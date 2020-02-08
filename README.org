@@ -1,0 +1,3 @@
+* Goal
+
+Common Lisp package that converts S-expressions to source code of the Rust programming language.
