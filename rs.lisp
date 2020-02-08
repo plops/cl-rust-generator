@@ -1,14 +1,14 @@
 
 #-nil
 (progn (ql:quickload "alexandria")
-       (defpackage :cl-cpp-generator2
+       (defpackage :cl-rust-generator
 	 (:use :cl
 	       :alexandria)
 	 (:export
 	  #:write-source)))
 ;(setf *features* (union *features* '(:generic-c)))
 ;(setf *features* (set-difference *features* '(:generic-c)))
-(in-package :cl-cpp-generator2)
+(in-package :cl-rust-generator)
 
 (setf (readtable-case *readtable*) :invert)
 

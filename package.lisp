@@ -1,6 +1,6 @@
-(defpackage :cl-cpp-generator2
+(defpackage :cl-rust-generator
   (:use :cl
 	:alexandria)
   (:export
    #:write-source
-   #:emit-c))
+   #:emit-rs))
