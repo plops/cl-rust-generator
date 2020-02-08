@@ -18,7 +18,7 @@
 				 ignore-hash)
   (let* ((fn (merge-pathnames (format nil "~a" name)
 			      dir))
-	(code-str (emit-c :code code))
+	(code-str (emit-rs :code code))
 	(fn-hash (sxhash fn))
 	 (code-hash (sxhash code-str)))
     (multiple-value-bind (old-code-hash exists) (gethash fn-hash *file-hashes*)
@@ -36,7 +36,7 @@
 	;; https://travisdowns.github.io/blog/2019/11/19/toupper.html
 	;; header reordering can affect compilation performance
 	;; FIXME: figure out how to prevent that
-	(sb-ext:run-program "/usr/bin/clang-format"
+	#+nil (sb-ext:run-program "/usr/bin/clang-format"
 			    (list "-i"  (namestring fn)
 					;"-style='{PenaltyReturnTypeOnItsOwnLine: 100000000}'"
 				  ))))))
@@ -148,7 +148,23 @@ entry return-values contains a list of return values"
 	(declare (ignorable req-param opt-param res-param
 			    key-param other-key-p aux-param key-exist-p))
 	(with-output-to-string (s)
-	  (format s "~a ~a ~a~:[~;;~]"
+	  (format s "fn ~a ~a~@[-> ~a ~]"
+		  name
+		  (funcall emit `(paren
+				  ,@(loop for p in req-param collect
+					 (format nil "~a ~a"
+						 (let ((type (gethash p env)))
+						   (if type
+						       type
+						       (break "can't find type for ~a in defun"
+							      p)))
+						 p
+						 ))))
+		  (let ((r (gethash 'return-values env)))
+		    (if (< 1 (length r))
+			(funcall emit `(paren ,@r))
+			(car r))))
+	  #+nil (format s "~a ~a ~a~:[~;;~]"
 		  (let ((r (gethash 'return-values env)))
 		    (if (< 1 (length r))
 					;(funcall emit `(paren ,@r))
@@ -234,11 +250,11 @@ entry return-values contains a list of return values"
    (substitute #\e #\d s)))
 			  
 (progn
-  (defun emit-c (&key code (str nil)  (level 0) (hook-defun nil))
+  (defun emit-rs (&key code (str nil)  (level 0) (hook-defun nil))
     "evaluate s-expressions in code, emit a string. if hook-defun is not nil, hook-defun will be called with every function definition. this functionality is intended to collect function declarations."
     (flet ((emit (code &optional (dl 0))
 	     "change the indentation level. this is used in do"
-	     (emit-c :code code :level (+ dl level) :hook-defun hook-defun)))
+	     (emit-rs :code code :level (+ dl level) :hook-defun hook-defun)))
       (if code
 	  (if (listp code)
 	      (progn
@@ -490,7 +506,7 @@ entry return-values contains a list of return values"
 						   `(do0
 						     ,@(mapcar #'emit
 							       forms))))))))))))
-		  (for (destructuring-bind ((start end iter) &rest body) (cdr code)
+		  #+nil (for (destructuring-bind ((start end iter) &rest body) (cdr code)
 			 (format nil "for (~@[~a~];~@[~a~];~@[~a~]) ~a"
 				 (emit start)
 				 (emit end)
@@ -501,9 +517,9 @@ entry return-values contains a list of return values"
 					   (< ,(emit i) ,(emit n))
 					   (incf ,(emit i) ,(emit step)))
 					 ,@body))))
-		  #-generic-c
-		  (foreach (destructuring-bind ((item collection) &rest body) (cdr code)
-			     (format nil "for (auto& ~a : ~a) ~a"
+		  
+		  (for (destructuring-bind ((item collection) &rest body) (cdr code)
+			     (format nil "for  ~a in ~a ~a"
 				     (emit item)
 				     (emit collection)
 				     (emit `(progn ,@body)))))
@@ -639,7 +655,7 @@ entry return-values contains a list of return values"
 	  "")))
   #+nil (progn
    (defparameter *bla*
-     (emit-c :code `(do0
+     (emit-rs :code `(do0
 		     (include <stdio.h>)
 		     (defun main (argc argv)
 		       (declare (type int argc)

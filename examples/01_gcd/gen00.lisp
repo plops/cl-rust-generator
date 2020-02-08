@@ -29,8 +29,10 @@
 
   (let ((code
 	 `(do0
-	   "use std::io::Write"
-	   "use std::str::FromStr"
+
+	   "use std::io::Write;"
+	   
+	   "use std::str::FromStr;"
 	   
 	   (defun main ()
 	     (let ((numbers ("Vec::new")))
