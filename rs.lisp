@@ -62,20 +62,28 @@ entry return-values contains a list of return values"
 	     (if (listp e)
 		 (if (eq (car e) 'declare)
 		     (loop for declaration in (cdr e) do
-		      (when (eq (first declaration) 'type)
-			(destructuring-bind (symb type &rest vars) declaration
-			  (declare (ignorable symb))
-			  (loop for var in vars do
-			       (setf (gethash var env) type))))
-		      (when (eq (first declaration) 'values)
-			(destructuring-bind (symb &rest types-opt) declaration
-			  (declare (ignorable symb))
-			  (let ((types nil))
-			    ;; only collect types until occurrance of &optional
-			    (loop for type in types-opt do
-				 (unless (eq #\& (aref (format nil "~a" type) 0))
-				   (push type types)))
-			    (setf (gethash 'return-values env) (reverse types))))))
+			  (cond 
+			   ((eq (first declaration) 'type)
+			     (destructuring-bind (symb type &rest vars) declaration
+			       (declare (ignorable symb))
+			       (loop for var in vars do
+				    (setf (gethash var env) type))))
+			   ((eq (first declaration) 'immutable)
+			     (destructuring-bind (symb &rest vars) declaration
+			       (declare (ignorable symb))
+			       (loop for var in vars do
+				    (setf (gethash var env) type))))
+			   
+			   ((eq (first declaration) 'values)
+			     (destructuring-bind (symb &rest types-opt) declaration
+			       (declare (ignorable symb))
+			       (let ((types nil))
+				 ;; only collect types until occurrance of &optional
+				 (loop for type in types-opt do
+				      (unless (eq #\& (aref (format nil "~a" type) 0))
+					(push type types)))
+				 (setf (gethash 'return-values env) (reverse types)))))
+			   (t (break "unknown declaration: ~a" declaration))))
 		     (progn
 		       (push e new-body)
 		       (setf looking-p nil)))
@@ -142,13 +150,14 @@ entry return-values contains a list of return values"
 		  name
 		  (funcall emit `(paren
 				  ,@(loop for p in req-param collect
-					 (format nil "mut ~a: ~a"
-						 p
-						 (let ((type (gethash p env)))
-						   (if type
-						       type
-						       (break "can't find type for ~a in defun"
-							      p)))))))
+					 (
+					  (format nil "mut ~a: ~a"
+						  p
+						  (let ((type (gethash p env)))
+						    (if type
+							type
+							(break "can't find type for ~a in defun"
+							       p))))))))
 		  (let ((r (gethash 'return-values env)))
 		    (if (< 1 (length r))
 			(funcall emit `(paren ,@r))

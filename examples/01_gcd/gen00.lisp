@@ -42,6 +42,7 @@
 	     (while (!= 0 m)
 	       (when (< m n)
 		 (let ((tt m))
+		   (declare (immutable tt))
 		   (setf m n
 			 n tt)))
 	       (setf m (% m n)))
@@ -63,7 +64,8 @@
 		 (for (m (ref (aref numbers "1..")))
 		      (setf d (gcd d *m))))
 	       (println! (string "The greatest common divisor of {:?} is {}"
-				 numbers d)))))))
+				 )
+			 numbers d))))))
     
     
     (write-source *code-file*
