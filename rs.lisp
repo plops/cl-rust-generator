@@ -50,6 +50,18 @@
 
   ;; FIXME doesnt handle documentation strings
 
+(defstruct type-definition
+  (declaration)
+  (immutable))
+
+(let ((h (make-hash-table))
+      (type 'u64)
+      )
+  (setf (gethash 'bla h)
+	(make-type-definition :declaration type :immutable nil))
+  (gethash 'bla h))
+
+
 (defun consume-declare (body)
   "take a list of instructions from body, parse type declarations,
 return the body without them and a hash table with an environment. the
@@ -67,7 +79,8 @@ entry return-values contains a list of return values"
 			     (destructuring-bind (symb type &rest vars) declaration
 			       (declare (ignorable symb))
 			       (loop for var in vars do
-				    (setf (gethash var env) type))))
+				    (setf (gethash var env)
+					  (make-type-definition :declaration type :immutable nil)))))
 			   ((eq (first declaration) 'immutable)
 			     (destructuring-bind (symb &rest vars) declaration
 			       (declare (ignorable symb))
