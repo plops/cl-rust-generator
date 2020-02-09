@@ -33,6 +33,19 @@
 	   "use std::io::Write;"
 	   
 	   "use std::str::FromStr;"
+
+	   (defun gcd (n m)
+	     (declare (type u64 n m)
+		      (values u64))
+	     (assert! (and (!= 0 n)
+			   (!= 0 m)))
+	     (while (!= 0 m)
+	       (when (< m n)
+		 (let ((tt m))
+		   (setf m n
+			 n tt)))
+	       (setf m (% m n)))
+	     (return n))
 	   
 	   (defun main ()
 	     (let ((numbers ("Vec::new")))
