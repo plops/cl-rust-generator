@@ -33,13 +33,9 @@
 			   :if-exists :supersede
 			   :if-does-not-exist :create)
 	  (write-sequence code-str s))
-	;; https://travisdowns.github.io/blog/2019/11/19/toupper.html
-	;; header reordering can affect compilation performance
-	;; FIXME: figure out how to prevent that
-	#+nil (sb-ext:run-program "/usr/bin/clang-format"
-			    (list "-i"  (namestring fn)
-					;"-style='{PenaltyReturnTypeOnItsOwnLine: 100000000}'"
-				  ))))))
+
+	(sb-ext:run-program "/home/martin/.cargo/bin/rustfmt"
+			    (list (namestring fn)))))))
 
 ;; http://clhs.lisp.se/Body/s_declar.htm
 ;; http://clhs.lisp.se/Body/d_type.htm
@@ -97,25 +93,19 @@ entry return-values contains a list of return values"
   (let* ((type (lookup-type name :env env)))
     (if (listp type)
 	(if (null type)
-	    (format nil "~a ~a"
-		    #+generic-c "__auto_type"
-		    #-generic-c "auto"
+	    (format nil "mut ~a"
 		    (funcall emit name))
 	    (progn
-	      ;; array
-	      (destructuring-bind (array_ element-type &rest dims) type
-		(assert (eq array_ 'array))
-		(format nil "~a ~a~{[~a]~}"
-			element-type
-			(funcall emit name)
-			(mapcar emit dims)))))
-	(format nil "~a ~a"
-		(if type
-		    (funcall emit type)
-		    #+generic-c "__auto_type"
-		    #-generic-c "auto"
-		    )
-		(funcall emit name)))))
+		 ;; array
+		 (destructuring-bind (array_ element-type &rest dims) type
+		   (assert (eq array_ 'array))
+		   (format nil "mut ~a : [~a ; ~a]"
+			   (funcall emit name)
+			   element-type
+			   (mapcar emit dims)))))
+	(format nil "mut ~a~@[ ~a~]"
+		(funcall emit name)
+		(funcall emit type)))))
 
 (defun parse-let (code emit)
   "let ({var | (var [init-form])}*) declaration* form*"
@@ -128,7 +118,7 @@ entry return-values contains a list of return values"
 			  ,@(loop for decl in decls collect
 				 (if (listp decl) ;; split into name and initform
 				     (destructuring-bind (name &optional value) decl
-				       (format nil "~a ~@[ = ~a~];"
+				       (format nil "let ~a ~@[ = ~a~];"
 					       (variable-declaration :name name :env env :emit emit)
 					       
 					       (when value
