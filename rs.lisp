@@ -53,35 +53,51 @@
 
 (defstruct type-definition
   (declaration)
-  (immutable))
+  (immutable)
+  (reference))
 
-(defun type-definition-supersede-declaration (name hashtable decl)
-  (multiple-value-bind (el exists) (gethash name hashtable)
-    (if exists
-	(progn
-	  ;(format t "~a  exists~%" name)
-	 (setf (gethash name hashtable)
-	       (make-type-definition :declaration decl :immutable (type-definition-immutable el))))
-	(progn
+
+
+(defun type-definition-supersede-declaration (rname hashtable decl)
+  (let* ((sname (format nil "~a" rname))
+	(name (remove #\& sname))
+	(ref  (< 0 (count #\& sname))))
+   (multiple-value-bind (el exists) (gethash name hashtable)
+     (if exists
+	 (progn
+					;(format t "~a  exists~%" name)
+	   (remhash name hashtable)
+	   (setf (gethash name hashtable)
+		 (make-type-definition :declaration  decl
+				       :immutable (type-definition-immutable el)
+				       :reference ref)))
+	 (progn
 	  
-	 (setf (gethash name hashtable)
-	       (make-type-definition :declaration decl :immutable nil))
-	 ;(format t "~a doesnt exist ~a~%" name `(:decl ,decl :entry ,(gethash name hashtable)))
-	 ))))
+	   (setf (gethash name hashtable)
+		 (make-type-definition :declaration decl :immutable nil
+				       :reference ref))
+					;(format t "~a doesnt exist ~a~%" name `(:decl ,decl :entry ,(gethash name hashtable)))
+	   )))))
 
-(defun type-definition-supersede-immutable (name hashtable imm)
-  (multiple-value-bind (el exists) (gethash name hashtable)
-    (if exists
-	(progn
-	  ;(format t "~a  exists~%" name)
-	 (setf (gethash name hashtable)
-	       (make-type-definition :declaration (type-definition-declaration el)
-				     :immutable imm)))
-	(progn
-	  ;(format t "~a doesnt exist~%" name)
-	 (setf (gethash name hashtable)
-	       (make-type-definition :declaration nil
-				     :immutable imm))))))
+(defun type-definition-supersede-immutable (rname hashtable imm)
+  (let* ((sname (format nil "~a" rname))
+	(name (remove #\& sname))
+	(ref  (< 0 (count #\& sname))))
+   (multiple-value-bind (el exists) (gethash name hashtable)
+     (if exists
+	 (progn
+					;(format t "~a  exists~%" name)
+	   (remhash name hashtable)
+	   (setf (gethash name hashtable)
+		 (make-type-definition :declaration (type-definition-declaration el)
+				       :immutable imm
+				       :reference ref)))
+	 (progn
+					;(format t "~a doesnt exist~%" name)
+	   (setf (gethash name hashtable)
+		 (make-type-definition :declaration nil
+				       :immutable imm
+				       :reference ref)))))))
 
 
 
@@ -199,19 +215,21 @@ entry return-values contains a list of return values"
 					 #+nil (variable-declaration :name p :env env :emit emit)
 					 (let* ((decl-imm (lookup-type p :env env))
 						(declaration (when decl-imm (type-definition-declaration decl-imm)))
-						(imm (when decl-imm (type-definition-immutable decl-imm))))
-					   #+nil (format t "~a" `(:p ,p :decl-imm ,decl-imm :type ,type :imm ,imm :env
+						(imm (when decl-imm (type-definition-immutable decl-imm)))
+						(ref (when decl-imm (type-definition-reference decl-imm))))
+					   (format t "~a" `(:p ,p :decl-imm ,decl-imm :decl ,declaration :imm ,imm :env
 								     ,(loop for key being the hash-keys using (hash-value v) of env collect `(,key ,v))))
 					   (with-output-to-string (s)
-					    (format s "~a: ~@[mut ~]"
-						    p
-						    (not imm)
-						    )
-					    (format s "~a"
-						    (if declaration
-							declaration
-							(break "can't find type for ~a in defun: ~a"
-							       p ))))))))
+					     (format s "~a: " p)
+					     (when ref
+					       (format s "&" ))
+					     (unless imm
+					       (format s "mut "))
+					     (format s "~a" declaration)
+					     #+nil (if declaration
+					      
+					      (break "can't find type for ~a in defun: ~a"
+								 p )))))))
 		  (let ((r (gethash 'return-values env)))
 		    (if (< 1 (length r))
 			(funcall emit `(paren ,@r))
