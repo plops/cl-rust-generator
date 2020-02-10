@@ -22,9 +22,14 @@
 					      :log-consume
 					      )))
 
+
+;; cargo new --bin rs01_gcd
+;; cargo test
+;; cargo run
+;; cargo clean
 (progn
-  (defparameter *source-dir* #P"examples/01_gcd/source/")
-  (defparameter *code-file* (asdf:system-relative-pathname 'cl-rust-generator (merge-pathnames #P"run_01_base.rs"
+  (defparameter *source-dir* #P"examples/01_gcd/rs01_gcd/src/")
+  (defparameter *code-file* (asdf:system-relative-pathname 'cl-rust-generator (merge-pathnames #P"main.rs"
 											       *source-dir*)))
 
   (let ((code
@@ -47,6 +52,13 @@
 			 n tt)))
 	       (setf m (% m n)))
 	     (return n))
+
+	   "#[test]"
+	   (defun test_gcd ()
+	     (assert_eq! (gcd 14 15) 1)
+	     (assert_eq! (gcd (* 2 3 5 11 17)
+			      (* 3 7 11 13 19))
+			 (* 3 11)))
 	   
 	   (defun main ()
 	     (let ((numbers ("Vec::new")))

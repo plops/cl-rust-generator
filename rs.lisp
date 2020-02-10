@@ -58,20 +58,30 @@
 (defun type-definition-supersede-declaration (name hashtable decl)
   (multiple-value-bind (el exists) (gethash name hashtable)
     (if exists
-	(setf (gethash name hashtable)
-	      (make-type-definition :declaration decl :immutable (type-definition-immutable el)))
-	(setf (gethash name hashtable)
-	      (make-type-definition :declaration decl :immutable nil)))))
+	(progn
+	  ;(format t "~a  exists~%" name)
+	 (setf (gethash name hashtable)
+	       (make-type-definition :declaration decl :immutable (type-definition-immutable el))))
+	(progn
+	  
+	 (setf (gethash name hashtable)
+	       (make-type-definition :declaration decl :immutable nil))
+	 ;(format t "~a doesnt exist ~a~%" name `(:decl ,decl :entry ,(gethash name hashtable)))
+	 ))))
 
 (defun type-definition-supersede-immutable (name hashtable imm)
   (multiple-value-bind (el exists) (gethash name hashtable)
     (if exists
-	(setf (gethash name hashtable)
-	      (make-type-definition :declaration (type-definition-declaration el)
-				    :immutable imm))
-	(setf (gethash name hashtable)
-	      (make-type-definition :declaration nil
-				    :immutable imm)))))
+	(progn
+	  ;(format t "~a  exists~%" name)
+	 (setf (gethash name hashtable)
+	       (make-type-definition :declaration (type-definition-declaration el)
+				     :immutable imm)))
+	(progn
+	  ;(format t "~a doesnt exist~%" name)
+	 (setf (gethash name hashtable)
+	       (make-type-definition :declaration nil
+				     :immutable imm))))))
 
 
 
@@ -87,21 +97,22 @@ entry return-values contains a list of return values"
 	     (if (listp e)
 		 (if (eq (car e) 'declare)
 		     (loop for declaration in (cdr e) do
+			  ;(format t "declaration: ~a~%" declaration)
 			  (cond 
-			   ((eq (first declaration) 'type)
+			    ((eq (first declaration) 'type)
 			     (destructuring-bind (symb type &rest vars) declaration
 			       (declare (ignorable symb))
 			       (loop for var in vars do
 				    (type-definition-supersede-declaration
 				     var env type))))
-			   ((eq (first declaration) 'immutable)
+			    ((eq (first declaration) 'immutable)
 			     (destructuring-bind (symb &rest vars) declaration
 			       (declare (ignorable symb))
 			       (loop for var in vars do
 				    (type-definition-supersede-immutable
 				     var env t))))
 			   
-			   ((eq (first declaration) 'values)
+			    ((eq (first declaration) 'values)
 			     (destructuring-bind (symb &rest types-opt) declaration
 			       (declare (ignorable symb))
 			       (let ((types nil))
@@ -110,7 +121,7 @@ entry return-values contains a list of return values"
 				      (unless (eq #\& (aref (format nil "~a" type) 0))
 					(push type types)))
 				 (setf (gethash 'return-values env) (reverse types)))))
-			   (t (break "unknown declaration: ~a" declaration))))
+			    (t (break "unknown declaration: ~a" declaration))))
 		     (progn
 		       (push e new-body)
 		       (setf looking-p nil)))
@@ -125,21 +136,20 @@ entry return-values contains a list of return values"
   (gethash name env))
 
 
-
-
 (defun variable-declaration (&key name env emit)
   (let* ((decl-imm (lookup-type name :env env))
-	 (type (or (not decl-imm) (type-definition-declaration decl-imm)))
-	 (imm (or (not decl-imm) (type-definition-immutable decl-imm))))
+	 (type (when decl-imm
+		   (type-definition-declaration decl-imm)))
+	 (imm (when decl-imm
+		(type-definition-immutable decl-imm))))
+    ;(format t "~a" (list decl-imm type imm))
     (with-output-to-string (s)
-      (format s "~@[mut ~]"
-		     (not imm))
-     (if (listp type)
-	 (if (null type)
-	     (format s "~a"
-		     
-		     (funcall emit name))
-	     (progn
+      (unless imm
+       (format s "mut "))
+      (if (listp type)
+	  (if (null type)
+	      (format s "~a" (funcall emit name))
+	      (progn
 	       ;; array
 	       (destructuring-bind (array_ element-type &rest dims) type
 		 (assert (eq array_ 'array))
@@ -147,7 +157,7 @@ entry return-values contains a list of return values"
 			 (funcall emit name)
 			 element-type
 			 (mapcar emit dims)))))
-	 (format s "~a~@[ ~a~]"
+	 (format s "~a~@[: ~a~]"
 		 (funcall emit name)
 		 (funcall emit type))))))
 
@@ -164,7 +174,6 @@ entry return-values contains a list of return values"
 				     (destructuring-bind (name &optional value) decl
 				       (format nil "let ~a ~@[ = ~a~];"
 					       (variable-declaration :name name :env env :emit emit)
-					       
 					       (when value
 						   (funcall emit value))))
 				     (format nil "~a;"
@@ -175,6 +184,7 @@ entry return-values contains a list of return values"
   ;; defun function-name lambda-list [declaration*] form*
   (destructuring-bind (name lambda-list &rest body) (cdr code)
     (multiple-value-bind (body env) (consume-declare body) ;; py
+      ;(format t "parse-defun:env = ~a~%" `(:env ,env :hash ,(loop for key being the hash-keys using (hash-value v) of env collect `(,key ,v))))
       (multiple-value-bind (req-param opt-param res-param
 				      key-param other-key-p
 				      aux-param key-exist-p)
@@ -182,20 +192,26 @@ entry return-values contains a list of return values"
 	(declare (ignorable req-param opt-param res-param
 			    key-param other-key-p aux-param key-exist-p))
 	(with-output-to-string (s)
-	  (format s "fn ~a ~a~@[-> ~a ~]"
+	  (format s "fn ~a ~a~@[ -> ~a~]"
 		  name
 		  (funcall emit `(paren
 				  ,@(loop for p in req-param collect
-					 (let* ((decl-imm (lookup-type name :env env))
-						(type (or (not decl-imm) (type-definition-declaration decl-imm)))
-						(imm (or (not decl-imm) (type-definition-immutable decl-imm))))
-					   (format nil "~@[mut ~]~a: ~a"
-						  (not imm) 
-						  p
-						  (if type
-						      type
-						      (break "can't find type for ~a in defun"
-							     p)))))))
+					 #+nil (variable-declaration :name p :env env :emit emit)
+					 (let* ((decl-imm (lookup-type p :env env))
+						(declaration (when decl-imm (type-definition-declaration decl-imm)))
+						(imm (when decl-imm (type-definition-immutable decl-imm))))
+					   #+nil (format t "~a" `(:p ,p :decl-imm ,decl-imm :type ,type :imm ,imm :env
+								     ,(loop for key being the hash-keys using (hash-value v) of env collect `(,key ,v))))
+					   (with-output-to-string (s)
+					    (format s "~a: ~@[mut ~]"
+						    p
+						    (not imm)
+						    )
+					    (format s "~a"
+						    (if declaration
+							declaration
+							(break "can't find type for ~a in defun: ~a"
+							       p ))))))))
 		  (let ((r (gethash 'return-values env)))
 		    (if (< 1 (length r))
 			(funcall emit `(paren ,@r))
@@ -223,7 +239,7 @@ entry return-values contains a list of return values"
 	  (unless header-only
 	   (format s "~a" (funcall emit `(progn ,@body)))))))))
 
-(defun parse-lambda (code emit)
+#+nil (defun parse-lambda (code emit)
   ;;  lambda lambda-list [declaration*] form*
   ;; no return value:
   ;;  [] (int a, float b) { body }
@@ -483,6 +499,13 @@ entry return-values contains a list of return values"
 			      (format nil "(~a)-=(~a)" (emit a) (emit b))
 			      (format nil "(~a)--" (emit a)))))
 		  (string (format nil "\"~a\"" (cadr code)))
+		  (string-r (let* ((str (cadr code))
+				   (n-of-hash (count #\# str))
+				   (list-of-hash (loop for i upto n-of-hash collect "#")))
+			      (format nil "r~{~a~}\"~a\"~{~a~}"
+				      list-of-hash
+				      str
+				      list-of-hash)))
 		  (char (format nil "'~a'" (cadr code)))
 		  (hex (destructuring-bind (number) (cdr code)
 			 (format nil "0x~x" number)))
