@@ -61,15 +61,17 @@
 (defun type-definition-supersede-declaration (rname hashtable decl)
   (let* ((sname (format nil "~a" rname))
 	(name (remove #\& sname))
-	(ref  (< 0 (count #\& sname))))
+	 (ref  (< 0 (count #\& sname))))
+    (format t "~a~%" `(:rname rname
+			    :env
+			    ,(loop for key being the hash-keys using (hash-value v) of hashtable collect `(,key ,v))))
    (multiple-value-bind (el exists) (gethash name hashtable)
      (if exists
-	 (progn
-					;(format t "~a  exists~%" name)
+	 (let ((imm (type-definition-immutable el)))
 	   (remhash name hashtable)
 	   (setf (gethash name hashtable)
 		 (make-type-definition :declaration  decl
-				       :immutable (type-definition-immutable el)
+				       :immutable imm
 				       :reference ref)))
 	 (progn
 	  
@@ -83,13 +85,15 @@
   (let* ((sname (format nil "~a" rname))
 	(name (remove #\& sname))
 	(ref  (< 0 (count #\& sname))))
-   (multiple-value-bind (el exists) (gethash name hashtable)
+    (format t "~a~%" `(:rname rname
+			    :env
+			    ,(loop for key being the hash-keys using (hash-value v) of hashtable collect `(,key ,v))))
+    (multiple-value-bind (el exists) (gethash name hashtable)
      (if exists
-	 (progn
-					;(format t "~a  exists~%" name)
+	 (let ((decl (type-definition-declaration el)))
 	   (remhash name hashtable)
 	   (setf (gethash name hashtable)
-		 (make-type-definition :declaration (type-definition-declaration el)
+		 (make-type-definition :declaration decl
 				       :immutable imm
 				       :reference ref)))
 	 (progn
@@ -105,7 +109,7 @@
   "take a list of instructions from body, parse type declarations,
 return the body without them and a hash table with an environment. the
 entry return-values contains a list of return values"
-  (let ((env (make-hash-table))
+  (let ((env (make-hash-table :test #'equalp))
 	(looking-p t)
 	(new-body nil))
     (loop for e in body do
@@ -147,9 +151,16 @@ entry return-values contains a list of return values"
 	     (push e new-body)))
     (values (reverse new-body) env)))
 
-(defun lookup-type (name &key env)
+(defun lookup-type (rname &key env)
   "get the type of a variable from an environment"
-  (gethash name env))
+  (let* ((sname (format nil "~a" rname))
+	(name (remove #\& sname))
+	 (ref  (< 0 (count #\& sname)))
+	 (el (gethash name env)))
+    (format t "search for ~a in ~a gives ~a ~%" name (loop for key being the hash-keys using (hash-value v) of env
+							collect `(,key ,v))
+	    el)
+    el))
 
 
 (defun variable-declaration (&key name env emit)
@@ -218,7 +229,7 @@ entry return-values contains a list of return values"
 						(imm (when decl-imm (type-definition-immutable decl-imm)))
 						(ref (when decl-imm (type-definition-reference decl-imm))))
 					   (format t "~a" `(:p ,p :decl-imm ,decl-imm :decl ,declaration :imm ,imm :env
-								     ,(loop for key being the hash-keys using (hash-value v) of env collect `(,key ,v))))
+							       ,(loop for key being the hash-keys using (hash-value v) of env collect `(,key ,v))))
 					   (with-output-to-string (s)
 					     (format s "~a: " p)
 					     (when ref

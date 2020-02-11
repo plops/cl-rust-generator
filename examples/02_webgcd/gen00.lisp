@@ -47,9 +47,9 @@
 	   "use iron::prelude::*;"
 	   "use iron::status;"
 
-	   (defun get_form (_)
-	    (declare (type "&Request" _)
-		      (immutable _)
+	   (defun get_form (&_request)
+	    (declare (type Request &_request)
+		     ;(immutable &_request)
 		      (values "IronResult<Response>"))
 	     (let ((response ("Response::new")))
 	       (response.set_mut "status::Ok")
