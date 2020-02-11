@@ -62,7 +62,7 @@
   (let* ((sname (format nil "~a" rname))
 	(name (remove #\& sname))
 	 (ref  (< 0 (count #\& sname))))
-    (format t "~a~%" `(:rname rname
+    #+nil (format t "~a~%" `(:rname rname
 			    :env
 			    ,(loop for key being the hash-keys using (hash-value v) of hashtable collect `(,key ,v))))
    (multiple-value-bind (el exists) (gethash name hashtable)
@@ -85,7 +85,7 @@
   (let* ((sname (format nil "~a" rname))
 	(name (remove #\& sname))
 	(ref  (< 0 (count #\& sname))))
-    (format t "~a~%" `(:rname rname
+    #+nil (format t "~a~%" `(:rname rname
 			    :env
 			    ,(loop for key being the hash-keys using (hash-value v) of hashtable collect `(,key ,v))))
     (multiple-value-bind (el exists) (gethash name hashtable)
@@ -151,20 +151,25 @@ entry return-values contains a list of return values"
 	     (push e new-body)))
     (values (reverse new-body) env)))
 
+(defun remove-ampersand (rname)
+  (let* ((sname (format nil "~a" rname))
+	 (name (remove #\& sname))
+	 (ref  (< 0 (count #\& sname))))
+    (values name ref)))
+
 (defun lookup-type (rname &key env)
   "get the type of a variable from an environment"
-  (let* ((sname (format nil "~a" rname))
-	(name (remove #\& sname))
-	 (ref  (< 0 (count #\& sname)))
+  (let* ((name (remove-ampersand rname))
 	 (el (gethash name env)))
-    (format t "search for ~a in ~a gives ~a ~%" name (loop for key being the hash-keys using (hash-value v) of env
+    #+nil (format t "search for ~a in ~a gives ~a ~%" name (loop for key being the hash-keys using (hash-value v) of env
 							collect `(,key ,v))
 	    el)
     el))
 
 
 (defun variable-declaration (&key name env emit)
-  (let* ((decl-imm (lookup-type name :env env))
+  (let* ((name (remove-ampersand name))
+	 (decl-imm (lookup-type name :env env))
 	 (type (when decl-imm
 		   (type-definition-declaration decl-imm)))
 	 (imm (when decl-imm
@@ -222,13 +227,14 @@ entry return-values contains a list of return values"
 	  (format s "fn ~a ~a~@[ -> ~a~]"
 		  name
 		  (funcall emit `(paren
-				  ,@(loop for p in req-param collect
+				  ,@(loop for rp in req-param collect
 					 #+nil (variable-declaration :name p :env env :emit emit)
-					 (let* ((decl-imm (lookup-type p :env env))
+					 (let* ((p (remove-ampersand rp))
+						(decl-imm (lookup-type p :env env))
 						(declaration (when decl-imm (type-definition-declaration decl-imm)))
 						(imm (when decl-imm (type-definition-immutable decl-imm)))
 						(ref (when decl-imm (type-definition-reference decl-imm))))
-					   (format t "~a" `(:p ,p :decl-imm ,decl-imm :decl ,declaration :imm ,imm :env
+					   #+nil (format t "~a" `(:p ,p :decl-imm ,decl-imm :decl ,declaration :imm ,imm :env
 							       ,(loop for key being the hash-keys using (hash-value v) of env collect `(,key ,v))))
 					   (with-output-to-string (s)
 					     (format s "~a: " p)
