@@ -58,7 +58,8 @@
 
 
 
-(defun type-definition-supersede-declaration (rname hashtable decl)
+(defun type-definition-supersede-declaration (rname
+					      hashtable decl)
   (let* ((sname (format nil "~a" rname))
 	(name (remove #\& sname))
 	 (ref  (< 0 (count #\& sname))))

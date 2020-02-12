@@ -42,18 +42,20 @@
 
 	   "extern crate iron;"
 
-	   ; "#[macro_use] extern crate mime;"
-
+	   " "
+	   ;"#[macro_use] extern crate mime;"
+	   " "
 	   "use iron::prelude::*;"
 	   "use iron::status;"
 
 	   (defun get_form (&_request)
-	    (declare (type Request &_request)
-		     ;(immutable &_request)
+	     (declare (type Request &_request)
+		      (immutable &_request)
 		      (values "IronResult<Response>"))
 	     (let ((response ("Response::new")))
 	       (response.set_mut "status::Ok")
-					;(response.set_mut (mime! "Text/Html; Charset=Utf8"))
+	       (response.set_mut "iron::mime::TEXT_HTML_UTF_8"
+				 #+nil (mime! "Text/Html; Charset=Utf8"))
 	       (response.set_mut (string-r "<title>GCD Calculator</title>
 <form action='/gcd' method='post'>
 <input type='text' name='n'/>
