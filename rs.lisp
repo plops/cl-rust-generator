@@ -272,10 +272,10 @@ entry return-values contains a list of return values"
 	  (unless header-only
 	   (format s "~a" (funcall emit `(progn ,@body)))))))))
 
-#+nil (defun parse-lambda (code emit)
+(defun parse-lambda (code emit)
   ;;  lambda lambda-list [declaration*] form*
   ;; no return value:
-  ;;  [] (int a, float b) { body }
+  ;;  |a, b| {body}
   ;; with (declaration (values float)):
   ;;  [] (int a, float b) -> float { body }
   ;; currently no support for captures (which would be placed into the first set of brackets)
@@ -288,14 +288,15 @@ entry return-values contains a list of return values"
 	(declare (ignorable req-param opt-param res-param
 			    key-param other-key-p aux-param key-exist-p))
 	(with-output-to-string (s)
-	  (format s "[] ~a~@[-> ~a ~]"
-		  (funcall emit `(paren
+	  (format s "|~a|~@[-> ~a ~]"
+		  (funcall emit `(comma
 				  ,@(loop for p in req-param collect
 					 (format nil "~a ~a"
 						 (let ((type (gethash p env)))
 						   (if type
 						       type
-						       (break "can't find type for ~a in defun"
+						       "" #+nil
+						       (break "can't find type for ~a in lambda"
 							      p)))
 						 p
 						 ))))
@@ -310,14 +311,22 @@ entry return-values contains a list of return values"
   "print a single floating point number as a string with a given nr. of
   digits. parse it again and increase nr. of digits until the same bit
   pattern."
+  (let* ((a f)
+	 (digits 1)
+	 (b (- a 1)))
+    (loop while (/= a b) do
+	 (setf b (read-from-string (format nil "~,vG" digits a)))
+	 (incf digits))
+    (format nil "~,vG" digits a))
+  #+nil
   (let* ((ff (coerce f 'single-float))
-         (s (format nil "~E" ff)))
+         (s (format nil "~,6F" ff)))
     #+nil   (assert (= 0s0 (- ff
                               (read-from-string s))))
     (assert (< (abs (- ff
                        (read-from-string s)))
                1d-4))
-   (format nil "~af" s)))
+   (format nil "~a" s)))
 
 
 
@@ -325,14 +334,24 @@ entry return-values contains a list of return values"
   "print a double floating point number as a string with a given nr. of
   digits. parse it again and increase nr. of digits until the same bit
   pattern."
+
+  (let* ((a f)
+	 (digits 1)
+	 (b (- a 1)))
+    (loop while (/= a b) do
+	 (setf b (read-from-string (format nil "~,vG" digits a)))
+	 (incf digits))
+    (format nil "~,vG" digits a))
+
+  #+nil
   (let* ((ff (coerce f 'double-float))
-	 (s (format nil "~E" ff)))
+	 (s (format nil "~,12F" ff)))
     #+nil (assert (= 0d0 (- ff
 			    (read-from-string s))))
     (assert (< (abs (- ff
 		       (read-from-string s)))
 	       1d-12))
-   (substitute #\e #\d s)))
+    (substitute #\e #\d s)))
 			  
 (progn
   (defun emit-rs (&key code (str nil)  (level 0) (hook-defun nil))
