@@ -1,3 +1,25 @@
 * Goal
 
 Common Lisp package that converts S-expressions to source code of the Rust programming language.
+
+
+* Examples
+
+** 01_gcd
+
+from book, minimal
+
+** 02_webgcd
+
+from book
+
+** 03_glium
+
+opengl binding. apparantly, original developer seems to have abandoned
+the approach in 2016. people still seem to use it. i just want to just
+get up and running with an immediate mode gui. this looks too
+cumbersome.
+
+** 04_azul
+
+perhaps this is easier to use for a 2d gui

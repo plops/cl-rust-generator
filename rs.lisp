@@ -217,10 +217,12 @@ entry return-values contains a list of return values"
   (destructuring-bind (name lambda-list &rest body) (cdr code)
     (multiple-value-bind (body env) (consume-declare body) ;; py
       ;(format t "parse-defun:env = ~a~%" `(:env ,env :hash ,(loop for key being the hash-keys using (hash-value v) of env collect `(,key ,v))))
-      (multiple-value-bind (req-param opt-param res-param
-				      key-param other-key-p
-				      aux-param key-exist-p)
-	  (parse-ordinary-lambda-list lambda-list)
+      (let ((req-param lambda-list))
+	;multiple-value-bind
+	#+nil(req-param opt-param res-param
+		   key-param other-key-p
+		   aux-param key-exist-p)
+	#+nil(parse-ordinary-lambda-list lambda-list)
 	(declare (ignorable req-param opt-param res-param
 			    key-param other-key-p aux-param key-exist-p))
 	(with-output-to-string (s)
@@ -236,41 +238,41 @@ entry return-values contains a list of return values"
 					   #+nil (format t "~a" `(:p ,p :decl-imm ,decl-imm :decl ,declaration :imm ,imm :env
 								     ,(loop for key being the hash-keys using (hash-value v) of env collect `(,key ,v))))
 					   (if decl-imm
-					    (with-output-to-string (s)
-					      (format s "~a: " p)
-					      (when ref
-						(format s "&" ))
-					      (unless imm
-						(format s "mut "))
-					      (format s "~a" declaration)
-					      )
-					    rp)))))
+					       (with-output-to-string (s)
+						 (format s "~a: " p)
+						 (when ref
+						   (format s "&" ))
+						 (unless imm
+						   (format s "mut "))
+						 (format s "~a" declaration)
+						 )
+					       rp)))))
 		  (let ((r (gethash 'return-values env)))
 		    (if (< 1 (length r))
 			(funcall emit `(paren ,@r))
 			(car r))))
 	  #+nil (format s "~a ~a ~a~:[~;;~]"
-		  (let ((r (gethash 'return-values env)))
-		    (if (< 1 (length r))
+			(let ((r (gethash 'return-values env)))
+			  (if (< 1 (length r))
 					;(funcall emit `(paren ,@r))
-			(break "multiple return values unsupported: ~a"
-			       r)
-			(if (car r)
-			    (car r)
-			    "void")))
-		  name
-		  (funcall emit `(paren
-				  ,@(loop for p in req-param collect
-					 (format nil "~a ~a"
-						 (let ((type (gethash p env)))
-						   (if type
-						       type
-						       (break "can't find type for ~a in defun"
-							      p)))
-						 p))))
-		  header-only)
+			      (break "multiple return values unsupported: ~a"
+				     r)
+			      (if (car r)
+				  (car r)
+				  "void")))
+			name
+			(funcall emit `(paren
+					,@(loop for p in req-param collect
+					       (format nil "~a ~a"
+						       (let ((type (gethash p env)))
+							 (if type
+							     type
+							     (break "can't find type for ~a in defun"
+								    p)))
+						       p))))
+			header-only)
 	  (unless header-only
-	   (format s "~a" (funcall emit `(progn ,@body)))))))))
+	    (format s "~a" (funcall emit `(progn ,@body)))))))))
 
 (defun parse-lambda (code emit)
   ;;  lambda lambda-list [declaration*] form*
@@ -363,6 +365,7 @@ entry return-values contains a list of return values"
 	  (if (listp code)
 	      (progn
 		(case (car code)
+		  
 		  (comma
 		   ;; comma {args}*
 		   (let ((args (cdr code)))
@@ -411,8 +414,9 @@ entry return-values contains a list of return values"
 						;; or if x is an s-expression with a c thing that doesn't end with semicolon
 						(if (or (eq #\; (aref b (- (length b) 1)))
 							(and (typep x 'string))
+							
 							(and (listp x)
-							     (member (car x) `(defun if for include dotimes while case))))
+							     (member (car x) `(defun if for include dotimes while case space))))
 						    ""
 						    ";"))))
 				  (cdr code)))

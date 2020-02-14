@@ -1,5 +1,5 @@
 [package]
-name = "my_first_azul_app"
+name = "rs04_azul"
 version = "0.1.0"
 authors = ["Martin Kielhorn <kielhorn.martin@gmail.com>"]
 edition = "2018"

@@ -31,6 +31,7 @@
 ;; cargo test
 ;; cargo run
 ;; cargo clean
+;; cargo fix
 
 ;; https://github.com/glium/glium/blob/master/book/tuto-01-getting-started.md
 ;; https://docs.rs/glium/0.26.0/glium/
