@@ -1,4 +1,3 @@
-
 #-nil
 (progn (ql:quickload "alexandria")
        (defpackage :cl-rust-generator
@@ -229,25 +228,23 @@ entry return-values contains a list of return values"
 		  name
 		  (funcall emit `(paren
 				  ,@(loop for rp in req-param collect
-					 #+nil (variable-declaration :name p :env env :emit emit)
 					 (let* ((p (remove-ampersand rp))
 						(decl-imm (lookup-type p :env env))
 						(declaration (when decl-imm (type-definition-declaration decl-imm)))
 						(imm (when decl-imm (type-definition-immutable decl-imm)))
 						(ref (when decl-imm (type-definition-reference decl-imm))))
 					   #+nil (format t "~a" `(:p ,p :decl-imm ,decl-imm :decl ,declaration :imm ,imm :env
-							       ,(loop for key being the hash-keys using (hash-value v) of env collect `(,key ,v))))
-					   (with-output-to-string (s)
-					     (format s "~a: " p)
-					     (when ref
-					       (format s "&" ))
-					     (unless imm
-					       (format s "mut "))
-					     (format s "~a" declaration)
-					     #+nil (if declaration
-					      
-					      (break "can't find type for ~a in defun: ~a"
-								 p )))))))
+								     ,(loop for key being the hash-keys using (hash-value v) of env collect `(,key ,v))))
+					   (if decl-imm
+					    (with-output-to-string (s)
+					      (format s "~a: " p)
+					      (when ref
+						(format s "&" ))
+					      (unless imm
+						(format s "mut "))
+					      (format s "~a" declaration)
+					      )
+					    rp)))))
 		  (let ((r (gethash 'return-values env)))
 		    (if (< 1 (length r))
 			(funcall emit `(paren ,@r))
