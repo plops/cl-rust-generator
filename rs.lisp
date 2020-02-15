@@ -407,10 +407,18 @@ entry return-values contains a list of return values"
 		     (destructuring-bind (name &rest params) args
 		       (emit `(space ,name
 				     (curly
-				      ,@(loop for i from 0 below (length params) by 2 collect
-					     (format nil "~a: ~a"
-						     (elt params i)
-						     (emit (elt params (+ i 1)))))))))))
+				      ,@(let ((i 0))
+					  (loop while (< i (length params))  collect
+					       (if (keywordp (elt params i))
+						   (prog1
+						     (format nil "~a: ~a"
+							     (elt params i)
+							     (emit (elt params (+ i 1))))
+						     (incf i 2))
+						   (prog1
+						    (format nil "~a"
+							    (elt params i))
+						    (incf i)))))))))))
 		  (new
 		   ;; new arg
 		   (let ((arg (cadr code)))
@@ -421,6 +429,11 @@ entry return-values contains a list of return values"
 			   ;; print indentation characters
 			   (loop for i below level collect "    ")
 			   (emit (cadr code))))
+		  (impl (destructuring-bind (_impl name &rest body) code
+			  (emit `(space (string "impl")
+					,name
+					(progn
+					  ,@body)))))
 		  (do0 (with-output-to-string (s)
 			 ;; do0 {form}*
 			 ;; write each form into a newline, keep current indentation level
@@ -437,7 +450,10 @@ entry return-values contains a list of return values"
 							(and (typep x 'string))
 							
 							(and (listp x)
-							     (member (car x) `(defun if for include dotimes while case space))))
+							     (member (car x)
+								     `(defun if for include
+									     dotimes while case
+									     space defstruct0))))
 						    ""
 						    ";"))))
 				  (cdr code)))
