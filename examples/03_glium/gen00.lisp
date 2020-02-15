@@ -32,7 +32,7 @@
 		   (cb ("glium::glutin::ContextBuilder::new"))
 		   (display (dot ("glium::Display::new" wb cb &event_loop)
 				 (unwrap))))
-	       (declare (mutable event_loop))
+	       ;(declare (mutable event_loop))
 
 
 	       (space
@@ -88,6 +88,7 @@
 					;(match event)
 			 
 			 (let ((target (display.draw)))
+			   (declare (mutable target))
 			   (target.clear_color 0.0 0.0 1.0 1.0)
 			   (dot target
 				(finish)

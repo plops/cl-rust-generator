@@ -3,18 +3,18 @@ extern crate glium;
 fn main() {
     #[allow(unused_imports)]
     use glium::{glutin, Surface};
-    let mut event_loop = glium::glutin::event_loop::EventLoop::new();
-    let mut wb = glium::glutin::window::WindowBuilder::new()
+    let event_loop = glium::glutin::event_loop::EventLoop::new();
+    let wb = glium::glutin::window::WindowBuilder::new()
         .with_inner_size(glium::glutin::dpi::LogicalSize::new(512, 512))
         .with_title("vis");
-    let mut cb = glium::glutin::ContextBuilder::new();
-    let mut display = glium::Display::new(wb, cb, &event_loop).unwrap();
+    let cb = glium::glutin::ContextBuilder::new();
+    let display = glium::Display::new(wb, cb, &event_loop).unwrap();
     #[derive(Copy, Clone)]
     struct Vertex {
         position: [f32; 2],
     };
     implement_vertex!(Vertex, position);
-    let mut shape = vec![
+    let shape = vec![
         Vertex {
             position: [(-0.50), (-0.50)],
         },
@@ -25,10 +25,10 @@ fn main() {
             position: [(0.50), (-0.250)],
         },
     ];
-    let mut vertex_buffer = glium::VertexBuffer::new(&display, &shape).unwrap();
-    let mut indices = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
+    let vertex_buffer = glium::VertexBuffer::new(&display, &shape).unwrap();
+    let indices = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
     event_loop.run(move |event, _, control_flow| {
-        let mut next_frame_time =
+        let next_frame_time =
             ((std::time::Instant::now()) + (std::time::Duration::from_nanos(16_666_667)));
         *control_flow = glium::glutin::event_loop::ControlFlow::WaitUntil(next_frame_time);
         match (event) {

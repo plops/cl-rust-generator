@@ -106,7 +106,7 @@
 
 
 
-(defun consume-declare (body &optional (mutable-default t))
+(defun consume-declare (body &optional (mutable-default nil))
   "take a list of instructions from body, parse type declarations,
 return the body without them and a hash table with an environment. the
 entry return-values contains a list of return values"
@@ -126,11 +126,8 @@ entry return-values contains a list of return values"
 			       (loop for var in vars do
 				    (type-definition-supersede-declaration
 				     var env type)
-				    (if mutable-default
-					(type-definition-supersede-mutable
-					 var env t)
-					(type-definition-supersede-mutable
-					 var env nil)))))
+				    (type-definition-supersede-mutable
+				     var env mutable-default))))
 			    ((eq (first declaration) 'immutable)
 			     (destructuring-bind (symb &rest vars) declaration
 			       (declare (ignorable symb))
@@ -244,18 +241,18 @@ entry return-values contains a list of return values"
 		  (funcall emit `(paren
 				  ,@(loop for rp in req-param collect
 					 (let* ((p (remove-ampersand rp))
-						(decl-imm (lookup-type p :env env))
-						(declaration (when decl-imm (type-definition-declaration decl-imm)))
-						(imm (when decl-imm (type-definition-immutable decl-imm)))
-						(ref (when decl-imm (type-definition-reference decl-imm))))
+						(decl-m (lookup-type p :env env))
+						(declaration (when decl-m (type-definition-declaration decl-m)))
+						(m (when decl-m (type-definition-immutable decl-m)))
+						(ref (when decl-m (type-definition-reference decl-m))))
 					   #+nil (format t "~a" `(:p ,p :decl-imm ,decl-imm :decl ,declaration :imm ,imm :env
 								     ,(loop for key being the hash-keys using (hash-value v) of env collect `(,key ,v))))
-					   (if decl-imm
+					   (if decl-m
 					       (with-output-to-string (s)
 						 (format s "~a: " p)
 						 (when ref
 						   (format s "&" ))
-						 (unless imm
+						 (when m
 						   (format s "mut "))
 						 (format s "~a" declaration)
 						 )
