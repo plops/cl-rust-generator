@@ -58,7 +58,8 @@
 
 
 (defun type-definition-supersede-declaration (rname
-					      hashtable decl)
+					      hashtable decl
+					      &optional (mutable t))
   "mutable by default"
   (multiple-value-bind (name ref) (remove-ampersand rname)
 					;let*
@@ -80,7 +81,7 @@
 	 (progn
 	   
 	   (setf (gethash name hashtable)
-		 (make-type-definition :declaration decl :mutable t
+		 (make-type-definition :declaration decl :mutable mutable
 				       :reference ref))
 					;(format t "~a doesnt exist ~a~%" name `(:decl ,decl :entry ,(gethash name hashtable)))
 	   )))))
@@ -129,8 +130,8 @@ entry return-values contains a list of return values"
 			       (declare (ignorable symb))
 			       (loop for var in vars do
 				    (type-definition-supersede-declaration
-				     var env type)
-				    (type-definition-supersede-mutable
+				     var env type mutable-default)
+				    #+nil (type-definition-supersede-mutable
 				     var env mutable-default))))
 			    ((eq (first declaration) 'immutable)
 			     (destructuring-bind (symb &rest vars) declaration
@@ -186,13 +187,14 @@ entry return-values contains a list of return values"
     el))
 
 
-(defun variable-declaration (&key name env emit)
+(defun variable-declaration (&key name env emit mutable-default)
   (let* ((name (remove-ampersand name))
 	 (decl-m (lookup-type name :env env))
 	 (type (when decl-m
 		   (type-definition-declaration decl-m)))
-	 (m (when decl-m
-	      (type-definition-mutable decl-m))))
+	 (m (if decl-m
+		(type-definition-mutable decl-m)
+		mutable-default)))
     ;(format t "~a" (list decl-imm type imm))
     (with-output-to-string (s)
       (when m
@@ -224,7 +226,8 @@ entry return-values contains a list of return values"
 			  ,@(loop for decl in decls collect
 				  (destructuring-bind (name &optional value) decl
 				    (format nil "let ~a ~@[ = ~a~];"
-					    (let ((l (variable-declaration :name name :env env :emit emit)))
+					    (let ((l (variable-declaration :name name :env env :emit emit
+									   :mutable-default mutable-default)))
 					      (if (listp l)
 						  (funcall #'emit l)
 						  l))

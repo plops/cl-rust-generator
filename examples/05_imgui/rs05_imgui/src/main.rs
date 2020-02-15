@@ -30,7 +30,7 @@ fn init(title: &str) -> System {
         Display::new(builder, context, &event_loop).expect("failed to initialize display");
     let mut imgui = Context::create();
     imgui.set_ini_filename(None);
-    let platform = WinitPlatform::init(&mut imgui);
+    let mut platform = WinitPlatform::init(&mut imgui);
     {
         let gl_window = display.gl_window();
         let window = gl_window.window();
@@ -69,14 +69,14 @@ impl System {
                 gl_window.window().request_redraw();
             }
             Event::RedrawRequested(_) => {
-                let ui = imgui.frame();
-                let run = true;
+                let mut ui = imgui.frame();
+                let mut run = true;
                 run_ui(&mut run, &mut ui);
                 if (!(run)) {
                     *control_flow = ControlFlow::Exit;
                 };
                 let gl_window = display.gl_window();
-                let target = display.draw();
+                let mut target = display.draw();
                 target.clear_color_srgb((1.0), (1.0), (1.0), (1.0));
                 platform.prepare_render(&ui, gl_window.window());
                 let draw_data = ui.render();
