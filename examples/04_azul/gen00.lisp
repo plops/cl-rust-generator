@@ -37,9 +37,9 @@
 	     (comma "counter: usize")))
 
 	   (defun update_counter ("event:CallbackInfo<MyDataModel>")
-	     (declare (type UpdateScreen))
+	     (declare (values UpdateScreen))
 	     (incf event.state.data.counter 1)
-	     (space Redraw))
+	     (return Redraw))
 	   
 	   (space
 	    "impl Layout for MyDataModel"
@@ -58,10 +58,11 @@
 				  (with_callback
 				   "On::MouseUp"
 				   update_counter))))
-		 (dot ("Dom::div")
-		      (with_child label)
-		      (with_child button)))
-	       (return ("Dom::div")))))
+		 (declare (immutable label button))
+		 (let ((dom (dot ("Dom::div")
+				 (with_child label)
+				 (with_child button))))
+		   (return dom))))))
 	   
 	   
 	   (defun main ()
@@ -74,6 +75,7 @@
 				 ("WindowCreateOptions::default")
 				 ("css::native"))
 				(unwrap))))
+	       (declare (immutable window))
 	       (dot app
 		    (run window)
 		    (unwrap)))))))
