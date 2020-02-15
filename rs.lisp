@@ -403,6 +403,7 @@ entry return-values contains a list of return values"
 		   (let ((args (cdr code)))
 		     (format nil "{~{~a~^, ~}}" (mapcar #'emit args))))
 		  (make-instance
+		   ;;https://doc.rust-lang.org/book/ch05-01-defining-structs.html
 		   (let ((args (cdr code)))
 		     (destructuring-bind (name &rest params) args
 		       (emit `(space ,name
