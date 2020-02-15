@@ -603,19 +603,19 @@ entry return-values contains a list of return values"
 		      (destructuring-bind (keyform &rest clauses)
 			  (cdr code)
 			(format
-			 nil "switch(~a) ~a"
+			 nil "match (~a) ~a"
 			 (emit keyform)
 			 (emit
 			  `(progn
 			     ,@(loop for c in clauses collect
 				    (destructuring-bind (key &rest forms) c
 				      (if (eq key t)
-					  (format nil "default: ~a"
+					  (format nil "_ => ~a,"
 						  (emit
 						   `(do0
 						     ,@(mapcar #'emit
 							       forms))))
-					  (format nil "~a: ~a"
+					  (format nil "~a => ~a,"
 						  (emit key)
 						  (emit
 						   `(do0
