@@ -577,7 +577,7 @@ entry return-values contains a list of return values"
 			      (format nil "(~a)-=(~a)" (emit a) (emit b))
 			      (format nil "(~a)--" (emit a)))))
 		  (string (format nil "\"~a\"" (cadr code)))
-		  (string-r (let* ((str (cadr code))
+		  (string# (let* ((str (cadr code))
 				   (n-of-hash (count #\# str))
 				   (list-of-hash (loop for i upto n-of-hash collect "#")))
 			      (format nil "r~{~a~}\"~a\"~{~a~}"

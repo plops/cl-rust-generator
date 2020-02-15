@@ -55,7 +55,27 @@
 			   (unwrap)))
 		     (indices
 		      ("glium::index::NoIndices"
-		       "glium::index::PrimitiveType::TrianglesList")))
+		       "glium::index::PrimitiveType::TrianglesList"))
+		     (vertex_shader_source
+		      (string# "#version 140
+in vec2 position;
+void main() {
+  gl_Position = vec4(position,0.0,1.0);
+}
+"))
+		     (fragment_shader_source
+		      (string# "#version 140
+out vec4 color;
+void main() {
+  color = vec4(1.0,0.0,0.0,1.0);
+}
+"))
+		     (program (dot ("glium::Program::from_source"
+				    &display
+				    vertex_shader_source
+				    fragment_shader_source
+				    None)
+				   (unwrap))))
 		 )
 	       
 	       (event_loop.run
@@ -90,6 +110,12 @@
 			 (let ((target (display.draw)))
 			   (declare (mutable target))
 			   (target.clear_color 0.0 0.0 1.0 1.0)
+			   (dot (target.draw &vertex_buffer
+					 &indices
+					 &program
+					 "&glium::uniforms::EmptyUniforms"
+					 ("&Default::default"))
+				(unwrap))
 			   (dot target
 				(finish)
 				(unwrap)))))))))))
