@@ -473,7 +473,7 @@ entry return-values contains a list of return values"
 							     (member (car x)
 								     `(defun if for include
 									     dotimes while case
-									     space defstruct0))))
+									     space defstruct0 impl))))
 						    ""
 						    ";"))))
 				  (cdr code)))
@@ -746,7 +746,7 @@ entry return-values contains a list of return values"
 		   (destructuring-bind (name &rest slot-descriptions) (cdr code)
 		     (format nil "~a"
 			     (emit `(do0
-				     ,(format nil "struct ~a ~a;"
+				     ,(format nil "struct ~a ~a"
 					      name
 					      (emit
 					       `(progn
