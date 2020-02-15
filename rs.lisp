@@ -52,13 +52,14 @@
 
 (defstruct type-definition
   (declaration)
-  (immutable)
+  (mutable)
   (reference))
 
 
 
 (defun type-definition-supersede-declaration (rname
 					      hashtable decl)
+  "mutable by default"
   (let* ((sname (format nil "~a" rname))
 	(name (remove #\& sname))
 	 (ref  (< 0 (count #\& sname))))
@@ -67,21 +68,21 @@
 			    ,(loop for key being the hash-keys using (hash-value v) of hashtable collect `(,key ,v))))
    (multiple-value-bind (el exists) (gethash name hashtable)
      (if exists
-	 (let ((imm (type-definition-immutable el)))
+	 (let ((m (type-definition-mutable el)))
 	   (remhash name hashtable)
 	   (setf (gethash name hashtable)
 		 (make-type-definition :declaration  decl
-				       :immutable imm
+				       :mutable m
 				       :reference ref)))
 	 (progn
 	  
 	   (setf (gethash name hashtable)
-		 (make-type-definition :declaration decl :immutable nil
+		 (make-type-definition :declaration decl :mutable t
 				       :reference ref))
 					;(format t "~a doesnt exist ~a~%" name `(:decl ,decl :entry ,(gethash name hashtable)))
 	   )))))
 
-(defun type-definition-supersede-immutable (rname hashtable imm)
+(defun type-definition-supersede-mutable (rname hashtable mutable)
   (let* ((sname (format nil "~a" rname))
 	(name (remove #\& sname))
 	(ref  (< 0 (count #\& sname))))
@@ -94,18 +95,18 @@
 	   (remhash name hashtable)
 	   (setf (gethash name hashtable)
 		 (make-type-definition :declaration decl
-				       :immutable imm
+				       :mutable mutable
 				       :reference ref)))
 	 (progn
 					;(format t "~a doesnt exist~%" name)
 	   (setf (gethash name hashtable)
 		 (make-type-definition :declaration nil
-				       :immutable imm
+				       :mutable mutable
 				       :reference ref)))))))
 
 
 
-(defun consume-declare (body)
+(defun consume-declare (body &optional (mutable-default t))
   "take a list of instructions from body, parse type declarations,
 return the body without them and a hash table with an environment. the
 entry return-values contains a list of return values"
@@ -124,12 +125,23 @@ entry return-values contains a list of return values"
 			       (declare (ignorable symb))
 			       (loop for var in vars do
 				    (type-definition-supersede-declaration
-				     var env type))))
+				     var env type)
+				    (if mutable-default
+					(type-definition-supersede-mutable
+					 var env t)
+					(type-definition-supersede-mutable
+					 var env nil)))))
 			    ((eq (first declaration) 'immutable)
 			     (destructuring-bind (symb &rest vars) declaration
 			       (declare (ignorable symb))
 			       (loop for var in vars do
-				    (type-definition-supersede-immutable
+				    (type-definition-supersede-mutable
+				     var env nil))))
+			    ((eq (first declaration) 'mutable)
+			     (destructuring-bind (symb &rest vars) declaration
+			       (declare (ignorable symb))
+			       (loop for var in vars do
+				    (type-definition-supersede-mutable
 				     var env t))))
 			   
 			    ((eq (first declaration) 'values)
@@ -169,15 +181,15 @@ entry return-values contains a list of return values"
 
 (defun variable-declaration (&key name env emit)
   (let* ((name (remove-ampersand name))
-	 (decl-imm (lookup-type name :env env))
-	 (type (when decl-imm
-		   (type-definition-declaration decl-imm)))
-	 (imm (when decl-imm
-		(type-definition-immutable decl-imm))))
+	 (decl-m (lookup-type name :env env))
+	 (type (when decl-m
+		   (type-definition-declaration decl-m)))
+	 (m (when decl-m
+	      (type-definition-mutable decl-m))))
     ;(format t "~a" (list decl-imm type imm))
     (with-output-to-string (s)
-      (unless imm
-       (format s "mut "))
+      (when m
+	(format s "mut "))
       (if (listp type)
 	  (if (null type)
 	      (format s "~a" (funcall emit name))
@@ -193,10 +205,11 @@ entry return-values contains a list of return values"
 		 (funcall emit name)
 		 (funcall emit type))))))
 
-(defun parse-let (code emit)
+
+(defun parse-let (code emit &key (mutable-default nil))
   "let ({var | (var [init-form])}*) declaration* form*"
   (destructuring-bind (decls &rest body) (cdr code)
-    (multiple-value-bind (body env) (consume-declare body)
+    (multiple-value-bind (body env) (consume-declare body mutable-default)
       (with-output-to-string (s)
 	(format s "~a"
 		(funcall emit
@@ -490,7 +503,8 @@ entry return-values contains a list of return values"
 				  (emit type)
 				  (emit value))))
 		  
-		  (let (parse-let code #'emit))
+		  (let (parse-let code #'emit :mutable-default nil))
+		  (let* (parse-let code #'emit :mutable-default t))
 		  (setf 
 		   (let ((args (cdr code)))
 		     ;; "setf {pair}*"

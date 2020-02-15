@@ -32,7 +32,7 @@
 		   (cb ("glium::glutin::ContextBuilder::new"))
 		   (display (dot ("glium::Display::new" wb cb &event_loop)
 				 (unwrap))))
-	       (declare (immutable wb cb display))
+	       (declare (mutable event_loop))
 
 
 	       (space
@@ -41,8 +41,22 @@
 		    (position "[f32;2]")))
 	       (implement_vertex! Vertex position)
 
-	       (let ((v1 (make-instance Vertex
-					:position (list -.5 -.5)))))
+	       (let ((shape (vec!
+			     ,@(loop for (e f) in `((-.5 -.5)
+						    (.0 .5)
+						    (.5 -.25))
+				  collect
+				    `(make-instance Vertex
+						    :position (list ,e ,f)))))
+		     (vertex_buffer
+		      (dot ("glium::VertexBuffer::new"
+			    &display
+			    &shape)
+			   (unwrap)))
+		     (indices
+		      ("glium::index::NoIndices"
+		       "glium::index::PrimitiveType::TrianglesList")))
+		 )
 	       
 	       (event_loop.run
 		(space move
