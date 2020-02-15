@@ -23,3 +23,11 @@ cumbersome.
 ** 04_azul
 
 perhaps this is easier to use for a 2d gui
+
+
+* Emacs config
+
+for viewing the generated code
+
+- Install rust-mode and eglot with Melpa
+- rustup component add rls --toolchain stable-x86_64-unknown-linux-gnu

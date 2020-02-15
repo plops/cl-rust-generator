@@ -1,33 +1,8 @@
 (eval-when (:compile-toplevel :execute :load-toplevel)
-  (ql:quickload "cl-rust-generator")
-  ;(ql:quickload "cl-ppcre")
-  )
+  (ql:quickload "cl-rust-generator"))
 
 (in-package :cl-rust-generator)
 
-(declaim (optimize (speed 0)
-	  (debug 3)
-	  (safety 3)))
-
-;; switches
-;; :safety .. enable extra asserts in the code
-;; :nolog  .. suppress all logging output (also makes code more readable)
-;; :log-consume .. show consumption of padding bits
-;; :log-brc .. show decompression
-
-(setf *features* (union *features* '(:safety
-					;:nolog
-					;:log-brc
-				     ;:log-consume
-				     )))
-(setf *features* (set-difference *features* '(;:safety
-					      :nolog
-					      :log-brc
-					      :log-consume
-					      )))
-
-
-;; cargo new --bin rs02_webgcd
 ;; cargo test
 ;; cargo run
 ;; cargo clean
