@@ -29,10 +29,12 @@ fn main() {
     let indices = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
     let vertex_shader_source = r##"#version 140
 in vec2 position;
+uniform float t;
 void main() {
-  gl_Position = vec4(position,0.0,1.0);
-}
-"##;
+  vec2 pos = position;
+  pos.x += t;
+  gl_Position = vec4(pos,0.0,1.0);
+}"##;
     let fragment_shader_source = r##"#version 140
 out vec4 color;
 void main() {
@@ -42,6 +44,7 @@ void main() {
     let program =
         glium::Program::from_source(&display, vertex_shader_source, fragment_shader_source, None)
             .unwrap();
+    let mut time: f32 = (-0.50);
     event_loop.run(move |event, _, control_flow| {
         let next_frame_time =
             ((std::time::Instant::now()) + (std::time::Duration::from_nanos(16_666_667)));
@@ -61,14 +64,19 @@ void main() {
             },
             _ => return,
         };
+        (time) += (2.00e-3);
+        if ((0.50) < time) {
+            time = (-0.50);
+        };
         let mut target = display.draw();
         target.clear_color((0.0), (0.0), (1.0), (1.0));
+        let uniforms = uniform! {t: time};
         target
             .draw(
                 &vertex_buffer,
                 &indices,
                 &program,
-                &glium::uniforms::EmptyUniforms,
+                &uniforms,
                 &Default::default(),
             )
             .unwrap();

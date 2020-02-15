@@ -59,8 +59,11 @@
 		     (vertex_shader_source
 		      (string# "#version 140
 in vec2 position;
+uniform float t;
 void main() {
-  gl_Position = vec4(position,0.0,1.0);
+  vec2 pos = position;
+  pos.x += t;
+  gl_Position = vec4(pos,0.0,1.0);
 }"
 ))
 		     (fragment_shader_source
@@ -77,26 +80,28 @@ void main() {
 				    None)
 				   (unwrap))))
 		 )
-	       
-	       (event_loop.run
-		(space move
-		       (lambda (event _ control_flow)
-			 (let ((next_frame_time (+ ("std::time::Instant::now")
-						   ("std::time::Duration::from_nanos" "16_666_667"))))
-			   (setf *control_flow
-				 ("glium::glutin::event_loop::ControlFlow::WaitUntil"
-				  next_frame_time))
-			   (case event
-			     ((space "glutin::event::Event::WindowEvent"
-				     (curly event ".."))
-			      (case event
-				("glutin::event::WindowEvent::CloseRequested"
-				 (setf *control_flow
-				       "glutin::event_loop::ControlFlow::Exit")
-				 (return))
-				(t (return)))
-			      )
-			     (("glutin::event::Event::NewEvents" cause)
+	       (let* ((time -.5))
+		 (declare (mutable time)
+			  (type f32 time))
+		(event_loop.run
+		 (space move
+			(lambda (event _ control_flow)
+			  (let ((next_frame_time (+ ("std::time::Instant::now")
+						    ("std::time::Duration::from_nanos" "16_666_667"))))
+			    (setf *control_flow
+				  ("glium::glutin::event_loop::ControlFlow::WaitUntil"
+				   next_frame_time))
+			    (case event
+			      ((space "glutin::event::Event::WindowEvent"
+				      (curly event ".."))
+			       (case event
+				 ("glutin::event::WindowEvent::CloseRequested"
+				  (setf *control_flow
+					"glutin::event_loop::ControlFlow::Exit")
+				  (return))
+				 (t (return)))
+			       )
+			      (("glutin::event::Event::NewEvents" cause)
 			       (case cause
 				 ((space "glutin::event::StartCause::ResumeTimeReached"
 					 (curly ".."))
@@ -104,21 +109,26 @@ void main() {
 				 ("glutin::event::StartCause::Init"
 				  "()")
 				 (t (return))))
-			     (_ (return))))
+			      (_ (return))))
 					;(match event)
-			 
-			 (let ((target (display.draw)))
-			   (declare (mutable target))
-			   (target.clear_color 0.0 0.0 1.0 1.0)
-			   (dot (target.draw &vertex_buffer
-					 &indices
-					 &program
-					 "&glium::uniforms::EmptyUniforms"
-					 ("&Default::default"))
-				(unwrap))
-			   (dot target
-				(finish)
-				(unwrap)))))))))))
+			  (do0
+			   (incf time .002)
+			   (when (< .5 time)
+			     (setf time -.5)))
+			  (let ((target (display.draw)))
+			    (declare (mutable target))
+			    (target.clear_color 0.0 0.0 1.0 1.0)
+			    (let ((uniforms (make-instance uniform! :t time) ))
+			     (dot (target.draw &vertex_buffer
+					       &indices
+					       &program
+					       &uniforms
+					       ;"&glium::uniforms::EmptyUniforms"
+					       ("&Default::default"))
+				  (unwrap)))
+			    (dot target
+				 (finish)
+				 (unwrap))))))))))))
     
     
     (write-source *code-file*
