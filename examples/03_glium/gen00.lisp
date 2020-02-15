@@ -61,8 +61,8 @@
 in vec2 position;
 void main() {
   gl_Position = vec4(position,0.0,1.0);
-}
-"))
+}"
+))
 		     (fragment_shader_source
 		      (string# "#version 140
 out vec4 color;
