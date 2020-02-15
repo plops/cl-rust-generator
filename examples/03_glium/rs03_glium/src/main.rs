@@ -1,4 +1,5 @@
 extern crate glium;
+use glium::Surface;
 fn main() {
     let mut event_loop = glium::glutin::event_loop::EventLoop::new();
     let wb = glium::glutin::window::WindowBuilder::new()
@@ -11,7 +12,6 @@ fn main() {
             ((std::time::Instant::now()) + (std::time::Duration::from_nanos(16_666_667)));
         *control_flow = glium::glutin::event_loop::ControlFlow::WaitUntil(next_frame_time);
         let mut target = display.draw();
-	target
         target.clear_color((0.0), (0.0), (1.0), (1.0));
         target.finish().unwrap();
     });

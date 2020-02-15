@@ -20,7 +20,7 @@
 	 `(do0
 
 	   "extern crate glium;"
-	   
+	   "use glium::Surface;"
 	   (defun main ()
 	     (let ((event_loop ("glium::glutin::event_loop::EventLoop::new"))
 		   (wb (dot ("glium::glutin::window::WindowBuilder::new")

@@ -31,3 +31,6 @@ for viewing the generated code
 
 - Install rust-mode and eglot with Melpa
 - rustup component add rls --toolchain stable-x86_64-unknown-linux-gnu
+- start company-mode, rust-mode and eglot-mode
+
+FIXME: completion not working
