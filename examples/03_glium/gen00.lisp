@@ -46,10 +46,9 @@
 				     (curly event ".."))
 			      (case event
 				("glutin::event::WindowEvent::CloseRequested"
-				 (progn
-				  (setf *control_flow
-					"glutin::event_loop::ControlFlow::Exit")
-				  (return)))
+				 (setf *control_flow
+				       "glutin::event_loop::ControlFlow::Exit")
+				 (return))
 				(t (return)))
 			      )
 			     (("glutin::event::Event::NewEvents" cause)
