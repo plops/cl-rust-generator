@@ -115,7 +115,57 @@
 					 "mut renderer"
 					 "..") self)
 			 (last_frame ("Instant::now")))
-		     (declare (mutable last_frame)))))
+		     (declare (mutable last_frame))
+		     (dot event_loop
+			  (run
+			   (space
+			    move
+			    (lambda (event _ control_flow)
+			      (case event
+				(("Event::NewEvents" _)
+				 (setf last_frame (dot imgui
+						       (io_mut)
+						       (update_delta_time last_frame)))
+				 )
+				("Event::MainEventsCleared"
+				 (let ((gl_window (display.gl_window)))
+				   (dot platform
+					(prepare_frame (imgui.io_mut)
+						       (ref (gl_window.window)))
+					(expect (string "failed to prepare frame")))
+				   (dot gl_window
+					(window)
+					(request_redraw))))
+				(("Event::RedrawRequested" _)
+				 (let* ((ui (imgui.frame))
+					(run true))
+				   (run_ui "&mut run"
+					   "&mut ui")
+				   (unless run
+				     (setf *control_flow
+					   "ControlFlow::Exit"))
+				   (let ((gl_window (display.gl_window)))
+				     (let* ((target (display.draw)))
+				       (target.clear_color_srgb 1s0 1s0 1s0 1s0)
+				       (platform.prepare_render &ui
+								(gl_window.window))
+				       (let ((draw_data (ui.render)))
+					 (dot renderer
+					      (render "&mut target"
+						      draw_data)
+					      (expect (string "rendering failed")))
+					 (dot target
+					      (finish)
+					      (expect (string "swap buffer failed"))))))))
+				((make-instance "Event::WindowEvent"
+						:event "WindowEvent::CloseRequested"
+						"..")
+				 (setf *control_flow "ControlFlow::Exit"))
+				(event
+				 (let ((gl_window (display.gl_window)))
+				   (platform.handle_event (imgui.io_mut)
+							  (gl_window.window)
+							  &event)))))))))))
 	   
 	   (defun main ()
 	     (let ((system (init (file!))))
@@ -131,7 +181,7 @@
 				       (let ((mouse_pos (dot ui
 							     (io)
 							     mouse_pos)))
-					 (ui.text (format
+					 (ui.text (format!
 						   (string "mouse: ({:.1},{:.1})"
 							   )
 						   (aref mouse_pos 0)

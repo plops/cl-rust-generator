@@ -57,6 +57,45 @@ impl System {
             ..
         } = self;
         let mut last_frame = Instant::now();
+        event_loop.run(move |event, _, control_flow| match (event) {
+            Event::NewEvents(_) => {
+                last_frame = imgui.io_mut().update_delta_time(last_frame);
+            }
+            Event::MainEventsCleared => {
+                let gl_window = display.gl_window();
+                platform
+                    .prepare_frame(imgui.io_mut(), &(gl_window.window()))
+                    .expect("failed to prepare frame");
+                gl_window.window().request_redraw();
+            }
+            Event::RedrawRequested(_) => {
+                let ui = imgui.frame();
+                let run = true;
+                run_ui(&mut run, &mut ui);
+                if (!(run)) {
+                    *control_flow = ControlFlow::Exit;
+                };
+                let gl_window = display.gl_window();
+                let target = display.draw();
+                target.clear_color_srgb((1.0), (1.0), (1.0), (1.0));
+                platform.prepare_render(&ui, gl_window.window());
+                let draw_data = ui.render();
+                renderer
+                    .render(&mut target, draw_data)
+                    .expect("rendering failed");
+                target.finish().expect("swap buffer failed");
+            }
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                *control_flow = ControlFlow::Exit;
+            }
+            event => {
+                let gl_window = display.gl_window();
+                platform.handle_event(imgui.io_mut(), gl_window.window(), &event);
+            }
+        });
     }
 }
 fn main() {
@@ -67,7 +106,7 @@ fn main() {
             .build(ui, || {
                 ui.text(im_str!("Hello World"));
                 let mouse_pos = ui.io().mouse_pos;
-                ui.text(format("mouse: ({:.1},{:.1})", mouse_pos[0], mouse_pos[1]));
+                ui.text(format!("mouse: ({:.1},{:.1})", mouse_pos[0], mouse_pos[1]));
             });
     });
 }
