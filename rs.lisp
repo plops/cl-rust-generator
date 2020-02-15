@@ -386,10 +386,21 @@ entry return-values contains a list of return values"
 		   ;; bracket {args}*
 		   (let ((args (cdr code)))
 		     (format nil "[~{~a~^, ~}]" (mapcar #'emit args))))
+		  (list
+		   (emit `(bracket ,@(cdr code))))
 		  (curly
 		   ;; curly {args}*
 		   (let ((args (cdr code)))
 		     (format nil "{~{~a~^, ~}}" (mapcar #'emit args))))
+		  (make-instance
+		   (let ((args (cdr code)))
+		     (destructuring-bind (name &rest params) args
+		       (emit `(space ,name
+				     (curly
+				      ,@(loop for i from 0 below (length params) by 2 collect
+					     (format nil "~a: ~a"
+						     (elt params i)
+						     (emit (elt params (+ i 1)))))))))))
 		  (new
 		   ;; new arg
 		   (let ((arg (cadr code)))
@@ -695,10 +706,11 @@ entry return-values contains a list of return values"
 						  ,@(loop for desc in slot-descriptions collect
 							 (destructuring-bind (slot-name &optional type value) desc
 							   (declare (ignorable value))
-							   (format nil "~a ~a;" (emit type) (emit slot-name))))))
+							   (format nil "~a: ~a,"  (emit slot-name)(emit type))))))
 					      
 					      )
-				     (deftype ,name () (struct ,name)))))))
+				     ;(deftype ,name () (struct ,name))
+				     )))))
 		  (handler-case
 		      ;; handler-case expression [[{error-clause}*]]
 		    ;;; error-clause::= (typespec ([var]) declaration* form*) ;; note: declarations are currently unsupported

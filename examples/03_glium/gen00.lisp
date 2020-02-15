@@ -18,7 +18,7 @@
 
   (let ((code
 	 `(do0
-
+	   "#[macro_use]"
 	   "extern crate glium;"
 
 	   
@@ -33,6 +33,17 @@
 		   (display (dot ("glium::Display::new" wb cb &event_loop)
 				 (unwrap))))
 	       (declare (immutable wb cb display))
+
+
+	       (space
+		"#[derive(Copy,Clone)]"
+		(defstruct0 Vertex
+		    (position "[f32;2]")))
+	       (implement_vertex! Vertex position)
+
+	       (let ((v1 (make-instance Vertex
+					:position (list -.5 -.5)))))
+	       
 	       (event_loop.run
 		(space move
 		       (lambda (event _ control_flow)
