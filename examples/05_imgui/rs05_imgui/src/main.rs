@@ -40,6 +40,12 @@ fn init (title: &str) -> System{
         let renderer  = Renderer::init(&mut imgui, &display).expect("failed to initialize renderer");
     return System {event_loop, display, imgui, platform, renderer, font_size: (12.    )};
 }
+impl System {
+        fn main_loop<F: FnMut(&mut bool,&mut Ui)+'static> (self, mut run_ui: F){
+                        let System {event_loop, display, mut imgui, mut platform, mut renderer, ..}  = self;
+        let mut last_frame  = Instant::now();
+}
+};
 fn main (){
             let system  = init(file!());
     system.main_loop(move | _,  ui|{

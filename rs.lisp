@@ -60,12 +60,15 @@
 (defun type-definition-supersede-declaration (rname
 					      hashtable decl)
   "mutable by default"
-  (let* ((sname (format nil "~a" rname))
-	(name (remove #\& sname))
-	 (ref  (< 0 (count #\& sname))))
-    #+nil (format t "~a~%" `(:rname rname
-			    :env
-			    ,(loop for key being the hash-keys using (hash-value v) of hashtable collect `(,key ,v))))
+  (multiple-value-bind (name ref) (remove-ampersand rname)
+					;let*
+    #+nil
+   ((sname (format nil "~a" rname))
+    (name (remove #\& sname))
+    (ref  (< 0 (count #\& sname))))
+   #+nil (format t "~a~%" `(:rname rname
+				   :env
+				   ,(loop for key being the hash-keys using (hash-value v) of hashtable collect `(,key ,v))))
    (multiple-value-bind (el exists) (gethash name hashtable)
      (if exists
 	 (let ((m (type-definition-mutable el)))
@@ -75,7 +78,7 @@
 				       :mutable m
 				       :reference ref)))
 	 (progn
-	  
+	   
 	   (setf (gethash name hashtable)
 		 (make-type-definition :declaration decl :mutable t
 				       :reference ref))
@@ -83,7 +86,8 @@
 	   )))))
 
 (defun type-definition-supersede-mutable (rname hashtable mutable)
-  (let* ((sname (format nil "~a" rname))
+  (multiple-value-bind (name ref) (remove-ampersand rname)
+   #+nil ((sname (format nil "~a" rname))
 	(name (remove #\& sname))
 	(ref  (< 0 (count #\& sname))))
     #+nil (format t "~a~%" `(:rname rname
@@ -161,15 +165,21 @@ entry return-values contains a list of return values"
     (values (reverse new-body) env)))
 
 (defun remove-ampersand (rname)
-  (let* ((sname (format nil "~a" rname))
-	 (name (remove #\& sname))
-	 (ref  (< 0 (count #\& sname))))
-    (values name ref)))
+  (let* ((sname (if (listp rname)
+		    rname
+		    (format nil "~a" rname)) ;(format nil "~a" rname)
+	   )
+	 (name sname ;(remove #\& sname)
+	   )
+	 ;(ref  (< 0 (count #\& sname)))
+	 )
+    (values name nil ;ref
+	    )))
 
 (defun lookup-type (rname &key env)
   "get the type of a variable from an environment"
   (let* ((name (remove-ampersand rname))
-	 (el (gethash name env)))
+	   (el (gethash name env)))
     #+nil (format t "search for ~a in ~a gives ~a ~%" name (loop for key being the hash-keys using (hash-value v) of env
 							collect `(,key ,v))
 	    el)
@@ -212,6 +222,15 @@ entry return-values contains a list of return values"
 		(funcall emit
 			`(do0
 			  ,@(loop for decl in decls collect
+				  (destructuring-bind (name &optional value) decl
+				    (format nil "let ~a ~@[ = ~a~];"
+					    (let ((l (variable-declaration :name name :env env :emit emit)))
+					      (if (listp l)
+						  (funcall #'emit l)
+						  l))
+					       (when value
+						   (funcall emit value))))
+				 #+nil
 				 (if (listp decl) ;; split into name and initform
 				     (destructuring-bind (name &optional value) decl
 				       (format nil "let ~a ~@[ = ~a~];"
@@ -431,7 +450,7 @@ entry return-values contains a list of return values"
 			   (loop for i below level collect "    ")
 			   (emit (cadr code))))
 		  (impl (destructuring-bind (_impl name &rest body) code
-			  (emit `(space (string "impl")
+			  (emit `(space impl
 					,name
 					(progn
 					  ,@body)))))

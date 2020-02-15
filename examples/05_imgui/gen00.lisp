@@ -3,6 +3,10 @@
 
 (in-package :cl-rust-generator)
 
+(declaim (optimize (speed 0)
+		   (safety 3)
+		   (debug 3)))
+
 ;; cargo test
 ;; cargo run
 ;; cargo clean
@@ -98,6 +102,20 @@
 				       platform
 				       renderer
 				       :font_size 12s0)))))
+
+
+	   (impl System
+		 (defun "main_loop<F: FnMut(&mut bool,&mut Ui)+'static>"
+		     (self "mut run_ui: F")
+		   (let (((make-instance System
+					 event_loop
+					 display
+					 "mut imgui"
+					 "mut platform"
+					 "mut renderer"
+					 "..") self)
+			 (last_frame ("Instant::now")))
+		     (declare (mutable last_frame)))))
 	   
 	   (defun main ()
 	     (let ((system (init (file!))))
