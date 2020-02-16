@@ -34,3 +34,9 @@ for viewing the generated code
 - start company-mode, rust-mode and eglot-mode
 
 FIXME: completion not working
+
+* Notes
+
+- when calling C/C++ unwinding is undefined behaviour, use catch_unwind
+- -C panic=abort reduces file size because unwinding code is not needed
+- align https://doc.rust-lang.org/edition-guide/rust-2018/data-types/choosing-alignment-with-the-repr-attribute.html

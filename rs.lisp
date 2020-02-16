@@ -457,6 +457,10 @@ entry return-values contains a list of return values"
 					,name
 					(progn
 					  ,@body)))))
+		  (use (let ((args (cdr code)))
+			 (with-output-to-string (s)
+			   (loop for e in args collect
+			    (format s "use ~{~a~^::~};" e)))))
 		  (do0 (with-output-to-string (s)
 			 ;; do0 {form}*
 			 ;; write each form into a newline, keep current indentation level

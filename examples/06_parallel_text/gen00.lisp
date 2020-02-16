@@ -18,8 +18,10 @@
 (progn
   (defparameter *source-dir* #P"examples/06_parallel_text/code/src/")
 
-  (with-open-file (s (merge-pathnames #P"../Cargo.toml"
-				      *source-dir*)
+  (with-open-file (s (asdf:system-relative-pathname 'cl-rust-generator
+				   (merge-pathnames #P"../Cargo.toml"
+						    *source-dir*))
+		     
 		     :direction :output
 		     :if-does-not-exist :create
 		     :if-exists :supersede)
