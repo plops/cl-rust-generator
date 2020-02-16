@@ -54,7 +54,8 @@ byteorder = \"*\"
 		(std thread spawn)
 		(std sync mpsc channel))
 	   (defun start_file_reader_thread ("documents: Vec<PathBuf>")
-	     (declare (values "(Receiver<String>, JoinHandle<io::Result<()>>)"))
+	     (declare (values "Receiver<String>"
+			      "JoinHandle<io::Result<()>>"))
 	     (let (((paren sender receiver) (channel))
 		   (handle (spawn
 			    ;; transfer ownership of sender
@@ -80,7 +81,19 @@ byteorder = \"*\"
 		   )
 	       (do0
 		;; result of closure is in threads JoinHandle
-		(return (paren receiver handle))))))))
+		(return (paren receiver handle)))))
+
+
+	   (defun start_file_indexing_thread ("texts: Receiver<String>")
+	     (declare (values "Receiver<InMemoryIndex>"
+			      "JoinHandle<()>")))
+
+	   (do0
+	    ;; receiver will block
+	    ;; loop exits when channel is empty and sender has been dropped
+	    (for (text receiver)
+		
+		 )))))
 
     
     
