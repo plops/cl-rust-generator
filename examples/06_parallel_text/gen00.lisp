@@ -56,6 +56,7 @@ byteorder = \"*\"
 	   (defun start_file_reader_thread ("documents: Vec<PathBuf>")
 	     (declare (values "Receiver<String>"
 			      "JoinHandle<io::Result<()>>"))
+	     ;; use std::sync::mpsc::sync_channel (sync_channel 100) to create back pressure
 	     (let (((paren sender receiver) (channel))
 		   (handle (spawn
 			    ;; transfer ownership of sender
@@ -125,7 +126,30 @@ byteorder = \"*\"
 
 	   (defun merge_index_files ("files: Receiver<PathBuf>"
 				     "output_dir: &Path")
-	     (declare (values "io::Result<()>")))
+	     (declare (values "io::Result<()>"))
+	     ;; produces single output file on disk
+	     )
+
+	   (defun run_pipeline ("documents: Vec<PathBuf>"
+				"output_dir: PathBuf")
+	     (declare (values "io::Result<()>"))
+	     (let (((paren texts h1) (start_file_reader_thread documents))
+		   ((paren pints h2) (start_file_indexing_thread texts))
+		   ((paren gallons h3) (start_in_memory_merge_thread pints))
+		   ((paren files h4) (start_index_writer_thread gallons &output_dir))
+		   (result (merge_index_files files &output_dir))
+		   (r1 (dot h1
+			    (join)
+			    (unwrap))))
+	       ;; h2 and h3 can't fail (pure in-memory)
+	       (dot h2 (join) (unwrap))
+	       (dot h3 (join) (unwrap))
+	       (let ((r4 (dot h4 (join) (unwrap)))))
+	       ;; return first error encountered
+	       (? r1)
+	       (? r4)
+	       (return result)))
+	   
 	   )))
 
     
