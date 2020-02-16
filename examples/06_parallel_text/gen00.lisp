@@ -64,7 +64,28 @@ byteorder = \"*\"
 	   (values "Vec<&str>")
 	   (dot text
 		(split (lambda ("ch: char")
-			 (return (not (ch.is_alphanumeric))))))))))
+			 (return (not (ch.is_alphanumeric)))))
+		(filter (lambda (word)
+			  (return (not (word.is_empty)))))
+		(collect)))
+	 (space pub
+		(defstruct0 InMemoryIndex
+		    ("pub word_count" usize)
+		  ("pub map" "HashMap<String,Vec<Hit>>"))
+		)
+	 "pub type Hit = Vec<u8>;"
+	 (impl InMemoryIndex
+	       (space pub
+		      (defun new ()
+			(declare (values InMemoryIndex))
+			(make-instance InMemoryIndex
+				       :word_count 0
+				       :map ("Hashmap::new"))))
+	       (space pub
+		      (defun from_single_document ("document_id: usize"
+						   "text: String")
+			(declare (values InMemoryIndex))
+			(let ((document_id "document_id as u32")))))))))
   
   (define-module
       `(main
