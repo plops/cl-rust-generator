@@ -61,7 +61,7 @@ byteorder = \"*\"
 	 (use (std collections HashMap)
 	      (byteorder "{LittleEndian,WriteBytesExt}"))
 	 (defun tokenize ("text: &str")
-	   (values "Vec<&str>")
+	   (declare (values "Vec<&str>"))
 	   (dot text
 		(split (lambda ("ch: char")
 			 (return (not (ch.is_alphanumeric)))))
@@ -85,7 +85,54 @@ byteorder = \"*\"
 		      (defun from_single_document ("document_id: usize"
 						   "text: String")
 			(declare (values InMemoryIndex))
-			(let ((document_id "document_id as u32")))))))))
+			(let ((document_id "document_id as u32")
+			      (index ("InMemoryIndex::new"))
+			      (text (text.to_lowercase))
+			      (tokens (tokenize &text)))
+			  (declare (mutable index))
+			  (for ((values i token)
+				(dot tokens
+				     (iter)
+				     (enumerate)))
+			       (let ((hits (dot index
+						map
+						(entry (token.to_string))
+						(or_insert_with (lambda ()
+								  (let* ((hits ("Vec::with_capacity" (+ 4 4))))
+								    (dot hits
+									 ("write_u32::<LittleEndian>" document_id)
+									 (unwrap))
+								    (return "vec![hits]")))))))
+				 (dot (aref hits 0)
+				      ("write_u32::<LittleEndian>" document_id)
+				      (unwrap))
+				 (incf index.word_count)))
+			  (when (== 0 (% document_id 100))
+			    (println! (string "indexed document {}, {} bytes, {} words")
+				      document_id
+				      (text.len)
+				      index.word_count))
+			  (return index))))
+	       (space pub
+		      (defun merge ("&mut self"
+				    "other: InMemoryIndex")
+			(for ((values term hits)
+			      other.map)
+			     (dot self
+				  map
+				  (entry term)
+				  (or_insert_with (lambda () (return "vec![]")))
+				  (extend hits)))
+			(incf self.word_count other.word_count)))
+	       (space pub
+		      (defun is_empty (&self)
+			(declare (values bool))
+			(return (== 0 self.word_count))))
+	       (space pub
+		      (defun is_large (&self)
+			(declare (values bool))
+			(return (< "100_000_000" self.word_count))))
+	       ))))
   
   (define-module
       `(main
@@ -94,6 +141,7 @@ byteorder = \"*\"
 	      (std io prelude *)
 	      (std thread spawn)
 	      (std sync mpsc channel))
+	 (mod index)
 	 (defun start_file_reader_thread ("documents: Vec<PathBuf>")
 	   (declare (values "Receiver<String>"
 			    "JoinHandle<io::Result<()>>"))

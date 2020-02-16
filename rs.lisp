@@ -464,10 +464,19 @@ entry return-values contains a list of return values"
 					  ,@body)))))
 		  (? (let ((args (cdr code)))
 		       (format nil "~a?" (emit (car args)))))
-		  (use (let ((args (cdr code)))
+		  (use
+		   ;; use {(a b c)}*
+		   ;; (use ((a b c) (q r))) => use a::b::c; use q::r
+		   (let ((args (cdr code)))
+		     (with-output-to-string (s)
+			   (loop for e in args collect
+				(format s "use ~{~a~^::~};~%" e)))))
+		  (mod
+		   ;; mod {module}*
+		   (let ((args (cdr code)))
 			 (with-output-to-string (s)
 			   (loop for e in args collect
-			    (format s "use ~{~a~^::~};~%" e)))))
+			    (format s "mod ~a;" e)))))
 		  (do0 (with-output-to-string (s)
 			 ;; do0 {form}*
 			 ;; write each form into a newline, keep current indentation level

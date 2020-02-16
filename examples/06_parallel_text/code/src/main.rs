@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::thread::spawn;
 use std::sync::mpsc::channel;
+mod index;
 fn start_file_reader_thread (documents: Vec<PathBuf>) -> (Receiver<String>, JoinHandle<io::Result<()>>){
             let (sender, receiver)  = channel();
     let handle  = spawn(move ||{
