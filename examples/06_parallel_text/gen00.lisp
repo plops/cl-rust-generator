@@ -62,12 +62,12 @@ byteorder = \"*\"
 	      (byteorder "{LittleEndian,WriteBytesExt}"))
 	 (defun tokenize ("text: &str")
 	   (declare (values "Vec<&str>"))
-	   (dot text
-		(split (lambda ("ch: char")
-			 (return (not (ch.is_alphanumeric)))))
-		(filter (lambda (word)
-			  (return (not (word.is_empty)))))
-		(collect)))
+	   (return (dot text
+		 (split (lambda ("ch: char")
+			  (return (not (ch.is_alphanumeric)))))
+		 (filter (lambda (word)
+			   (return (not (word.is_empty)))))
+		 (collect))))
 	 (space pub
 		(defstruct0 InMemoryIndex
 		    ("pub word_count" usize)
@@ -78,9 +78,9 @@ byteorder = \"*\"
 	       (space pub
 		      (defun new ()
 			(declare (values InMemoryIndex))
-			(make-instance InMemoryIndex
-				       :word_count 0
-				       :map ("HashMap::new"))))
+			(return (make-instance InMemoryIndex
+					:word_count 0
+					:map ("HashMap::new")))))
 	       (space pub
 		      (defun from_single_document ("document_id: usize"
 						   "text: String")
@@ -137,7 +137,7 @@ byteorder = \"*\"
   (define-module
       `(main
 	(do0
-	 
+	 "#[allow(unused_parens)]"
 	 (mod index)
 
 	 (use
@@ -145,6 +145,7 @@ byteorder = \"*\"
 	  (std fs File)
 	  (std io)
 	  (std io prelude *)
+	  (std path (curly Path PathBuf))
 	  (std sync mpsc (curly channel Receiver))
 	  (std thread (curly spawn JoinHandle))
 	  (index InMemoryIndex))
@@ -212,40 +213,43 @@ byteorder = \"*\"
 	       ))
 
 
-	 (defun start_in_memory_merge_thread ("file_indexes: Receiver<InMemoryIndex>")
-	   (declare (values "Receiver<InMemoryIndex>"
-			    "JoinHandle<()>")))
+	 #+nil (do0
+	  (defun start_in_memory_merge_thread ("file_indexes: Receiver<InMemoryIndex>")
+	    (declare (values "Receiver<InMemoryIndex>"
+			     "JoinHandle<()>")))
 
-	 (defun start_index_writer_thread ("big_indexes: Receiver<InMemoryIndex>"
-					   "output_dir: &Path")
-	   (declare (values "Receiver<PathBuf>"
-			    "JoinHandle<io::Result<()>>")))
+	  (defun start_index_writer_thread ("big_indexes: Receiver<InMemoryIndex>"
+					    "output_dir: &Path")
+	    (declare (values "Receiver<PathBuf>"
+			     "JoinHandle<io::Result<()>>")))
 
-	 (defun merge_index_files ("files: Receiver<PathBuf>"
-				   "output_dir: &Path")
-	   (declare (values "io::Result<()>"))
-	   ;; produces single output file on disk
-	   )
+	  (defun merge_index_files ("files: Receiver<PathBuf>"
+				    "output_dir: &Path")
+	    (declare (values "io::Result<()>"))
+	    ;; produces single output file on disk
+	    ))
 
 	 (defun run_pipeline ("documents: Vec<PathBuf>"
 			      "output_dir: PathBuf")
 	   (declare (values "io::Result<()>"))
 	   (let (((paren texts h1) (start_file_reader_thread documents))
-		 ((paren pints h2) (start_file_indexing_thread texts))
-		 ((paren gallons h3) (start_in_memory_merge_thread pints))
-		 ((paren files h4) (start_index_writer_thread gallons &output_dir))
-		 (result (merge_index_files files &output_dir))
+		 ;((paren pints h2) (start_file_indexing_thread texts))
+		 ;((paren gallons h3) (start_in_memory_merge_thread pints))
+		 ;((paren files h4) (start_index_writer_thread gallons &output_dir))
+		 ;(result (merge_index_files files &output_dir))
 		 (r1 (dot h1
 			  (join)
 			  (unwrap))))
-	     ;; h2 and h3 can't fail (pure in-memory)
-	     (dot h2 (join) (unwrap))
-	     (dot h3 (join) (unwrap))
-	     (let ((r4 (dot h4 (join) (unwrap)))))
-	     ;; return first error encountered
-	     (? r1)
-	     (? r4)
-	     (return result)))
+	     #+nil (do0
+	      ;; h2 and h3 can't fail (pure in-memory)
+	      (dot h2 (join) (unwrap))
+	      (dot h3 (join) (unwrap))
+	      (let ((r4 (dot h4 (join) (unwrap)))))
+	      ;; return first error encountered
+	      (? r1)
+	      (? r4))
+	     (return (Ok "()") ;result
+	       )))
 
 	 (defun expand_filename_arguments ("args: Vec<String>")
 	   (declare (values "io::Result<Vec<PathBuf>>"))
@@ -269,7 +273,7 @@ byteorder = \"*\"
 	   (declare (values "io::Result<()>"))
 	   (let ((output_dir ("PathBuf::from" (string ".")))
 		 (documents (? (expand_filename_arguments filenames))))
-	     (run_pipeline documents output_dir)))
+	     (return (run_pipeline documents output_dir))))
 	 
 	 (defun main ()
 	   (let* ((filenames "vec![]"))

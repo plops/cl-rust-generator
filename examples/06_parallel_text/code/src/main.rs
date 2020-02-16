@@ -1,9 +1,11 @@
+#[allow(unused_parens)]
 mod index;
 use index::InMemoryIndex;
 use std::error::Error;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver};
 use std::thread::{spawn, JoinHandle};
 fn start_file_reader_thread(
@@ -37,29 +39,10 @@ fn start_file_indexing_thread(
     });
     return (receiver, handle);
 }
-fn start_in_memory_merge_thread(
-    file_indexes: Receiver<InMemoryIndex>,
-) -> (Receiver<InMemoryIndex>, JoinHandle<()>) {
-}
-fn start_index_writer_thread(
-    big_indexes: Receiver<InMemoryIndex>,
-    output_dir: &Path,
-) -> (Receiver<PathBuf>, JoinHandle<io::Result<()>>) {
-}
-fn merge_index_files(files: Receiver<PathBuf>, output_dir: &Path) -> io::Result<()> {}
 fn run_pipeline(documents: Vec<PathBuf>, output_dir: PathBuf) -> io::Result<()> {
     let (texts, h1) = start_file_reader_thread(documents);
-    let (pints, h2) = start_file_indexing_thread(texts);
-    let (gallons, h3) = start_in_memory_merge_thread(pints);
-    let (files, h4) = start_index_writer_thread(gallons, &output_dir);
-    let result = merge_index_files(files, &output_dir);
     let r1 = h1.join().unwrap();
-    h2.join().unwrap();
-    h3.join().unwrap();
-    let r4 = h4.join().unwrap();
-    r1?;
-    r4?;
-    return result;
+    return Ok(());
 }
 fn expand_filename_arguments(args: Vec<String>) -> io::Result<Vec<PathBuf>> {
     let mut filenames = vec![];
@@ -81,7 +64,7 @@ fn expand_filename_arguments(args: Vec<String>) -> io::Result<Vec<PathBuf>> {
 fn run(filenames: Vec<String>) -> io::Result<()> {
     let output_dir = PathBuf::from(".");
     let documents = expand_filename_arguments(filenames)?;
-    run_pipeline(documents, output_dir);
+    return run_pipeline(documents, output_dir);
 }
 fn main() {
     let mut filenames = vec![];
