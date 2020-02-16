@@ -481,7 +481,7 @@ entry return-values contains a list of return values"
 							(and (listp x)
 							     (member (car x)
 								     `(defun if for include
-									     dotimes while case
+									     dotimes while case do0
 									     space defstruct0 impl use))))
 						    ""
 						    ";"))))

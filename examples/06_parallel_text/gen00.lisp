@@ -53,23 +53,23 @@ byteorder = \"*\"
 	    (use (std fs File)
 		 (std io prelude *)
 		 (std thread spawn)
-		 (std sync mpsc channel)))
+		 (std sync mpsc channel))))
 
-	   (let (((paren sender receiver) (channel))
-		 (handle (spawn
-			  (space
-			   move
-			   (lambda ()
-			     (for (filename documents)
-				  (let* ((f (? ("File::open" filename)))
-					 (text ("String::new")))
-				    (? (f.read_to_string "&mut text"))
-				    (when (dot sender
-					       (send text)
-					       (is_err))
-				      break)))
-			     (return (Ok "()"))
-			     )))))))))
+	  (let (((paren sender receiver) (channel))
+		      (handle (spawn
+			       (space
+				move
+				(lambda ()
+				  (for (filename documents)
+				       (let* ((f (? ("File::open" filename)))
+					      (text ("String::new")))
+					 (? (f.read_to_string "&mut text"))
+					 (when (dot sender
+						    (send text)
+						    (is_err))
+					   break)))
+				  (return (Ok "()"))
+				  ))))))))
 
     
     
