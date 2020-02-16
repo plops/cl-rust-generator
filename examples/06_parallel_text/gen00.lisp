@@ -55,7 +55,15 @@ byteorder = \"*\"
 		 (std thread spawn)
 		 (std sync mpsc channel))
 	    )
-	   )))
+
+	   (let (((paren sender receiver) (channel))
+		 (handle (spawn
+			  (space
+			   move
+			   (lambda ()
+			     (for (filename documents)
+				  (let* ((f (? ("File::open" filename))))))
+			     )))))))))
 
     
     

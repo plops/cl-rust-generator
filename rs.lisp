@@ -457,6 +457,8 @@ entry return-values contains a list of return values"
 					,name
 					(progn
 					  ,@body)))))
+		  (? (let ((args (cdr code)))
+		       (format nil "~a?" (emit args))))
 		  (use (let ((args (cdr code)))
 			 (with-output-to-string (s)
 			   (loop for e in args collect
