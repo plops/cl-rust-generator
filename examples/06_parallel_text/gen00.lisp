@@ -62,7 +62,9 @@ byteorder = \"*\"
 			   move
 			   (lambda ()
 			     (for (filename documents)
-				  (let* ((f (? ("File::open" filename))))))
+				  (let* ((f (? ("File::open" filename)))
+					 (text ("String::new")))
+				    (? (f.read_to_string "&mut text"))))
 			     )))))))))
 
     
