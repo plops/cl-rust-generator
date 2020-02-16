@@ -54,6 +54,17 @@ byteorder = \"*\"
 	(push `(:name ,module-name :code ,module-code)
 	      *module*)))
 
+
+  (define-module
+      `(index
+	(do0
+	 (use (std collections HashMap)
+	      (byteorder "{LittleEndian,WriteBytesExt}"))
+	 (defun tokenize ("text: &str")
+	   (values "Vec<&str>")
+	   (dot text
+		(split (lambda ("ch: char")
+			 (return (not (ch.is_alphanumeric))))))))))
   
   (define-module
       `(main

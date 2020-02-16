@@ -315,10 +315,12 @@ entry return-values contains a list of return values"
   ;; currently no support for captures (which would be placed into the first set of brackets)
   (destructuring-bind (lambda-list &rest body) (cdr code)
     (multiple-value-bind (body env) (consume-declare body)
-      (multiple-value-bind (req-param opt-param res-param
-				      key-param other-key-p
-				      aux-param key-exist-p)
-	  (parse-ordinary-lambda-list lambda-list)
+      (let ((req-param lambda-list))
+	;multiple-value-bind
+	#+nil (req-param opt-param res-param
+		   key-param other-key-p
+		   aux-param key-exist-p)
+	;(parse-ordinary-lambda-list lambda-list)
 	(declare (ignorable req-param opt-param res-param
 			    key-param other-key-p aux-param key-exist-p))
 	(with-output-to-string (s)
