@@ -80,7 +80,7 @@ byteorder = \"*\"
 			(declare (values InMemoryIndex))
 			(make-instance InMemoryIndex
 				       :word_count 0
-				       :map ("Hashmap::new"))))
+				       :map ("HashMap::new"))))
 	       (space pub
 		      (defun from_single_document ("document_id: usize"
 						   "text: String")
@@ -137,11 +137,18 @@ byteorder = \"*\"
   (define-module
       `(main
 	(do0
-	 (use (std fs File)
-	      (std io prelude *)
-	      (std thread spawn)
-	      (std sync mpsc channel))
+	 
 	 (mod index)
+
+	 (use
+	  (std error Error)
+	  (std fs File)
+	  (std io)
+	  (std io prelude *)
+	  (std sync mpsc (curly channel Receiver))
+	  (std thread (curly spawn JoinHandle))
+	  (index InMemoryIndex))
+	 
 	 (defun start_file_reader_thread ("documents: Vec<PathBuf>")
 	   (declare (values "Receiver<String>"
 			    "JoinHandle<io::Result<()>>"))
@@ -196,6 +203,7 @@ byteorder = \"*\"
 			    )))))
 	     (return (values receiver handle))))
 
+	 #+nil
 	 (do0
 	  ;; receiver will block
 	  ;; loop exits when channel is empty and sender has been dropped
@@ -240,7 +248,7 @@ byteorder = \"*\"
 	     (return result)))
 
 	 (defun expand_filename_arguments ("args: Vec<String>")
-	   (values "io::Result<Vec<PathBuf>>")
+	   (declare (values "io::Result<Vec<PathBuf>>"))
 	   (let* ((filenames "vec![]"))
 	     (for (arg args)
 		  (let ((path ("PathBuf::from" arg)))
@@ -258,7 +266,7 @@ byteorder = \"*\"
 	     (return (Ok filenames))))
 
 	 (defun run ("filenames: Vec<String>")
-	   (values "io::Result<()>")
+	   (declare (values "io::Result<()>"))
 	   (let ((output_dir ("PathBuf::from" (string ".")))
 		 (documents (? (expand_filename_arguments filenames))))
 	     (run_pipeline documents output_dir)))
