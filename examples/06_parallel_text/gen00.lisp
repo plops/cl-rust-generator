@@ -64,7 +64,12 @@ byteorder = \"*\"
 			     (for (filename documents)
 				  (let* ((f (? ("File::open" filename)))
 					 (text ("String::new")))
-				    (? (f.read_to_string "&mut text"))))
+				    (? (f.read_to_string "&mut text"))
+				    (when (dot sender
+					       (send text)
+					       (is_err))
+				      break)))
+			     (return (Ok "()"))
 			     )))))))))
 
     
