@@ -49,27 +49,38 @@ byteorder = \"*\"
 
   (let ((code
 	 `(do0
-	   (do0
-	    (use (std fs File)
-		 (std io prelude *)
-		 (std thread spawn)
-		 (std sync mpsc channel))))
+	   (use (std fs File)
+		(std io prelude *)
+		(std thread spawn)
+		(std sync mpsc channel))
+	   (defun start_file_reader_thread ("documents: Vec<PathBuf>")
+	     (declare (values "(Receiver<String>, JoinHandle<io::Result<()>>)"))
+	     (let (((paren sender receiver) (channel))
+		   (handle (spawn
+			    ;; transfer ownership of sender
+			    (space
+			     move
+			     (lambda ()
+			       (for (filename documents)
+				    (let* ((f (? ("File::open" filename)))
+					   (text ("String::new")))
 
-	  (let (((paren sender receiver) (channel))
-		      (handle (spawn
-			       (space
-				move
-				(lambda ()
-				  (for (filename documents)
-				       (let* ((f (? ("File::open" filename)))
-					      (text ("String::new")))
-					 (? (f.read_to_string "&mut text"))
-					 (when (dot sender
-						    (send text)
-						    (is_err))
-					   break)))
-				  (return (Ok "()"))
-				  ))))))))
+				      ;; use ? so that errors don't pass silently
+				      (? (f.read_to_string "&mut text"))
+				      ;; after successful read send to channel (only 3 words go through channel)
+				      (when (dot sender
+						 (send text)
+						 (is_err))
+					;; send only fails if the receiver has been dropped
+					;; in that case the receiver just exits early with Ok
+					break)))
+			       (return (Ok "()"))
+			       ))))
+		   
+		   )
+	       (do0
+		;; result of closure is in threads JoinHandle
+		(return (paren receiver handle))))))))
 
     
     

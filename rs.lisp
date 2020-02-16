@@ -634,7 +634,7 @@ entry return-values contains a list of return values"
 			 (format nil "0x~x" number)))
 		  (if (destructuring-bind (condition true-statement &optional false-statement) (cdr code)
 			(with-output-to-string (s)
-			  (format s "if ( ~a ) ~a"
+			  (format s "if  ~a  ~a"
 				  (emit condition)
 				  (emit `(progn ,true-statement)))
 			  (when false-statement
