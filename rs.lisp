@@ -482,7 +482,7 @@ entry return-values contains a list of return values"
 							     (member (car x)
 								     `(defun if for include
 									     dotimes while case
-									     space defstruct0 impl))))
+									     space defstruct0 impl use))))
 						    ""
 						    ";"))))
 				  (cdr code)))

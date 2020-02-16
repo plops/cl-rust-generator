@@ -53,8 +53,7 @@ byteorder = \"*\"
 	    (use (std fs File)
 		 (std io prelude *)
 		 (std thread spawn)
-		 (std sync mpsc channel))
-	    )
+		 (std sync mpsc channel)))
 
 	   (let (((paren sender receiver) (channel))
 		 (handle (spawn
