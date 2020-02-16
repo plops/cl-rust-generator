@@ -627,14 +627,12 @@ entry return-values contains a list of return values"
 			(format nil "(~a)~{>>(~a)~}" (emit a) (mapcar #'emit rest))))
 		  #+nil (>> (destructuring-bind (a b) (cdr code)
 			      (format nil "(~a)>>~a" (emit a) (emit b))))
-		  (incf (destructuring-bind (a &optional b) (cdr code) ;; py
-			  (if b
-			      (format nil "(~a)+=(~a)" (emit a) (emit b))
-			      (format nil "(~a)++" (emit a)))))
-		  (decf (destructuring-bind (a &optional b) (cdr code)
-			  (if b
-			      (format nil "(~a)-=(~a)" (emit a) (emit b))
-			      (format nil "(~a)--" (emit a)))))
+		  (incf (destructuring-bind (a &optional (b 1)) (cdr code) ;; py
+			  (format nil "(~a)+=(~a)" (emit a) (emit b))
+			  ))
+		  (decf (destructuring-bind (a &optional (b 1)) (cdr code)
+			  (format nil "(~a)-=(~a)" (emit a) (emit b))
+			  ))
 		  (string (format nil "\"~a\"" (cadr code)))
 		  (string# (let* ((str (cadr code))
 				   (n-of-hash (count #\# str))
