@@ -18,6 +18,22 @@ fn start_file_reader_thread (documents: Vec<PathBuf>) -> (Receiver<String>, Join
         return (receiver, handle);
 }
 fn start_file_indexing_thread (texts: Receiver<String>) -> (Receiver<InMemoryIndex>, JoinHandle<()>){
+            let (sender, receiver)  = channel();
+    let handle  = spawn(move ||{
+                for  (doc_id, text) in texts.into_iter().enumerate() {
+                                    let index  = InMemoryIndex::from_single_document(doc_id, text);
+            if  sender.send(index).is_err()  {
+                                break;
+};
+}
+});
+    return (receiver, handle);
 }
 for  text in receiver {
+}
+fn start_in_memory_merge_thread (file_indexes: Receiver<InMemoryIndex>) -> (Receiver<InMemoryIndex>, JoinHandle<()>){
+}
+fn start_index_writer_thread (big_indexes: Receiver<InMemoryIndex>, output_dir: &Path) -> (Receiver<PathBuf>, JoinHandle<io::Result<()>>){
+}
+fn merge_index_files (files: Receiver<PathBuf>, output_dir: &Path) -> io::Result<()>{
 }

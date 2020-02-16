@@ -414,6 +414,9 @@ entry return-values contains a list of return values"
 		   ;; paren {args}*
 		   (let ((args (cdr code)))
 		     (format nil "(~{~a~^, ~})" (mapcar #'emit args))))
+		  (values
+		   ;; values {args}* -- same as paren
+		   (emit `(paren ,@(cdr code))))
 		  (bracket
 		   ;; bracket {args}*
 		   (let ((args (cdr code)))

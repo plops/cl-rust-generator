@@ -81,19 +81,52 @@ byteorder = \"*\"
 		   )
 	       (do0
 		;; result of closure is in threads JoinHandle
-		(return (paren receiver handle)))))
+		(return (values receiver handle)))))
 
 
 	   (defun start_file_indexing_thread ("texts: Receiver<String>")
 	     (declare (values "Receiver<InMemoryIndex>"
-			      "JoinHandle<()>")))
+			      "JoinHandle<()>"))
+	     (let (((paren sender
+			   receiver)
+		    (channel))
+		   (handle
+		    (spawn
+		     (space move
+			    (lambda ()
+			      (for ((paren doc_id text)
+				    (dot texts
+					 (into_iter)
+					 (enumerate)))
+				   (let ((index ("InMemoryIndex::from_single_document" doc_id text)))
+				     (if (dot sender
+					      (send index)
+					      (is_err))
+					 break)))
+			      )))))
+	       (return (values receiver handle))))
 
 	   (do0
 	    ;; receiver will block
 	    ;; loop exits when channel is empty and sender has been dropped
 	    (for (text receiver)
 		
-		 )))))
+		 ))
+
+
+	   (defun start_in_memory_merge_thread ("file_indexes: Receiver<InMemoryIndex>")
+	     (declare (values "Receiver<InMemoryIndex>"
+		      "JoinHandle<()>")))
+
+	   (defun start_index_writer_thread ("big_indexes: Receiver<InMemoryIndex>"
+					     "output_dir: &Path")
+	     (declare (values "Receiver<PathBuf>"
+		      "JoinHandle<io::Result<()>>")))
+
+	   (defun merge_index_files ("files: Receiver<PathBuf>"
+				     "output_dir: &Path")
+	     (declare (values "io::Result<()>")))
+	   )))
 
     
     
