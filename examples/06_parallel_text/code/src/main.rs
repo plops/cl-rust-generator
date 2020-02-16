@@ -51,3 +51,38 @@ fn run_pipeline (documents: Vec<PathBuf>, output_dir: PathBuf) -> io::Result<()>
     r4?;
     return result;
 }
+fn expand_filename_arguments (args: Vec<String>){
+        (io::Result<Vec<PathBuf>>);
+            let mut filenames  = vec![];
+    for  arg in args {
+                        let path  = PathBuf::from(arg);
+        if  path.metadata()?.is_dir()  {
+                        for  entry in path.read_dir()? {
+                                                let entry  = entry?;
+                if  entry.file_type()?.is_file()  {
+                                                            filenames.push(entry.path());
+};
+}
+} else {
+                        filenames.push(path);
+};
+}
+    return Ok(filenames);
+}
+fn run (filenames: Vec<String>){
+        (io::Result<()>);
+            let output_dir  = PathBuf::from(".");
+    let documents  = expand_filename_arguments(filenames)?;
+    run_pipeline(documents, output_dir);
+}
+fn main (){
+            let mut filenames  = vec![];
+    match (run(filenames)) {
+                Ok(()) => {
+                return {}
+},
+                Err(err) => {
+                println!("error: {:?}", err.description())
+},
+};
+}
