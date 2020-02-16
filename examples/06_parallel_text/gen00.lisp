@@ -13,7 +13,7 @@
 ;; cargo fix
 
 ;; https://github.com/ProgrammingRust/fingertips
-
+;; example from the channels chapter
 
 (progn
   (defparameter *source-dir* #P"examples/06_parallel_text/code/src/")
