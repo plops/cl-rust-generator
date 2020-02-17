@@ -186,7 +186,7 @@ byteorder = \"*\"
 	      (std path PathBuf)
 	      (index InMemoryIndex)
 	      (tmp TmpDir)
-	      (byteorder (curly LittleEndian WriteByteExt)))
+	      (byteorder (curly LittleEndian WriteBytesExt)))
 	 
 	 (space pub
 		(defstruct0 IndexFileWriter
@@ -208,7 +208,9 @@ byteorder = \"*\"
 		      (defun write_main ("&mut self"
 					 "buf: &[u8]")
 			(declare (values "io::Result<()>"))
-			(? (self.writer.write_all buf))
+			(do0 ;?
+			 (self.writer.write_all buf)
+			 )
 			(incf self.offset (coerce (buf.len) u64))
 			(return (Ok "()"))))
 	       (space pub
@@ -217,34 +219,38 @@ byteorder = \"*\"
 						   "df: u32"
 						   "offset: u64"
 						   "nbytes: u64")
-			,@(loop for e in `(offset nbytes df) collect
+			,@(loop for (e type) in `((offset u64)
+						  (nbytes u64)
+						  (df u32)) collect
 			       `(dot self
 				     contents_buf
-				     ("write_u64::<LittleEndian>" ,e)
+				     (,(format nil "write_~a::<LittleEndian>" type) ,e)
 				     (unwrap)))
 			(let ((bytes (term.bytes)))
-			  ,@(loop for e in `(bytes) collect
+			  ,@(loop for (e type) in `(((bytes.len) u32)) collect
 			       `(dot self
 				     contents_buf
-				     ("write_u64::<LittleEndian>" ,e)
+				     (,(format nil "write_~a::<LittleEndian>" type) (coerce ,e ,type))
 				     (unwrap))))
 			(self.contents_buf.extend bytes)))
 	       (space pub
 		      (defun finish ("mut self")
 			(declare (type "io::Result<()>"))
 			(let ((contents_start self.offset))
-			  (? (dot self
-				  writer
-				  (write_all &self.contents_buf)))
+			  (do0 ;?
+			   (dot self
+				writer
+				(write_all &self.contents_buf)))
 			  (println! (string "{} bytes main, {} bytes total")
 				    contents_start
 				    (+ contents_start (coerce (dot self
 							       contents_buf
 							       (len))
 							      u64)))
-			  (? (dot self
-				  writer
-				  (seek ("SeekFrom::Start" 0))))
+			  (do0 ;?
+			   (dot self
+				writer
+				(seek ("SeekFrom::Start" 0))))
 			  (? (dot self
 				  writer
 				  ("write_u64<LittleEndian>" contents_start)))
@@ -263,16 +269,19 @@ byteorder = \"*\"
 		      (dot index_as_vec
 			   (sort_by (lambda ("&(ref a,_)"
 					     "&(ref b,_)")
-				      (a.cmp b))))
+				      (return (a.cmp b)))))
 		      (for ((values term hits) index_as_vec)
 			   (let ((df (coerce (hits.len) u32))
 				 (start writer.offset))
 			     (for (buffer hits)
-				  (? (writer.write_main &buffer)))
+				  (do0 ;?
+				   (writer.write_main &buffer)))
 			     (let ((stop writer.offset))
 			       (writer.write_contents_entry
 				term df start (- stop start)))))
-		      (? (writer.finish))
+		      (do0 ;?
+		       (writer.finish)
+		       )
 		      (println! (string "wrote file {:?}") filename)
 		      (return (Ok filename)))))))))
 
