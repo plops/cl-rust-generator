@@ -343,6 +343,7 @@ entry return-values contains a list of return values"
 	  (format s "~a" (funcall emit `(progn ,@body))))))))
 
 
+
 (defun print-sufficient-digits-f32 (f)
   "print a single floating point number as a string with a given nr. of
   digits. parse it again and increase nr. of digits until the same bit
@@ -351,7 +352,10 @@ entry return-values contains a list of return values"
 	 (digits 1)
 	 (b (- a 1)))
     (unless (eq a 0)
-     (loop while (/= a b) do
+     (loop while (< 1d-12
+		     (/ (abs (- a b))
+		       (abs a))
+		     ) do
 	  (setf b (read-from-string (format nil "~,vG" digits a)))
 	  (incf digits)))
     (format nil "~,vG" digits a))
@@ -376,7 +380,10 @@ entry return-values contains a list of return values"
 	 (digits 1)
 	 (b (- a 1)))
     (unless (eq a 0)
-     (loop while (/= a b) do
+     (loop while (< 1d-12
+		     (/ (abs (- a b))
+		       (abs a))
+		     ) do
 	  (setf b (read-from-string (format nil "~,vG" digits a)))
 	  (incf digits)))
     (format nil "~,vG" digits a))
@@ -662,7 +669,7 @@ entry return-values contains a list of return values"
 			    (emit `(if (not ,condition)
 				       (do0
 					,@forms)))))
-		  (as (let ((args (cdr code)))
+		  (coerce (let ((args (cdr code)))
 			(destructuring-bind (name type) args
 			    (format nil "~a as ~a" (emit name) (emit type)))))
 		  (dot (let ((args (cdr code)))

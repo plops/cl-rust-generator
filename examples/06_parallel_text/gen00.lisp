@@ -155,8 +155,7 @@ byteorder = \"*\"
 					       :n 1))))
 	       (space pub
 		      (defun create ("&mut self")
-			(declare (values "io::Result<(PathBuf, BufWriter<File>)>")
-				 )
+			(declare (values "io::Result<(PathBuf, BufWriter<File>)>"))
 			(let* ((try_count 1))
 			  (loop
 			     (let ((filename (dot self
@@ -210,8 +209,72 @@ byteorder = \"*\"
 					 "buf: &[u8]")
 			(declare (values "io::Result<()>"))
 			(? (self.writer.write_all buf))
-			(incf self.offset (as (buf.len) u64))
-			(return (Ok "()"))))))))
+			(incf self.offset (coerce (buf.len) u64))
+			(return (Ok "()"))))
+	       (space pub
+		      (defun write_contents_entry ("&mut self"
+						   "term: String"
+						   "df: u32"
+						   "offset: u64"
+						   "nbytes: u64")
+			,@(loop for e in `(offset nbytes df) collect
+			       `(dot self
+				     contents_buf
+				     ("write_u64::<LittleEndian>" ,e)
+				     (unwrap)))
+			(let ((bytes (term.bytes)))
+			  ,@(loop for e in `(bytes) collect
+			       `(dot self
+				     contents_buf
+				     ("write_u64::<LittleEndian>" ,e)
+				     (unwrap))))
+			(self.contents_buf.extend bytes)))
+	       (space pub
+		      (defun finish ("mut self")
+			(declare (type "io::Result<()>"))
+			(let ((contents_start self.offset))
+			  (? (dot self
+				  writer
+				  (write_all &self.contents_buf)))
+			  (println! (string "{} bytes main, {} bytes total")
+				    contents_start
+				    (+ contents_start (coerce (dot self
+							       contents_buf
+							       (len))
+							      u64)))
+			  (? (dot self
+				  writer
+				  (seek ("SeekFrom::Start" 0))))
+			  (? (dot self
+				  writer
+				  ("write_u64<LittleEndian>" contents_start)))
+			  (return (Ok "()"))))))
+	 (space pub
+		(defun write_index_to_tmp_file ("index: InMemoryIndex"
+						"tmp_dir: &mut TmpDir")
+		  (declare (values "io::Result<PathBuf>"))
+		  (let (((values filename f) (? (tmp_dir.create))))
+		    (let* ((writer (? ("IndexFileWriter::new" f)))
+			   (index_as_vec (dot index
+					      map
+					      (into_iter)
+					      (collect))))
+		      (declare (type "Vec<_>" index_as_vec))
+		      (dot index_as_vec
+			   (sort_by (lambda ("&(ref a,_)"
+					     "&(ref b,_)")
+				      (a.cmp b))))
+		      (for ((values term hits) index_as_vec)
+			   (let ((df (coerce (hits.len) u32))
+				 (start writer.offset))
+			     (for (buffer hits)
+				  (? (writer.write_main &buffer)))
+			     (let ((stop writer.offset))
+			       (writer.write_contents_entry
+				term df start (- stop start)))))
+		      (? (writer.finish))
+		      (println! (string "wrote file {:?}") filename)
+		      (return (Ok filename)))))))))
 
 
 
@@ -224,7 +287,7 @@ byteorder = \"*\"
 	 "extern crate argparse;"
 	 "extern crate byteorder;"
 	 
-	 (mod index tmp)
+	 (mod index tmp write)
 	
 
 	 (use
@@ -239,6 +302,7 @@ byteorder = \"*\"
 	  (argparse (curly ArgumentParser StoreTrue Collect))
 	  
 	  (index InMemoryIndex)
+	  (write write_index_to_tmp_file)
 	  (tmp TmpDir)
 	  )
 	 
