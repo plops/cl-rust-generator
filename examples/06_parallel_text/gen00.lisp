@@ -292,8 +292,8 @@ byteorder = \"*\"
   (define-module
       `(main
 	(do0
-	 "#[allow(unused_parens)]"
-
+	 ;"#[allow(unused_parens)]"
+	 
 	 "extern crate argparse;"
 	 "extern crate byteorder;"
 	 

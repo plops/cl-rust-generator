@@ -485,7 +485,7 @@ entry return-values contains a list of return values"
 		   (let ((args (cdr code)))
 			 (with-output-to-string (s)
 			   (loop for e in args collect
-			    (format s "mod ~a;" e)))))
+			    (format s "mod ~a;~%" e)))))
 		  (do0 (with-output-to-string (s)
 			 ;; do0 {form}*
 			 ;; write each form into a newline, keep current indentation level
@@ -505,7 +505,7 @@ entry return-values contains a list of return values"
 							     (member (car x)
 								     `(defun if for include
 									     dotimes while case do0
-									     space defstruct0 impl use))))
+									     space defstruct0 impl use mod))))
 						    ""
 						    ";"))))
 				  (cdr code)))
@@ -585,7 +585,7 @@ entry return-values contains a list of return values"
 		  (ref (format nil "&(~a)" (emit (car (cdr code)))))
 		  (+ (let ((args (cdr code)))
 		       ;; + {summands}*
-		       (format nil "(~{(~a)~^+~})" (mapcar #'emit args))))
+		       (format nil "(~{~a~^+~})" (mapcar #'emit args))))
 		  (- (let ((args (cdr code)))
 		       (if (eq 1 (length args))
 			   (format nil "(-(~a))" (emit (car args))) ;; py
@@ -854,11 +854,20 @@ entry return-values contains a list of return values"
 		     (stringp code)) ;; print variable
 		 (format nil "~a" code))
 		((numberp code) ;; print constants
-		 (cond ((integerp code) (format str "~a" code))
+		 (cond ((integerp code)
+			(if (< code 0)
+			    (format str "(~a)" code)
+			    (format str "~a" code)))
 		       ((floatp code)
 			(typecase code
-			  (single-float (format str "(~a)" (print-sufficient-digits-f32 code)))
-			  (double-float (format str "(~a)" (print-sufficient-digits-f64 code))))
+			  (single-float (let ((v (print-sufficient-digits-f32 code)))
+					  (if (< code 0)
+					      (format str "(~a)" v)
+					      (format str "~a" v))))
+			  (double-float (let ((v (print-sufficient-digits-f64 code)))
+					  (if (< code 0)
+					      (format str "(~a)" v)
+					      (format str "~a" v)))))
 			#+nil (format str "(~a)" (print-sufficient-digits-f64 code)))))))
 	  "")))
   #+nil (progn
