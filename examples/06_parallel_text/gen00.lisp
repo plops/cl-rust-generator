@@ -138,6 +138,10 @@ byteorder = \"*\"
       `(main
 	(do0
 	 "#[allow(unused_parens)]"
+
+	 "extern crate argparse;"
+	 "extern crate byteorder;"
+	 
 	 (mod index)
 
 	 (use
@@ -148,7 +152,9 @@ byteorder = \"*\"
 	  (std path (curly Path PathBuf))
 	  (std sync mpsc (curly channel Receiver))
 	  (std thread (curly spawn JoinHandle))
-	  (index InMemoryIndex))
+	  (argparse (curly ArgumentParser StoreTrue Collect))
+	  (index InMemoryIndex)
+	  )
 	 
 	 (defun start_file_reader_thread ("documents: Vec<PathBuf>")
 	   (declare (values "Receiver<String>"
@@ -277,6 +283,16 @@ byteorder = \"*\"
 	 
 	 (defun main ()
 	   (let* ((filenames "vec![]"))
+
+	     (progn
+	       (let* ((ap ("ArgumentParser::new")))
+		 (ap.set_description (string "make inverted index for searching documents"))
+		 (dot ap
+		      (refer "&mut filenames")
+		      (add_argument (string "filenames") Collect
+				    (string "files/directories to index")))
+		 (ap.parse_args_or_exit)))
+	     
 	     (case (run filenames)
 	       ((Ok "()") (return "{}"))
 	       ((Err err) (println! (string "error: {:?}")

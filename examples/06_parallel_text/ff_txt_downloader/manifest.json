@@ -4,11 +4,15 @@
     "version": "1.0",
     
     "description": "Adds a red border to all webpages matching mozilla.org.",
+
+    "background": {
+	"scripts" : ["download.js"]
+    },
     
     "content_scripts": [
 	{
 	    "matches": ["*://*/*"],
-	    "js": ["download.js"]
+	    "js": ["collect_url.js"]
 	}
     ],
     

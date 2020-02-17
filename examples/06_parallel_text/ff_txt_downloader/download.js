@@ -1,14 +1,28 @@
 // https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Your_first_WebExtension
 // about:debugging 'this firefox' load temporary add on
+// https://stackoverflow.com/questions/48450230/firefox-webextension-api-downloads-not-working/48456109
 
-var arr = [], l = document.links;
-for(var i=0; i<l.length; i++) {
-    if(l[i].href.endsWith('.txt')) {
-	arr.push(l[i].href);
+browser.runtime.sendMessage({"bg_task":"started"});
+
+console.log('start listening for urls');
+browser.runtime.onMessage.addListener(notify);
+
+
+
+
+function notify(message) {
+    console.log('receive urls');
+    urls = message.urls;
+    for(var i=0; i<urls.length; i++) {
+	a = urls[i];
+	url = new URL(a);
+	
+	fn = url.pathname.replace(/\//g,"_");
+	console.log(fn)
+	var downloading = browser.downloads.download({
+	    url : a,
+	    filename : fn,
+	    conflictAction : 'uniquify'
+	});
     }
 }
-browser.downloads.download({
-    url : arr[0],
-  filename : '/dev/shm/my-image-again.txt',
-  conflictAction : 'uniquify'
-});

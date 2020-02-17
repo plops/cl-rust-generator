@@ -1,5 +1,8 @@
 #[allow(unused_parens)]
+extern crate argparse;
+extern crate byteorder;
 mod index;
+use argparse::{ArgumentParser, Collect, StoreTrue};
 use index::InMemoryIndex;
 use std::error::Error;
 use std::fs::File;
@@ -68,6 +71,13 @@ fn run(filenames: Vec<String>) -> io::Result<()> {
 }
 fn main() {
     let mut filenames = vec![];
+    {
+        let mut ap = ArgumentParser::new();
+        ap.set_description("make inverted index for searching documents");
+        ap.refer(&mut filenames)
+            .add_argument("filenames", Collect, "files/directories to index");
+        ap.parse_args_or_exit();
+    };
     match (run(filenames)) {
         Ok(()) => return {},
         Err(err) => println!("error: {:?}", err.description()),
