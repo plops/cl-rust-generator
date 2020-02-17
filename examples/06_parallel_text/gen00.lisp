@@ -235,7 +235,7 @@ byteorder = \"*\"
 			(self.contents_buf.extend bytes)))
 	       (space pub
 		      (defun finish ("mut self")
-			(declare (type "io::Result<()>"))
+			(declare (values "io::Result<()>"))
 			(let ((contents_start self.offset))
 			  (do0 ;?
 			   (dot self
@@ -251,9 +251,10 @@ byteorder = \"*\"
 			   (dot self
 				writer
 				(seek ("SeekFrom::Start" 0))))
-			  (? (dot self
-				  writer
-				  ("write_u64<LittleEndian>" contents_start)))
+			  (do0 ;?
+			   (dot self
+				writer
+				("write_u64::<LittleEndian>" contents_start)))
 			  (return (Ok "()"))))))
 	 (space pub
 		(defun write_index_to_tmp_file ("index: InMemoryIndex"
