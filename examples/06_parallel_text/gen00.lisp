@@ -219,10 +219,27 @@ byteorder = \"*\"
 	       ))
 
 
-	 #+nil (do0
-	  (defun start_in_memory_merge_thread ("file_indexes: Receiver<InMemoryIndex>")
+	 (defun start_in_memory_merge_thread ("file_indexes: Receiver<InMemoryIndex>")
 	    (declare (values "Receiver<InMemoryIndex>"
-			     "JoinHandle<()>")))
+			     "JoinHandle<()>"))
+	    (let (((values sender receiver) (channel))
+		  (handle (spawn
+			   (space move
+				  (lambda ()
+				    (let* ((accumulated_index ("InMemoryIndex::new")))
+				      (for (fi file_indexes)
+					   (accumulated_index.merge fi)
+					   (when (accumulated_index.is_large)
+					     (when (dot sender
+							(send accumulated_index)
+							(is_err))
+					       (return))
+					     (setf accumulated_index ("InMemoryIndex::new"))))
+				      (unless (accumulated_index.is_empty)
+					(let ((_ (sender.send accumulated_index)))))))))))
+	      (return (values receiver handle))))
+	 #+nil (do0
+		
 
 	  (defun start_index_writer_thread ("big_indexes: Receiver<InMemoryIndex>"
 					    "output_dir: &Path")
@@ -239,7 +256,7 @@ byteorder = \"*\"
 			      "output_dir: PathBuf")
 	   (declare (values "io::Result<()>"))
 	   (let (((paren texts h1) (start_file_reader_thread documents))
-		 ;((paren pints h2) (start_file_indexing_thread texts))
+		 ((paren pints h2) (start_file_indexing_thread texts))
 		 ;((paren gallons h3) (start_in_memory_merge_thread pints))
 		 ;((paren files h4) (start_index_writer_thread gallons &output_dir))
 		 ;(result (merge_index_files files &output_dir))

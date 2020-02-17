@@ -42,8 +42,30 @@ fn start_file_indexing_thread(
     });
     return (receiver, handle);
 }
+fn start_in_memory_merge_thread(
+    file_indexes: Receiver<InMemoryIndex>,
+) -> (Receiver<InMemoryIndex>, JoinHandle<()>) {
+    let (sender, receiver) = channel();
+    let handle = spawn(move || {
+        let mut accumulated_index = InMemoryIndex::new();
+        for fi in file_indexes {
+            accumulated_index.merge(fi);
+            if accumulated_index.is_large() {
+                if sender.send(accumulated_index).is_err() {
+                    return;
+                };
+                accumulated_index = InMemoryIndex::new();
+            };
+        }
+        if !(accumulated_index.is_empty()) {
+            let _ = sender.send(accumulated_index);
+        };
+    });
+    return (receiver, handle);
+}
 fn run_pipeline(documents: Vec<PathBuf>, output_dir: PathBuf) -> io::Result<()> {
     let (texts, h1) = start_file_reader_thread(documents);
+    let (pints, h2) = start_file_indexing_thread(texts);
     let r1 = h1.join().unwrap();
     return Ok(());
 }
