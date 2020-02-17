@@ -350,9 +350,10 @@ entry return-values contains a list of return values"
   (let* ((a f)
 	 (digits 1)
 	 (b (- a 1)))
-    (loop while (/= a b) do
-	 (setf b (read-from-string (format nil "~,vG" digits a)))
-	 (incf digits))
+    (unless (eq a 0)
+     (loop while (/= a b) do
+	  (setf b (read-from-string (format nil "~,vG" digits a)))
+	  (incf digits)))
     (format nil "~,vG" digits a))
   #+nil
   (let* ((ff (coerce f 'single-float))
@@ -374,9 +375,10 @@ entry return-values contains a list of return values"
   (let* ((a f)
 	 (digits 1)
 	 (b (- a 1)))
-    (loop while (/= a b) do
-	 (setf b (read-from-string (format nil "~,vG" digits a)))
-	 (incf digits))
+    (unless (eq a 0)
+     (loop while (/= a b) do
+	  (setf b (read-from-string (format nil "~,vG" digits a)))
+	  (incf digits)))
     (format nil "~,vG" digits a))
 
   #+nil
