@@ -2,6 +2,7 @@
 extern crate argparse;
 extern crate byteorder;
 mod index;
+mod tmp;
 use argparse::{ArgumentParser, Collect, StoreTrue};
 use index::InMemoryIndex;
 use std::error::Error;
@@ -11,6 +12,7 @@ use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver};
 use std::thread::{spawn, JoinHandle};
+use tmp::TmpDir;
 fn start_file_reader_thread(
     documents: Vec<PathBuf>,
 ) -> (Receiver<String>, JoinHandle<io::Result<()>>) {
@@ -63,9 +65,28 @@ fn start_in_memory_merge_thread(
     });
     return (receiver, handle);
 }
+fn start_index_writer_thread(
+    big_indexes: Receiver<InMemoryIndex>,
+    output_dir: &Path,
+) -> (Receiver<PathBuf>, JoinHandle<io::Result<()>>) {
+    let (sender, receiver) = channel();
+    let mut tmp_dir = TmpDir::new(output_dir);
+    let handle = spawn(move || {
+        for index in big_indexes {
+            let file = write_index_to_tmp_file(index, &mut tmp_dir)?;
+            if sender.send(file).is_err() {
+                break;
+            };
+        }
+        return Ok(());
+    });
+    return (receiver, handle);
+}
 fn run_pipeline(documents: Vec<PathBuf>, output_dir: PathBuf) -> io::Result<()> {
     let (texts, h1) = start_file_reader_thread(documents);
     let (pints, h2) = start_file_indexing_thread(texts);
+    let (gallons, h3) = start_in_memory_merge_thread(pints);
+    let (files, h4) = start_index_writer_thread(gallons, &output_dir);
     let r1 = h1.join().unwrap();
     return Ok(());
 }

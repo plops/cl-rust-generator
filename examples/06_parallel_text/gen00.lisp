@@ -133,6 +133,88 @@ byteorder = \"*\"
 			(declare (values bool))
 			(return (< "100_000_000" self.word_count))))
 	       ))))
+  (define-module
+      `(tmp
+	(do0
+	 (use (std io (curly self BufWriter))
+	      (std fs (curly self File))
+	      (std path (curly Path PathBuf)))
+	  "#[derive(Clone)]"
+	 (space pub
+		(defstruct0 TmpDir
+		    (dir PathBuf)
+		  (n usize)))
+	 (impl TmpDir
+	       (space pub
+		      (defun "new<P: AsRef<Path>>"  ("dir: P")
+			(declare (values TmpDir))
+			(return (make-instance TmpDir
+					       :dir (dot dir
+							 (as_ref)
+							 (to_owned))
+					       :n 1))))
+	       (space pub
+		      (defun create ("&mut self")
+			(declare (values "io::Result<(PathBuf, BufWriter<File>)>")
+				 )
+			(let* ((try_count 1))
+			  (loop
+			     (let ((filename (dot self
+						  dir
+						  (join ("PathBuf::from"
+							 (format! (string "tmp{:08x}.dat")
+								  self.n))))))
+			       (incf self.n)
+			       (case (dot ("fs::OpenOptions::new")
+					  (write true)
+					  (create_new true)
+					  (open &filename))
+				 ((Ok f) (return (Ok (values filename
+							     ("BufWriter::new" f)))))
+				 ((Err exc)
+				  (unless (and (< try_count 999)
+					       (== "io::ErrorKind::AlreadyExists"
+						   (exc.kind)))
+				    (return (Err exc))))))
+			     (incf try_count)))))))))
+
+  (define-module
+      `(write
+	(do0
+	 (use (std fs File)
+	      (std io (curly self BufWriter SeekFrom))
+	      (std io prelude *)
+	      (std path PathBuf)
+	      (index InMemoryIndex)
+	      (tmp TmpDir)
+	      (byteorder (curly LittleEndian WriteByteExt)))
+	 
+	 (space pub
+		(defstruct0 IndexFileWriter
+		    (offset u64)
+		  (writer BufWriter<File>)
+		  (contents_buf Vec<u8>)))
+	 (impl IndexFileWriter
+	       (space pub
+		      (defun new ("mut f: BufWriter<File>")
+			(declare (values "io::Result<IndexFileWriter>"))
+			"const HEADER_SIZE: u64 = 8;"
+			(? ("f.write_u64::<LittleEndian>" 0))
+			
+			(return (Ok (make-instance IndexFileWriter
+						   :offset HEADER_SIZE
+						   :writer f
+						   :contents_buf "vec![]")))))
+	       (space pub
+		      (defun write_main ("&mut self"
+					 "buf: &[u8]")
+			(declare (values "io::Result<()>"))
+			(? (self.writer.write_all buf))
+			(incf self.offset (as (buf.len) u64))
+			(return (Ok "()"))))))))
+
+
+
   
   (define-module
       `(main
@@ -142,7 +224,8 @@ byteorder = \"*\"
 	 "extern crate argparse;"
 	 "extern crate byteorder;"
 	 
-	 (mod index)
+	 (mod index tmp)
+	
 
 	 (use
 	  (std error Error)
@@ -152,8 +235,11 @@ byteorder = \"*\"
 	  (std path (curly Path PathBuf))
 	  (std sync mpsc (curly channel Receiver))
 	  (std thread (curly spawn JoinHandle))
+
 	  (argparse (curly ArgumentParser StoreTrue Collect))
+	  
 	  (index InMemoryIndex)
+	  (tmp TmpDir)
 	  )
 	 
 	 (defun start_file_reader_thread ("documents: Vec<PathBuf>")
@@ -238,13 +324,29 @@ byteorder = \"*\"
 				      (unless (accumulated_index.is_empty)
 					(let ((_ (sender.send accumulated_index)))))))))))
 	      (return (values receiver handle))))
+
+	 
+	 (defun start_index_writer_thread ("big_indexes: Receiver<InMemoryIndex>"
+					    "output_dir: &Path")
+	    (declare (values "Receiver<PathBuf>"
+			     "JoinHandle<io::Result<()>>"))
+	    (let (((values sender receiver) (channel)))
+	      (let* ((tmp_dir ("TmpDir::new" output_dir)))
+		(let ((handle (spawn (space move
+					    (lambda ()
+					      (for (index big_indexes)
+						   (let ((file (? (write_index_to_tmp_file index "&mut tmp_dir"))))
+						     (when (dot sender
+								(send file)
+								(is_err))
+						       break)))
+					      (return (Ok "()")))))))
+		  (return (values receiver handle))))))
+	 
 	 #+nil (do0
 		
 
-	  (defun start_index_writer_thread ("big_indexes: Receiver<InMemoryIndex>"
-					    "output_dir: &Path")
-	    (declare (values "Receiver<PathBuf>"
-			     "JoinHandle<io::Result<()>>")))
+		
 
 	  (defun merge_index_files ("files: Receiver<PathBuf>"
 				    "output_dir: &Path")
@@ -257,8 +359,8 @@ byteorder = \"*\"
 	   (declare (values "io::Result<()>"))
 	   (let (((paren texts h1) (start_file_reader_thread documents))
 		 ((paren pints h2) (start_file_indexing_thread texts))
-		 ;((paren gallons h3) (start_in_memory_merge_thread pints))
-		 ;((paren files h4) (start_index_writer_thread gallons &output_dir))
+		 ((paren gallons h3) (start_in_memory_merge_thread pints))
+		 ((paren files h4) (start_index_writer_thread gallons &output_dir))
 		 ;(result (merge_index_files files &output_dir))
 		 (r1 (dot h1
 			  (join)

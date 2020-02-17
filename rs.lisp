@@ -628,10 +628,10 @@ entry return-values contains a list of return values"
 		  #+nil (>> (destructuring-bind (a b) (cdr code)
 			      (format nil "(~a)>>~a" (emit a) (emit b))))
 		  (incf (destructuring-bind (a &optional (b 1)) (cdr code) ;; py
-			  (format nil "(~a)+= ~a " (emit a) (emit b))
+			  (format nil "~a += ~a " (emit a) (emit b))
 			  ))
 		  (decf (destructuring-bind (a &optional (b 1)) (cdr code)
-			  (format nil "(~a)-= ~a" (emit a) (emit b))
+			  (format nil "~a -= ~a" (emit a) (emit b))
 			  ))
 		  (string (format nil "\"~a\"" (cadr code)))
 		  (string# (let* ((str (cadr code))
@@ -660,7 +660,9 @@ entry return-values contains a list of return values"
 			    (emit `(if (not ,condition)
 				       (do0
 					,@forms)))))
-		  
+		  (as (let ((args (cdr code)))
+			(destructuring-bind (name type) args
+			    (format nil "~a as ~a" (emit name) (emit type)))))
 		  (dot (let ((args (cdr code)))
 			 (format nil "~{~a~^.~}" (mapcar #'emit args))))
 		  
@@ -710,7 +712,9 @@ entry return-values contains a list of return values"
 					   (< ,(emit i) ,(emit n))
 					   (incf ,(emit i) ,(emit step)))
 					 ,@body))))
-		  
+		  (loop (let ((args (cdr code)))
+			  (format nil "loop ~a"
+				  (emit `(progn ,@args)))))
 		  (for (destructuring-bind ((item collection) &rest body) (cdr code)
 			     (format nil "for  ~a in ~a ~a"
 				     (emit item)
