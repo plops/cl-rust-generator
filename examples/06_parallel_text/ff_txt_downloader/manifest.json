@@ -1,0 +1,17 @@
+{
+    "manifest_version": 2,
+    "name": "ff_txt_downloader",
+    "version": "1.0",
+    
+    "description": "Adds a red border to all webpages matching mozilla.org.",
+    
+    "content_scripts": [
+	{
+	    "matches": ["*://*/*"],
+	    "js": ["download.js"]
+	}
+    ],
+    
+    "permissions": ["downloads"]
+
+}
