@@ -329,10 +329,10 @@ byteorder = \"*\"
 				      (first (? (IndexFileReader--read_entry "&mut contents"))))
 				  (declare (mutable contents))
 				  (? (fs--remove_file filename))
-				  (Ok (make-instance IndexFileReader
-						     :main main
-						     :contents contents
-						     :next first)))))))))
+				  (return (Ok (make-instance IndexFileReader
+						      :main main
+						      :contents contents
+						      :next first))))))))))
 	       
 	       (space pub
 		      (defun read_entry ("f: &mut BufReader<File>")
@@ -356,11 +356,11 @@ byteorder = \"*\"
 					((Err _) (return (Err (io--Error--new
 							       io--ErrorKind--Other
 							       (string "unicode fail"))))))))
-			    (return (Some (make-instance Entry
-							 term
-							 df
-							 offset
-							 nbytes)))))))
+			    (return (Ok (Some (make-instance Entry
+							  term
+							  df
+							  offset
+							  nbytes))))))))
 	       (space pub
 		      (defun peek (&self)
 			(declare (values Option<&Entry>))
@@ -402,12 +402,15 @@ byteorder = \"*\"
   (define-module
       `(main
 	(do0
-	 ;"#[allow(unused_parens)]"
+	 
 	 
 	 "extern crate argparse;"
 	 "extern crate byteorder;"
-
-	 
+	 #+nil (do0
+	  "crate index;"
+	  "crate read;"
+	  "crate write;"
+	  "crate tmp;")
 	 (mod index read write  tmp)
 	
 
@@ -610,4 +613,6 @@ byteorder = \"*\"
 	     (write-source (asdf:system-relative-pathname 'cl-rust-generator
 							  (merge-pathnames (format nil "~a.rs" name)
 									   *source-dir*))
-			   code))))
+			   `(do0
+			     "#[allow(unused_parens)]"
+			     ,code)))))
