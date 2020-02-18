@@ -19,10 +19,29 @@
     (asdf:system-relative-pathname 'cl-rust-generator
 				   (merge-pathnames #P"main.rs"
 						    *source-dir*)))
-
+  (defun logprint (msg &optional (rest nil))
+    `(progn
+       (println! (string ,(format nil "{} {}:{} ~a ~{~a~^ ~}"
+				  msg
+				  (loop for e in rest collect
+				       (format nil " ~a={}" (emit-rs :code e)))))
+		 #+nil (dot (SystemTime--now)
+		      (duration_since UNIX_EPOCH)
+		      (expect (string "time went backwards"))
+		      (as_micros))
+		 (Utc--now)
+		 (file!)
+		 (line!)
+		 ,@(loop for e in rest collect
+			e ;`(dot ,e (display))
+			))))
   (let ((code
 	 `(do0
 	   (do0
+
+	    (use (request)
+		 (chrono (curly DateTime Utc)))
+	    
 	    "use imgui::*;"
 	    ,@(loop for e in `("glutin"
 			       "glutin::event::{Event,WindowEvent}"
@@ -35,7 +54,7 @@
 	    "use imgui_glium_renderer::Renderer;"
 	    "use imgui_winit_support::{HiDpiMode,WinitPlatform};"
 	    "use std::time::Instant;")
-	   
+
 
 	   (defstruct0 System
 	       (event_loop "EventLoop<()>")
@@ -168,6 +187,14 @@
 							  &event)))))))))))
 	   
 	   (defun main ()
+	     (let* ((client (request--Client--new))
+		    (body (dot client
+			       (get (string "https://query1.finance.yahoo.com/v7/finance/quote?lang=en-US&region=US&corsDomain=finance.yahoo.com&symbols=DBX,LITE,AMD,INTC&fields=regularMarketPrice"))
+			       (? await)
+			       (text)
+			       (? await))))
+	       
+	       ,(logprint "stock" `(body)))
 	     (let ((system (init (file!))))
 	       (system.main_loop
 		(space move
@@ -185,7 +212,14 @@
 						   (string "mouse: ({:.1},{:.1})"
 							   )
 						   (aref mouse_pos 0)
-						   (aref mouse_pos 1)))))))))))))))
+						   (aref mouse_pos 1)))))))
+			 (dot ("Window::new" (im_str! (string "recv")))
+			      (size (list 200.0 100.0)
+				    "Condition::FirstUseEver")
+			      (build ui
+				     (lambda ()
+				       (ui.text (im_str! (string "recv")))
+				       )))))))))))
 
     
     

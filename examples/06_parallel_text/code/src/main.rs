@@ -32,15 +32,6 @@ fn start_file_reader_thread(
     let (sender, receiver) = sync_channel(32);
     let handle = spawn(move || {
         for filename in documents {
-            {
-                println!(
-                    "{} {}:{} reader  filename.display()={}",
-                    Utc::now(),
-                    file!(),
-                    line!(),
-                    filename.display()
-                );
-            }
             let mut fh = OpenOptions::new()
                 .read(true)
                 .open(filename)
@@ -118,6 +109,15 @@ fn start_index_writer_thread(
 fn merge_index_files(files: Receiver<PathBuf>, output_dir: &Path) -> io::Result<()> {
     let mut merge = FileMerge::new(output_dir);
     for file in files {
+        {
+            println!(
+                "{} {}:{} merge index  file.display()={}",
+                Utc::now(),
+                file!(),
+                line!(),
+                file.display()
+            );
+        }
         merge.add_file(file)?;
     }
     return merge.finish();

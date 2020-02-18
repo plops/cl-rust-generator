@@ -622,7 +622,7 @@ encoding = \"*\"
 			   move
 			   (lambda ()
 			     (for (filename documents)
-				  ,(logprint "reader" `((filename.display)))
+				  ;,(logprint "reader" `((filename.display)))
 
 				  (let* ((fh (dot (OpenOptions--new)
 						  (read true)
@@ -733,6 +733,7 @@ encoding = \"*\"
 		(let ((handle (spawn (space move
 					    (lambda ()
 					      (for (index big_indexes)
+						   
 						   (let ((file (? (write_index_to_tmp_file index "&mut tmp_dir"))))
 						     (when (dot sender
 								(send file)
@@ -747,6 +748,7 @@ encoding = \"*\"
 		 ;; produces single output file on disk
 		 (let* ((merge (FileMerge--new output_dir)))
 		   (for (file files)
+			,(logprint "merge index" `((file.display)))
 			(? (merge.add_file file)))
 		   (return (merge.finish))))
 
