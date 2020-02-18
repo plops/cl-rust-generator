@@ -30,7 +30,7 @@
 name = \"code\"
 version = \"0.1.0\"
 authors = [\"Martin Kielhorn <kielhorn.martin@gmail.com>\"]
-edition = \"2018\"
+# edition = \"2018\"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -427,9 +427,9 @@ byteorder = \"*\"
 			   ;StoreTrue
 			   Collect))
 	  
-	  (index InMemoryIndex)
-	  (write write_index_to_tmp_file)
-	  (tmp TmpDir)
+	  (self index InMemoryIndex)
+	  (self write write_index_to_tmp_file)
+	  (self tmp TmpDir)
 	  )
 	 
 	 (defun start_file_reader_thread ("documents: Vec<PathBuf>")

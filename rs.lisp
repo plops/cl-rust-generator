@@ -486,7 +486,7 @@ entry return-values contains a list of return values"
 		   (let ((args (cdr code)))
 			 (with-output-to-string (s)
 			   (loop for e in args collect
-			    (format s "mod ~a;~%" e)))))
+			    (format s "mod ~a;~%" (emit e))))))
 		  (do0 (with-output-to-string (s)
 			 ;; do0 {form}*
 			 ;; write each form into a newline, keep current indentation level
@@ -505,7 +505,7 @@ entry return-values contains a list of return values"
 							(and (listp x)
 							     (member (car x)
 								     `(defun if for include
-									     dotimes while case do0 progn
+									     dotimes while case do0 progn case
 									     space defstruct0 impl use mod))))
 						    ""
 						    ";"))))

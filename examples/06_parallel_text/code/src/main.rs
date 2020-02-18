@@ -5,8 +5,10 @@ mod index;
 mod read;
 mod tmp;
 mod write;
+use self::index::InMemoryIndex;
+use self::tmp::TmpDir;
+use self::write::write_index_to_tmp_file;
 use argparse::{ArgumentParser, Collect};
-use index::InMemoryIndex;
 use std::error::Error;
 use std::fs::File;
 use std::io;
@@ -14,8 +16,6 @@ use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver};
 use std::thread::{spawn, JoinHandle};
-use tmp::TmpDir;
-use write::write_index_to_tmp_file;
 fn start_file_reader_thread(
     documents: Vec<PathBuf>,
 ) -> (Receiver<String>, JoinHandle<io::Result<()>>) {
