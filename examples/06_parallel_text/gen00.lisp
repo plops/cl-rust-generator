@@ -37,6 +37,7 @@ authors = [\"Martin Kielhorn <kielhorn.martin@gmail.com>\"]
 [dependencies]
 argparse = \"*\"
 byteorder = \"*\"
+chrono = \"*\"
 "
 
 
@@ -47,7 +48,7 @@ byteorder = \"*\"
        (println! (string ,(format nil "{} {}:{} ~a ~{~a~^ ~}"
 				  msg
 				  (loop for e in rest collect
-				       (format nil " ~a=" (emit-rs :code e)))))
+				       (format nil " ~a={}" (emit-rs :code e)))))
 		 #+nil (dot (SystemTime--now)
 		      (duration_since UNIX_EPOCH)
 		      (expect (string "time went backwards"))
@@ -55,7 +56,9 @@ byteorder = \"*\"
 		 (Utc--now)
 		 (file!)
 		 (line!)
-		 ,@rest)))
+		 ,@(loop for e in rest collect
+			e ;`(dot ,e (display))
+			))))
   
   #+nil (defparameter *code-file*
     (asdf:system-relative-pathname 'cl-rust-generator
@@ -610,11 +613,19 @@ byteorder = \"*\"
 			   move
 			   (lambda ()
 			     (for (filename documents)
+				  ,(logprint "reader" `((filename.display)))
 				  (let* ((f (? ("File::open" filename)))
 					 (text ("String::new")))
-
+				    
 				    ;; use ? so that errors don't pass silently
-				    (? (f.read_to_string "&mut text"))
+				    (let ((res (f.read_to_string "&mut text")))
+				      (case res
+					((Err err)
+					 ,(logprint "reader err" `(err))
+					 continue)
+					((Ok r)))
+				      ;,(logprint "reader" `(text))
+				      )
 				    ;; after successful read send to channel (only 3 words go through channel)
 				    (when (dot sender
 					       (send text)
@@ -622,10 +633,7 @@ byteorder = \"*\"
 				      ;; send only fails if the receiver has been dropped
 				      ;; in that case the receiver just exits early with Ok
 				      break)))
-			     (return (Ok "()"))
-			     ))))
-		 
-		 )
+			     (return (Ok "()")))))))
 	     (do0
 	      ;; result of closure is in threads JoinHandle
 	      (return (values receiver handle)))))

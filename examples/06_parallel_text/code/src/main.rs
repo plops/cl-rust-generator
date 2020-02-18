@@ -26,9 +26,33 @@ fn start_file_reader_thread(
     let (sender, receiver) = channel();
     let handle = spawn(move || {
         for filename in documents {
+            {
+                println!(
+                    "{} {}:{} reader  filename.display()={}",
+                    Utc::now(),
+                    file!(),
+                    line!(),
+                    filename.display()
+                );
+            }
             let mut f = File::open(filename)?;
             let mut text = String::new();
-            f.read_to_string(&mut text)?;
+            let res = f.read_to_string(&mut text);
+            match res {
+                Err(err) => {
+                    {
+                        println!(
+                            "{} {}:{} reader err  err={}",
+                            Utc::now(),
+                            file!(),
+                            line!(),
+                            err
+                        );
+                    }
+                    continue;
+                }
+                Ok(r) => {}
+            };
             if sender.send(text).is_err() {
                 break;
             };
