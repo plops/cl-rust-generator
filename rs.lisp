@@ -672,7 +672,7 @@ entry return-values contains a list of return values"
 					,@forms)))))
 		  (coerce (let ((args (cdr code)))
 			(destructuring-bind (name type) args
-			    (format nil "~a as ~a" (emit name) (emit type)))))
+			    (format nil "(~a as ~a)" (emit name) (emit type)))))
 		  (dot (let ((args (cdr code)))
 			 (format nil "~{~a~^.~}" (mapcar #'emit args))))
 		  
@@ -848,7 +848,7 @@ entry return-values contains a list of return values"
 				   (eq (aref (format nil "~a" (car args)) 0) #\.))
 			     #+nil (format nil "~a~a" name
 					   (emit args))
-			     (format nil "~a~a" name
+			     (format nil "~a~a" (emit name)
 				     (emit `(paren ,@args)))))))))
 	      (cond
 		((or (stringp code) (symbolp code))
