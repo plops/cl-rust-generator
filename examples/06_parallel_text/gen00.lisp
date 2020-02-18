@@ -309,7 +309,9 @@ byteorder = \"*\"
 	  (std sync mpsc (curly channel Receiver))
 	  (std thread (curly spawn JoinHandle))
 
-	  (argparse (curly ArgumentParser StoreTrue Collect))
+	  (argparse (curly ArgumentParser
+			   ;StoreTrue
+			   Collect))
 	  
 	  (index InMemoryIndex)
 	  (write write_index_to_tmp_file)

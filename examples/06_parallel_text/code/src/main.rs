@@ -3,7 +3,7 @@ extern crate byteorder;
 mod index;
 mod tmp;
 mod write;
-use argparse::{ArgumentParser, Collect, StoreTrue};
+use argparse::{ArgumentParser, Collect};
 use index::InMemoryIndex;
 use std::error::Error;
 use std::fs::File;
@@ -122,7 +122,7 @@ fn main() {
             .add_argument("filenames", Collect, "files/directories to index");
         ap.parse_args_or_exit();
     };
-    match (run(filenames)) {
+    match run(filenames) {
         Ok(()) => return {},
         Err(err) => println!("error: {:?}", err.description()),
     };

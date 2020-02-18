@@ -585,11 +585,11 @@ entry return-values contains a list of return values"
 		  (ref (format nil "&(~a)" (emit (car (cdr code)))))
 		  (+ (let ((args (cdr code)))
 		       ;; + {summands}*
-		       (format nil "(~{~a~^+~})" (mapcar #'emit args))))
+		       (format nil "~{~a~^+~}" (mapcar #'emit args))))
 		  (- (let ((args (cdr code)))
 		       (if (eq 1 (length args))
-			   (format nil "(-(~a))" (emit (car args))) ;; py
-			   (format nil "(~{(~a)~^-~})" (mapcar #'emit args)))))
+			   (format nil "(-~a)" (emit (car args))) ;; py
+			   (format nil "~{~a~^-~}" (mapcar #'emit args)))))
 		  (* (let ((args (cdr code)))
 		       (format nil "(~{(~a)~^*~})" (mapcar #'emit args))))
 		  (^ (let ((args (cdr code)))
@@ -693,7 +693,7 @@ entry return-values contains a list of return values"
 		      (destructuring-bind (keyform &rest clauses)
 			  (cdr code)
 			(format
-			 nil "match (~a) ~a"
+			 nil "match ~a ~a"
 			 (emit keyform)
 			 (emit
 			  `(progn
