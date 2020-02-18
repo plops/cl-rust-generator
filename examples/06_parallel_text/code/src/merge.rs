@@ -1,0 +1,65 @@
+use read::IndexFileReader;
+#[allow(unused_parens)]
+use std::fs::{self, File};
+use std::io::{self, BufWriter};
+use std::mem;
+use std::path::{Path, PathBuf};
+use tmp::TmpDir;
+use write::IndexFileWriter;
+pub struct FileMerge {
+    output_dir: PathBuf,
+    tmp_dir: TmpDir,
+    stacks: Vec<Vec<PathBuf>>,
+}
+const NSTREAMS: usize = 12;
+const MERGED_FILENAME: &'static str = "index.dat";
+impl FileMerge {
+    pub fn new(output_dir: &Path) -> FileMerge {
+        return FileMerge {
+            output_dir: output_dir.to_owned(),
+            tmp_dir: TmpDir::new(output_dir.to_owned()),
+            stacks: vec![],
+        };
+    }
+    pub fn add_file(&mut self, mut file: PathBuf) -> io::Result<()> {
+        let mut level = 0;
+        loop {
+            if (level) == (self.stacks.len()) {
+                self.stacks.push(vec![]);
+            };
+            self.stacks[level].push(file);
+            if self.stacks[level].len() < NSTREAMS {
+                break;
+            };
+            let (filename, out) = self.temp_dir.create()?;
+            let mut to_merge = vec![];
+            mem::swap(&mut self.stacks[level], &mut to_merge);
+            merge_streams(to_merge, out)?;
+            file = filename;
+            level += 1;
+        }
+        return Ok(());
+    }
+    pub fn finish(mut self) -> io::Result<()> {
+        let mut tmp = Vec::with_capacity(NSTREAMS);
+        for stack in self.stacks {
+            for file in stack.into_iter().rev() {
+                tmp.push(file);
+                if (tmp.len()) == (NSTREAMS) {
+                    merge_reversed(&mut tmp, &mut self.tmp_dir)?;
+                };
+            }
+        }
+        if 1 < tmp.len() {
+            merge_reversed(&mut tmp, &mut self.tmp_dir)?;
+        };
+        assert!((tmp.len()) <= (1));
+        return match tmp.pop() {
+            Some(last_file) => fs::rename(last_file, self.output_dir.join(MERGED_FILENAME)),
+            None => Err(io::Error::new(
+                io::ErrorKind::Other,
+                "no documents were parsed",
+            )),
+        };
+    }
+}
