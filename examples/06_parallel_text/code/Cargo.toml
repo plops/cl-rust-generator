@@ -9,3 +9,4 @@ authors = ["Martin Kielhorn <kielhorn.martin@gmail.com>"]
 [dependencies]
 argparse = "*"
 byteorder = "*"
+chrono = "*"

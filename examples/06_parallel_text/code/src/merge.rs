@@ -1,10 +1,10 @@
+#[allow(unused_parens)]
+use chrono::{DateTime, Utc};
 use read::IndexFileReader;
 use std::fs::{self, File};
 use std::io::{self, BufWriter};
 use std::mem;
 use std::path::{Path, PathBuf};
-#[allow(unused_parens)]
-use std::time::{SystemTime, UNIX_EPOCH};
 use tmp::TmpDir;
 use write::IndexFileWriter;
 pub struct FileMerge {

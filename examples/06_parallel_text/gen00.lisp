@@ -48,10 +48,11 @@ byteorder = \"*\"
 				  msg
 				  (loop for e in rest collect
 				       (format nil " ~a=" (emit-rs :code e)))))
-		 (dot (SystemTime--now)
+		 #+nil (dot (SystemTime--now)
 		      (duration_since UNIX_EPOCH)
 		      (expect (string "time went backwards"))
-		      (as_millis))
+		      (as_micros))
+		 (Utc--now)
 		 (file!)
 		 (line!)
 		 ,@rest)))
@@ -575,7 +576,7 @@ byteorder = \"*\"
 	 
 	 "extern crate argparse;"
 	 "extern crate byteorder;"
-
+	 "extern crate chrono;"
 	 (mod index read write merge tmp)
 	
 
@@ -711,6 +712,7 @@ byteorder = \"*\"
 	 (defun run_pipeline ("documents: Vec<PathBuf>"
 			      "output_dir: PathBuf")
 	   (declare (values "io::Result<()>"))
+	   ,(logprint "run_pipeline")
 	   (let (((paren texts h1) (start_file_reader_thread documents))
 		 ((paren pints h2) (start_file_indexing_thread texts))
 		 ((paren gallons h3) (start_in_memory_merge_thread pints))
@@ -778,5 +780,6 @@ byteorder = \"*\"
 									   *source-dir*))
 			   `(do0
 			     "#[allow(unused_parens)]"
-			     (use (std time (curly SystemTime UNIX_EPOCH)))
+					;(use (std time (curly SystemTime UNIX_EPOCH)))
+			     (use (chrono (curly DateTime Utc)))
 			     ,code)))))

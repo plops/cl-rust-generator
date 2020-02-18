@@ -1,11 +1,11 @@
 use byteorder::{LittleEndian, WriteBytesExt};
+#[allow(unused_parens)]
+use chrono::{DateTime, Utc};
 use index::InMemoryIndex;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{self, BufWriter, SeekFrom};
 use std::path::PathBuf;
-#[allow(unused_parens)]
-use std::time::{SystemTime, UNIX_EPOCH};
 use tmp::TmpDir;
 pub struct IndexFileWriter {
     offset: u64,

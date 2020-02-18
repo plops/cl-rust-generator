@@ -1,7 +1,8 @@
 #[allow(unused_parens)]
-use std::time::{SystemTime, UNIX_EPOCH};
+use chrono::{DateTime, Utc};
 extern crate argparse;
 extern crate byteorder;
+extern crate chrono;
 mod index;
 mod merge;
 mod read;
@@ -96,6 +97,9 @@ fn merge_index_files(files: Receiver<PathBuf>, output_dir: &Path) -> io::Result<
     return merge.finish();
 }
 fn run_pipeline(documents: Vec<PathBuf>, output_dir: PathBuf) -> io::Result<()> {
+    {
+        println!("{} {}:{} run_pipeline ", Utc::now(), file!(), line!());
+    }
     let (texts, h1) = start_file_reader_thread(documents);
     let (pints, h2) = start_file_indexing_thread(texts);
     let (gallons, h3) = start_in_memory_merge_thread(pints);
@@ -134,15 +138,7 @@ fn run(filenames: Vec<String>) -> io::Result<()> {
 fn main() {
     let mut filenames = vec![];
     {
-        println!(
-            "{} {}:{} start ",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("time went backwards")
-                .as_millis(),
-            file!(),
-            line!()
-        );
+        println!("{} {}:{} start ", Utc::now(), file!(), line!());
     }
     {
         let mut ap = ArgumentParser::new();
