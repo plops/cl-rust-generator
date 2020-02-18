@@ -1,0 +1,14 @@
+* Comments
+
+- chardetect can find text file encoding
+
+for i in  /home/martin/txt/*.txt;do python3.6 /usr/bin/chardetect $i;done > ~/txt/types
+
+this is python and very slow
+
+perhaps use chardet crate
+
+
+- iconv -f UTF-8 -t ISO-8859-1 in.txt > out.txt
+
+for i in ~/txt/*; do 
