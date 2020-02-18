@@ -31,7 +31,7 @@ impl FileMerge {
             if self.stacks[level].len() < NSTREAMS {
                 break;
             };
-            let (filename, out) = self.temp_dir.create()?;
+            let (filename, out) = self.tmp_dir.create()?;
             let mut to_merge = vec![];
             mem::swap(&mut self.stacks[level], &mut to_merge);
             merge_streams(to_merge, out)?;
@@ -73,7 +73,7 @@ fn merge_streams(files: Vec<PathBuf>, out: BufWriter<File>) -> io::Result<()> {
     let mut count = streams
         .iter()
         .filter(|s| {
-            return s.peak().is_some();
+            return s.peek().is_some();
         })
         .count();
     while (0 < count) {
@@ -82,7 +82,7 @@ fn merge_streams(files: Vec<PathBuf>, out: BufWriter<File>) -> io::Result<()> {
         let mut df = 0;
         for s in &streams {
             match s.peek() {
-                None => return {},
+                None => {}
                 Some(entry) => {
                     if ((term.is_none()) || (entry.term < *(term.as_ref().unwrap()))) {
                         term = Some(entry.term.clone());

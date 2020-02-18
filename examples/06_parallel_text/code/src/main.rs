@@ -2,13 +2,13 @@
 extern crate argparse;
 extern crate byteorder;
 mod index;
+mod merge;
 mod read;
 mod tmp;
 mod write;
-use self::index::InMemoryIndex;
-use self::tmp::TmpDir;
-use self::write::write_index_to_tmp_file;
 use argparse::{ArgumentParser, Collect};
+use index::InMemoryIndex;
+use merge::FileMerge;
 use std::error::Error;
 use std::fs::File;
 use std::io;
@@ -16,6 +16,8 @@ use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver};
 use std::thread::{spawn, JoinHandle};
+use tmp::TmpDir;
+use write::write_index_to_tmp_file;
 fn start_file_reader_thread(
     documents: Vec<PathBuf>,
 ) -> (Receiver<String>, JoinHandle<io::Result<()>>) {
@@ -85,13 +87,26 @@ fn start_index_writer_thread(
     });
     return (receiver, handle);
 }
+fn merge_index_files(files: Receiver<PathBuf>, output_dir: &Path) -> io::Result<()> {
+    let mut merge = FileMerge::new(output_dir);
+    for file in files {
+        merge.add_file(file)?;
+    }
+    return merge.finish();
+}
 fn run_pipeline(documents: Vec<PathBuf>, output_dir: PathBuf) -> io::Result<()> {
     let (texts, h1) = start_file_reader_thread(documents);
     let (pints, h2) = start_file_indexing_thread(texts);
     let (gallons, h3) = start_in_memory_merge_thread(pints);
     let (files, h4) = start_index_writer_thread(gallons, &output_dir);
+    let result = merge_index_files(files, &output_dir);
     let r1 = h1.join().unwrap();
-    return Ok(());
+    h2.join().unwrap();
+    h3.join().unwrap();
+    let r4 = h4.join().unwrap();
+    r1?;
+    r4?;
+    return result;
 }
 fn expand_filename_arguments(args: Vec<String>) -> io::Result<Vec<PathBuf>> {
     let mut filenames = vec![];

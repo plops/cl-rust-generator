@@ -445,7 +445,7 @@ byteorder = \"*\"
 					   (len))
 				      NSTREAMS)
 			       break)
-			     (let (((values filename out) (? (self.temp_dir.create)))
+			     (let (((values filename out) (? (self.tmp_dir.create)))
 				   (to_merge "vec![]"))
 			       (declare (mutable to_merge))
 			       (mem--swap "&mut self.stacks[level]"
@@ -496,7 +496,7 @@ byteorder = \"*\"
 			      (iter)
 			      (filter (lambda (s)
 					(return (dot s
-						     (peak)
+						     (peek)
 						     (is_some)))))
 			      (count))))
 	     (declare (type u64 point)
@@ -507,7 +507,7 @@ byteorder = \"*\"
 		      (df 0))
 		 (for (s &streams)
 		      (case (s.peek)
-			(None (return "{}"))
+			(None "{}")
 			((Some entry) (if (or (term.is_none)
 					      (< entry.term
 						 (deref (dot term
@@ -562,7 +562,7 @@ byteorder = \"*\"
 	 "extern crate argparse;"
 	 "extern crate byteorder;"
 
-	 (mod index read write  tmp)
+	 (mod index read write merge tmp)
 	
 
 	 (use
@@ -578,9 +578,10 @@ byteorder = \"*\"
 			   ;StoreTrue
 			   Collect))
 	  
-	  (self index InMemoryIndex)
-	  (self write write_index_to_tmp_file)
-	  (self tmp TmpDir)
+	  (index InMemoryIndex)
+	  (write write_index_to_tmp_file)
+	  (tmp TmpDir)
+	  (merge FileMerge)
 	  )
 	 
 	 (defun start_file_reader_thread ("documents: Vec<PathBuf>")
@@ -684,16 +685,14 @@ byteorder = \"*\"
 					      (return (Ok "()")))))))
 		  (return (values receiver handle))))))
 	 
-	 #+nil (do0
-		
-
-		
-
-	  (defun merge_index_files ("files: Receiver<PathBuf>"
-				    "output_dir: &Path")
-	    (declare (values "io::Result<()>"))
-	    ;; produces single output file on disk
-	    ))
+	 (defun merge_index_files ("files: Receiver<PathBuf>"
+					 "output_dir: &Path")
+		 (declare (values "io::Result<()>"))
+		 ;; produces single output file on disk
+		 (let* ((merge (FileMerge--new output_dir)))
+		   (for (file files)
+			(? (merge.add_file file)))
+		   (return (merge.finish))))
 
 	 (defun run_pipeline ("documents: Vec<PathBuf>"
 			      "output_dir: PathBuf")
@@ -702,11 +701,11 @@ byteorder = \"*\"
 		 ((paren pints h2) (start_file_indexing_thread texts))
 		 ((paren gallons h3) (start_in_memory_merge_thread pints))
 		 ((paren files h4) (start_index_writer_thread gallons &output_dir))
-		 ;(result (merge_index_files files &output_dir))
+		 (result (merge_index_files files &output_dir))
 		 (r1 (dot h1
 			  (join)
 			  (unwrap))))
-	     #+nil (do0
+	     (do0
 	      ;; h2 and h3 can't fail (pure in-memory)
 	      (dot h2 (join) (unwrap))
 	      (dot h3 (join) (unwrap))
@@ -714,8 +713,7 @@ byteorder = \"*\"
 	      ;; return first error encountered
 	      (? r1)
 	      (? r4))
-	     (return (Ok "()") ;result
-	       )))
+	     (return result)))
 
 	 (defun expand_filename_arguments ("args: Vec<String>")
 	   (declare (values "io::Result<Vec<PathBuf>>"))
