@@ -10,3 +10,5 @@ authors = ["Martin Kielhorn <kielhorn.martin@gmail.com>"]
 argparse = "*"
 byteorder = "*"
 chrono = "*"
+chardet = "*"
+encoding = "*"

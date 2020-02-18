@@ -18,30 +18,7 @@
 (progn
   (defparameter *source-dir* #P"examples/06_parallel_text/code/src/")
 
-  (with-open-file (s (asdf:system-relative-pathname 'cl-rust-generator
-				   (merge-pathnames #P"../Cargo.toml"
-						    *source-dir*))
-		     
-		     :direction :output
-		     :if-does-not-exist :create
-		     :if-exists :supersede)
-    (format s "~a"
-	    "[package]
-name = \"code\"
-version = \"0.1.0\"
-authors = [\"Martin Kielhorn <kielhorn.martin@gmail.com>\"]
-# edition = \"2018\"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-argparse = \"*\"
-byteorder = \"*\"
-chrono = \"*\"
-"
-
-
-	    ))
+  
 
   (defun logprint (msg &optional (rest nil))
     `(progn
@@ -570,7 +547,32 @@ chrono = \"*\"
 	       (return (Ok "()"))))))))
 
 
+  (with-open-file (s (asdf:system-relative-pathname 'cl-rust-generator
+						    (merge-pathnames #P"../Cargo.toml"
+								     *source-dir*))
+		     
+		     :direction :output
+		     :if-does-not-exist :create
+		     :if-exists :supersede)
+    (format s "~a"
+	    "[package]
+name = \"code\"
+version = \"0.1.0\"
+authors = [\"Martin Kielhorn <kielhorn.martin@gmail.com>\"]
+# edition = \"2018\"
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+argparse = \"*\"
+byteorder = \"*\"
+chrono = \"*\"
+chardet = \"*\"
+encoding = \"*\"
+"
+
+
+	    ))
   
   (define-module
       `(main
@@ -580,6 +582,9 @@ chrono = \"*\"
 	 "extern crate argparse;"
 	 "extern crate byteorder;"
 	 "extern crate chrono;"
+	 "extern crate chardet;"
+	 "extern crate encoding;"
+	 
 	 (mod index read write merge tmp)
 	
 
@@ -589,7 +594,7 @@ chrono = \"*\"
 	  (std io)
 	  (std io prelude *)
 	  (std path (curly Path PathBuf))
-	  (std sync mpsc (curly channel Receiver))
+	  (std sync mpsc (curly channel Receiver sync_channel))
 	  (std thread (curly spawn JoinHandle))
 
 	  (argparse (curly ArgumentParser
@@ -600,13 +605,17 @@ chrono = \"*\"
 	  (write write_index_to_tmp_file)
 	  (tmp TmpDir)
 	  (merge FileMerge)
+	  (chardet (curly  charset2encoding detect))
+	  (std fs OpenOptions)
+	  (encoding DecoderTrap)
+	  (encoding label encoding_from_whatwg_label)
 	  )
 	 
 	 (defun start_file_reader_thread ("documents: Vec<PathBuf>")
 	   (declare (values "Receiver<String>"
 			    "JoinHandle<io::Result<()>>"))
 	   ;; use std::sync::mpsc::sync_channel (sync_channel 100) to create back pressure
-	   (let (((paren sender receiver) (channel))
+	   (let (((paren sender receiver) (sync_channel 32))
 		 (handle (spawn
 			  ;; transfer ownership of sender
 			  (space
@@ -614,8 +623,32 @@ chrono = \"*\"
 			   (lambda ()
 			     (for (filename documents)
 				  ,(logprint "reader" `((filename.display)))
+
+				  (let* ((fh (dot (OpenOptions--new)
+						  (read true)
+						  (open filename)
+						  (expect (string "could not open file"))))
+					 (reader (Vec--new)))
+				    (declare (type Vec<u8> reader))
+				    (dot (fh.read_to_end "&mut reader")
+					 (expect (string "could not read file")))
+				    (let ((detected_charset (detect &reader))
+					  (coder (encoding_from_whatwg_label (charset2encoding &detected_charset.0))))
+				      (when (coder.is_some)
+					(let ((utf8reader (dot coder
+							       (unwrap)
+							       (decode &reader
+								       DecoderTrap--Ignore)
+							       (expect (string "could not convert to utf-8")))))
+					  (when (dot sender
+						     (send utf8reader)
+						     (is_err))
+					    break)))))
+				  #+nil 
 				  (let* ((f (? ("File::open" filename)))
 					 (text ("String::new")))
+
+				    
 				    
 				    ;; use ? so that errors don't pass silently
 				    (let ((res (f.read_to_string "&mut text")))

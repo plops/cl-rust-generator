@@ -2,28 +2,34 @@
 use chrono::{DateTime, Utc};
 extern crate argparse;
 extern crate byteorder;
+extern crate chardet;
 extern crate chrono;
+extern crate encoding;
 mod index;
 mod merge;
 mod read;
 mod tmp;
 mod write;
 use argparse::{ArgumentParser, Collect};
+use chardet::{charset2encoding, detect};
+use encoding::label::encoding_from_whatwg_label;
+use encoding::DecoderTrap;
 use index::InMemoryIndex;
 use merge::FileMerge;
 use std::error::Error;
 use std::fs::File;
+use std::fs::OpenOptions;
 use std::io;
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{channel, sync_channel, Receiver};
 use std::thread::{spawn, JoinHandle};
 use tmp::TmpDir;
 use write::write_index_to_tmp_file;
 fn start_file_reader_thread(
     documents: Vec<PathBuf>,
 ) -> (Receiver<String>, JoinHandle<io::Result<()>>) {
-    let (sender, receiver) = channel();
+    let (sender, receiver) = sync_channel(32);
     let handle = spawn(move || {
         for filename in documents {
             {
@@ -35,26 +41,22 @@ fn start_file_reader_thread(
                     filename.display()
                 );
             }
-            let mut f = File::open(filename)?;
-            let mut text = String::new();
-            let res = f.read_to_string(&mut text);
-            match res {
-                Err(err) => {
-                    {
-                        println!(
-                            "{} {}:{} reader err  err={}",
-                            Utc::now(),
-                            file!(),
-                            line!(),
-                            err
-                        );
-                    }
-                    continue;
-                }
-                Ok(r) => {}
-            };
-            if sender.send(text).is_err() {
-                break;
+            let mut fh = OpenOptions::new()
+                .read(true)
+                .open(filename)
+                .expect("could not open file");
+            let mut reader: Vec<u8> = Vec::new();
+            fh.read_to_end(&mut reader).expect("could not read file");
+            let detected_charset = detect(&reader);
+            let coder = encoding_from_whatwg_label(charset2encoding(&detected_charset.0));
+            if coder.is_some() {
+                let utf8reader = coder
+                    .unwrap()
+                    .decode(&reader, DecoderTrap::Ignore)
+                    .expect("could not convert to utf:8");
+                if sender.send(utf8reader).is_err() {
+                    break;
+                };
             };
         }
         return Ok(());
