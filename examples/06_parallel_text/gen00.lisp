@@ -323,89 +323,78 @@ byteorder = \"*\"
 					(filename.display)
 					contents_offset)
 			      (let* ((contents_raw (? (File--open filename))))
-				(? (contents_raw.seek (SeekFrom--Start contents_offset)))))))
-			))
+				(? (contents_raw.seek (SeekFrom--Start contents_offset)))
+				(let ((main (BufReader--new main_raw))
+				      (contents (BufReader--new contents_raw))
+				      (first (? (IndexFileReader--read_entry "&mut contents"))))
+				  (declare (mutable contents))
+				  (? (fs--remove_file filename))
+				  (Ok (make-instance IndexFileReader
+						     :main main
+						     :contents contents
+						     :next first)))))))))
+	       
 	       (space pub
-		      (defun write_main ("&mut self"
-					 "buf: &[u8]")
+		      (defun read_entry ("f: &mut BufReader<File>")
+			(declare (values io--Result<Option<Entry>>))
+			(let ((offset (case (f.read_u64--<LittleEndian>)
+					((Ok value) value)
+					((Err err) (if (== io--ErrorKind--UnexpectedEof
+							   (err.kind))
+						       (return (Ok None))
+						       (return (Err err))))))
+			      (nbytes (? (f.read_u64--<LittleEndian>)))
+			      (df (? (f.read_u32--<LittleEndian>)))
+			      (term_len (coerce (? (f.read_u32--<LittleEndian>))
+						usize))
+			      (bytes (Vec--with_capacity term_len)))
+			  (declare (mutable bytes))
+			  (bytes.resize term_len 0)
+			  (? (f.read_exact "&mut bytes"))
+			  (let ((term (case (String--from_utf8 bytes)
+					((Ok s) s)
+					((Err _) (return (Err (io--Error--new
+							       io--ErrorKind--Other
+							       (string "unicode fail"))))))))
+			    (return (Some (make-instance Entry
+							 term
+							 df
+							 offset
+							 nbytes)))))))
+	       (space pub
+		      (defun peek (&self)
+			(declare (values Option<&Entry>))
+			(return (self.next.as_ref))))
+
+	       (space pub
+		      (defun is_at (&self
+				    "term: &str")
+			(declare (values bool))
+			(case self.next
+			  ((Some "ref e") (return (== term e.term)))
+			  (None (return false)))))
+
+	       (space pub
+		      (defun move_entry_to ("&mut self"
+					    "out: &mut IndexFileWriter")
 			(declare (values "io::Result<()>"))
-			(?
-			 (self.writer.write_all buf)
-			 )
-			(incf self.offset (coerce (buf.len) u64))
-			(return (Ok "()"))))
-	       (space pub
-		      (defun write_contents_entry ("&mut self"
-						   "term: String"
-						   "df: u32"
-						   "offset: u64"
-						   "nbytes: u64")
-			,@(loop for (e type) in `((offset u64)
-						  (nbytes u64)
-						  (df u32)) collect
-			       `(dot self
-				     contents_buf
-				     (,(format nil "write_~a::<LittleEndian>" type) ,e)
-				     (unwrap)))
-			(let ((bytes (term.bytes)))
-			  ,@(loop for (e type) in `(((bytes.len) u32)) collect
-			       `(dot self
-				     contents_buf
-				     (,(format nil "write_~a::<LittleEndian>" type) (coerce ,e ,type))
-				     (unwrap))))
-			(self.contents_buf.extend bytes)))
-	       (space pub
-		      (defun finish ("mut self")
-			(declare (values "io::Result<()>"))
-			(let ((contents_start self.offset))
-			  (?
-			   (dot self
-				writer
-				(write_all &self.contents_buf)))
-			  (println! (string "{} bytes main, {} bytes total")
-				    contents_start
-				    (+ contents_start (coerce (dot self
-							       contents_buf
-							       (len))
-							      u64)))
-			  (?
-			   (dot self
-				writer
-				(seek ("SeekFrom::Start" 0))))
-			  (?
-			   (dot self
-				writer
-				("write_u64::<LittleEndian>" contents_start)))
-			  (return (Ok "()"))))))
-	 (space pub
-		(defun write_index_to_tmp_file ("index: InMemoryIndex"
-						"tmp_dir: &mut TmpDir")
-		  (declare (values "io::Result<PathBuf>"))
-		  (let (((values filename f) (? (tmp_dir.create))))
-		    (let* ((writer (? ("IndexFileWriter::new" f)))
-			   (index_as_vec (dot index
-					      map
-					      (into_iter)
-					      (collect))))
-		      (declare (type "Vec<_>" index_as_vec))
-		      (dot index_as_vec
-			   (sort_by (lambda ("&(ref a,_)"
-					     "&(ref b,_)")
-				      (return (a.cmp b)))))
-		      (for ((values term hits) index_as_vec)
-			   (let ((df (coerce (hits.len) u32))
-				 (start writer.offset))
-			     (for (buffer hits)
-				  (?
-				   (writer.write_main &buffer)))
-			     (let ((stop writer.offset))
-			       (writer.write_contents_entry
-				term df start (- stop start)))))
-		      (?
-		       (writer.finish)
-		       )
-		      (println! (string "wrote file {:?}") filename)
-		      (return (Ok filename)))))))))
+			(progn
+			  (let ((e (dot self
+					next
+					(as_ref)
+					(expect (string "no entry to move")))))
+			    (when (< (coerce (usize--max_value) u64)
+				     e.nbytes)
+			      (return (Err (io--Error--new
+					    io--ErrorKind--Other
+					    (string "computer not big enough to hold index entry")))))
+			    (let* ((buf (Vec--with_capacity (coerce e.nbytes usize))))
+			      (buf.resize (coerce e.nbytes usize)
+					  0)
+			      (? (self.main.read_exact "&mut buf"))
+			      (? (out.write_main &buf)))))
+			(setf self.next (? (Self--read_entry "&mut self.contents")))
+			(return (Ok "()"))))))))
 
 
 
@@ -419,7 +408,7 @@ byteorder = \"*\"
 	 "extern crate byteorder;"
 
 	 
-	 (mod index tmp write)
+	 (mod index read write  tmp)
 	
 
 	 (use

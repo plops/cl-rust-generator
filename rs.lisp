@@ -259,7 +259,7 @@ entry return-values contains a list of return values"
 			    key-param other-key-p aux-param key-exist-p))
 	(with-output-to-string (s)
 	  (format s "fn ~a ~a~@[ -> ~a~]"
-		  name
+		  (funcall emit name)
 		  (funcall emit `(paren
 				  ,@(loop for rp in req-param collect
 					 (let* ((p (remove-ampersand rp))
@@ -282,7 +282,8 @@ entry return-values contains a list of return values"
 		  (let ((r (gethash 'return-values env)))
 		    (if (< 1 (length r))
 			(funcall emit `(paren ,@r))
-			(car r))))
+			(when (car r)
+			 (funcall emit (car r))))))
 	  #+nil (format s "~a ~a ~a~:[~;;~]"
 			(let ((r (gethash 'return-values env)))
 			  (if (< 1 (length r))
@@ -850,11 +851,12 @@ entry return-values contains a list of return values"
 			     (format nil "~a~a" name
 				     (emit `(paren ,@args)))))))))
 	      (cond
-		((symbolp code) ;; print variable or function name
+		((or (stringp code) (symbolp code))
+		 ;; print variable or function name
 		 ;; convert - to :
 		 (substitute #\: #\- (format nil "~a" code))
 		 )
-		((stringp code) 
+		#+nil ((stringp code) 
 		 (format nil "~a" code))
 		((numberp code) ;; print constants
 		 (cond ((integerp code)
