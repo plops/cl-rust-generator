@@ -396,6 +396,161 @@ byteorder = \"*\"
 			(setf self.next (? (Self--read_entry "&mut self.contents")))
 			(return (Ok "()"))))))))
 
+  (define-module
+      `(merge
+	(do0
+	 (use (std fs (curly self File))
+	      (std io (curly self BufWriter))
+	      (std mem)
+	      (std path (curly Path PathBuf))
+	      (tmp TmpDir)
+	      (read IndexFileReader)
+	      (write IndexFileWriter))
+	 
+	 (space pub
+		(defstruct0 FileMerge
+		    (output_dir PathBuf)
+		  (tmp_dir TmpDir)
+		  (stacks Vec<Vec<PathBuf>>)))
+
+	 "const NSTREAMS: usize = 12;"
+	 "const MERGED_FILENAME: &'static str =  \"index.dat\";"
+	 
+	 	 
+	 (impl FileMerge
+	       (space pub
+		      (defun new ("output_dir: &Path")
+			(declare (values FileMerge))
+			(return (make-instance
+				 FileMerge
+				 :output_dir (output_dir.to_owned)
+				 :tmp_dir (TmpDir--new (output_dir.to_owned))
+				 :stacks "vec![]"))))
+	       
+	       
+	       (space pub
+		      (defun add_file ("&mut self"
+				       "mut file: PathBuf")
+			(declare (values "io--Result<()>"))
+			(let* ((level 0))
+			  (loop
+			     (when (== level
+				       (self.stacks.len))
+			       (self.stacks.push "vec![]"))
+			     (dot self
+				  (aref stacks level)
+				  (push file))
+			     (when (< (dot self
+					   (aref stacks level)
+					   (len))
+				      NSTREAMS)
+			       break)
+			     (let (((values filename out) (? (self.temp_dir.create)))
+				   (to_merge "vec![]"))
+			       (declare (mutable to_merge))
+			       (mem--swap "&mut self.stacks[level]"
+					  "&mut to_merge")
+			       (? (merge_streams to_merge out))
+			       (setf file filename)
+			       (incf level)))
+			  (return (Ok "()")))))
+	       (space pub
+		      (defun finish ("mut self")
+			(declare (values "io::Result<()>"))
+			(let* ((tmp (Vec--with_capacity NSTREAMS)))
+			  (for (stack self.stacks)
+			       (for (file (dot stack
+					       (into_iter)
+					       (rev)))
+				    (tmp.push file)
+				    (when (== (tmp.len)
+					      NSTREAMS)
+				      (? (merge_reversed "&mut tmp"
+							 "&mut self.tmp_dir")))))
+			  (when (< 1 (tmp.len))
+			    (? (merge_reversed "&mut tmp"
+					       "&mut self.tmp_dir")))
+			  (assert! (<= (tmp.len) 1))
+			  
+			  (return
+			    (case (tmp.pop)
+			     ((Some last_file)
+			      (fs--rename last_file
+					  (self.output_dir.join MERGED_FILENAME)))
+			     (None
+			      (Err (io--Error--new
+				    io--ErrorKind--Other
+				    (string "no documents were parsed")))))))))
+	       )
+
+	 (defun merge_streams ("files: Vec<PathBuf>"
+			       "out: BufWriter<File>")
+	   (declare (values "io::Result<()>"))
+	   (let* ((streams (? (dot files
+				   (into_iter)
+				   (map IndexFileReader--open_and_delete)
+				   (collect--<io--Result<_>>))))
+		  (output (? (IndexFileWriter--new out)))
+		  (point 0)
+		  (count (dot streams
+			      (iter)
+			      (filter (lambda (s)
+					(return (dot s
+						     (peak)
+						     (is_some)))))
+			      (count))))
+	     (declare (type u64 point)
+		      (type Vec<IndexFileReader> streams))
+	     (while (< 0 count)
+	       (let* ((term None)
+		      (nbytes 0)
+		      (df 0))
+		 (for (s &streams)
+		      (case (s.peek)
+			(None (return "{}"))
+			((Some entry) (if (or (term.is_none)
+					      (< entry.term
+						 (deref (dot term
+							     (as_ref)
+							     (unwrap)))))
+					  (do0
+					   (setf term (Some (entry.term.clone))
+						 nbytes entry.nbytes
+						 df entry.df))
+					  (if (== entry.term
+						  (deref (dot term
+							     (as_ref)
+							     (unwrap))))
+					      (do0
+					       (incf nbytes entry.nbytes)
+					       (incf df entry.df)))))))
+		 (let ((term (term.expect (string "bug in algorithm!"))))
+		   (for (s "&mut streams")
+			(when (s.is_at &term)
+			  (? (s.move_entry_to "&mut output"))
+			  (when (dot s
+				     (peek)
+				     (is_none))
+			    (decf count))))
+		   (output.write_contents_entry term df point (coerce nbytes u64))
+		   (incf point (coerce nbytes u64)))))
+	     (assert! (dot streams
+			   (iter)
+			   (all (lambda (s) (return (dot s
+							 (peek)
+							 (is_none)))))))
+	     (return (output.finish))))
+	 (defun merge_reversed ("filenames: &mut Vec<PathBuf>"
+				"tmp_dir: &mut TmpDir")
+	   (declare (values "io::Result<()>"))
+	   (filenames.reverse)
+	   (let (((values merged_filename out) (? (tmp_dir.create))))
+	     (let* ((to_merge (Vec--with_capacity NSTREAMS)))
+	       (mem--swap filenames "&mut to_merge")
+	       (? (merge_streams to_merge out))
+	       (filenames.push merged_filename)
+	       (return (Ok "()"))))))))
+
 
 
   
@@ -406,11 +561,7 @@ byteorder = \"*\"
 	 
 	 "extern crate argparse;"
 	 "extern crate byteorder;"
-	 #+nil (do0
-	  "crate index;"
-	  "crate read;"
-	  "crate write;"
-	  "crate tmp;")
+
 	 (mod index read write  tmp)
 	
 

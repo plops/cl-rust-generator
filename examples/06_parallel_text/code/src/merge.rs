@@ -63,3 +63,63 @@ impl FileMerge {
         };
     }
 }
+fn merge_streams(files: Vec<PathBuf>, out: BufWriter<File>) -> io::Result<()> {
+    let mut streams: Vec<IndexFileReader> = files
+        .into_iter()
+        .map(IndexFileReader::open_and_delete)
+        .collect::<io::Result<_>>()?;
+    let mut output = IndexFileWriter::new(out)?;
+    let mut point: u64 = 0;
+    let mut count = streams
+        .iter()
+        .filter(|s| {
+            return s.peak().is_some();
+        })
+        .count();
+    while (0 < count) {
+        let mut term = None;
+        let mut nbytes = 0;
+        let mut df = 0;
+        for s in &streams {
+            match s.peek() {
+                None => return {},
+                Some(entry) => {
+                    if ((term.is_none()) || (entry.term < *(term.as_ref().unwrap()))) {
+                        term = Some(entry.term.clone());
+                        nbytes = entry.nbytes;
+                        df = entry.df;
+                    } else {
+                        if (entry.term) == (*(term.as_ref().unwrap())) {
+                            nbytes += entry.nbytes;
+                            df += entry.df;
+                        }
+                    }
+                }
+            }
+        }
+        let term = term.expect("bug in algorithm!");
+        for s in &mut streams {
+            if s.is_at(&term) {
+                s.move_entry_to(&mut output)?;
+                if s.peek().is_none() {
+                    count -= 1;
+                };
+            };
+        }
+        output.write_contents_entry(term, df, point, (nbytes as u64));
+        point += (nbytes as u64);
+    }
+    assert!(streams.iter().all(|s| {
+        return s.peek().is_none();
+    }));
+    return output.finish();
+}
+fn merge_reversed(filenames: &mut Vec<PathBuf>, tmp_dir: &mut TmpDir) -> io::Result<()> {
+    filenames.reverse();
+    let (merged_filename, out) = tmp_dir.create()?;
+    let mut to_merge = Vec::with_capacity(NSTREAMS);
+    mem::swap(filenames, &mut to_merge);
+    merge_streams(to_merge, out)?;
+    filenames.push(merged_filename);
+    return Ok(());
+}
