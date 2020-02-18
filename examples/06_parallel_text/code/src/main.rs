@@ -1,4 +1,5 @@
 #[allow(unused_parens)]
+use std::time::{SystemTime, UNIX_EPOCH};
 extern crate argparse;
 extern crate byteorder;
 mod index;
@@ -132,6 +133,17 @@ fn run(filenames: Vec<String>) -> io::Result<()> {
 }
 fn main() {
     let mut filenames = vec![];
+    {
+        println!(
+            "{} {}:{} start ",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_millis(),
+            file!(),
+            line!()
+        );
+    }
     {
         let mut ap = ArgumentParser::new();
         ap.set_description("make inverted index for searching documents");

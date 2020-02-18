@@ -1,6 +1,7 @@
 use byteorder::{LittleEndian, WriteBytesExt};
-#[allow(unused_parens)]
 use std::collections::HashMap;
+#[allow(unused_parens)]
+use std::time::{SystemTime, UNIX_EPOCH};
 fn tokenize(text: &str) -> Vec<&str> {
     return text
         .split(|ch: char| {

@@ -1,7 +1,8 @@
 use std::fs::{self, File};
-#[allow(unused_parens)]
 use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
+#[allow(unused_parens)]
+use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Clone)]
 pub struct TmpDir {
     dir: PathBuf,

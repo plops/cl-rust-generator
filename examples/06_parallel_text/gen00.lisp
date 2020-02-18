@@ -41,6 +41,20 @@ byteorder = \"*\"
 
 
 	    ))
+
+  (defun logprint (msg &optional (rest nil))
+    `(progn
+       (println! (string ,(format nil "{} {}:{} ~a ~{~a~^ ~}"
+				  msg
+				  (loop for e in rest collect
+				       (format nil " ~a=" (emit-rs :code e)))))
+		 (dot (SystemTime--now)
+		      (duration_since UNIX_EPOCH)
+		      (expect (string "time went backwards"))
+		      (as_millis))
+		 (file!)
+		 (line!)
+		 ,@rest)))
   
   #+nil (defparameter *code-file*
     (asdf:system-relative-pathname 'cl-rust-generator
@@ -741,7 +755,7 @@ byteorder = \"*\"
 	 
 	 (defun main ()
 	   (let* ((filenames "vec![]"))
-
+	     ,(logprint "start")
 	     (progn
 	       (let* ((ap ("ArgumentParser::new")))
 		 (ap.set_description (string "make inverted index for searching documents"))
@@ -764,4 +778,5 @@ byteorder = \"*\"
 									   *source-dir*))
 			   `(do0
 			     "#[allow(unused_parens)]"
+			     (use (std time (curly SystemTime UNIX_EPOCH)))
 			     ,code)))))

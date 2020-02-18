@@ -1,9 +1,10 @@
 use byteorder::{LittleEndian, ReadBytesExt};
-#[allow(unused_parens)]
 use std::fs::{self, File};
 use std::io::prelude::*;
 use std::io::{self, BufReader, SeekFrom};
 use std::path::Path;
+#[allow(unused_parens)]
+use std::time::{SystemTime, UNIX_EPOCH};
 use write::IndexFileWriter;
 pub struct IndexFileReader {
     main: BufReader<File>,
