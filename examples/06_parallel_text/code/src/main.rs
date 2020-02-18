@@ -121,7 +121,7 @@ fn main() {
         ap.refer(&mut filenames)
             .add_argument("filenames", Collect, "files/directories to index");
         ap.parse_args_or_exit();
-    };
+    }
     match run(filenames) {
         Ok(()) => return {},
         Err(err) => println!("error: {:?}", err.description()),

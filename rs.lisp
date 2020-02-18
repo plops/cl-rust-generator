@@ -504,7 +504,7 @@ entry return-values contains a list of return values"
 							(and (listp x)
 							     (member (car x)
 								     `(defun if for include
-									     dotimes while case do0
+									     dotimes while case do0 progn
 									     space defstruct0 impl use mod))))
 						    ""
 						    ";"))))
@@ -850,8 +850,11 @@ entry return-values contains a list of return values"
 			     (format nil "~a~a" name
 				     (emit `(paren ,@args)))))))))
 	      (cond
-		((or (symbolp code)
-		     (stringp code)) ;; print variable
+		((symbolp code) ;; print variable or function name
+		 ;; convert - to :
+		 (substitute #\: #\- (format nil "~a" code))
+		 )
+		((stringp code) 
 		 (format nil "~a" code))
 		((numberp code) ;; print constants
 		 (cond ((integerp code)
