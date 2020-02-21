@@ -35,11 +35,44 @@
 		 ,@(loop for e in rest collect
 			e ;`(dot ,e (display))
 			))))
+
+
+  (with-open-file (s (asdf:system-relative-pathname 'cl-rust-generator
+						    (merge-pathnames #P"../Cargo.toml"
+								     *source-dir*))
+		     
+		     :direction :output
+		     :if-does-not-exist :create
+		     :if-exists :supersede)
+    (format s "~a"
+	    "[package]
+name = \"rs03_glium\"
+version = \"0.1.0\"
+authors = [\"Martin Kielhorn <kielhorn.martin@gmail.com>\"]
+edition = \"2018\"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+glium = \"*\"
+imgui = \"*\"
+imgui-glium-renderer = \"*\"
+imgui-winit-support = \"*\"
+chrono = \"*\"
+reqwest = \"*\"
+crossbeam-channel = \"*\"
+"
+	    
+
+
+	    ))
+
+  
   (let ((code
 	 `(do0
 	   (do0
 
-	    (use (request)
+	    (use (reqwest)
 		 (chrono (curly DateTime Utc)))
 	    
 	    "use imgui::*;"
@@ -187,7 +220,7 @@
 							  &event)))))))))))
 	   
 	   (defun main ()
-	     (let* ((client (request--Client--new))
+	     #+nil (let* ((client (request--Client--new))
 		    (body (dot client
 			       (get (string "https://query1.finance.yahoo.com/v7/finance/quote?lang=en-US&region=US&corsDomain=finance.yahoo.com&symbols=DBX,LITE,AMD,INTC&fields=regularMarketPrice"))
 			       (? await)

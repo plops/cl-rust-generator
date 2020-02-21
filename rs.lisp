@@ -352,7 +352,7 @@ entry return-values contains a list of return values"
   (let* ((a f)
 	 (digits 1)
 	 (b (- a 1)))
-    (unless (eq a 0)
+    (unless (= a 0)
      (loop while (< 1d-12
 		     (/ (abs (- a b))
 		       (abs a))
@@ -380,7 +380,7 @@ entry return-values contains a list of return values"
   (let* ((a f)
 	 (digits 1)
 	 (b (- a 1)))
-    (unless (eq a 0)
+    (unless (= a 0)
      (loop while (< 1d-12
 		     (/ (abs (- a b))
 		       (abs a))
@@ -506,7 +506,8 @@ entry return-values contains a list of return values"
 							     (member (car x)
 								     `(defun if for include
 									     dotimes while case do0 progn case
-									     space defstruct0 impl use mod))))
+									     space defstruct0 impl use mod
+									     extern unsafe))))
 						    ""
 						    ";"))))
 				  (cdr code)))
@@ -586,11 +587,11 @@ entry return-values contains a list of return values"
 		  (ref (format nil "&(~a)" (emit (car (cdr code)))))
 		  (+ (let ((args (cdr code)))
 		       ;; + {summands}*
-		       (format nil "~{~a~^+~}" (mapcar #'emit args))))
+		       (format nil "(~{~a~^+~})" (mapcar #'emit args))))
 		  (- (let ((args (cdr code)))
 		       (if (eq 1 (length args))
 			   (format nil "(-~a)" (emit (car args))) ;; py
-			   (format nil "~{~a~^-~}" (mapcar #'emit args)))))
+			   (format nil "(~{~a~^-~})" (mapcar #'emit args)))))
 		  (* (let ((args (cdr code)))
 		       (format nil "(~{(~a)~^*~})" (mapcar #'emit args))))
 		  (^ (let ((args (cdr code)))
@@ -643,6 +644,7 @@ entry return-values contains a list of return values"
 		  (decf (destructuring-bind (a &optional (b 1)) (cdr code)
 			  (format nil "~a -= ~a" (emit a) (emit b))
 			  ))
+		  (byte  (format nil "b'~a'" (cadr code)))
 		  (string (format nil "\"~a\"" (cadr code)))
 		  (string# (let* ((str (cadr code))
 				   (n-of-hash (count #\# str))
@@ -685,7 +687,16 @@ entry return-values contains a list of return values"
 			(format nil "~{~a~^->~}" (mapcar #'emit args))))
 		  
 		  (lambda (parse-lambda code #'emit))
-		  
+		  #+nil (unsafe (let ((args (cdr code)))
+			    (format nil "unsafe {~{~a~}}" args)))
+		  (unsafe (let ((args (cdr code)))
+			    (emit `(space "unsafe"
+					  (progn
+					    ,@args)))))
+		  (extern (let ((args (cdr code)))
+			    (emit `(space "extern"
+					  (progn
+					    ,@args)))))
 		  (case
 		      ;; case keyform {normal-clause}* [otherwise-clause]
 		      ;; normal-clause::= (keys form*) 
@@ -851,10 +862,15 @@ entry return-values contains a list of return values"
 			     (format nil "~a~a" (emit name)
 				     (emit `(paren ,@args)))))))))
 	      (cond
-		((or (stringp code) (symbolp code))
+		((symbolp code)
 		 ;; print variable or function name
-		 ;; convert - to :
+		 ;; convert - to : 
 		 (substitute #\: #\- (format nil "~a" code))
+		 )
+		((stringp code) 
+		 ;; print variable or function name
+		 ;; don't transform characters
+		 (format nil "~a" code)
 		 )
 		#+nil ((stringp code) 
 		 (format nil "~a" code))

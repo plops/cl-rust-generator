@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use glium::glutin;
 use glium::glutin::event::{Event, WindowEvent};
 use glium::glutin::event_loop::{ControlFlow, EventLoop};
@@ -7,6 +8,7 @@ use imgui::*;
 use imgui::{Context, FontConfig, FontGlyphRanges, FontSource, Ui};
 use imgui_glium_renderer::Renderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
+use reqwest;
 use std::time::Instant;
 struct System {
     event_loop: EventLoop<()>,
@@ -17,8 +19,8 @@ struct System {
     font_size: f32,
 }
 fn init(title: &str) -> System {
-    let title = match (title.rfind("/")) {
-        Some(idx) => title.split_at(((idx) + (1))).1,
+    let title = match title.rfind("/") {
+        Some(idx) => title.split_at(idx + 1).1,
         None => title,
     };
     let event_loop = EventLoop::new();
@@ -43,7 +45,7 @@ fn init(title: &str) -> System {
         imgui,
         platform,
         renderer,
-        font_size: (12.),
+        font_size: 12.,
     };
 }
 impl System {
@@ -57,7 +59,7 @@ impl System {
             ..
         } = self;
         let mut last_frame = Instant::now();
-        event_loop.run(move |event, _, control_flow| match (event) {
+        event_loop.run(move |event, _, control_flow| match event {
             Event::NewEvents(_) => {
                 last_frame = imgui.io_mut().update_delta_time(last_frame);
             }
@@ -72,12 +74,12 @@ impl System {
                 let mut ui = imgui.frame();
                 let mut run = true;
                 run_ui(&mut run, &mut ui);
-                if (!(run)) {
+                if !(run) {
                     *control_flow = ControlFlow::Exit;
                 };
                 let gl_window = display.gl_window();
                 let mut target = display.draw();
-                target.clear_color_srgb((1.0), (1.0), (1.0), (1.0));
+                target.clear_color_srgb(1.0, 1.0, 1.0, 1.0);
                 platform.prepare_render(&ui, gl_window.window());
                 let draw_data = ui.render();
                 renderer
@@ -102,11 +104,16 @@ fn main() {
     let system = init(file!());
     system.main_loop(move |_, ui| {
         Window::new(im_str!("Hello world"))
-            .size([(3.00e+2), (1.00e+2)], Condition::FirstUseEver)
+            .size([3.00e+2, 1.00e+2], Condition::FirstUseEver)
             .build(ui, || {
                 ui.text(im_str!("Hello World"));
                 let mouse_pos = ui.io().mouse_pos;
                 ui.text(format!("mouse: ({:.1},{:.1})", mouse_pos[0], mouse_pos[1]));
+            });
+        Window::new(im_str!("recv"))
+            .size([2.00e+2, 1.00e+2], Condition::FirstUseEver)
+            .build(ui, || {
+                ui.text(im_str!("recv"));
             });
     });
 }
