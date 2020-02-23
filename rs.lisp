@@ -569,7 +569,8 @@ entry return-values contains a list of return values"
 			  (format nil "(~a) ~a"
 				  (emit type)
 				  (emit value))))
-		  
+		  (slice (let ((args (cdr code)))
+			       (format nil "~{~a~^..~}" (mapcar #'emit args))))
 		  (let (parse-let code #'emit :mutable-default nil))
 		  (let* (parse-let code #'emit :mutable-default t))
 		  (setf 
@@ -1062,7 +1063,7 @@ entry return-values contains a list of return values"
 					     ,@body))))
       
 		      
-		      (slice (let ((args (cdr code)))
+      (slice (let ((args (cdr code)))
 			       (if (null args)
 				   (format nil ":")
 				   (format nil "~{~a~^:~}" (mapcar #'emit args)))))
