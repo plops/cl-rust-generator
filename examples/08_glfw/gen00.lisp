@@ -52,10 +52,11 @@ authors = [\"Martin Kielhorn <kielhorn.martin@gmail.com>\"]
 
 [dependencies]
 #chrono = \"*\"
-glfw = \"*\"
+#glfw = \"*\"
 gl = \"*\"
-imgui-rs = \"*\"
-imgui_opengl_renderer = \"*\"
+imgui-glfw-rs = \"*\"
+#imgui-rs = \"*\"
+#imgui_opengl_renderer = \"*\"
 "
 
 
@@ -65,11 +66,13 @@ imgui_opengl_renderer = \"*\"
    (define-module
        `(main
 	 (do0
-	  "extern crate glfw;"
+	  ;;"extern crate glfw;"
 	  (use (glfw (curly Action Context Key)))
 	  (defun main ()
 	    (let* ((glfw (dot (glfw--init glfw--FAIL_ON_ERRORS)
-			     (unwrap))))
+			      (unwrap))))
+	      (glfw.window_hint
+	       (glfw--WindowHint--ContextVersion 3 3))
 	     (let (
 		   ((values "mut window"
 			    events)
@@ -81,7 +84,34 @@ imgui_opengl_renderer = \"*\"
 			 (expect (string "failed to create glfw window")))))
 	       (window.make_current)
 	       (window.set_key_polling true)
+	       (gl--load_with
+		(lambda (symbol)
+		  (return
+		    (coerce (dot window
+				(get_proc_address symbol))
+			   *const))
+		 ))
+	       (space unsafe
+		      (progn
+			(gl--Enable gl--BLEND)
+			(gl--BlendFunc gl--SRC_ALPHA gl--ONE_MINUS_SRC_ALPHA)
+			(gl--Enable gl--DEPTH_TEST)
+			(gl--DepthFunc gl--LESS)
+			(gl--ClearColor .1s0 .1s0 .1s0 1s0)))
+	       (let* ((imgui (imgui--Context--create))
+		      (imgui_glfw (imgui_glfw_rs--ImguiGLFW--new
+				   "&mut imgui"
+				   "&mut window"))))
 	       (while (not (window.should_close))
+		 (space unsafe
+			(progn
+			  (gl--Clear
+			   (logior gl--COLOR_BUFFER_BIT
+				   gl--DEPTH_BUFFER_BIT))))
+		 (let ((ui (imgui_glfw.frame "&mut window"
+					     "&mut imgui")))
+		   (ui.show_demo_window "&mut true")
+		   (imgui_glfw.draw ui "&mut window"))
 		 (window.swap_buffers)
 		 (glfw.poll_events)
 		 (for ((values _ event)
