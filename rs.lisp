@@ -443,7 +443,7 @@ entry return-values contains a list of return values"
 		   ;;https://doc.rust-lang.org/book/ch05-01-defining-structs.html
 		   (let ((args (cdr code)))
 		     (destructuring-bind (name &rest params) args
-		       (emit `(space ,name
+		       (emit `(space ,(emit name)
 				     (curly
 				      ,@(let ((i 0))
 					  (loop while (< i (length params))  collect
@@ -455,7 +455,7 @@ entry return-values contains a list of return values"
 						     (incf i 2))
 						   (prog1
 						    (format nil "~a"
-							    (elt params i))
+							    (emit (elt params i)))
 						    (incf i)))))))))))
 		  (new
 		   ;; new arg
