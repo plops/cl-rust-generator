@@ -89,7 +89,7 @@ imgui-opengl-renderer = \"*\"
 					  glfw--WindowMode--Windowed)
 			   (expect (string "failed to create glfw window")))))
 		 (window.make_current)
-		 (window.set_key_polling true)
+		 (window.set_all_polling true)
 		 (gl--load_with
 		  (lambda (symbol)
 		    (return (dot window
@@ -137,6 +137,9 @@ imgui-opengl-renderer = \"*\"
 					;,(logprint "event" `(event))
 			  (println! (string "{:?}")
 				    event)
+			  (imgui_glfw.handle_event
+			   "&mut imgui"
+			   &event)
 			  (case event
 			    ((glfw--WindowEvent--Key
 			      Key--Escape

@@ -12,7 +12,7 @@ fn main() {
         .create_window(512, 512, "glfw win", glfw::WindowMode::Windowed)
         .expect("failed to create glfw window");
     window.make_current();
-    window.set_key_polling(true);
+    window.set_all_polling(true);
     gl::load_with(|symbol| {
         return window.get_proc_address(symbol);
     });
@@ -37,6 +37,7 @@ fn main() {
         glfw.poll_events();
         for (_, event) in glfw::flush_messages(&events) {
             println!("{:?}", event);
+            imgui_glfw.handle_event(&mut imgui, &event);
             match event {
                 glfw::WindowEvent::Key(Key::Escape, _, Action::Press, _) => {
                     window.set_should_close(true)
