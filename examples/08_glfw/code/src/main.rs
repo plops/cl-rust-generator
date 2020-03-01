@@ -1,7 +1,7 @@
 #[allow(unused_parens)]
 extern crate glfw;
 extern crate imgui;
-extern crate imgui_opengl_renderer;
+extern crate imgui_glfw_rs;
 use glfw::{Action, Context, Key};
 use std::ffi::CString;
 use std::os::raw::c_void;

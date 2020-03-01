@@ -8,8 +8,8 @@ authors = ["Martin Kielhorn <kielhorn.martin@gmail.com>"]
 
 [dependencies]
 #chrono = "*"
-glfw = "*"
-gl = "*"
-imgui-glfw-rs = "*"
-imgui = "*"
-imgui-opengl-renderer = "*"
+glfw = "0.31.0"
+gl = "0.14.0"
+imgui-glfw-rs = "0.4.1"
+imgui = "0.1.0"
+imgui-opengl-renderer = "0.5.0"
