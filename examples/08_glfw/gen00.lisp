@@ -10,6 +10,8 @@
   ;; only glfw pulls in 20 crates
   ;; chrono pulls in 9 more
   ;; gl pulls in 37-29=8
+  ;; https://github.com/michaelfairley/rust-imgui-opengl-renderer
+;; https://docs.rs/imgui-glfw-rs/0.4.1/imgui_glfw_rs/
   (defun logprint (msg &optional (rest nil))
     `(progn
        (println! (string ,(format nil "{}:{} ~a ~{~a~^ ~}"
@@ -52,6 +54,8 @@ authors = [\"Martin Kielhorn <kielhorn.martin@gmail.com>\"]
 #chrono = \"*\"
 glfw = \"*\"
 gl = \"*\"
+imgui-rs = \"*\"
+imgui_opengl_renderer = \"*\"
 "
 
 

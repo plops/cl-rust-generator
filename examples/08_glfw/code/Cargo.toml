@@ -10,3 +10,5 @@ authors = ["Martin Kielhorn <kielhorn.martin@gmail.com>"]
 #chrono = "*"
 glfw = "*"
 gl = "*"
+imgui-rs = "*"
+imgui_opengl_renderer = "*"
