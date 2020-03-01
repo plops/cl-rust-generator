@@ -24,17 +24,15 @@ fn main() {
         gl::ClearColor(0.10, 0.10, 0.10, 1.0);
     }
     let mut imgui = imgui::Context::create();
+    let mut imgui_glfw = imgui_glfw_rs::ImguiGLFW::new(&mut imgui, &mut window);
     imgui.set_ini_filename(None);
-    let renderer = imgui_opengl_renderer::Renderer::new(&mut imgui, |symbol| {
-        return window.get_proc_address(symbol);
-    });
     while (!(window.should_close())) {
         unsafe {
             gl::Clear(((gl::COLOR_BUFFER_BIT) | (gl::DEPTH_BUFFER_BIT)));
         }
-        let ui = imgui.frame();
+        let ui = imgui_glfw.frame(&mut window, &mut imgui);
         ui.show_demo_window(&mut true);
-        renderer.render(ui);
+        imgui_glfw.draw(ui, &mut window);
         window.swap_buffers();
         glfw.poll_events();
         for (_, event) in glfw::flush_messages(&events) {

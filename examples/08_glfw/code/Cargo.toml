@@ -10,6 +10,6 @@ authors = ["Martin Kielhorn <kielhorn.martin@gmail.com>"]
 #chrono = "*"
 glfw = "*"
 gl = "*"
-#imgui-glfw-rs = "*"
+imgui-glfw-rs = "*"
 imgui = "*"
 imgui-opengl-renderer = "*"

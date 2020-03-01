@@ -55,7 +55,7 @@ authors = [\"Martin Kielhorn <kielhorn.martin@gmail.com>\"]
 #chrono = \"*\"
 glfw = \"*\"
 gl = \"*\"
-#imgui-glfw-rs = \"*\"
+imgui-glfw-rs = \"*\"
 imgui = \"*\"
 imgui-opengl-renderer = \"*\"
 "
@@ -105,46 +105,46 @@ imgui-opengl-renderer = \"*\"
 			  (gl--DepthFunc gl--LESS)
 			  (gl--ClearColor .1s0 .1s0 .1s0 1s0)))
 		 (let* ((imgui (imgui--Context--create))
-			#+nil (imgui_glfw (imgui_glfw_rs--ImguiGLFW--new
+		       (imgui_glfw (imgui_glfw_rs--ImguiGLFW--new
 					   "&mut imgui"
 					   "&mut window")))
 		   (imgui.set_ini_filename None)
-		   (let ((renderer (imgui_opengl_renderer--Renderer--new
-				    "&mut imgui"
-				    (lambda (symbol)
-				      (return (dot  window
-						    (get_proc_address symbol))
-					      )
+		   #+nil (let ((renderer (imgui_opengl_renderer--Renderer--new
+				"&mut imgui"
+				(lambda (symbol)
+				  (return (dot  window
+						(get_proc_address symbol))
+					  )
 				     
-		    ))))
-		    (while (not (window.should_close))
-		      (space unsafe
-			     (progn
-			       (gl--Clear
-				(logior gl--COLOR_BUFFER_BIT
-					gl--DEPTH_BUFFER_BIT))))
-		      (let ((ui (imgui.frame)))
-			(ui.show_demo_window "&mut true")
+				  )))))
+		   (while (not (window.should_close))
+		     (space unsafe
+			    (progn
+			      (gl--Clear
+			       (logior gl--COLOR_BUFFER_BIT
+				       gl--DEPTH_BUFFER_BIT))))
+		     #+nil(let ((ui (imgui.frame)))
+		       (ui.show_demo_window "&mut true")
 		       (renderer.render ui))
-		      #+nil (let ((ui (imgui_glfw.frame "&mut window"
-						  "&mut imgui")))
-			(ui.show_demo_window "&mut true")
-			(imgui_glfw.draw ui "&mut window"))
-		      (window.swap_buffers)
-		      (glfw.poll_events)
-		      (for ((values _ event)
-			    (glfw--flush_messages &events))
+		     (let ((ui (imgui_glfw.frame "&mut window"
+						       "&mut imgui")))
+			     (ui.show_demo_window "&mut true")
+			     (imgui_glfw.draw ui "&mut window"))
+		     (window.swap_buffers)
+		     (glfw.poll_events)
+		     (for ((values _ event)
+			   (glfw--flush_messages &events))
 					;,(logprint "event" `(event))
-			   (println! (string "{:?}")
-				     event)
-			   (case event
-			     ((glfw--WindowEvent--Key
-			       Key--Escape
-			       _
-			       Action--Press
-			       _)
-			      (window.set_should_close true))
-			     (t "{}")))))))))))))
+			  (println! (string "{:?}")
+				    event)
+			  (case event
+			    ((glfw--WindowEvent--Key
+			      Key--Escape
+			      _
+			      Action--Press
+			      _)
+			     (window.set_should_close true))
+			    (t "{}"))))))))))))
 
 
   (loop for e in (reverse *module*) and i from 0 do
