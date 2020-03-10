@@ -11,10 +11,10 @@ crate-lib = ["cdylib"]
 crate-type = ["cdylib","rlib"]
 
 [dependencies]
-wasm-bindgen = "0.2"
+wasm-bindgen = "*" #.2
 
 [dependencies.web-sys]
-version = "0.3"
+version = "*" #.3
 features = ["Attr",
 "CanvasRenderingContext2d",
 "Document",

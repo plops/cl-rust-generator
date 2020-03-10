@@ -3,10 +3,10 @@
 
 (in-package :cl-rust-generator)
 ;; https://dev.to/deciduously/reactive-canvas-with-rust-webassembly-and-web-sys-2hg2
-;; wasm-pack build
-;; npm init wasm-app www
-;; npm install
-;; npm run startx
+;; cd code; wasm-pack build
+;; cd code; npm init wasm-app www
+;; cd code/www; npm install
+;; cd code/www; npm run start
 (progn
   (defparameter *source-dir* #P"examples/09_wasm/code/src/")
   
@@ -53,10 +53,10 @@ crate-lib = [\"cdylib\"]
 crate-type = [\"cdylib\",\"rlib\"]
 
 [dependencies]
-wasm-bindgen = \"0.2\"
+wasm-bindgen = \"*\" #.2
 
 [dependencies.web-sys]
-version = \"0.3\"
+version = \"*\" #.3
 features = [\"Attr\",
 \"CanvasRenderingContext2d\",
 \"Document\",
@@ -70,10 +70,39 @@ features = [\"Attr\",
 \"Text\",
 \"Window\"]
 
-"
-
-
-	    ))
+"))
+  (defun append-attrs (doc el &rest attribs)
+    "append-attrs document label (for size)"
+    `(do0
+      ,@(loop for (key val) in attribs collect
+	   `(progn
+	      (let ((attr (? (dot ,doc
+				  (create_attribute (string ,key))))))
+		(dot attr
+		     (set_value (string ,val)))
+		(? (dot ,el (set_attribute_node &attr))))))))
+  (defun append-text-child (doc el text)
+    `(progn
+	(let ((text (dot ,doc
+			 (create_text_node (string ,text)))))
+	  
+	  (? (dot ,el (append_child &text))))))
+  (defun create-element-attrs (doc type &rest attribs)
+    `(progn
+	(let ((el (? (dot ,doc
+			(create_element (string ,type))))))
+	  ,(append-attrs doc 'el attribs)
+	  (return el))))
+  (defun append-element-attrs (doc parent type &rest attribs)
+    `(progn
+	(let ((el ,(create-element-attrs doc type attribs)))
+	  (? (dot ,parent ,(append-child '&el))))))
+  (defun append-text-element-attrs (doc parent type text &rest attribs)
+    `(progn
+       (let ((el ,(create-element-attrs doc type attribs)))
+	 ,(append-text-child doc 'el text)
+	  (? (dot ,parent ,(append-child '&el))))))
+  
   (define-module
       `(lib
 	(do0
