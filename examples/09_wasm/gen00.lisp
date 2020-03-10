@@ -96,12 +96,12 @@ features = [\"Attr\",
   (defun append-element-attrs (doc parent type &rest attribs)
     `(progn
 	(let ((el ,(create-element-attrs doc type attribs)))
-	  (? (dot ,parent ,(append-child '&el))))))
+	  (? (dot ,parent (append_child &el))))))
   (defun append-text-element-attrs (doc parent type text &rest attribs)
     `(progn
        (let ((el ,(create-element-attrs doc type attribs)))
 	 ,(append-text-child doc 'el text)
-	  (? (dot ,parent ,(append-child '&el))))))
+	  (? (dot ,parent (append_child &el))))))
   
   (define-module
       `(lib
@@ -147,7 +147,9 @@ features = [\"Attr\",
 	 (defun mount_app ("document: &web_sys::Document"
 			   "body: &web_sys::HtmlElement")
 	   (declare (values "Result<()>"))
-	   (? (mount_title &document &body))
+	   ,(append-text-element-attrs
+	     'document 'body "h1" "DOT")
+	   ;(? (mount_title &document &body))
 	   (return (Ok "()")))
 	 (defun mount_title ("document: &web_sys::Document"
 			     "body: &web_sys::HtmlElement")
