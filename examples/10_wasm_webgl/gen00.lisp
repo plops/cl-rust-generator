@@ -58,13 +58,13 @@ js-sys = \"*\"
 
 [dependencies.web-sys]
 version = \"*\" #.3
-features = [~{\"~a\"~^,~}]
+features = [~{'~a'~^,~}]
 "
-	    `(Document Element HtmlCanvasElement
-		       WebGLBuffer
-		       WebGLRenderingContext
-		       WebGLProgram
-		       WebGLShader
+	    `(Document Document	Element HtmlCanvasElement
+		       WebGlBuffer
+		       WebGlRenderingContext
+		       WebGlProgram
+		       WebGlShader
 		       Window)))
   
   (define-module
@@ -72,9 +72,9 @@ features = [~{\"~a\"~^,~}]
 	(do0
 	 (use (wasm_bindgen prelude *)
 	      (wasm_bindgen JsCast)
-	      (web_sys (curly WebGLProgram
+	      (web_sys (curly WebGlProgram
 			      WebGlRenderingContext
-			      WebGLShader)))
+			      WebGlShader)))
 	 
 	 "type Result<T> = std::result::Result<T,JsValue>;"
 	 (do0
@@ -88,7 +88,7 @@ features = [~{\"~a\"~^,~}]
 			 (canvas_el (dot document
 				      (get_element_by_id (string "canvas"))
 				      (unwrap)))
-			 (canvas (? (dot canvas
+			 (canvas (? (dot canvas_el
 					 ("dyn_into::<web_sys::HtmlCanvasElement>"))))
 			 (context (dot canvas
 				       (? (get_context (string "webgl")))

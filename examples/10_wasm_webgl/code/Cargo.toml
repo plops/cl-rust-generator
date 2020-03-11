@@ -16,4 +16,4 @@ js-sys = "*"
 
 [dependencies.web-sys]
 version = "*" #.3
-features = ["Document","Element","HtmlCanvasElement","WebGLBuffer","WebGLRenderingContext","WebGLProgram","WebGLShader","Window"]
+features = ['Document','Document','Element','HtmlCanvasElement','WebGlBuffer','WebGlRenderingContext','WebGlProgram','WebGlShader','Window']
