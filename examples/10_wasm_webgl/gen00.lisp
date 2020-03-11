@@ -137,7 +137,7 @@ features = [~{'~a'~^,~}]
 								(string "unknown error creating program object"))))))))))))))
 	 
 	 (do0
-	  "#[wasm_bindgen]"
+	  "#[wasm_bindgen(start)]"
 	  (space pub
 		 (defun start ()
 		   (declare (values "Result<(),JsValue>"))
@@ -173,10 +173,10 @@ void main(){
 				    canvas))
 		     (context.use_program (Some &program))
 		     ,(let ((l `(-.7 -.7
-					    0 .7
-					    -.7 0
-					    0 .7
-					    0)))
+				     0 .7
+				     -.7 0
+				     0 .7
+				     0)))
 			`(let ((vertices (list ,@(mapcar (lambda (x) (* 1s0 x))
 							  l)))
 			       (buffer (dot context
@@ -203,12 +203,8 @@ void main(){
 			    0
 			    (coerce (/ (vertices.len)
 				       3)
-				    i32))
-			   ))
-		     (return (Ok "()"))))))
-
-
-	 )))
+				    i32))))
+		     (return (Ok "()")))))))))
  
 
   (loop for e in (reverse *module*) and i from 0 do

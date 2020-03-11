@@ -47,7 +47,7 @@ pub fn link_program(
         }));
     };
 }
-#[wasm_bindgen]
+#[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
     let document = web_sys::window().unwrap().document().unwrap();
     let canvas_el = document.get_element_by_id("canvas").unwrap();
