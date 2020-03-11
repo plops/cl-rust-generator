@@ -70,7 +70,7 @@ void main(){
     )?;
     let frag_shader = compile_shader(
         &context,
-        WebGlRenderingContext::VERTEX_SHADER,
+        WebGlRenderingContext::FRAGMENT_SHADER,
         r#"void main(){
   gl_FragColor = vec4(1.0,1.0,1.0,1.0);
 }
