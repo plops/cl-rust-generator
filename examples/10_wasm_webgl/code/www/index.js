@@ -1,3 +1,3 @@
 import * as wasm from "code";
 
-wasm.start();
+wasm.run();

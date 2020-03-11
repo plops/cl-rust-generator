@@ -9,6 +9,8 @@
 ;; cd code/www; npm run start
 
 ;; https://rustwasm.github.io/2018/06/25/vision-for-rust-and-wasm.html
+;; cargo install twiggy
+;; twiggy top target/wasm32-unknown-unknown/release/code.wasm
 (progn
   (defparameter *source-dir* #P"examples/10_wasm_webgl/code/src/")
   
@@ -57,6 +59,7 @@ crate-type = [\"cdylib\",\"rlib\"]
 [dependencies]
 wasm-bindgen = \"*\" #.2
 js-sys = \"*\"
+console_error_panic_hook = \"*\"
 
 [dependencies.web-sys]
 version = \"*\" #.3
@@ -72,11 +75,13 @@ features = [~{'~a'~^,~}]
   (define-module
       `(lib
 	(do0
+	 "extern crate console_error_panic_hook;"
 	 (use (wasm_bindgen prelude *)
 	      (wasm_bindgen JsCast)
 	      (web_sys (curly WebGlProgram
 			      WebGlRenderingContext
-			      WebGlShader)))
+			      WebGlShader))
+	      (std panic))
 	 
 	 ;"type Result<T> = std::result::Result<T,JsValue>;"
 
@@ -139,10 +144,13 @@ features = [~{'~a'~^,~}]
 								(string "unknown error creating program object"))))))))))))))
 	 
 	 (do0
-	  "#[wasm_bindgen(start)]"
+	  "#[wasm_bindgen]"
 	  (space pub
-		 (defun start ()
+		 (defun run ()
 		   (declare (values "Result<(),JsValue>"))
+		   (std--panic--set_hook
+		    (Box--new
+		     console_error_panic_hook--hook))
 		   (let ((document (dot (web_sys--window)
 					(unwrap)
 					(document)

@@ -1,4 +1,6 @@
 #![allow(unused_parens)]
+extern crate console_error_panic_hook;
+use std::panic;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{WebGlProgram, WebGlRenderingContext, WebGlShader};
@@ -47,8 +49,9 @@ pub fn link_program(
         }));
     };
 }
-#[wasm_bindgen(start)]
-pub fn start() -> Result<(), JsValue> {
+#[wasm_bindgen]
+pub fn run() -> Result<(), JsValue> {
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     let document = web_sys::window().unwrap().document().unwrap();
     let canvas_el = document.get_element_by_id("canvas").unwrap();
     let canvas: web_sys::HtmlCanvasElement = canvas_el.dyn_into::<web_sys::HtmlCanvasElement>()?;

@@ -13,6 +13,7 @@ crate-type = ["cdylib","rlib"]
 [dependencies]
 wasm-bindgen = "*" #.2
 js-sys = "*"
+console_error_panic_hook = "*"
 
 [dependencies.web-sys]
 version = "*" #.3
