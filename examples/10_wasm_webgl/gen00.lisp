@@ -76,12 +76,41 @@ features = [~{'~a'~^,~}]
 			      WebGlRenderingContext
 			      WebGlShader)))
 	 
-	 "type Result<T> = std::result::Result<T,JsValue>;"
+	 ;"type Result<T> = std::result::Result<T,JsValue>;"
+
+	 (do0
+	  (space pub
+		 (defun compile_shader ("context: &WebGlRenderingContext"
+					"shader_type: u32"
+					"source: &str")
+		   (declare (values "Result<WebGlShader,String>"))
+		   (let ((shader (dot context
+				      (create_shader shader_type)
+				      (? (ok_or_else (lambda ()
+						       (return (String--from
+							 (string "unable to create shader object")))))))))
+		     (context.shader_source &shader source)
+		     (context.compile_shader &shader)
+		     (if (dot context
+			      (get_shader_parameter &shader
+						    WebGlRenderingContext--COMPILE_STATUS)
+			      (as_bool)
+			      (unwrap_or false))
+			 (do0
+			  (return (Ok shader)))
+			 (do0
+			  (return 
+			   (Err (dot context
+				     (get_shader_info_log &shader)
+				     (unwrap_or_else (lambda ()
+						       (return (String--from
+								(string "unknown error creating shader"))))))))))))))
+	 
 	 (do0
 	  "#[wasm_bindgen]"
 	  (space pub
 		 (defun start ()
-		   (declare (values "Result<()>"))
+		   (declare (values "Result<(),JsValue>"))
 		   (let ((document (dot (web_sys--window)
 					(unwrap)
 					(document)
@@ -95,7 +124,16 @@ features = [~{'~a'~^,~}]
 				       (? (get_context (string "webgl")))
 				       (unwrap)
 				       (?
-					("dyn_into::<WebGlRenderingContext>")))))
+					("dyn_into::<WebGlRenderingContext>"))))
+			 (vert_shader (? (compile_shader &context
+						       WebGlRenderingContext--VERTEX_SHADER
+						       (string# "attribute vec4 position;
+void main(){
+  gl_Position = position;
+}
+")))))
+		     (declare (type "web_sys::HtmlCanvasElement"
+				    canvas))
 		     (return (Ok "()"))))))
 
 
