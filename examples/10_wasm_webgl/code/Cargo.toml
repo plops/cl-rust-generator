@@ -16,15 +16,4 @@ js-sys = "*"
 
 [dependencies.web-sys]
 version = "*" #.3
-features = ["Attr",
-"CanvasRenderingContext2d",
-"Document",
-"Element",
-"Event",
-"EventTarget",
-"HtmlCanvasElement",
-"HtmlElement",
-"HtmlInputElement",
-"Node",
-"Text",
-"Window"]
+features = ["Document","Element","HtmlCanvasElement","WebGLBuffer","WebGLRenderingContext","WebGLProgram","WebGLShader","Window"]

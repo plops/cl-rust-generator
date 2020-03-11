@@ -58,18 +58,7 @@ js-sys = \"*\"
 
 [dependencies.web-sys]
 version = \"*\" #.3
-features = [\"Attr\",
-\"CanvasRenderingContext2d\",
-\"Document\",
-\"Element\",
-\"Event\",
-\"EventTarget\",
-\"HtmlCanvasElement\",
-\"HtmlElement\",
-\"HtmlInputElement\",
-\"Node\",
-\"Text\",
-\"Window\"]
+features = [~{\"~a\"~^,~}]
 "
 	    `(Document Element HtmlCanvasElement
 		       WebGLBuffer

@@ -147,9 +147,9 @@ features = [\"Attr\",
 	 (defun mount_app ("document: &web_sys::Document"
 			   "body: &web_sys::HtmlElement")
 	   (declare (values "Result<()>"))
-	   ,(append-text-element-attrs
+	   #+nil ,(append-text-element-attrs
 	     'document 'body "h1" "DOT")
-	   ;(? (mount_title &document &body))
+	   (? (mount_title &document &body))
 	   (return (Ok "()")))
 	 (defun mount_title ("document: &web_sys::Document"
 			     "body: &web_sys::HtmlElement")

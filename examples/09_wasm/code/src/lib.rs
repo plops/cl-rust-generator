@@ -14,22 +14,7 @@ pub fn run() -> Result<()> {
     return Ok(());
 }
 fn mount_app(document: &web_sys::Document, body: &web_sys::HtmlElement) -> Result<()> {
-    {
-        let el = {
-            let el = document.create_element("h1")?;
-            {
-                let attr = document.create_attribute("nil")?;
-                attr.set_value("nil");
-                el.set_attribute_node(&attr)?;
-            }
-            return el;
-        };
-        {
-            let text = document.create_text_node("DOT");
-            el.append_child(&text)?;
-        }
-        body.append_child(&el)?;
-    }
+    mount_title(&document, &body)?;
     return Ok(());
 }
 fn mount_title(document: &web_sys::Document, body: &web_sys::HtmlElement) -> Result<()> {
