@@ -1,0 +1,30 @@
+[package]
+name = "code"
+version = "0.1.0"
+authors = ["Martin Kielhorn <kielhorn.martin@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-lib = ["cdylib"]
+crate-type = ["cdylib","rlib"]
+
+[dependencies]
+wasm-bindgen = "*" #.2
+js-sys = "*"
+
+[dependencies.web-sys]
+version = "*" #.3
+features = ["Attr",
+"CanvasRenderingContext2d",
+"Document",
+"Element",
+"Event",
+"EventTarget",
+"HtmlCanvasElement",
+"HtmlElement",
+"HtmlInputElement",
+"Node",
+"Text",
+"Window"]
