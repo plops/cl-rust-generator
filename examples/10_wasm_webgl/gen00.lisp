@@ -78,6 +78,7 @@ features = [~{'~a'~^,~}]
 	 
 	 "type Result<T> = std::result::Result<T,JsValue>;"
 	 (do0
+	  "#[wasm_bindgen]"
 	  (space pub
 		 (defun start ()
 		   (declare (values "Result<()>"))
