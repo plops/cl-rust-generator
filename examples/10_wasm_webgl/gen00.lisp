@@ -7,6 +7,8 @@
 ;; cd code; npm init wasm-app www
 ;; cd code/www; npm install
 ;; cd code/www; npm run start
+
+;; https://rustwasm.github.io/2018/06/25/vision-for-rust-and-wasm.html
 (progn
   (defparameter *source-dir* #P"examples/10_wasm_webgl/code/src/")
   
