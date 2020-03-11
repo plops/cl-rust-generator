@@ -105,6 +105,36 @@ features = [~{'~a'~^,~}]
 				     (unwrap_or_else (lambda ()
 						       (return (String--from
 								(string "unknown error creating shader"))))))))))))))
+	 (do0
+	  (space pub
+		 (defun link_program ("context: &WebGlRenderingContext"
+				      "vert_shader: &WebGlShader"
+				      "frag_shader: &WebGlShader"
+				      )
+		   (declare (values "Result<WebGlProgram,String>"))
+		   (let ((program (dot context
+				       (create_program)
+				       (? (ok_or_else (lambda ()
+							(return (String--from
+								 (string "unable to create shader object")))))))))
+
+		     (context.attach_shader &program vert_shader)
+		     (context.attach_shader &program frag_shader)
+		     (context.link_program &program)
+		     (if (dot context
+			      (get_program_parameter &program
+						     WebGlRenderingContext--LINK_STATUS)
+			      (as_bool)
+			      (unwrap_or false))
+			 (do0
+			  (return (Ok program)))
+			 (do0
+			  (return 
+			   (Err (dot context
+				     (get_program_info_log &program)
+				     (unwrap_or_else (lambda ()
+						       (return (String--from
+								(string "unknown error creating program object"))))))))))))))
 	 
 	 (do0
 	  "#[wasm_bindgen]"
@@ -131,9 +161,17 @@ features = [~{'~a'~^,~}]
 void main(){
   gl_Position = position;
 }
-")))))
+"))))
+			 (frag_shader (? (compile_shader &context
+						       WebGlRenderingContext--VERTEX_SHADER
+						       (string# "void main(){
+  gl_FragColor = vec4(1.0,1.0,1.0,1.0);
+}
+"))))
+			 (program (? (link_program &context &vert_shader &frag_shader))))
 		     (declare (type "web_sys::HtmlCanvasElement"
 				    canvas))
+		     (context.use_program (Some &program))
 		     (return (Ok "()"))))))
 
 
