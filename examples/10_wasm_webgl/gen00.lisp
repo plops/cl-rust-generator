@@ -172,6 +172,39 @@ void main(){
 		     (declare (type "web_sys::HtmlCanvasElement"
 				    canvas))
 		     (context.use_program (Some &program))
+		     ,(let ((l `(-.7 -.7
+					    0 .7
+					    -.7 0
+					    0 .7
+					    0)))
+			`(let ((vertices (list ,@(mapcar (lambda (x) (* 1s0 x))
+							  l)))
+			       (buffer (dot context
+					    (create_buffer)
+					    (? (ok_or (string "failed to create buffer"))))))
+			   (declare (type ,(format nil "[f32;~a]" (length l))
+					  vertices))
+			   (context.bind_buffer WebGlRenderingContext--ARRAY_BUFFER (Some &buffer))
+			   "// don't do memory allocations until view is dropped"
+			   (space unsafe
+				  (progn
+				    (let ((vert_array (js_sys--Float32Array--view &vertices)))
+				      (context.buffer_data_with_array_buffer_view
+				       WebGlRenderingContext--ARRAY_BUFFER
+				       &vert_array
+				       WebGlRenderingContext--STATIC_DRAW))))
+			   (context.vertex_attrib_pointer_with_i32
+			    0 3 WebGlRenderingContext--FLOAT false 0 0)
+			   (context.enable_vertex_attrib_array 0)
+			   (context.clear_color 0s0 0s0 0s0 1s0)
+			   (context.clear WebGlRenderingContext--COLOR_BUFFER_BIT)
+			   (context.draw_arrays
+			    WebGlRenderingContext--TRIANGLES
+			    0
+			    (coerce (/ (vertices.len)
+				       3)
+				    i32))
+			   ))
 		     (return (Ok "()"))))))
 
 
@@ -184,6 +217,6 @@ void main(){
 						      (merge-pathnames (format nil "~a.rs" name)
 								       *source-dir*))
 		       `(do0
-			 "#[allow(unused_parens)]"
+			 "#![allow(unused_parens)]"
 					;(use (chrono (curly DateTime Utc)))
 			 ,code)))))
