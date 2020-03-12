@@ -64,7 +64,7 @@ rustacuda_derive = \"*\"
 	 
 	 (defun main ()
 	   (declare (values "Result<(),Box<dyn Error>>"))
-	   ((rustacuda--init (CudaFlags--empty)) ?)
+	   (? (rustacuda--init (CudaFlags--empty)))
 	   (let ((device (? (Device--get_device 0)))
 		 (context (? (Context--create_and_push
 			      (logior
@@ -78,7 +78,8 @@ rustacuda_derive = \"*\"
 		 )
 	     (let* ((x (? (DeviceBox--new &10.0f32)))
 		    (y (? (DeviceBox--new &20.0f32)))
-		    (result (? (DeviceBox--new &0.0f32))))))))))
+		    (result (? (DeviceBox--new &0.0f32))))))
+	   (return (Ok "()"))))))
  
 
   (loop for e in (reverse *module*) and i from 0 do
