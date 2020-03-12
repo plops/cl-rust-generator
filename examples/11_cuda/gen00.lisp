@@ -66,19 +66,40 @@ rustacuda_derive = \"*\"
 	   (declare (values "Result<(),Box<dyn Error>>"))
 	   (? (rustacuda--init (CudaFlags--empty)))
 	   (let ((device (? (Device--get_device 0)))
-		 (context (? (Context--create_and_push
+		 (_ctx (? (Context--create_and_push
 			      (logior
 			       ContextFlags--MAP_HOST
 			       ContextFlags--SCHED_AUTO)
 			      device)))
-		 (module_data (CString--new
-			       (include_str! (string "add.ptx"))))
-		 (module (? (Module--load_from_string &module_data)))
+		 (ptx (? (CString--new
+			(include_str! (string "add.ptx")))))
+		 (module (? (Module--load_from_string &ptx)))
 		 (stream (? (Stream--new StreamFlags--NON_BLOCKING None)))
 		 )
-	     (let* ((x (? (DeviceBox--new &10.0f32)))
-		    (y (? (DeviceBox--new &20.0f32)))
-		    (result (? (DeviceBox--new &0.0f32))))))
+	     ,(let ((l `((in_x 1.0f32)
+						 (in_y 2.0f32)
+						 (out_1 0.0f32)
+						 (out_2 0.0f32))))
+		`(let* (,@(loop for (var val) in l
+			     collect
+			       `(,var (? (DeviceBuffer--from_slice
+					  ,(format nil "&[~a; 10]" val))))))
+		   (space unsafe
+			  (progn
+			    (let ((result (launch!
+					   ("module.sum<<<1,1,0,stream>>>"
+					    ,@(loop for (e f) in l collect
+						   `(dot ,e (as_device_ptr)))))))
+			      (? result))))
+		   (? (stream.synchronize))
+		   (let* ((out_host "[0.0f32; 20]"))
+		     (? (dot out_1 (copy_to "&mut out_host[0..10]")))
+		     (? (dot out_2 (copy_to "&mut out_host[10..20]"))))
+		   (for (x (out_host.iter))
+			(assert_eq!
+			 (coerce 3.0 u32)
+			 (coerce *x u32)))
+		 )))
 	   (return (Ok "()"))))))
  
 
