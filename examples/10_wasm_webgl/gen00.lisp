@@ -11,6 +11,9 @@
 ;; https://rustwasm.github.io/2018/06/25/vision-for-rust-and-wasm.html
 ;; cargo install twiggy
 ;; twiggy top target/wasm32-unknown-unknown/release/code.wasm
+
+;; interactivity
+;; https://rustwasm.github.io/book/game-of-life/hello-world.html
 (progn
   (defparameter *source-dir* #P"examples/10_wasm_webgl/code/src/")
   
