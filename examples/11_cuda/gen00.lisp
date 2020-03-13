@@ -8,12 +8,12 @@
   
   (defun logprint (msg &optional (rest nil))
     `(progn
-       (println! (string ,(format nil "{}:{} ~a ~{~a~^ ~}"
+       (println! (string ,(format nil "{} {}:{} ~a ~{~a~^ ~}"
 				  msg
 				  (loop for e in rest collect
 				       (format nil " ~a={}" (emit-rs :code e)))))
 
-		 ;;(Utc--now)
+		 (Utc--now)
 		 (file!)
 		 (line!)
 		 ,@(loop for e in rest collect
@@ -48,6 +48,7 @@ edition = \"2018\"
 rustacuda = \"*\"
 rustacuda_core = \"*\"
 rustacuda_derive = \"*\"
+chrono = \"*\"
 "))
   
   (define-module
@@ -60,11 +61,13 @@ rustacuda_derive = \"*\"
 	 "extern crate rustacuda_core;"
 	 (use (rustacuda prelude *)
 	      (std error Error)
-	      (std ffi CString))
+	      (std ffi CString)
+	      (chrono Utc))
 	 
 	 (defun main ()
 	   (declare (values "Result<(),Box<dyn Error>>"))
 	   (? (rustacuda--init (CudaFlags--empty)))
+	   ,(logprint "get device")
 	   (let ((device (? (Device--get_device 0)))
 		 (_ctx (? (Context--create_and_push
 			      (logior
@@ -76,30 +79,40 @@ rustacuda_derive = \"*\"
 		 (module (? (Module--load_from_string &ptx)))
 		 (stream (? (Stream--new StreamFlags--NON_BLOCKING None)))
 		 )
-	     ,(let ((l `((in_x 1.0f32)
-						 (in_y 2.0f32)
-						 (out_1 0.0f32)
-						 (out_2 0.0f32))))
-		`(let* (,@(loop for (var val) in l
-			     collect
-			       `(,var (? (DeviceBuffer--from_slice
-					  ,(format nil "&[~a; 10]" val))))))
-		   (space unsafe
-			  (progn
-			    (let ((result (launch!
-					   ("module.sum<<<1,1,0,stream>>>"
-					    ,@(loop for (e f) in l collect
-						   `(dot ,e (as_device_ptr)))))))
-			      (? result))))
-		   (? (stream.synchronize))
-		   (let* ((out_host "[0.0f32; 20]"))
-		     (? (dot out_1 (copy_to "&mut out_host[0..10]")))
-		     (? (dot out_2 (copy_to "&mut out_host[10..20]"))))
-		   (for (x (out_host.iter))
-			(assert_eq!
-			 (coerce 3.0 u32)
-			 (coerce *x u32)))
-		 )))
+	     
+	     (progn
+	       ,(logprint "allocate buffers")
+	       ,(let ((l `((in_x 1.0f32)
+			  (in_y 2.0f32)
+			  (out_1 0.0f32)
+			  (out_2 0.0f32))))
+		 `(let* (,@(loop for (var val) in l
+			      collect
+				`(,var (? (DeviceBuffer--from_slice
+					   ,(format nil "&[~a; 10]" val))))))
+		    #+nil ,@(loop for (var val) in l
+			 collect
+			   (logprint "" `((dot ,var capacity))))
+		    ,(logprint "launch")
+		    (space unsafe
+			   (progn
+			     (let ((result (launch!
+					    ("module.sum<<<1,1,0,stream>>>"
+					     ,@(loop for (e f) in l collect
+						    `(dot ,e (as_device_ptr)))))))
+			       (? result))))
+		    ,(logprint "sync")
+		    (? (stream.synchronize))
+		    (let* ((out_host "[0.0f32; 20]"))
+		      (? (dot out_1 (copy_to "&mut out_host[0..10]")))
+		      (? (dot out_2 (copy_to "&mut out_host[10..20]"))))
+		    (for (x (out_host.iter))
+			 ,(logprint "" `(x))
+			 #+nil
+			 (assert_eq!
+			  (coerce 3.0 u32)
+			  (coerce *x u32)))
+		    ))))
 	   (return (Ok "()"))))))
  
 
