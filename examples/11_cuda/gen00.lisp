@@ -80,7 +80,7 @@ chrono = \"*\"
 		 (stream (? (Stream--new StreamFlags--NON_BLOCKING None)))
 		 )
 	     
-	     (progn
+	     (do0
 	       ,(logprint "allocate buffers")
 	       ,(let ((l `((in_x "1.0f32")
 			  (in_y "2.0f32")

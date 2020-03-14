@@ -22,32 +22,30 @@ fn main() -> Result<(), Box<dyn Error>> {
     let module = Module::load_from_string(&ptx)?;
     let stream = Stream::new(StreamFlags::NON_BLOCKING, None)?;
     {
+        println!("{} {}:{} allocate buffers ", Utc::now(), file!(), line!());
+    }
+    let mut in_x = DeviceBuffer::from_slice(&[1.0f32; 10])?;
+    let mut in_y = DeviceBuffer::from_slice(&[2.0f32; 10])?;
+    let mut out_1 = DeviceBuffer::from_slice(&[0.0f32; 10])?;
+    let mut out_2 = DeviceBuffer::from_slice(&[0.0f32; 10])?;
+    {
+        println!("{} {}:{} launch ", Utc::now(), file!(), line!());
+    }
+    unsafe {
+        let result = launch!(module.sum<<<1,1,0,stream>>>(in_x.as_device_ptr(), in_y.as_device_ptr(), out_1.as_device_ptr(), out_2.as_device_ptr()));
+        result?;
+    }
+    {
+        println!("{} {}:{} sync ", Utc::now(), file!(), line!());
+    }
+    stream.synchronize()?;
+    let mut out_host = [0.0f32; 20];
+    out_1.copy_to(&mut out_host[0..10])?;
+    out_2.copy_to(&mut out_host[10..20])?;
+    for x in out_host.iter() {
         {
-            println!("{} {}:{} allocate buffers ", Utc::now(), file!(), line!());
+            println!("{} {}:{}   x={}", Utc::now(), file!(), line!(), x);
         }
-        let mut in_x = DeviceBuffer::from_slice(&[1.0f32; 10])?;
-        let mut in_y = DeviceBuffer::from_slice(&[2.0f32; 10])?;
-        let mut out_1 = DeviceBuffer::from_slice(&[0.0f32; 10])?;
-        let mut out_2 = DeviceBuffer::from_slice(&[0.0f32; 10])?;
-        {
-            println!("{} {}:{} launch ", Utc::now(), file!(), line!());
-        }
-        unsafe {
-            let result = launch!(module.sum<<<1,1,0,stream>>>(in_x.as_device_ptr(), in_y.as_device_ptr(), out_1.as_device_ptr(), out_2.as_device_ptr()));
-            result?;
-        }
-        {
-            println!("{} {}:{} sync ", Utc::now(), file!(), line!());
-        }
-        stream.synchronize()?;
-        let mut out_host = [0.0f32; 20];
-        out_1.copy_to(&mut out_host[0..10])?;
-        out_2.copy_to(&mut out_host[10..20])?;
-        for x in out_host.iter() {
-            {
-                println!("{} {}:{}   x={}", Utc::now(), file!(), line!(), x);
-            }
-        }
-    };
+    }
     return Ok(());
 }
