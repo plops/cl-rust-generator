@@ -25,10 +25,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         {
             println!("{} {}:{} allocate buffers ", Utc::now(), file!(), line!());
         }
-        let mut in_x = DeviceBuffer::from_slice(&[1.0e32; 10])?;
-        let mut in_y = DeviceBuffer::from_slice(&[2.0e32; 10])?;
-        let mut out_1 = DeviceBuffer::from_slice(&[0.0; 10])?;
-        let mut out_2 = DeviceBuffer::from_slice(&[0.0; 10])?;
+        let mut in_x = DeviceBuffer::from_slice(&[1.0f32; 10])?;
+        let mut in_y = DeviceBuffer::from_slice(&[2.0f32; 10])?;
+        let mut out_1 = DeviceBuffer::from_slice(&[0.0f32; 10])?;
+        let mut out_2 = DeviceBuffer::from_slice(&[0.0f32; 10])?;
         {
             println!("{} {}:{} launch ", Utc::now(), file!(), line!());
         }

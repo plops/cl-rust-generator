@@ -82,10 +82,10 @@ chrono = \"*\"
 	     
 	     (progn
 	       ,(logprint "allocate buffers")
-	       ,(let ((l `((in_x 1.0f32)
-			  (in_y 2.0f32)
-			  (out_1 0.0f32)
-			  (out_2 0.0f32))))
+	       ,(let ((l `((in_x "1.0f32")
+			  (in_y "2.0f32")
+			  (out_1 "0.0f32")
+			  (out_2 "0.0f32"))))
 		 `(let* (,@(loop for (var val) in l
 			      collect
 				`(,var (? (DeviceBuffer--from_slice
