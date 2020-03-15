@@ -83,20 +83,21 @@ winit = \"*\"
 	      (std time Instant))
 	 (defun main ()
 	   (let ((adapter (dot (wgpu--Adapter--request
-			    (ref
+				(ref
 			     (make-instance
 			      wgpu--RequestAdapterOptions
 			      :power_preference wgpu--PowerPreference--Default
-			       :backends wgpu--BackendBit--PRIMARY))
-			   
-			    )
+			      :backends wgpu--BackendBit--PRIMARY)))
 			       (unwrap)))
-		 #+nil (instance (wgpu--Instance--new))
-		 #+nil (adapter (instance.get_adapter
-			   (ref
-			    (make-instance
-			     wgpu--AdapterDescriptor
-			     :power_preference wgpu--PowerPreference--HighPerformance)))))
+		 ((values device queue)
+		  (adapter.request_device
+		   (ref
+		    (make-instance
+		     wgpu--DeviceDescriptor
+		     :extensions (make-instance
+				  wgpu--Extensions
+				  :anisotropic_filtering false)
+		     :limits (wgpu--Limits--default))))))
 	     )
 	   ))))
  

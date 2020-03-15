@@ -24,15 +24,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     {
         println!("{} {}:{} allocate buffers ", Utc::now(), file!(), line!());
     }
-    let mut in_x = DeviceBuffer::from_slice(&[1.0f32; 10]).unwrap();
-    let mut in_y = DeviceBuffer::from_slice(&[2.0f32; 10]).unwrap();
-    let mut out_1 = DeviceBuffer::from_slice(&[0.0f32; 10]).unwrap();
-    let mut out_2 = DeviceBuffer::from_slice(&[0.0f32; 10]).unwrap();
+    let mut in_x = DeviceBuffer::from_slice(&[1.0f32; 10])?;
+    let mut in_y = DeviceBuffer::from_slice(&[2.0f32; 10])?;
+    let mut out_1 = DeviceBuffer::from_slice(&[0.0f32; 10])?;
+    let mut out_2 = DeviceBuffer::from_slice(&[0.0f32; 10])?;
     {
         println!("{} {}:{} launch ", Utc::now(), file!(), line!());
     }
     unsafe {
-        let result = launch!(module.sum<<<1,1,0,stream>>>(in_x.as_device_ptr(), in_y.as_device_ptr(), out_1.as_device_ptr(), out_2.as_device_ptr()));
+        let result = launch!(module.sum<<<1,1,0,stream>>>(in_x.as_device_ptr(), in_y.as_device_ptr(), out_1.as_device_ptr(), out_1.len()));
         result?;
     }
     {

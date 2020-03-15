@@ -88,9 +88,9 @@ chrono = \"*\"
 			  (out_2 "0.0f32"))))
 		 `(let* (,@(loop for (var val) in l
 			      collect
-				`(,var (dot (DeviceBuffer--from_slice
+				`(,var (? (DeviceBuffer--from_slice
 					     ,(format nil "&[~a; 10]" val))
-					    (unwrap)))))
+					    ))))
 		    #+nil ,@(loop for (var val) in l
 			 collect
 			   (logprint "" `((dot ,var capacity))))
@@ -99,8 +99,9 @@ chrono = \"*\"
 			   (progn
 			     (let ((result (launch!
 					    ("module.sum<<<1,1,0,stream>>>"
-					     ,@(loop for (e f) in l collect
-						    `(dot ,e (as_device_ptr)))))))
+					     ,@(loop for (e f) in (butlast l) collect
+						    `(dot ,e (as_device_ptr)))
+					     (out_1.len)))))
 			       (? result))))
 		    ,(logprint "sync")
 		    (? (stream.synchronize))
