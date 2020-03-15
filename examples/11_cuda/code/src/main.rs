@@ -24,10 +24,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     {
         println!("{} {}:{} allocate buffers ", Utc::now(), file!(), line!());
     }
-    let mut in_x = DeviceBuffer::from_slice(&[1.0f32; 10])?;
-    let mut in_y = DeviceBuffer::from_slice(&[2.0f32; 10])?;
-    let mut out_1 = DeviceBuffer::from_slice(&[0.0f32; 10])?;
-    let mut out_2 = DeviceBuffer::from_slice(&[0.0f32; 10])?;
+    let mut in_x = DeviceBuffer::from_slice(&[1.0f32; 10]).unwrap();
+    let mut in_y = DeviceBuffer::from_slice(&[2.0f32; 10]).unwrap();
+    let mut out_1 = DeviceBuffer::from_slice(&[0.0f32; 10]).unwrap();
+    let mut out_2 = DeviceBuffer::from_slice(&[0.0f32; 10]).unwrap();
     {
         println!("{} {}:{} launch ", Utc::now(), file!(), line!());
     }
@@ -39,6 +39,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("{} {}:{} sync ", Utc::now(), file!(), line!());
     }
     stream.synchronize()?;
+    DeviceBuffer::drop(in_x);
+    DeviceBuffer::drop(in_y);
     let mut out_host = [0.0f32; 20];
     out_1.copy_to(&mut out_host[0..10])?;
     out_2.copy_to(&mut out_host[10..20])?;

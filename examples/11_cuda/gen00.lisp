@@ -88,8 +88,9 @@ chrono = \"*\"
 			  (out_2 "0.0f32"))))
 		 `(let* (,@(loop for (var val) in l
 			      collect
-				`(,var (? (DeviceBuffer--from_slice
-					   ,(format nil "&[~a; 10]" val))))))
+				`(,var (dot (DeviceBuffer--from_slice
+					     ,(format nil "&[~a; 10]" val))
+					    (unwrap)))))
 		    #+nil ,@(loop for (var val) in l
 			 collect
 			   (logprint "" `((dot ,var capacity))))
@@ -103,6 +104,8 @@ chrono = \"*\"
 			       (? result))))
 		    ,(logprint "sync")
 		    (? (stream.synchronize))
+		    ,@(loop for (e f) in (subseq l 0 2) collect
+			   `(DeviceBuffer--drop ,e))
 		    (let* ((out_host "[0.0f32; 20]"))
 		      (? (dot out_1 (copy_to "&mut out_host[0..10]")))
 		      (? (dot out_2 (copy_to "&mut out_host[10..20]"))))

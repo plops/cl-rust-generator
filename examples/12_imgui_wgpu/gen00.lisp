@@ -48,9 +48,13 @@ edition = \"2018\"
 
 [dependencies]
 wgpu = \"*\"
-cgmath = \"*\"
-imgui = \"*\"
-imgui-winit-support = \"*\"
+#cgmath = \"*\"
+#imgui = \"*\"
+#imgui-winit-support = \"*\"
+#imgui-wgpu = \"*\"
+
+[dev-dependencies]
+winit = \"*\"
 "
 ))
   
@@ -70,6 +74,13 @@ imgui-winit-support = \"*\"
 	      (imgui_winit_support)
 	      (std time Instant))
 	 (defun main ()
+	   (let ((instance (wgpu--Instance--new))
+		 (adapter (instance.get_adapter
+			   (ref
+			    (make-instance
+			     wgpu--AdapterDescriptor
+			     :power_preference wgpu--PowerPreference--HighPerformance)))))
+	     )
 	   )
 	 )))
  

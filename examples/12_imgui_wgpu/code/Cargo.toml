@@ -9,6 +9,10 @@ edition = "2018"
 
 [dependencies]
 wgpu = "*"
-cgmath = "*"
-imgui = "*"
-imgui-winit-support = "*"
+#cgmath = "*"
+#imgui = "*"
+#imgui-winit-support = "*"
+#imgui-wgpu = "*"
+
+[dev-dependencies]
+winit = "*"

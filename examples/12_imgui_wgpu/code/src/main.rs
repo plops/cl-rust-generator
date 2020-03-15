@@ -7,4 +7,11 @@ use winit::{
     dpi::LogicalSize, ElementState, Event, EventsLoop, KeywordInput, VirtualKeyCode, WindowBuilder,
     WindowEvent,
 };
-fn main() {}
+fn main() {
+    let instance = wgpu::Instance::new();
+    let adapter = instance.get_adapter(
+        &(wgpu::AdapterDescriptor {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+        }),
+    );
+}
