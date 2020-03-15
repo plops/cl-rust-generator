@@ -3,7 +3,7 @@
 
 (in-package :cl-rust-generator)
 ;; https://github.com/unconed/imgui-wgpu-rs
-
+;; Building_WebGPU_with_Rust_-_Dzmitry_Malyshau_-_FOSDEM_20-Z1l91Y3_oyw
 (progn
   (defparameter *source-dir* #P"examples/12_imgui_wgpu/code/src/")
   
@@ -50,7 +50,7 @@ edition = \"2018\"
 wgpu = \"*\"
 #cgmath = \"*\"
 #imgui = \"*\"
-#imgui-winit-support = \"*\"
+##imgui-winit-support = \"*\"
 #imgui-wgpu = \"*\"
 
 [dev-dependencies]
@@ -61,6 +61,14 @@ winit = \"*\"
   (define-module
       `(main
 	(do0
+	 (use
+	  (wgpu)
+	  ;(imgui *)
+					;(imgui_wgpu Renderer)
+					;(imgui_winit_support)
+	  )
+	 #+nil
+	 
 	 (use (winit (curly WindowBuilder
 			    Event
 			    WindowEvent
@@ -74,15 +82,23 @@ winit = \"*\"
 	      (imgui_winit_support)
 	      (std time Instant))
 	 (defun main ()
-	   (let ((instance (wgpu--Instance--new))
-		 (adapter (instance.get_adapter
+	   (let ((adapter (dot (wgpu--Adapter--request
+			    (ref
+			     (make-instance
+			      wgpu--RequestAdapterOptions
+			      :power_preference wgpu--PowerPreference--Default
+			       :backends wgpu--BackendBit--PRIMARY))
+			   
+			    )
+			       (unwrap)))
+		 #+nil (instance (wgpu--Instance--new))
+		 #+nil (adapter (instance.get_adapter
 			   (ref
 			    (make-instance
 			     wgpu--AdapterDescriptor
 			     :power_preference wgpu--PowerPreference--HighPerformance)))))
 	     )
-	   )
-	 )))
+	   ))))
  
 
   (loop for e in (reverse *module*) and i from 0 do
