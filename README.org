@@ -56,6 +56,16 @@ the way i know it.
 
 
 
+** 09_wasm
+Simple wasm example
+** 10_wasm_webgl
+Wasm webgl example (only draws a triangle, no animation or event handling)
+** 11_cuda 
+Add two arrays with rustacuda
+** 12_imgui_wgpu (api has not stabilized)
+webgpu is suppossed to replace webgl in browser.
+apparently, firefox only supports compute right now. the api is not stable yet. 
+
 
 * Emacs config
 
