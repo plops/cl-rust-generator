@@ -71,10 +71,7 @@ void main(){
     let frag_shader = compile_shader(
         &context,
         WebGlRenderingContext::FRAGMENT_SHADER,
-        r#"void main(){
-  gl_FragColor = vec4(1.0,1.0,1.0,1.0);
-}
-"#,
+        include_str!("trace.frag"),
     )?;
     let program = link_program(&context, &vert_shader, &frag_shader)?;
     context.use_program(Some(&program));

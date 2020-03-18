@@ -1,7 +1,22 @@
 (eval-when (:compile-toplevel :execute :load-toplevel)
-  (ql:quickload "cl-rust-generator"))
+  (ql:quickload "cl-rust-generator")
+  (ql:quickload "cl-cpp-generator2"))
+
+
+(in-package :cl-cpp-generator2)
+
+(let ((name "trace.frag"))
+  (defparameter *source-dir* #P"examples/10_wasm_webgl/code/src/")
+ (write-source (asdf:system-relative-pathname 'cl-rust-generator
+					      (merge-pathnames (format nil "~a" name)
+							       *source-dir*))
+	       `(do0
+		 (defun main ()
+		   (setf gl_FragColor (vec4 .2s0 1s0 1s0 1s0))))))
 
 (in-package :cl-rust-generator)
+
+
 ;; https://rustwasm.github.io/wasm-bindgen/examples/webgl.html
 ;; cd code; wasm-pack build
 ;; cd code; npm init wasm-app www
@@ -181,7 +196,8 @@ void main(){
 "))))
 			 (frag_shader (? (compile_shader &context
 						       WebGlRenderingContext--FRAGMENT_SHADER
-						       (string# "void main(){
+						       (include_str! (string "trace.frag"))
+						       #+nil (string# "void main(){
   gl_FragColor = vec4(1.0,1.0,1.0,1.0);
 }
 "))))
