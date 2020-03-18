@@ -54,7 +54,7 @@ chrono = \"*\"
 
 	 
 	 (use
-	  (vulkano instance (curly Instance InstanceExtensions))
+	  ;(vulkano instance (curly Instance InstanceExtensions))
 	  (vulkano_win VkSurfaceBuild)
 	  ;(winit event_loop (curly EventsLoop WindowBuilder))
 	  (chrono Utc))
@@ -63,9 +63,30 @@ chrono = \"*\"
 	   ;(declare (values "Result<(),Box<dyn Error>>"))
 	   (let* (;(events_loops (EventsLoop--new))
 		  )
-	     (let ((extensions (vulkano_win--required_extensions))
-		   (instance (dot (Instance--new None &extensions None)
+	     (let (
+		   (extensions (vulkano_win--required_extensions))
+		   (instance (dot (vulkano--instance--Instance--new None &extensions None)
 				  (expect (string "failed to create Vulkan instance"))))
+		   (physical (dot (vulkano--instance--PhysicalDevice--enumerate &instance)
+				  (next)
+				  (expect (string "no device available"))))
+		   (queue_family (dot physical
+				      (queue_families)
+				      (find (lambda (&q)
+					      (return (q.supports_graphics))))
+				      (expect (string "couldnt find graphical queue family"))))
+		   ((values device "mut queues")
+		    (dot (vulkano--device--Device--new physical
+						       (ref (vulkano--device--Features--none))
+						       (ref (vulkano--device--DeviceExtensions--none))
+						       (dot (list (values queue_family 0.5))
+							    (iter)
+							    (cloned))
+						   )
+			 (expect (string "failed to create device"))))
+		   (queue (dot queues
+			       (next)
+			       (unwrap)))
 		   #+nil (surface (dot (WindowBuilder--new)
 				 (build_vk_surface
 				  &events_loop
