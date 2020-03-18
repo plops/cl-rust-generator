@@ -18,3 +18,11 @@ console_error_panic_hook = "*"
 [dependencies.web-sys]
 version = "*" #.3
 features = ['Document','Document','Element','HtmlCanvasElement','WebGlBuffer','WebGlRenderingContext','WebGlProgram','WebGlShader','Window']
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = ['-O']
+
+[package.metadata.wasm-pack.profile.dev.wasm-bindgen]
+debug-js-glue = true
+demangle-name-section = true
+dwarf-debug-info = true

@@ -12,13 +12,16 @@
 							       *source-dir*))
 	       `(do0
 		 (defun main ()
-		   (setf gl_FragColor (vec4 .2s0 1s0 1s0 1s0))))))
+		   #+nil (let ((uv (/ gl_FragCoord.xy
+				(vec2 512s0 512s0))))
+		     (declare (type vec2 uv)))
+		   (setf gl_FragColor (vec4 1s0 1s0 (+ .5 (* .5 (sin 1s0))) 1s0))))))
 
 (in-package :cl-rust-generator)
 
 
 ;; https://rustwasm.github.io/wasm-bindgen/examples/webgl.html
-;; cd code; wasm-pack build
+;; cd code; wasm-pack build --dev
 ;; cd code; npm init wasm-app www
 ;; cd code/www; npm install
 ;; cd code/www; npm run start
@@ -86,6 +89,14 @@ console_error_panic_hook = \"*\"
 [dependencies.web-sys]
 version = \"*\" #.3
 features = [~{'~a'~^,~}]
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = ['-O']
+
+[package.metadata.wasm-pack.profile.dev.wasm-bindgen]
+debug-js-glue = true
+demangle-name-section = true
+dwarf-debug-info = true
 "
 	    `(Document Document	Element HtmlCanvasElement
 		       WebGlBuffer
