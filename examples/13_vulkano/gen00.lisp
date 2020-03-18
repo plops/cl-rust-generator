@@ -42,6 +42,7 @@ version = \"0.1.0\"
 authors = [\"Martin Kielhorn <kielhorn.martin@gmail.com>\"]
 edition = \"2018\"
 [dependencies]
+vulkano = \"*\"
 vulkano-win = \"*\"
 winit = \"*\"
 chrono = \"*\"
@@ -52,23 +53,26 @@ chrono = \"*\"
 	(do0
 
 	 
-	 (use (vulkano_win VkSurfaceBuild)
-	      (winit (curly EventsLoop WindowBuilder))
-	      (chrono Utc))
+	 (use
+	  (vulkano instance (curly Instance InstanceExtensions))
+	  (vulkano_win VkSurfaceBuild)
+	  ;(winit event_loop (curly EventsLoop WindowBuilder))
+	  (chrono Utc))
 	 
 	 (defun main ()
-	   (declare (values "Result<(),Box<dyn Error>>"))
-	   (let* ((events_loop (EventsLoop--new))
+	   ;(declare (values "Result<(),Box<dyn Error>>"))
+	   (let* (;(events_loops (EventsLoop--new))
 		  )
 	     (let ((extensions (vulkano_win--required_extensions))
 		   (instance (dot (Instance--new None &extensions None)
 				  (expect (string "failed to create Vulkan instance"))))
-		   (surface (dot (WindowBuilder--new)
+		   #+nil (surface (dot (WindowBuilder--new)
 				 (build_vk_surface
 				  &events_loop
 				  (instance.clone))
 				 (unwrap))))))
-	   (return (Ok "()"))))))
+	   ;(return (Ok "()"))
+	   ))))
  
 
   (loop for e in (reverse *module*) and i from 0 do
