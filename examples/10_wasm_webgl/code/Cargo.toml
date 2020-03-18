@@ -20,7 +20,7 @@ version = "*" #.3
 features = ['Document','Document','Element','HtmlCanvasElement','WebGlBuffer','WebGlRenderingContext','WebGlProgram','WebGlShader','Window']
 
 [package.metadata.wasm-pack.profile.dev]
-wasm-opt = ['-O']
+wasm-opt = false #['-O']
 
 [package.metadata.wasm-pack.profile.dev.wasm-bindgen]
 debug-js-glue = true

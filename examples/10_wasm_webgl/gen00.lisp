@@ -5,17 +5,22 @@
 
 (in-package :cl-cpp-generator2)
 
-(let ((name "trace.frag"))
+(let ((name "trace.frag")
+      (w 512s0)
+      (h 512s0))
   (defparameter *source-dir* #P"examples/10_wasm_webgl/code/src/")
  (write-source (asdf:system-relative-pathname 'cl-rust-generator
 					      (merge-pathnames (format nil "~a" name)
 							       *source-dir*))
 	       `(do0
+		 "#version 300 es"
+		 "precision mediump float;"
+		 "out vec4 FragColor;"
 		 (defun main ()
-		   #+nil (let ((uv (/ gl_FragCoord.xy
-				(vec2 512s0 512s0))))
-		     (declare (type vec2 uv)))
-		   (setf gl_FragColor (vec4 1s0 1s0 (+ .5 (* .5 (sin 1s0))) 1s0))))))
+		   (let ((uv (/ gl_FragCoord.xy
+				(vec2 ,w ,h))))
+		     (declare (type vec2 uv))
+		     (setf FragColor (vec4 uv.x 1s0 (+ .5 (* .5 (sin 1s0))) 1s0)))))))
 
 (in-package :cl-rust-generator)
 
@@ -36,6 +41,8 @@
 ;; shader
 ;; https://youtu.be/Cfe5UQ-1L9Q?t=1364
 
+;; webgl2 spec
+;; https://www.khronos.org/registry/webgl/specs/latest/2.0/
 (progn
   (defparameter *source-dir* #P"examples/10_wasm_webgl/code/src/")
   
@@ -91,7 +98,7 @@ version = \"*\" #.3
 features = [~{'~a'~^,~}]
 
 [package.metadata.wasm-pack.profile.dev]
-wasm-opt = ['-O']
+wasm-opt = false #['-O']
 
 [package.metadata.wasm-pack.profile.dev.wasm-bindgen]
 debug-js-glue = true
@@ -216,12 +223,11 @@ void main(){
 		     (declare (type "web_sys::HtmlCanvasElement"
 				    canvas))
 		     (context.use_program (Some &program))
-		     ,(let ((l `(-.7 -.7
-				     0 .7
-				     -.7 0
-				     0 .7
-				     0)))
-			`(let ((vertices (list ,@(mapcar (lambda (x) (* 1s0 x))
+		     ,(let ((l `(-1 -1 0
+				  1 -1 0
+				  1  1 0
+				  -1  1 0)))
+			`(let ((vertices (list ,@(mapcar (lambda (x) (* .98s0 x))
 							  l)))
 			       (buffer (dot context
 					    (create_buffer)
@@ -243,7 +249,7 @@ void main(){
 			   (context.clear_color 0s0 0s0 0s0 1s0)
 			   (context.clear WebGlRenderingContext--COLOR_BUFFER_BIT)
 			   (context.draw_arrays
-			    WebGlRenderingContext--TRIANGLES
+			    WebGlRenderingContext--TRIANGLE_FAN
 			    0
 			    (coerce (/ (vertices.len)
 				       3)

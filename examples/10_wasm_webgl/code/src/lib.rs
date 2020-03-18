@@ -75,7 +75,20 @@ void main(){
     )?;
     let program = link_program(&context, &vert_shader, &frag_shader)?;
     context.use_program(Some(&program));
-    let vertices: [f32; 9] = [(-0.70), (-0.70), 0., 0.70, (-0.70), 0., 0., 0.70, 0.];
+    let vertices: [f32; 12] = [
+        (-0.980),
+        (-0.980),
+        0.,
+        0.980,
+        (-0.980),
+        0.,
+        0.980,
+        0.980,
+        0.,
+        (-0.980),
+        0.980,
+        0.,
+    ];
     let buffer = context.create_buffer().ok_or("failed to create buffer")?;
     context.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&buffer));
     // don't do memory allocations until view is dropped
@@ -92,7 +105,7 @@ void main(){
     context.clear_color(0., 0., 0., 1.0);
     context.clear(WebGlRenderingContext::COLOR_BUFFER_BIT);
     context.draw_arrays(
-        WebGlRenderingContext::TRIANGLES,
+        WebGlRenderingContext::TRIANGLE_FAN,
         0,
         (((vertices.len()) / (3)) as i32),
     );
