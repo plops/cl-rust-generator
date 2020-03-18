@@ -1,0 +1,9 @@
+[package]
+name = "code"
+version = "0.1.0"
+authors = ["Martin Kielhorn <kielhorn.martin@gmail.com>"]
+edition = "2018"
+[dependencies]
+vulkano-win = "*"
+winit = "*"
+chrono = "*"
