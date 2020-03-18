@@ -14,6 +14,10 @@
 
 ;; interactivity
 ;; https://rustwasm.github.io/book/game-of-life/hello-world.html
+
+;; shader
+;; https://youtu.be/Cfe5UQ-1L9Q?t=1364
+
 (progn
   (defparameter *source-dir* #P"examples/10_wasm_webgl/code/src/")
   
