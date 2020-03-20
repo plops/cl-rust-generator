@@ -95,6 +95,10 @@ chrono = \"*\"
 				   false
 				   data)
 				  (expect (string "failed to create buffer")))))
+		 (let* ((content (dot buffer
+				      (write)
+				      (unwrap))))
+		   (setf *content 2))
 		 )
 	       
 	       #+nil (let ((surface (dot (winit-window--WindowBuilder--new)

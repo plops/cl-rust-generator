@@ -33,6 +33,8 @@ fn main() {
         data,
     )
     .expect("failed to create buffer");
+    let mut content = buffer.write().unwrap();
+    *content = 2;
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());
     }
