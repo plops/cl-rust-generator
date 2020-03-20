@@ -2,7 +2,7 @@
   (ql:quickload "cl-rust-generator"))
 
 (in-package :cl-rust-generator)
-
+;; https://vulkano.rs/guide/example-operation
 (progn
   (defparameter *source-dir* #P"examples/13_vulkano/code/src/")
   
@@ -55,13 +55,13 @@ chrono = \"*\"
 	 
 	 (use
 	  ;(vulkano instance (curly Instance InstanceExtensions))
-	  (vulkano_win VkSurfaceBuild)
+	  ;(vulkano_win VkSurfaceBuild)
 	  ;(winit event_loop (curly EventsLoop WindowBuilder))
 	  (chrono Utc))
 	 
 	 (defun main ()
-	   ;(declare (values "Result<(),Box<dyn Error>>"))
-	   (let* (;(events_loops (EventsLoop--new))
+	   ,(logprint "start" `())
+	   (let* ((event_loops (winit--event_loop--EventLoop--new))
 		  )
 	     (let (
 		   (extensions (vulkano_win--required_extensions))
@@ -87,11 +87,23 @@ chrono = \"*\"
 		   (queue (dot queues
 			       (next)
 			       (unwrap)))
-		   #+nil (surface (dot (WindowBuilder--new)
-				 (build_vk_surface
-				  &events_loop
-				  (instance.clone))
-				 (unwrap))))))
+		   )
+	       (let ((data 12)
+		     (buffer (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
+				   (device.clone)
+				   (vulkano--buffer--BufferUsage--all)
+				   false
+				   data)
+				  (expect (string "failed to create buffer")))))
+		 )
+	       
+	       #+nil (let ((surface (dot (winit-window--WindowBuilder--new)
+				   (build_vk_surface
+				    &event_loop
+				    (instance.clone))
+				   (unwrap))))
+		,(logprint "queue" `()))))
+	   ,(logprint "end" `())
 	   ;(return (Ok "()"))
 	   ))))
  

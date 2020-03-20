@@ -1,7 +1,10 @@
 #![allow(unused_parens)]
 use chrono::Utc;
-use vulkano_win::VkSurfaceBuild;
 fn main() {
+    {
+        println!("{} {}:{} start ", Utc::now(), file!(), line!());
+    }
+    let mut event_loops = winit::event_loop::EventLoop::new();
     let extensions = vulkano_win::required_extensions();
     let instance = vulkano::instance::Instance::new(None, &extensions, None)
         .expect("failed to create Vulkan instance");
@@ -22,4 +25,15 @@ fn main() {
     )
     .expect("failed to create device");
     let queue = queues.next().unwrap();
+    let data = 12;
+    let buffer = vulkano::buffer::CpuAccessibleBuffer::from_data(
+        device.clone(),
+        vulkano::buffer::BufferUsage::all(),
+        false,
+        data,
+    )
+    .expect("failed to create buffer");
+    {
+        println!("{} {}:{} end ", Utc::now(), file!(), line!());
+    }
 }
