@@ -81,24 +81,51 @@ chrono = \"*\"
 						       (ref (vulkano--device--DeviceExtensions--none))
 						       (dot (list (values queue_family 0.5))
 							    (iter)
-							    (cloned))
-						   )
+							    (cloned)))
 			 (expect (string "failed to create device"))))
 		   (queue (dot queues
 			       (next)
-			       (unwrap)))
-		   )
+			       (unwrap))))
 	       (let ((data 12)
-		     (buffer (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
+		     (buffer_src (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
+				   (device.clone)
+				   (vulkano--buffer--BufferUsage--all)
+				   false
+				   data)
+				      (expect (string "failed to create buffer"))))
+		     (buffer_dst (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
 				   (device.clone)
 				   (vulkano--buffer--BufferUsage--all)
 				   false
 				   data)
 				  (expect (string "failed to create buffer")))))
-		 (let* ((content (dot buffer
+		 (let* ((content (dot buffer_src
 				      (write)
 				      (unwrap))))
-		   (setf *content 2))
+		   (setf *content 2)
+		   (let ((command_buffer (dot
+					  (vulkano--command_buffer--AutoCommandBufferBuilder--new
+					   (device.clone)
+					   (queue.family))
+					  (unwrap)
+					  ;; this command buffer should copy something
+					  (copy_buffer (buffer_src.clone)
+						       (buffer_dst.clone))
+					  (unwrap)
+					  (build)
+					  (unwrap)))
+			 (finished (dot command_buffer
+					(execute (queue.clone))
+					;(unwrap)
+					)))
+		    #+nil  (do0 ,(logprint "copy .." `())
+			  (dot finished
+			       (then_signal_fence_and_flush)
+			       (unwrap)
+			       (wait None)
+			       (unwrap))
+			  ,(logprint "after copy" `()))))
+		 
 		 )
 	       
 	       #+nil (let ((surface (dot (winit-window--WindowBuilder--new)

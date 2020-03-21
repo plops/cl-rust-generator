@@ -26,15 +26,30 @@ fn main() {
     .expect("failed to create device");
     let queue = queues.next().unwrap();
     let data = 12;
-    let buffer = vulkano::buffer::CpuAccessibleBuffer::from_data(
+    let buffer_src = vulkano::buffer::CpuAccessibleBuffer::from_data(
         device.clone(),
         vulkano::buffer::BufferUsage::all(),
         false,
         data,
     )
     .expect("failed to create buffer");
-    let mut content = buffer.write().unwrap();
+    let buffer_dst = vulkano::buffer::CpuAccessibleBuffer::from_data(
+        device.clone(),
+        vulkano::buffer::BufferUsage::all(),
+        false,
+        data,
+    )
+    .expect("failed to create buffer");
+    let mut content = buffer_src.write().unwrap();
     *content = 2;
+    let command_buffer =
+        vulkano::command_buffer::AutoCommandBufferBuilder::new(device.clone(), queue.family())
+            .unwrap()
+            .copy_buffer(buffer_src.clone(), buffer_dst.clone())
+            .unwrap()
+            .build()
+            .unwrap();
+    let finished = command_buffer.execute(queue.clone());
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());
     }
