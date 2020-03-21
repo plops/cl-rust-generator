@@ -48,55 +48,14 @@ void main() {
 //"##}
         }
         let shader = cs::Shader::load(device.clone()).expect("failed to create shader");
-    }
-    let data = 12;
-    let buffer_src = vulkano::buffer::CpuAccessibleBuffer::from_data(
-        device.clone(),
-        vulkano::buffer::BufferUsage::all(),
-        false,
-        data,
-    )
-    .expect("failed to create buffer");
-    let buffer_dst = vulkano::buffer::CpuAccessibleBuffer::from_data(
-        device.clone(),
-        vulkano::buffer::BufferUsage::all(),
-        false,
-        data,
-    )
-    .expect("failed to create buffer");
-    {
-        let mut content = buffer_src.write().unwrap();
-        *content = 2;
-    }
-    let command_buffer =
-        vulkano::command_buffer::AutoCommandBufferBuilder::new(device.clone(), queue.family())
-            .unwrap()
-            .copy_buffer(buffer_src.clone(), buffer_dst.clone())
-            .unwrap()
-            .build()
-            .unwrap();
-    let finished = command_buffer.execute(queue.clone()).unwrap();
-    {
-        println!("{} {}:{} copy .. ", Utc::now(), file!(), line!());
-    }
-    finished
-        .then_signal_fence_and_flush()
-        .unwrap()
-        .wait(None)
-        .unwrap();
-    {
-        let src_content = buffer_src.read().unwrap();
-        let dst_content = buffer_dst.read().unwrap();
-        {
-            println!(
-                "{} {}:{} after copy  *src_content={}  *dst_content={}",
-                Utc::now(),
-                file!(),
-                line!(),
-                *src_content,
-                *dst_content
-            );
-        };
+        let compute_pipeline = std::sync::Arc::new(
+            vulkano::pipeline::ComputePipeline::new(
+                device.clone(),
+                &shader.main_entry_point(),
+                &(),
+            )
+            .expect("failed to create compute pipeline"),
+        );
     };
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());

@@ -141,9 +141,15 @@ vulkano-shaders= \"*\"
 										     (merge-pathnames "trace.comp"
 												      *source-dir*)))))))
 		   (let ((shader (dot (cs--Shader--load (device.clone))
-				      (expect (string "failed to create shader"))))))))
+				      (expect (string "failed to create shader"))))
+			 (compute_pipeline (std--sync--Arc--new
+					    (dot (vulkano--pipeline--ComputePipeline--new
+						  (device.clone)
+						  (&shader.main_entry_point)
+						  "&()")
+						 (expect (string "failed to create compute pipeline")))))))))
 	       
-	       (let ((data 12)
+	      #+nil  (let ((data 12)
 		     (buffer_src (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
 				   (device.clone)
 				   (vulkano--buffer--BufferUsage--all)
