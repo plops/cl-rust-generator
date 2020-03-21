@@ -1,6 +1,7 @@
 #![allow(unused_parens)]
 use chrono::Utc;
 use vulkano::command_buffer::CommandBuffer;
+use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::sync::GpuFuture;
 fn main() {
     {
@@ -56,6 +57,13 @@ void main() {
             )
             .expect("failed to create compute pipeline"),
         );
+        let set = vulkano::descriptor::descriptor_set::PersistentDescriptorSet::start(
+            compute_pipeline.clone(),
+        )
+        .add_buffer(data_buffer.clone())
+        .unwrap()
+        .build()
+        .unwrap();
     };
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());
