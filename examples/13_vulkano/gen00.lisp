@@ -4,7 +4,7 @@
 
 (in-package :cl-cpp-generator2)
 
-(let (;(name "trace.frag")cc
+(let (;(name "trace.frag")
       (w 512s0)
       (h 512s0))
   (defparameter *source-dir* #P"examples/13_vulkano/code/src/")
@@ -72,6 +72,7 @@ vulkano = \"*\"
 vulkano-win = \"*\"
 winit = \"*\"
 chrono = \"*\"
+vulkano-shaders= \"*\"
 "))
   
   (define-module
@@ -124,7 +125,14 @@ chrono = \"*\"
 					  (vulkano--buffer--BufferUsage--all)
 					  false
 					  data_iter)
-					 (expect (string "failed to create buffer")))))))
+					 (expect (string "failed to create buffer"))))
+		       )
+
+		   (space "mod cs"
+			  (progn
+			    (make-instance vulkano_shaders--shader!
+					   :ty (string "compute")
+					   :src (include_str! (string "trace.comp")))))))
 	       
 	       (let ((data 12)
 		     (buffer_src (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
