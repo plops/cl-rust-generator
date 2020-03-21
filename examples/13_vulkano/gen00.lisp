@@ -70,11 +70,11 @@ version = \"0.1.0\"
 authors = [\"Martin Kielhorn <kielhorn.martin@gmail.com>\"]
 edition = \"2018\"
 [dependencies]
-vulkano = \"*\"
+vulkano = \"0.13\"
 vulkano-win = \"*\"
 winit = \"*\"
 chrono = \"*\"
-vulkano-shaders= \"*\"
+vulkano-shaders= \"0.13\"
 "))
   
   (define-module
@@ -98,8 +98,11 @@ vulkano-shaders= \"*\"
 	   (let* ((event_loops (winit--event_loop--EventLoop--new))
 		  )
 	     (let (
-		   (extensions (vulkano_win--required_extensions))
-		   (instance (dot (vulkano--instance--Instance--new None &extensions None)
+		   ; (extensions (vulkano_win--required_extensions))
+		   (instance (dot (vulkano--instance--Instance--new None
+					; &extensions
+								    (&vulkano--instance--InstanceExtensions--none)
+								    None)
 				  (expect (string "failed to create Vulkan instance"))))
 		   (physical (dot (vulkano--instance--PhysicalDevice--enumerate &instance)
 				  (next)
@@ -126,7 +129,7 @@ vulkano-shaders= \"*\"
 		       (data_buffer (dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
 					  (device.clone)
 					  (vulkano--buffer--BufferUsage--all)
-					  false
+					  ;false
 					  data_iter)
 					 (expect (string "failed to create buffer"))))
 		       )
@@ -152,7 +155,7 @@ vulkano-shaders= \"*\"
 			 (set (dot
 				(vulkano--descriptor--descriptor_set--PersistentDescriptorSet--start
 				 (compute_pipeline.clone)
-				 ;0
+				 0
 				 )
 				(add_buffer (data_buffer.clone))
 				(unwrap)

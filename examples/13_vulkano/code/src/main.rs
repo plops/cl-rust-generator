@@ -8,9 +8,12 @@ fn main() {
         println!("{} {}:{} start ", Utc::now(), file!(), line!());
     }
     let mut event_loops = winit::event_loop::EventLoop::new();
-    let extensions = vulkano_win::required_extensions();
-    let instance = vulkano::instance::Instance::new(None, &extensions, None)
-        .expect("failed to create Vulkan instance");
+    let instance = vulkano::instance::Instance::new(
+        None,
+        &vulkano::instance::InstanceExtensions::none(),
+        None,
+    )
+    .expect("failed to create Vulkan instance");
     let physical = vulkano::instance::PhysicalDevice::enumerate(&instance)
         .next()
         .expect("no device available");
@@ -33,7 +36,6 @@ fn main() {
         let data_buffer = vulkano::buffer::CpuAccessibleBuffer::from_iter(
             device.clone(),
             vulkano::buffer::BufferUsage::all(),
-            false,
             data_iter,
         )
         .expect("failed to create buffer");
@@ -59,6 +61,7 @@ void main() {
         );
         let set = vulkano::descriptor::descriptor_set::PersistentDescriptorSet::start(
             compute_pipeline.clone(),
+            0,
         )
         .add_buffer(data_buffer.clone())
         .unwrap()
