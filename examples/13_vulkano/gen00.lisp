@@ -57,7 +57,10 @@ chrono = \"*\"
 	  ;(vulkano instance (curly Instance InstanceExtensions))
 	  ;(vulkano_win VkSurfaceBuild)
 					;(winit event_loop (curly EventsLoop WindowBuilder))
-	  (vulkano command_buffer CommandBuffer)
+	  (vulkano command_buffer CommandBuffer
+		   )
+	  (vulkano sync GpuFuture
+		   )
 	  (chrono Utc))
 	 
 	 (defun main ()
@@ -99,33 +102,35 @@ chrono = \"*\"
 				   (vulkano--buffer--BufferUsage--all)
 				   false
 				   data)
-				  (expect (string "failed to create buffer")))))
-		 (let* ((content (dot buffer_src
+				      (expect (string "failed to create buffer")))))
+		 (progn
+		   (let* ((content (dot buffer_src
 				      (write)
 				      (unwrap))))
-		   (setf *content 2)
-		   (let ((command_buffer (dot
-					  (vulkano--command_buffer--AutoCommandBufferBuilder--new
-					   (device.clone)
-					   (queue.family))
-					  (unwrap)
-					  ;; this command buffer should copy something
-					  (copy_buffer (buffer_src.clone)
-						       (buffer_dst.clone))
-					  (unwrap)
-					  (build)
-					  (unwrap)))
-			 (finished (dot command_buffer
-					(execute (queue.clone))
-					;(unwrap)
-					)))
-		    #+nil  (do0 ,(logprint "copy .." `())
-			  (dot finished
-			       (then_signal_fence_and_flush)
-			       (unwrap)
-			       (wait None)
-			       (unwrap))
-			  ,(logprint "after copy" `()))))
+		     (setf *content 2)))
+		 
+		 (let ((command_buffer (dot
+					(vulkano--command_buffer--AutoCommandBufferBuilder--new
+					 (device.clone)
+					 (queue.family))
+					(unwrap)
+					;; this command buffer should copy something
+					(copy_buffer (buffer_src.clone)
+						     (buffer_dst.clone))
+					(unwrap)
+					(build)
+					(unwrap)))
+		       (finished (dot command_buffer
+				      (execute (queue.clone))
+				      (unwrap)
+				      )))
+		   (do0 ,(logprint "copy .." `())
+			(dot finished
+			     (then_signal_fence_and_flush)
+			     (unwrap)
+			     (wait None)
+			     (unwrap))
+			,(logprint "after copy" `())))
 		 
 		 )
 	       

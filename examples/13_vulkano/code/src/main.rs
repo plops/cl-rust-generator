@@ -1,6 +1,7 @@
 #![allow(unused_parens)]
 use chrono::Utc;
 use vulkano::command_buffer::CommandBuffer;
+use vulkano::sync::GpuFuture;
 fn main() {
     {
         println!("{} {}:{} start ", Utc::now(), file!(), line!());
@@ -41,8 +42,10 @@ fn main() {
         data,
     )
     .expect("failed to create buffer");
-    let mut content = buffer_src.write().unwrap();
-    *content = 2;
+    {
+        let mut content = buffer_src.write().unwrap();
+        *content = 2;
+    }
     let command_buffer =
         vulkano::command_buffer::AutoCommandBufferBuilder::new(device.clone(), queue.family())
             .unwrap()
@@ -50,7 +53,18 @@ fn main() {
             .unwrap()
             .build()
             .unwrap();
-    let finished = command_buffer.execute(queue.clone());
+    let finished = command_buffer.execute(queue.clone()).unwrap();
+    {
+        println!("{} {}:{} copy .. ", Utc::now(), file!(), line!());
+    }
+    finished
+        .then_signal_fence_and_flush()
+        .unwrap()
+        .wait(None)
+        .unwrap();
+    {
+        println!("{} {}:{} after copy ", Utc::now(), file!(), line!());
+    };
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());
     }
