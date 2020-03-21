@@ -175,7 +175,20 @@ vulkano-shaders= \"0.13\"
 							"()")
 					      (unwrap)
 					      (build)
-					      (unwrap)))))))
+					      (unwrap)))
+			 (finished (dot command_buffer
+					(execute (queue.clone))
+					(unwrap))))
+		     (dot finished
+			  (then_signal_fence_and_flush)
+			  (unwrap)
+			  (wait None)
+			  (unwrap))
+		     (let ((content (dot data_buffer
+					 (read)
+					 (unwrap))))
+		       ,(logprint "result" `((aref content 0)
+					     (aref content 1)))))))
 	       
 	      #+nil  (let ((data 12)
 		     (buffer_src (dot (vulkano--buffer--CpuAccessibleBuffer--from_data

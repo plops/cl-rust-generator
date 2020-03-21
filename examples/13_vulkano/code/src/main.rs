@@ -77,6 +77,23 @@ void main() {
                 .unwrap()
                 .build()
                 .unwrap();
+        let finished = command_buffer.execute(queue.clone()).unwrap();
+        finished
+            .then_signal_fence_and_flush()
+            .unwrap()
+            .wait(None)
+            .unwrap();
+        let content = data_buffer.read().unwrap();
+        {
+            println!(
+                "{} {}:{} result  content[0]={}  content[1]={}",
+                Utc::now(),
+                file!(),
+                line!(),
+                content[0],
+                content[1]
+            );
+        };
     };
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());
