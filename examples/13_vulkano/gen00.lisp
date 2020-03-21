@@ -18,7 +18,7 @@
 		 "layout(set=0,binding=0) buffer Data { uint data[]; } buf;"
 		 
                  (defun main ()
-		   (let ((idx (gl_GlobalInvocationID.x)))
+		   (let ((idx gl_GlobalInvocationID.x))
 		     (declare (type uint idx))
 		     (setf (aref buf.data idx)
 			   (* (aref buf.data idx) 12))))
