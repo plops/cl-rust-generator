@@ -456,6 +456,23 @@ entry return-values contains a list of return values"
 						   (prog1
 						    (format nil "~a"
 							    (emit (elt params i)))
+						     (incf i)))))))))))
+		  (macroexpand
+		   (let ((args (cdr code)))
+		     (destructuring-bind (name &rest params) args
+		       (emit `(space ,(emit name)
+				     (curly
+				      ,@(let ((i 0))
+					  (loop while (< i (length params))  collect
+					       (if (keywordp (elt params i))
+						   (prog1
+						     (format nil "~a: ~a"
+							     (elt params i)
+							     (emit (elt params (+ i 1))))
+						     (incf i 2))
+						   (prog1
+						    (format nil "~a"
+							    (emit (elt params i)))
 						    (incf i)))))))))))
 		  (new
 		   ;; new arg
@@ -507,8 +524,8 @@ entry return-values contains a list of return values"
 								     `(defun if for include
 									     dotimes while case do0 progn case
 									     space defstruct0 impl use mod
-									     extern unsafe))))
-						    ""
+									     extern unsafe macroexpand))))
+						    "" 
 						    ";"))))
 				  (cdr code)))
 			 #+nil

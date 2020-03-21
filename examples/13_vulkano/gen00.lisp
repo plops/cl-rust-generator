@@ -21,7 +21,9 @@
 		   (let ((idx (gl_GlobalInvocationID.x)))
 		     (declare (type uint idx))
 		     (setf (aref buf.data idx)
-			   (* (aref buf.data idx) 12)))))))
+			   (* (aref buf.data idx) 12))))
+		 "// "
+		 )))
 
 
 
@@ -130,10 +132,14 @@ vulkano-shaders= \"*\"
 
 		   (space "mod cs"
 			  (progn
-			    (return
-			     (make-instance vulkano_shaders--shader!
-					    :ty (string "compute")
-					    :src (include_str! (string "trace.comp"))))))
+			    (macroexpand
+			     vulkano_shaders--shader!
+			     :ty (string "compute")
+			     :src
+			     (string#
+			      ,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
+										     (merge-pathnames "trace.comp"
+												      *source-dir*)))))))
 		   (let ((shader (dot (cs--Shader--load (device.clone))
 				      (expect (string "failed to create shader"))))))))
 	       
