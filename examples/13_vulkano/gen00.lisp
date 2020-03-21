@@ -56,7 +56,8 @@ chrono = \"*\"
 	 (use
 	  ;(vulkano instance (curly Instance InstanceExtensions))
 	  ;(vulkano_win VkSurfaceBuild)
-	  ;(winit event_loop (curly EventsLoop WindowBuilder))
+					;(winit event_loop (curly EventsLoop WindowBuilder))
+	  (vulkano command_buffer CommandBuffer)
 	  (chrono Utc))
 	 
 	 (defun main ()
