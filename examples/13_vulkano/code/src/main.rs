@@ -1,5 +1,6 @@
 #![allow(unused_parens)]
 use chrono::Utc;
+use std::sync::Arc;
 use vulkano::command_buffer::CommandBuffer;
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::sync::GpuFuture;
@@ -59,14 +60,16 @@ void main() {
             )
             .expect("failed to create compute pipeline"),
         );
-        let set = vulkano::descriptor::descriptor_set::PersistentDescriptorSet::start(
-            compute_pipeline.clone(),
-            0,
-        )
-        .add_buffer(data_buffer.clone())
-        .unwrap()
-        .build()
-        .unwrap();
+        let set = std::sync::Arc::new(
+            vulkano::descriptor::descriptor_set::PersistentDescriptorSet::start(
+                compute_pipeline.clone(),
+                0,
+            )
+            .add_buffer(data_buffer.clone())
+            .unwrap()
+            .build()
+            .unwrap(),
+        );
     };
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());

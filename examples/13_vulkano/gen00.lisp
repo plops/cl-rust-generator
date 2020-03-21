@@ -91,6 +91,7 @@ vulkano-shaders= \"0.13\"
 	  (vulkano sync GpuFuture
 		   )
 	  (vulkano descriptor descriptor_set PersistentDescriptorSet)
+	  (std sync Arc)
 	  (chrono Utc))
 	 
 	 (defun main ()
@@ -152,17 +153,18 @@ vulkano-shaders= \"0.13\"
 						  (&shader.main_entry_point)
 						  "&()")
 						 (expect (string "failed to create compute pipeline")))))
-			 (set (dot
-				(vulkano--descriptor--descriptor_set--PersistentDescriptorSet--start
-				 (compute_pipeline.clone)
-				 0
-				 )
-				(add_buffer (data_buffer.clone))
-				(unwrap)
-				(build)
-				(unwrap))
-			   #+nil(std--sync--Arc-new
-			       ))))))
+			 
+			 (set 
+			   (std--sync--Arc--new
+			    (dot
+			  (vulkano--descriptor--descriptor_set--PersistentDescriptorSet--start
+			   (compute_pipeline.clone)
+			   0
+			   )
+			   (add_buffer (data_buffer.clone))
+			   (unwrap)
+			   (build)
+			   (unwrap))))))))
 	       
 	      #+nil  (let ((data 12)
 		     (buffer_src (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
