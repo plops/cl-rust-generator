@@ -63,7 +63,18 @@ fn main() {
         .wait(None)
         .unwrap();
     {
-        println!("{} {}:{} after copy ", Utc::now(), file!(), line!());
+        let src_content = buffer_src.read().unwrap();
+        let dst_content = buffer_dst.read().unwrap();
+        {
+            println!(
+                "{} {}:{} after copy  *src_content={}  *dst_content={}",
+                Utc::now(),
+                file!(),
+                line!(),
+                *src_content,
+                *dst_content
+            );
+        };
     };
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());

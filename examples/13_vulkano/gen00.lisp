@@ -130,7 +130,10 @@ chrono = \"*\"
 			     (unwrap)
 			     (wait None)
 			     (unwrap))
-			,(logprint "after copy" `())))
+			(progn
+			  (let ((src_content (dot buffer_src (read) (unwrap)))
+				(dst_content (dot buffer_dst (read) (unwrap))))
+			   ,(logprint "after copy" `(*src_content *dst_content))))))
 		 
 		 )
 	       
