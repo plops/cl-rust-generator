@@ -1,5 +1,31 @@
 (eval-when (:compile-toplevel :execute :load-toplevel)
-  (ql:quickload "cl-rust-generator"))
+  (ql:quickload "cl-rust-generator")
+  (ql:quickload "cl-cpp-generator2"))
+
+(in-package :cl-cpp-generator2)
+
+(let (;(name "trace.frag")cc
+      (w 512s0)
+      (h 512s0))
+  (defparameter *source-dir* #P"examples/13_vulkano/code/src/")
+  (write-source (asdf:system-relative-pathname 'cl-rust-generator
+					       (merge-pathnames "trace.comp"
+								*source-dir*))
+               `(do0
+                 "#version 450"
+
+		 "layout(local_size_x=64,local_size_y=1,local_size_z=1) in;"
+		 "layout(set=0,binding=0) buffer Data { uint data[]; } buf;"
+		 
+                 (defun main ()
+		   (let ((idx (gl_GlobalInvocationID.x)))
+		     (declare (type uint idx))
+		     (setf (aref buf.data idx)
+			   (* (aref buf.data idx) 12)))))))
+
+
+
+
 
 (in-package :cl-rust-generator)
 ;; https://vulkano.rs/guide/example-operation
@@ -90,6 +116,16 @@ chrono = \"*\"
 		   (queue (dot queues
 			       (next)
 			       (unwrap))))
+
+	       (progn
+		 (let ((data_iter "0 .. 65535")
+		       (data_buffer (dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
+					  (device.clone)
+					  (vulkano--buffer--BufferUsage--all)
+					  false
+					  data_iter)
+					 (expect (string "failed to create buffer")))))))
+	       
 	       (let ((data 12)
 		     (buffer_src (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
 				   (device.clone)
