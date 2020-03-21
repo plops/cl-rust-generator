@@ -19,13 +19,14 @@ fn main (){
                         let data_iter  = 0 .. 65535;
         let data_buffer  = vulkano::buffer::CpuAccessibleBuffer::from_iter(device.clone(), vulkano::buffer::BufferUsage::all(), false, data_iter).expect("failed to create buffer");
         mod cs {
-                        vulkano_shaders::shader! {ty: "compute", src: include_str!("trace.comp")};
-};
+                        return vulkano_shaders::shader! {ty: "compute", src: include_str!("trace.comp")};
+}
+                let shader  = cs::Shader::load(device.clone()).expect("failed to create shader");
 }
         let data  = 12;
     let buffer_src  = vulkano::buffer::CpuAccessibleBuffer::from_data(device.clone(), vulkano::buffer::BufferUsage::all(), false, data).expect("failed to create buffer");
     let buffer_dst  = vulkano::buffer::CpuAccessibleBuffer::from_data(device.clone(), vulkano::buffer::BufferUsage::all(), false, data).expect("failed to create buffer");
-    {9
+    {
                         let mut content  = buffer_src.write().unwrap();
                 *content=2;
 }

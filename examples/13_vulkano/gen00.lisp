@@ -130,9 +130,12 @@ vulkano-shaders= \"*\"
 
 		   (space "mod cs"
 			  (progn
-			    (make-instance vulkano_shaders--shader!
-					   :ty (string "compute")
-					   :src (include_str! (string "trace.comp")))))))
+			    (return
+			     (make-instance vulkano_shaders--shader!
+					    :ty (string "compute")
+					    :src (include_str! (string "trace.comp"))))))
+		   (let ((shader (dot (cs--Shader--load (device.clone))
+				      (expect (string "failed to create shader"))))))))
 	       
 	       (let ((data 12)
 		     (buffer_src (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
