@@ -70,6 +70,13 @@ void main() {
             .build()
             .unwrap(),
         );
+        let command_buffer =
+            vulkano::command_buffer::AutoCommandBufferBuilder::new(device.clone(), queue.family())
+                .unwrap()
+                .dispatch([1024, 1, 1], compute_pipeline.clone(), set.clone(), ())
+                .unwrap()
+                .build()
+                .unwrap();
     };
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());

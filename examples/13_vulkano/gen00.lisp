@@ -164,7 +164,18 @@ vulkano-shaders= \"0.13\"
 			   (add_buffer (data_buffer.clone))
 			   (unwrap)
 			   (build)
-			   (unwrap))))))))
+			   (unwrap))))
+			 (command_buffer (dot (vulkano--command_buffer--AutoCommandBufferBuilder--new
+					       (device.clone)
+					       (queue.family))
+					      (unwrap)
+					      (dispatch (list 1024 1 1)
+							(compute_pipeline.clone)
+							(set.clone)
+							"()")
+					      (unwrap)
+					      (build)
+					      (unwrap)))))))
 	       
 	      #+nil  (let ((data 12)
 		     (buffer_src (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
