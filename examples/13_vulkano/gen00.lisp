@@ -125,6 +125,57 @@ vulkano-shaders= \"0.13\"
 			       (next)
 			       (unwrap))))
 
+
+	       #+nil
+	       (progn
+		 "// command buffer copy example"
+		 (let ((data 12)
+		      (buffer_src (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
+					(device.clone)
+					(vulkano--buffer--BufferUsage--all)
+					false
+					data)
+				       (expect (string "failed to create buffer"))))
+		      (buffer_dst (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
+					(device.clone)
+					(vulkano--buffer--BufferUsage--all)
+					false
+					data)
+				       (expect (string "failed to create buffer")))))
+		  (progn
+		    (let* ((content (dot buffer_src
+					 (write)
+					 (unwrap))))
+		      (setf *content 2)))
+		 
+		  (let ((command_buffer (dot
+					 (vulkano--command_buffer--AutoCommandBufferBuilder--new
+					  (device.clone)
+					  (queue.family))
+					 (unwrap)
+					 ;; this command buffer should copy something
+					 (copy_buffer (buffer_src.clone)
+						      (buffer_dst.clone))
+					 (unwrap)
+					 (build)
+					 (unwrap)))
+			(finished (dot command_buffer
+				       (execute (queue.clone))
+				       (unwrap)
+				       )))
+		    (do0 ,(logprint "copy .." `())
+			 (dot finished
+			      (then_signal_fence_and_flush)
+			      (unwrap)
+			      (wait None)
+			      (unwrap))
+			 (progn
+			   (let ((src_content (dot buffer_src (read) (unwrap)))
+				 (dst_content (dot buffer_dst (read) (unwrap))))
+			     ,(logprint "after copy" `(*src_content *dst_content))))))
+		 
+		  ))
+	       #+nil
 	       (progn
 		 "// compute shader"
 		 (let ((data_iter "0 .. 65535")
@@ -191,52 +242,18 @@ vulkano-shaders= \"0.13\"
 					     (aref content 1)))))))
 	       
 	       
-	      #+nil  (let ((data 12)
-		     (buffer_src (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
-				   (device.clone)
-				   (vulkano--buffer--BufferUsage--all)
-				   false
-				   data)
-				      (expect (string "failed to create buffer"))))
-		     (buffer_dst (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
-				   (device.clone)
-				   (vulkano--buffer--BufferUsage--all)
-				   false
-				   data)
-				      (expect (string "failed to create buffer")))))
-		 (progn
-		   (let* ((content (dot buffer_src
-				      (write)
-				      (unwrap))))
-		     (setf *content 2)))
-		 
-		 (let ((command_buffer (dot
-					(vulkano--command_buffer--AutoCommandBufferBuilder--new
-					 (device.clone)
-					 (queue.family))
-					(unwrap)
-					;; this command buffer should copy something
-					(copy_buffer (buffer_src.clone)
-						     (buffer_dst.clone))
-					(unwrap)
-					(build)
-					(unwrap)))
-		       (finished (dot command_buffer
-				      (execute (queue.clone))
-				      (unwrap)
-				      )))
-		   (do0 ,(logprint "copy .." `())
-			(dot finished
-			     (then_signal_fence_and_flush)
-			     (unwrap)
-			     (wait None)
-			     (unwrap))
-			(progn
-			  (let ((src_content (dot buffer_src (read) (unwrap)))
-				(dst_content (dot buffer_dst (read) (unwrap))))
-			   ,(logprint "after copy" `(*src_content *dst_content))))))
-		 
-		 )
+
+	       (progn
+		 "// image"
+		 (let ((image (dot (vulkano--image--StorageImage--new
+				    (device.clone)
+				    (make-instance vulkano--image--Dimensions--Dim2d
+						   :width 1024
+						   :height 1024)
+				    vulkano--format--Format--R8G8B8A8Unorm
+				    (Some (queue.family)))
+				   (unwrap))))))
+	       
 	       
 	       #+nil (let ((surface (dot (winit-window--WindowBuilder--new)
 				   (build_vk_surface

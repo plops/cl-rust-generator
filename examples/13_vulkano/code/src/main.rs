@@ -33,67 +33,17 @@ fn main() {
     .expect("failed to create device");
     let queue = queues.next().unwrap();
     {
-        let data_iter = 0..65535;
-        let data_buffer = vulkano::buffer::CpuAccessibleBuffer::from_iter(
+        // image
+        let image = vulkano::image::StorageImage::new(
             device.clone(),
-            vulkano::buffer::BufferUsage::all(),
-            data_iter,
+            vulkano::image::Dimensions::Dim2d {
+                width: 1024,
+                height: 1024,
+            },
+            vulkano::format::Format::R8G8B8A8Unorm,
+            Some(queue.family()),
         )
-        .expect("failed to create buffer");
-        mod cs {
-            vulkano_shaders::shader! {ty: "compute", src: r##"#version 450
-layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
-layout(set = 0, binding = 0) buffer Data { uint data[]; }
-buf;
-void main() {
-  uint idx = gl_GlobalInvocationID.x;
-  buf.data[idx] = ((buf.data[idx]) * (12));
-}
-//"##}
-        }
-        let shader = cs::Shader::load(device.clone()).expect("failed to create shader");
-        let compute_pipeline = std::sync::Arc::new(
-            vulkano::pipeline::ComputePipeline::new(
-                device.clone(),
-                &shader.main_entry_point(),
-                &(),
-            )
-            .expect("failed to create compute pipeline"),
-        );
-        let set = std::sync::Arc::new(
-            vulkano::descriptor::descriptor_set::PersistentDescriptorSet::start(
-                compute_pipeline.clone(),
-                0,
-            )
-            .add_buffer(data_buffer.clone())
-            .unwrap()
-            .build()
-            .unwrap(),
-        );
-        let command_buffer =
-            vulkano::command_buffer::AutoCommandBufferBuilder::new(device.clone(), queue.family())
-                .unwrap()
-                .dispatch([1024, 1, 1], compute_pipeline.clone(), set.clone(), ())
-                .unwrap()
-                .build()
-                .unwrap();
-        let finished = command_buffer.execute(queue.clone()).unwrap();
-        finished
-            .then_signal_fence_and_flush()
-            .unwrap()
-            .wait(None)
-            .unwrap();
-        let content = data_buffer.read().unwrap();
-        {
-            println!(
-                "{} {}:{} result  content[0]={}  content[1]={}",
-                Utc::now(),
-                file!(),
-                line!(),
-                content[0],
-                content[1]
-            );
-        };
+        .unwrap();
     };
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());
