@@ -130,7 +130,7 @@ vulkano-shaders= \"0.13\"
 	       (progn
 		 "// command buffer copy example"
 		 (let ((data 12)
-		      (buffer_src (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
+		       (buffer_src (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
 					(device.clone)
 					(vulkano--buffer--BufferUsage--all)
 					false
@@ -253,18 +253,33 @@ vulkano-shaders= \"0.13\"
 				    vulkano--format--Format--R8G8B8A8Unorm
 				    (Some (queue.family)))
 				   (unwrap)))
+		       
+		       (buf (dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
+				 (device.clone)
+				 (vulkano--buffer--BufferUsage--all)
+				 (dot "(0.. 1024*1024*4)"
+				      (map (lambda (_) "0u8"))))
+				 (expect (string "failed to create buffer"))))
 		       (command_buffer (dot (vulkano--command_buffer--AutoCommandBufferBuilder--new
-					       (device.clone)
-					       (queue.family))
+					     (device.clone)
+					     (queue.family))
 					    (unwrap)
 					    (clear_color_image
 					     (image.clone)
-					     (vulkano--format--ClearValue--Float (list 0s0 0s0 1s0 1s0))
-					     )
-					     
-					      (unwrap)
-					      (build)
-					      (unwrap))))))
+					     (vulkano--format--ClearValue--Float (list 0s0 0s0 1s0 1s0)))
+					    (unwrap)
+					    (copy_image_to_buffer (image.clone) (buf.clone))
+					    (unwrap)
+					    (build)
+					    (unwrap)))
+		       (finished (dot command_buffer
+					(execute (queue.clone))
+					(unwrap))))
+		   (dot finished
+			  (then_signal_fence_and_flush)
+			  (unwrap)
+			  (wait None)
+			  (unwrap))))
 	       
 	       
 	       #+nil (let ((surface (dot (winit-window--WindowBuilder--new)

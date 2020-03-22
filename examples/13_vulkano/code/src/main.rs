@@ -44,6 +44,12 @@ fn main() {
             Some(queue.family()),
         )
         .unwrap();
+        let buf = vulkano::buffer::CpuAccessibleBuffer::from_iter(
+            device.clone(),
+            vulkano::buffer::BufferUsage::all(),
+            (0..1024 * 1024 * 4).map(|_| 0u8),
+        )
+        .expect("failed to create buffer");
         let command_buffer =
             vulkano::command_buffer::AutoCommandBufferBuilder::new(device.clone(), queue.family())
                 .unwrap()
@@ -52,8 +58,16 @@ fn main() {
                     vulkano::format::ClearValue::Float([0., 0., 1.0, 1.0]),
                 )
                 .unwrap()
+                .copy_image_to_buffer(image.clone(), buf.clone())
+                .unwrap()
                 .build()
                 .unwrap();
+        let finished = command_buffer.execute(queue.clone()).unwrap();
+        finished
+            .then_signal_fence_and_flush()
+            .unwrap()
+            .wait(None)
+            .unwrap();
     };
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());
