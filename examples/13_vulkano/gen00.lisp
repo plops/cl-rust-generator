@@ -126,14 +126,14 @@ vulkano-shaders= \"0.13\"
 			       (unwrap))))
 
 	       (progn
+		 "// compute shader"
 		 (let ((data_iter "0 .. 65535")
 		       (data_buffer (dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
 					  (device.clone)
 					  (vulkano--buffer--BufferUsage--all)
 					  ;false
 					  data_iter)
-					 (expect (string "failed to create buffer"))))
-		       )
+					 (expect (string "failed to create buffer")))))
 
 		   (space "mod cs"
 			  (progn
@@ -189,6 +189,7 @@ vulkano-shaders= \"0.13\"
 					 (unwrap))))
 		       ,(logprint "result" `((aref content 0)
 					     (aref content 1)))))))
+	       
 	       
 	      #+nil  (let ((data 12)
 		     (buffer_src (dot (vulkano--buffer--CpuAccessibleBuffer--from_data
