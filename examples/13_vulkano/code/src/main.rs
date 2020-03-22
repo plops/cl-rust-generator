@@ -44,6 +44,16 @@ fn main() {
             Some(queue.family()),
         )
         .unwrap();
+        let command_buffer =
+            vulkano::command_buffer::AutoCommandBufferBuilder::new(device.clone(), queue.family())
+                .unwrap()
+                .clear_color_image(
+                    image.clone(),
+                    vulkano::format::ClearValue::Float([0., 0., 1.0, 1.0]),
+                )
+                .unwrap()
+                .build()
+                .unwrap();
     };
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());

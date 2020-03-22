@@ -252,7 +252,19 @@ vulkano-shaders= \"0.13\"
 						   :height 1024)
 				    vulkano--format--Format--R8G8B8A8Unorm
 				    (Some (queue.family)))
-				   (unwrap))))))
+				   (unwrap)))
+		       (command_buffer (dot (vulkano--command_buffer--AutoCommandBufferBuilder--new
+					       (device.clone)
+					       (queue.family))
+					    (unwrap)
+					    (clear_color_image
+					     (image.clone)
+					     (vulkano--format--ClearValue--Float (list 0s0 0s0 1s0 1s0))
+					     )
+					     
+					      (unwrap)
+					      (build)
+					      (unwrap))))))
 	       
 	       
 	       #+nil (let ((surface (dot (winit-window--WindowBuilder--new)
