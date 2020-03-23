@@ -583,21 +583,22 @@ image = \"*\"
 				      (build (device.clone))
 				      (unwrap)))))))
 		   
-		   (dot
-		    (vulkano--command_buffer--AutoCommandBufferBuilder--new
-		     (device.clone)
-		     (queue.family))
-		    (unwrap)
-		    (begin_render_pass (framebuffer.clone)
-				       false
-				       (space vec!
-					      (list
-					       (dot
-						(list 0s0 0s0 1s0 1s0)
-						(into)))))
-		    (unwrap)
-		    (end_render_pass)
-		    (unwrap))))
+		   (let ((command_buffer
+			  (dot
+			   (vulkano--command_buffer--AutoCommandBufferBuilder--primary_one_time_submit
+			    (device.clone)
+			    (queue.family))
+			   (unwrap)
+			   (begin_render_pass (framebuffer.clone)
+					      false
+					      (space vec!
+						     (list
+						      (dot
+						       (list 0s0 0s0 1s0 1s0)
+						       (into)))))
+			   (unwrap)
+			   (end_render_pass)
+			   (unwrap)))))))
 
 	       
 
