@@ -11,7 +11,7 @@
   (write-source (asdf:system-relative-pathname 'cl-rust-generator
 					       (merge-pathnames "trace.comp"
 								*source-dir*))
-               `(do0
+               #+nil `(do0
                  "#version 450"
 
 		 "layout(local_size_x=64,local_size_y=1,local_size_z=1) in;"
@@ -22,7 +22,39 @@
 		     (declare (type uint idx))
 		     (setf (aref buf.data idx)
 			   (* (aref buf.data idx) 12))))
-		 "// "
+		 
+		 )
+	       `(do0
+                 "#version 450"
+
+		 "layout(local_size_x=8,local_size_y=8,local_size_z=1) in;"
+		 "layout(set=0,binding=0,rgba8) uniform writeonly image2D img;"
+		 
+                 (defun main ()
+		   (let ((norm_coordinates (/ (+ (vec2 0.5) gl_GlobalInvocationID.xy)
+					      (vec2 (imageSize img))))
+			 (c (- (* 2.0 (- norm_coordinates (vec 0.5)))
+			       (vec2 1.0 0.0)))
+			 (z (vec2 0.0 0.0))
+			 (i 0.0))
+		     (declare (type vec2 norm_coordinates c z)
+			      (type float i))
+		     (for ((= i 0.0)
+			   (< i 1.0)
+			   (incf i .005))
+			  (setf z (vec2 (+ (* z.x z.x)
+					   c.x
+					   (* -1 z.y z.y))
+					(+ (* z.x z.y)
+					   c.x
+					   (*  z.x z.y))))
+			  (when (< 4.0 (length z))
+			    break))
+		     (let ((to_write (vec4 (vec3 i) 1.0)))
+		       (declare (type vec4 to_write))
+		       (imageStore img (ivec2 gl_GlobalInvocationID.xy)
+				   to_write))))
+		 
 		 )))
 
 
@@ -244,8 +276,9 @@ image = \"*\"
 	       
 	       
 
+	       #+nil
 	       (progn
-		 "// image"
+		 "// store a blue image"
 		 (let ((image (dot (vulkano--image--StorageImage--new
 				    (device.clone)
 				    (make-instance vulkano--image--Dimensions--Dim2d
@@ -282,7 +315,7 @@ image = \"*\"
 			  (wait None)
 			  (unwrap))
 		   (progn
-		     "// safe image"
+		     "// save image"
 		     (let ((buffer_content (dot buf
 						(read)
 						(unwrap)))
@@ -293,6 +326,143 @@ image = \"*\"
 		       (dot image
 			    (save (string "image.png"))
 			    (unwrap))))))
+
+	       #+nil (progn
+		 "// store a blue image"
+		 (let ((image (dot (vulkano--image--StorageImage--new
+				    (device.clone)
+				    (make-instance vulkano--image--Dimensions--Dim2d
+						   :width 1024
+						   :height 1024)
+				    vulkano--format--Format--R8G8B8A8Unorm
+				    (Some (queue.family)))
+				   (unwrap)))
+		       
+		       (buf (dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
+				 (device.clone)
+				 (vulkano--buffer--BufferUsage--all)
+				 (dot "(0.. 1024*1024*4)"
+				      (map (lambda (_) "0u8"))))
+				 (expect (string "failed to create buffer"))))
+		       (command_buffer (dot (vulkano--command_buffer--AutoCommandBufferBuilder--new
+					     (device.clone)
+					     (queue.family))
+					    (unwrap)
+					    (clear_color_image
+					     (image.clone)
+					     (vulkano--format--ClearValue--Float (list 0s0 0s0 1s0 1s0)))
+					    (unwrap)
+					    (copy_image_to_buffer (image.clone) (buf.clone))
+					    (unwrap)
+					    (build)
+					    (unwrap)))
+		       (finished (dot command_buffer
+					(execute (queue.clone))
+					(unwrap))))
+		   (dot finished
+			  (then_signal_fence_and_flush)
+			  (unwrap)
+			  (wait None)
+			  (unwrap))
+		   (progn
+		     "// save image"
+		     (let ((buffer_content (dot buf
+						(read)
+						(unwrap)))
+			   (image (dot ("image::ImageBuffer::<image::Rgba<u8>,_>::from_raw"
+					1024 1024
+					"&buffer_content[..]")
+				       (unwrap))))
+		       (dot image
+			    (save (string "image.png"))
+			    (unwrap))))))
+
+
+
+	       (progn
+		 "// store mandelbrot image"
+		 (let ((image (dot (vulkano--image--StorageImage--new
+				    (device.clone)
+				    (make-instance vulkano--image--Dimensions--Dim2d
+						   :width 1024
+						   :height 1024)
+				    vulkano--format--Format--R8G8B8A8Unorm
+				    (Some (queue.family)))
+				   (unwrap)))
+		       #+nil (data_iter "0 .. 65535")
+			     )
+
+		   (space "mod cs"
+			  (progn
+			    (macroexpand
+			     vulkano_shaders--shader!
+			     :ty (string "compute")
+			     :src
+			     (string#
+			      ,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
+										     (merge-pathnames "trace.comp"
+												      *source-dir*)))))))
+		   (let ((shader (dot (cs--Shader--load (device.clone))
+				      (expect (string "failed to create shader"))))
+			 (compute_pipeline (std--sync--Arc--new
+					    (dot (vulkano--pipeline--ComputePipeline--new
+						  (device.clone)
+						  (&shader.main_entry_point)
+						  "&()")
+						 (expect (string "failed to create compute pipeline")))))
+			 
+			 (set 
+			  (std--sync--Arc--new
+			   (dot
+			    (vulkano--descriptor--descriptor_set--PersistentDescriptorSet--start
+			     (compute_pipeline.clone)
+			     0
+			     )
+			    (add_image (image.clone))
+			    (unwrap)
+			    (build)
+			    (unwrap))))
+			  (buf (dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
+					  (device.clone)
+					  (vulkano--buffer--BufferUsage--all)
+					  (dot (slice 0 (* 1024 1024 4))
+					       (map (lambda (_) "0u8"))))
+					 (expect (string "failed to create buffer"))))
+			 (command_buffer (dot (vulkano--command_buffer--AutoCommandBufferBuilder--new
+					       (device.clone)
+					       (queue.family))
+					      (unwrap)
+					      (dispatch (list (/ 1024 8)
+							      (/ 1024 8) 1)
+							(compute_pipeline.clone)
+							(set.clone)
+							"()")
+					      (unwrap)
+					      (copy_image_to_buffer (image.clone)
+								    (buf.clone))
+					      (unwrap)
+					      (build)
+					      (unwrap)))
+			 (finished (dot command_buffer
+					(execute (queue.clone))
+					(unwrap))))
+		     (dot finished
+			  (then_signal_fence_and_flush)
+			  (unwrap)
+			  (wait None)
+			  (unwrap))
+		     (progn
+		       "// save image"
+		       (let ((buffer_content (dot buf
+						(read)
+						(unwrap)))
+			   (image (dot ("image::ImageBuffer::<image::Rgba<u8>,_>::from_raw"
+					1024 1024
+					"&buffer_content[..]")
+				       (unwrap))))
+		       (dot image
+			    (save (string "image.png"))
+			    (unwrap)))))))
 	       
 	       
 	       #+nil (let ((surface (dot (winit-window--WindowBuilder--new)
