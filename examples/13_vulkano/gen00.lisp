@@ -43,11 +43,12 @@
 			   (< i 1.0)
 			   (incf i .005))
 			  (setf z (vec2 (+ (* z.x z.x)
+					   (* -1 z.y z.y)
 					   c.x
-					   (* -1 z.y z.y))
+					   )
 					(+ (* z.x z.y)
-					   c.x
-					   (*  z.x z.y))))
+					   (*  z.x z.y)
+					   c.y)))
 			  (when (< 4.0 (length z))
 			    break))
 		     (let ((to_write (vec4 (vec3 i) 1.0)))
