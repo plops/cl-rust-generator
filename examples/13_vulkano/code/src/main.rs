@@ -4,6 +4,11 @@ use std::sync::Arc;
 use vulkano::command_buffer::CommandBuffer;
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::sync::GpuFuture;
+#[derive(Default, Copy, Clone)]
+struct Vertex {
+    position: [f32; 2],
+}
+vulkano::impl_vertex!(Vertex, position);
 fn main() {
     {
         println!("{} {}:{} start ", Utc::now(), file!(), line!());

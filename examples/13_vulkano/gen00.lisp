@@ -29,8 +29,9 @@
 
 		 "layout(local_size_x=8,local_size_y=8,local_size_z=1) in;"
 		 "layout(set=0,binding=0,rgba8) uniform writeonly image2D img;"
-		 
-                 (defun main ()
+
+
+		 (defun main ()
 		   (let ((norm_coordinates (/ (+ (vec2 0.5) gl_GlobalInvocationID.xy)
 					      (vec2 (imageSize img))))
 			 (c (- (* 2.0 (- norm_coordinates (vec2 0.5)))
@@ -114,7 +115,7 @@ image = \"*\"
   (define-module
       `(main
 	(do0
-
+	 
 	 
 	 (use
 	  ;(vulkano instance (curly Instance InstanceExtensions))
@@ -127,6 +128,12 @@ image = \"*\"
 	  (vulkano descriptor descriptor_set PersistentDescriptorSet)
 	  (std sync Arc)
 	  (chrono Utc))
+
+	 (do0
+	  "#[derive(Default,Copy,Clone)]"
+	  (defstruct0 Vertex
+	      (position "[f32;2]"))
+	  (vulkano--impl_vertex! Vertex position))
 	 
 	 (defun main ()
 	   ,(logprint "start" `())
