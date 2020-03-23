@@ -75,6 +75,7 @@ vulkano-win = \"*\"
 winit = \"*\"
 chrono = \"*\"
 vulkano-shaders= \"0.13\"
+image = \"*\"
 "))
   
   (define-module
@@ -279,7 +280,19 @@ vulkano-shaders= \"0.13\"
 			  (then_signal_fence_and_flush)
 			  (unwrap)
 			  (wait None)
-			  (unwrap))))
+			  (unwrap))
+		   (progn
+		     "// safe image"
+		     (let ((buffer_content (dot buf
+						(read)
+						(unwrap)))
+			   (image (dot ("image::ImageBuffer::<image::Rgba<u8>,_>::from_raw"
+					1024 1024
+					"&buffer_content[..]")
+				       (unwrap))))
+		       (dot image
+			    (save (string "image.png"))
+			    (unwrap))))))
 	       
 	       
 	       #+nil (let ((surface (dot (winit-window--WindowBuilder--new)

@@ -68,6 +68,14 @@ fn main() {
             .unwrap()
             .wait(None)
             .unwrap();
+        {
+            // safe image
+            let buffer_content = buf.read().unwrap();
+            let image =
+                image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(1024, 1024, &buffer_content[..])
+                    .unwrap();
+            image.save("image.png").unwrap();
+        };
     };
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());
