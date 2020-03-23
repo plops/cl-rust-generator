@@ -542,6 +542,47 @@ image = \"*\"
 					  (unwrap)
 					  (build)
 					  (unwrap)))))
+		   (do0
+		    (space "mod vs"
+			   (progn
+			     (macroexpand
+			      vulkano_shaders--shader!
+			      :ty (string "vertex")
+			      :src
+			      (string#
+			       ,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
+										      (merge-pathnames "trace.vert"
+												       *source-dir*)))))))
+
+		    (space "mod fs"
+			   (progn
+			     (macroexpand
+			      vulkano_shaders--shader!
+			      :ty (string "fragment")
+			      :src
+			      (string#
+			       ,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
+										      (merge-pathnames "trace.frag"
+												       *source-dir*)))))))
+		    (let ((vs (dot (vs--Shader--load (device.clone))
+				   (expect (string "failed to create shader"))))
+			  (fs (dot (fs--Shader--load (device.clone))
+				   (expect (string "failed to create shader"))))
+			  (pipeline (std--sync--Arc--new
+				     (dot
+				      (vulkano--pipeline--GraphicsPipeline--start)
+				      (vertex_input_single_buffer--<Vertex>)
+				      (vertex_shader (vs.main_entry_point)
+						     "()")
+				      (viewports_dynamic_scissors_irrelevant 1)
+				      (fragment_shader (fs.main_entry_point) "()")
+				      (render_pass (dot (vulkano--framebuffer--Subpass--from
+							 (render_pass.clone)
+							 0)
+							(unwrap)))
+				      (build (device.clone))
+				      (unwrap)))))))
+		   
 		   (dot
 		    (vulkano--command_buffer--AutoCommandBufferBuilder--new
 		     (device.clone)
@@ -557,6 +598,9 @@ image = \"*\"
 		    (unwrap)
 		    (end_render_pass)
 		    (unwrap))))
+
+	       
+
 	       
 	       #+nil (let ((surface (dot (winit-window--WindowBuilder--new)
 				   (build_vk_surface
