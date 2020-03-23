@@ -386,7 +386,7 @@ image = \"*\"
 			    (unwrap))))))
 
 
-
+	       #+nil
 	       (progn
 		 "// store mandelbrot image"
 		 (let ((image (dot (vulkano--image--StorageImage--new
@@ -471,7 +471,23 @@ image = \"*\"
 		       (dot image
 			    (save (string "image.png"))
 			    (unwrap)))))))
-	       
+
+	       (progn
+		 "// render example"
+		 (let ((vertex_buffer
+			(dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
+					  (device.clone)
+					  (vulkano--buffer--BufferUsage--all)
+					  (dot (space vec! (list ,@(loop for (x y) in `((-1 -1)
+										    (0 1)
+										    (1 -.5)) collect
+								    `(make-instance Vertex
+										    :position
+										    (list ,(* .5 x)
+											  ,(* .5 y))))))
+					       (into_iter)))
+					 (expect (string "failed to create buffer")))
+			))))
 	       
 	       #+nil (let ((surface (dot (winit-window--WindowBuilder--new)
 				   (build_vk_surface
