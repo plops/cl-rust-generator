@@ -526,7 +526,37 @@ image = \"*\"
 						"color: [color],"
 						"depth_stencil: {}")))
 					  (unwrap)))
-			 ))))
+			 )
+		       (image (dot (vulkano--image--StorageImage--new
+				    (device.clone)
+				    (make-instance vulkano--image--Dimensions--Dim2d
+						   :width 1024
+						   :height 1024)
+				    vulkano--format--Format--R8G8B8A8Unorm
+				    (Some (queue.family)))
+				   (unwrap)))
+		       (framebuffer (std--sync--Arc--new
+				     (dot (vulkano--framebuffer--Framebuffer--start
+					   (render_pass.clone))
+					  (add (image.clone))
+					  (unwrap)
+					  (build)
+					  (unwrap)))))
+		   (dot
+		    (vulkano--command_buffer--AutoCommandBufferBuilder--new
+		     (device.clone)
+		     (queue.family))
+		    (unwrap)
+		    (begin_render_pass (framebuffer.clone)
+				       false
+				       (space vec!
+					      (list
+					       (dot
+						(list 0s0 0s0 1s0 1s0)
+						(into)))))
+		    (unwrap)
+		    (end_render_pass)
+		    (unwrap))))
 	       
 	       #+nil (let ((surface (dot (winit-window--WindowBuilder--new)
 				   (build_vk_surface

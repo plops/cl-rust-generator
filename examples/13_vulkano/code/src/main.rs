@@ -70,6 +70,29 @@ fn main() {
             })
             .unwrap(),
         );
+        let image = vulkano::image::StorageImage::new(
+            device.clone(),
+            vulkano::image::Dimensions::Dim2d {
+                width: 1024,
+                height: 1024,
+            },
+            vulkano::format::Format::R8G8B8A8Unorm,
+            Some(queue.family()),
+        )
+        .unwrap();
+        let framebuffer = std::sync::Arc::new(
+            vulkano::framebuffer::Framebuffer::start(render_pass.clone())
+                .add(image.clone())
+                .unwrap()
+                .build()
+                .unwrap(),
+        );
+        vulkano::command_buffer::AutoCommandBufferBuilder::new(device.clone(), queue.family())
+            .unwrap()
+            .begin_render_pass(framebuffer.clone(), false, vec![[0., 0., 1.0, 1.0].into()])
+            .unwrap()
+            .end_render_pass()
+            .unwrap();
     };
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());
