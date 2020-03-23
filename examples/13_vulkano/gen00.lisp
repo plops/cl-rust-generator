@@ -57,7 +57,29 @@
 		       (imageStore img (ivec2 gl_GlobalInvocationID.xy)
 				   to_write))))
 		 
-		 )))
+		 ))
+  (write-source (asdf:system-relative-pathname 'cl-rust-generator
+					       (merge-pathnames "trace.vert"
+								*source-dir*))
+		`(do0
+                 "#version 450"
+
+		 "layout(location=0) in vec2 position;"
+		 
+		 
+                 (defun main ()
+		   (setf gl_Position (vec4 position 0.0 1.0)))))
+  (write-source (asdf:system-relative-pathname 'cl-rust-generator
+					       (merge-pathnames "trace.frag"
+								*source-dir*))
+		`(do0
+                 "#version 450"
+
+		 "layout(location=0) out vec4 f_color;"
+		 
+		 
+                 (defun main ()
+		   (setf f_color (vec4 1.0 0.0 0.0 1.0))))))
 
 
 
@@ -486,8 +508,25 @@ image = \"*\"
 										    (list ,(* .5 x)
 											  ,(* .5 y))))))
 					       (into_iter)))
-					 (expect (string "failed to create buffer")))
-			))))
+			     (expect (string "failed to create buffer"))))
+		       (render_pass (std--sync--Arc--new
+				     (dot (vulkano--single_pass_renderpass!
+				       (device.clone)
+				       (space
+					"attachments:"
+					(progn
+					  (space "color:"
+						 (progn
+						   "load: Clear,"
+						   "store: Store,"
+						   "format: vulkano::format::Format::R8G8B8A8Unorm,"
+						   "samples: 1,"))))
+				       (space "pass:"
+					      (progn
+						"color: [color],"
+						"depth_stencil: {}")))
+					  (unwrap)))
+			 ))))
 	       
 	       #+nil (let ((surface (dot (winit-window--WindowBuilder--new)
 				   (build_vk_surface

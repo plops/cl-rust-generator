@@ -56,6 +56,20 @@ fn main() {
             .into_iter(),
         )
         .expect("failed to create buffer");
+        let render_pass = std::sync::Arc::new(
+            vulkano::single_pass_renderpass!(device.clone(), attachments: {
+                                    color: {
+                                            load: Clear,
+                                            store: Store,
+                                            format: vulkano::format::Format::R8G8B8A8Unorm,
+                                            samples: 1,
+            }
+            }, pass: {
+                                    color: [color],
+                                    depth_stencil: {}
+            })
+            .unwrap(),
+        );
     };
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());
