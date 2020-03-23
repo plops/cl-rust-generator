@@ -4,7 +4,7 @@ layout(set = 0, binding = 0, rgba8) uniform writeonly image2D img;
 void main() {
   vec2 norm_coordinates = ((((vec2((0.50))) + (gl_GlobalInvocationID.xy))) /
                            (vec2(imageSize(img))));
-  vec2 c = (((((2.0)) * (((norm_coordinates) - (vec((0.50))))))) -
+  vec2 c = (((((2.0)) * (((norm_coordinates) - (vec2((0.50))))))) -
             (vec2((1.0), (0.))));
   vec2 z = vec2((0.), (0.));
   float i = (0.);

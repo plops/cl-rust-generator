@@ -587,7 +587,7 @@ entry return-values contains a list of return values"
 				  (emit type)
 				  (emit value))))
 		  (slice (let ((args (cdr code)))
-			       (format nil "~{~a~^..~}" (mapcar #'emit args))))
+			       (format nil "(~{~a~^..~})" (mapcar #'emit args))))
 		  (let (parse-let code #'emit :mutable-default nil))
 		  (let* (parse-let code #'emit :mutable-default t))
 		  (setf 

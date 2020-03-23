@@ -33,7 +33,7 @@
                  (defun main ()
 		   (let ((norm_coordinates (/ (+ (vec2 0.5) gl_GlobalInvocationID.xy)
 					      (vec2 (imageSize img))))
-			 (c (- (* 2.0 (- norm_coordinates (vec 0.5)))
+			 (c (- (* 2.0 (- norm_coordinates (vec2 0.5)))
 			       (vec2 1.0 0.0)))
 			 (z (vec2 0.0 0.0))
 			 (i 0.0))
