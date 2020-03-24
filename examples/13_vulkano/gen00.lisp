@@ -661,15 +661,44 @@ image = \"*\"
 				     &event_loops
 				     (instance.clone))
 				    (unwrap))))
-		   (event_loops.run_forever
-		    (lambda (event)
-		      (case event
-			((make-instance winit--Event--WindowEvent
-					:event winit--WindowEvent--CloseRequested
-					"..")
-			 (return winit--ControlFlow--Break))
-			(_
-			 (return winit--ControlFlow--Continue)))))
+		   (let ((caps (dot (surface.capabilities physical)
+				    (expect (string "failed to get surface capabilities"))))
+			 (dimensions (caps.current_extent.unwrap_or (list 1280 1024)))
+			 (alpha (dot caps
+				     supported_composite_alpha
+				     (iter)
+				     (next)
+				     (unwrap)))
+			 (format (dot caps
+				      (aref supported_formats 0)
+				      0))
+			 ((values swapchain images)
+			  (dot (vulkano--swapchain--Swapchain--new
+				(device.clone)
+				(surface.clone)
+				caps.min_image_count
+				format
+				dimensions
+				1
+				caps.supported_usage_flags
+				&queue
+				vulkano--swapchain--SurfaceTransform--Identity
+				alpha
+				vulkano--swapchain--PresentMode--Fifo
+				true
+				None)
+			       (expect (string "failed to create swapchain")))))
+
+		   
+		    (event_loops.run_forever
+		     (lambda (event)
+		       (case event
+			 ((make-instance winit--Event--WindowEvent
+					 :event winit--WindowEvent--CloseRequested
+					 "..")
+			  (return winit--ControlFlow--Break))
+			 (_
+			  (return winit--ControlFlow--Continue))))))
 		  ,(logprint "queue" `())))))
 	   ,(logprint "end" `())
 	   ;(return (Ok "()"))

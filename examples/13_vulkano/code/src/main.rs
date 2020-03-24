@@ -42,6 +42,28 @@ fn main() {
         let surface = winit::WindowBuilder::new()
             .build_vk_surface(&event_loops, instance.clone())
             .unwrap();
+        let caps = surface
+            .capabilities(physical)
+            .expect("failed to get surface capabilities");
+        let dimensions = caps.current_extent.unwrap_or([1280, 1024]);
+        let alpha = caps.supported_composite_alpha.iter().next().unwrap();
+        let format = caps.supported_formats[0].0;
+        let (swapchain, images) = vulkano::swapchain::Swapchain::new(
+            device.clone(),
+            surface.clone(),
+            caps.min_image_count,
+            format,
+            dimensions,
+            1,
+            caps.supported_usage_flags,
+            &queue,
+            vulkano::swapchain::SurfaceTransform::Identity,
+            alpha,
+            vulkano::swapchain::PresentMode::Fifo,
+            true,
+            None,
+        )
+        .expect("failed to create swapchain");
         event_loops.run_forever(|event| match event {
             winit::Event::WindowEvent {
                 event: winit::WindowEvent::CloseRequested,
