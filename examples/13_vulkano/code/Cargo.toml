@@ -5,8 +5,8 @@ authors = ["Martin Kielhorn <kielhorn.martin@gmail.com>"]
 edition = "2018"
 [dependencies]
 vulkano = "0.13"
-vulkano-win = "*"
-winit = "*"
+vulkano-win = "0.13"
+winit = "0.19"
 chrono = "*"
 vulkano-shaders= "0.13"
 image = "*"

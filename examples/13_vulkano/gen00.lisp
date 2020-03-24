@@ -127,8 +127,8 @@ authors = [\"Martin Kielhorn <kielhorn.martin@gmail.com>\"]
 edition = \"2018\"
 [dependencies]
 vulkano = \"0.13\"
-vulkano-win = \"*\"
-winit = \"*\"
+vulkano-win = \"0.13\"
+winit = \"0.19\"
 chrono = \"*\"
 vulkano-shaders= \"0.13\"
 image = \"*\"
@@ -141,14 +141,17 @@ image = \"*\"
 	 
 	 (use
 	  ;(vulkano instance (curly Instance InstanceExtensions))
-	  ;(vulkano_win VkSurfaceBuild)
-					;(winit event_loop (curly EventsLoop WindowBuilder))
+	  (vulkano_win VkSurfaceBuild)
+	  (winit EventsLoop)
+	  (winit WindowBuilder)
 	  (vulkano command_buffer CommandBuffer
 		   )
 	  (vulkano sync GpuFuture
 		   )
 	  (vulkano descriptor descriptor_set PersistentDescriptorSet)
+	  
 	  (std sync Arc)
+	  
 	  (chrono Utc))
 
 	 (do0
@@ -159,7 +162,7 @@ image = \"*\"
 	 
 	 (defun main ()
 	   ,(logprint "start" `())
-	   (let* ((event_loops (winit--event_loop--EventLoop--new))
+	   (let* ((event_loops (winit--EventsLoop--new))
 		  )
 	     (let (
 		   ; (extensions (vulkano_win--required_extensions))
@@ -496,6 +499,7 @@ image = \"*\"
 			       (save (string "image.png"))
 			       (unwrap))))))))
 
+	       #+nil
 	       (progn
 		 "// render triangle to png"
 		 (let ((vertex_buffer
@@ -650,12 +654,14 @@ image = \"*\"
 	       
 
 	       
-	       #+nil (let ((surface (dot (winit-window--WindowBuilder--new)
-				   (build_vk_surface
-				    &event_loop
-				    (instance.clone))
-				   (unwrap))))
-		,(logprint "queue" `()))))
+	       (progn
+		 "// render to window"
+		 (let ((surface (dot (winit--WindowBuilder--new)
+				    (build_vk_surface
+				     &event_loops
+				     (instance.clone))
+				    (unwrap))))
+		  ,(logprint "queue" `())))))
 	   ,(logprint "end" `())
 	   ;(return (Ok "()"))
 	   ))))
