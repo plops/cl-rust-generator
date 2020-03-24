@@ -661,7 +661,7 @@ image = \"*\"
 	       
 	       (progn
 		 "// render to window"
-		 "//  https://github.com/vulkano-rs/vulkano-examples/blob/master/src/bin/triangle.rs"
+		 "//  https://github.com/vulkano-rs/vulkano-examples/blob/master/src/bin/triangle.rs "
 		 (let ((surface (dot (winit--WindowBuilder--new)
 				    (build_vk_surface
 				     &event_loops
@@ -798,70 +798,86 @@ image = \"*\"
 							(unwrap)))
 				      (build (device.clone))
 				      (unwrap))))
-			  (dynamic_state (make-instance vulkano--command_buffer--DynamicState
-							:line_width None
-							:viewports None
-							:scissors None
-							:compare_mask None
-							:write_mask None
-							:reference None
-							;:viewports
-							#+nil (Some
+			  
+			  )))
+		   (let ((dynamic_state (make-instance vulkano--command_buffer--DynamicState
+							;; :line_width None
+							;; :viewports None
+							;; :scissors None
+							;; :compare_mask None
+							;; :write_mask None
+							;; :reference None
+							:viewports
+							 (Some
 							 (space vec! (list (make-instance vulkano--pipeline--viewport--Viewport
 											  :origin (list 0s0 0s0)
 											  :dimensions (list 1024s0 1024s0)
 											  :depth_range (slice 0s0 1s0)))))
-							;".. vulkano::command_buffer::DynamicState::none()"
-							)))))
-		   
-		   (let ((command_buffer
-			  (dot
-			   (vulkano--command_buffer--AutoCommandBufferBuilder--primary_one_time_submit
-			    (device.clone)
-			    (queue.family))
-			   (unwrap)
-			   (begin_render_pass (framebuffer.clone)
-					      false
-					      (space vec!
-						     (list
-						      (dot
-						       (list 0s0 0s0 1s0 1s0)
-						       (into)))))
-			   (unwrap)
-			   (draw (pipeline.clone)
-				 &dynamic_state
-				 (vertex_buffer.clone)
-				 "()"
-				 "()")
-			   (unwrap)
-			   (end_render_pass)
-			   (unwrap)
-			   (copy_image_to_buffer (image.clone)
-						 (buf.clone))
-			   (unwrap)
-			   (build)
-			   (unwrap))))
-		     (do0
-		      (let ((finished (dot command_buffer
-					   (execute (queue.clone))
+							".. vulkano::command_buffer::DynamicState::none()"
+							))
+			 (framebuffers
+			  (dot images
+			       (iter)
+			       (map (lambda (image)
+				      (return (coerce
+					       (std--sync--Arc--new
+						(dot (vulkano--framebuffer--Framebuffer--start
+						      (render_pass.clone))
+						     (add (image.clone))
+						     (unwrap)
+						     (build)
+						     (unwrap)))
+					       "Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send +Sync>"))))
+			       (collect--<Vec<_>>)))
+			 )
+		    (let ((command_buffer
+			   (dot
+			    (vulkano--command_buffer--AutoCommandBufferBuilder--primary_one_time_submit
+			     (device.clone)
+			     (queue.family))
+			    (unwrap)
+			    (begin_render_pass (framebuffer.clone)
+					       false
+					       (space vec!
+						      (list
+						       (dot
+							(list 0s0 0s0 1s0 1s0)
+							(into)))))
+			    (unwrap)
+			    (draw (pipeline.clone)
+				  &dynamic_state
+				  (vertex_buffer.clone)
+				  "()"
+				  "()")
+			    (unwrap)
+			    (end_render_pass)
+			    (unwrap)
+			    (copy_image_to_buffer (image.clone)
+						  (buf.clone))
+			    (unwrap)
+			    (build)
+			    (unwrap))))
+		      (do0
+		       (let ((finished (dot command_buffer
+					    (execute (queue.clone))
+					    (unwrap))))
+			 (dot finished
+			      (then_signal_fence_and_flush)
+			      (unwrap)
+			      (wait None)
+			      (unwrap)))
+		       (progn
+			 "// save image"
+			 (let ((buffer_content (dot buf
+						    (read)
+						    (unwrap)))
+			       (image (dot ("image::ImageBuffer::<image::Rgba<u8>,_>::from_raw"
+					    1024 1024
+					    "&buffer_content[..]")
 					   (unwrap))))
-			(dot finished
-			     (then_signal_fence_and_flush)
-			     (unwrap)
-			     (wait None)
-			     (unwrap)))
-		      (progn
-			"// save image"
-			(let ((buffer_content (dot buf
-						   (read)
-						   (unwrap)))
-			      (image (dot ("image::ImageBuffer::<image::Rgba<u8>,_>::from_raw"
-					   1024 1024
-					   "&buffer_content[..]")
-					  (unwrap))))
-			  (dot image
-			       (save (string "image.png"))
-			       (unwrap))))))))
+			   (dot image
+				(save (string "image.png"))
+				(unwrap)))))))))
 		     
 		    (event_loops.run_forever
 		     (lambda (event)

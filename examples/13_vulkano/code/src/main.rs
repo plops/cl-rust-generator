@@ -152,13 +152,26 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
                 .unwrap(),
         );
         let dynamic_state = vulkano::command_buffer::DynamicState {
-            line_width: None,
-            viewports: None,
-            scissors: None,
-            compare_mask: None,
-            write_mask: None,
-            reference: None,
+            viewports: Some(vec![vulkano::pipeline::viewport::Viewport {
+                origin: [0., 0.],
+                dimensions: [1024., 1024.],
+                depth_range: (0. ..1.0),
+            }]),
+            ..vulkano::command_buffer::DynamicState::none()
         };
+        let framebuffers = images
+            .iter()
+            .map(|image| {
+                return (std::sync::Arc::new(
+                    vulkano::framebuffer::Framebuffer::start(render_pass.clone())
+                        .add(image.clone())
+                        .unwrap()
+                        .build()
+                        .unwrap(),
+                )
+                    as Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send + Sync>);
+            })
+            .collect::<Vec<_>>();
         let command_buffer =
             vulkano::command_buffer::AutoCommandBufferBuilder::primary_one_time_submit(
                 device.clone(),
