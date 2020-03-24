@@ -661,6 +661,7 @@ image = \"*\"
 	       
 	       (progn
 		 "// render to window"
+		 "//  https://github.com/vulkano-rs/vulkano-examples/blob/master/src/bin/triangle.rs"
 		 (let ((surface (dot (winit--WindowBuilder--new)
 				    (build_vk_surface
 				     &event_loops

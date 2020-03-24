@@ -43,6 +43,7 @@ fn main() {
     let queue = queues.next().unwrap();
     {
         // render to window
+        //  https://github.com/vulkano-rs/vulkano-examples/blob/master/src/bin/triangle.rs
         let surface = winit::WindowBuilder::new()
             .build_vk_surface(&event_loops, instance.clone())
             .unwrap();
