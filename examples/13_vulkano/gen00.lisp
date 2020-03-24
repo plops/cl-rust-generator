@@ -128,7 +128,7 @@ edition = \"2018\"
 [dependencies]
 vulkano = \"0.13\"
 vulkano-win = \"0.13\"
-winit = \"0.22\" #0.19
+winit = \"0.19\" #0.19
 chrono = \"*\"
 vulkano-shaders= \"0.13\"
 image = \"*\"
@@ -662,6 +662,8 @@ image = \"*\"
 	       (progn
 		 "// render to window"
 		 "//  https://github.com/vulkano-rs/vulkano-examples/blob/master/src/bin/triangle.rs "
+		 "// vulkano 0.13 example:"
+		 "// https://github.com/vulkano-rs/vulkano-examples/blob/1cf9c37073a79a3a0cee60e83c8db8d967218e3e/src/bin/triangle.rs"
 		 (let ((surface (dot (winit--WindowBuilder--new)
 				    (build_vk_surface
 				     &event_loops
