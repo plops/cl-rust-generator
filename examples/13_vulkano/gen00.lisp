@@ -692,7 +692,11 @@ image = \"*\"
 				vulkano--swapchain--PresentMode--Fifo
 				true
 				None)
-			       (expect (string "failed to create swapchain")))))
+			       (expect (string "failed to create swapchain"))))
+			 ((values image_num acquire_future)
+			  (dot (vulkano--swapchain--acquire_next_image (swapchain.clone)
+							      None)
+			       (unwrap))))
 
 		   
 		    (event_loops.run_forever
