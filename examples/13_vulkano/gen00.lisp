@@ -179,10 +179,15 @@ image = \"*\"
 				      (find (lambda (&q)
 					      (return (q.supports_graphics))))
 				      (expect (string "couldnt find graphical queue family"))))
+		   (device_ext (make-instance vulkano--device--DeviceExtensions
+					      :khr_swapchain true
+					      ".. vulkano::device::DeviceExtensions::none()"))
 		   ((values device "mut queues")
 		    (dot (vulkano--device--Device--new physical
-						       (ref (vulkano--device--Features--none))
-						       (ref (vulkano--device--DeviceExtensions--none))
+						       (physical.supported_features)
+						       &device_ext
+						       ;(ref (vulkano--device--Features--none))
+						       ;(ref (vulkano--device--DeviceExtensions--none))
 						       (dot (list (values queue_family 0.5))
 							    (iter)
 							    (cloned)))

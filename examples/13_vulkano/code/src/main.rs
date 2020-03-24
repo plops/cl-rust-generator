@@ -29,10 +29,14 @@ fn main() {
             return q.supports_graphics();
         })
         .expect("couldnt find graphical queue family");
+    let device_ext = vulkano::device::DeviceExtensions {
+        khr_swapchain: true,
+        ..vulkano::device::DeviceExtensions::none()
+    };
     let (device, mut queues) = vulkano::device::Device::new(
         physical,
-        &(vulkano::device::Features::none()),
-        &(vulkano::device::DeviceExtensions::none()),
+        physical.supported_features(),
+        &device_ext,
         [(queue_family, 0.50)].iter().cloned(),
     )
     .expect("failed to create device");
