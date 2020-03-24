@@ -128,7 +128,7 @@ edition = \"2018\"
 [dependencies]
 vulkano = \"0.13\"
 vulkano-win = \"0.13\"
-winit = \"0.19\"
+winit = \"0.22\" #0.19
 chrono = \"*\"
 vulkano-shaders= \"0.13\"
 image = \"*\"
@@ -828,56 +828,13 @@ image = \"*\"
 						     (build)
 						     (unwrap)))
 					       "Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send +Sync>"))))
-			       (collect--<Vec<_>>)))
-			 )
-		    (let ((command_buffer
-			   (dot
-			    (vulkano--command_buffer--AutoCommandBufferBuilder--primary_one_time_submit
-			     (device.clone)
-			     (queue.family))
-			    (unwrap)
-			    (begin_render_pass (framebuffer.clone)
-					       false
-					       (space vec!
-						      (list
-						       (dot
-							(list 0s0 0s0 1s0 1s0)
-							(into)))))
-			    (unwrap)
-			    (draw (pipeline.clone)
-				  &dynamic_state
-				  (vertex_buffer.clone)
-				  "()"
-				  "()")
-			    (unwrap)
-			    (end_render_pass)
-			    (unwrap)
-			    (copy_image_to_buffer (image.clone)
-						  (buf.clone))
-			    (unwrap)
-			    (build)
-			    (unwrap))))
-		      (do0
-		       (let ((finished (dot command_buffer
-					    (execute (queue.clone))
-					    (unwrap))))
-			 (dot finished
-			      (then_signal_fence_and_flush)
-			      (unwrap)
-			      (wait None)
-			      (unwrap)))
-		       (progn
-			 "// save image"
-			 (let ((buffer_content (dot buf
-						    (read)
-						    (unwrap)))
-			       (image (dot ("image::ImageBuffer::<image::Rgba<u8>,_>::from_raw"
-					    1024 1024
-					    "&buffer_content[..]")
-					   (unwrap))))
-			   (dot image
-				(save (string "image.png"))
-				(unwrap)))))))))
+			       (collect--<Vec<_>>))))
+		     (let* ((recreate_swapchain false)
+			    (previous_frame_end (Some (coerce
+						  (Box--new (vulkano--sync--now (device.clone)
+										))
+						  "Box<dyn vulkano::sync::GpuFuture>"))))
+		      ))))
 		     
 		    (event_loops.run_forever
 		     (lambda (event)
@@ -887,7 +844,87 @@ image = \"*\"
 					 "..")
 			  (return winit--ControlFlow--Break))
 			 (_
-			  (return winit--ControlFlow--Continue))))))
+			  (return winit--ControlFlow--Continue))
+			 (winit--event--Event--RedrawEventsCleared
+			  (do0
+			   (dot previous_frame_end
+				(as_mut)
+				(unwrap)
+				(cleanup_finished))
+			   (when recreate_swapchain
+			     ,(logprint "swapchain needs recreation" `()))
+			   (let (((values image_num
+					  suboptimal
+					  acquire_future)
+				  (case (vulkano--swapchain--acquire_next_image
+					 (swapchain.clone)
+					 None)
+				    ((Ok r) r)
+				    #+nil ((Err vulkano--AcquireError--OutOfDate)
+					   (do0
+					    (setf recreate_swapchain true)
+					    return))
+				    ((Err e)
+				     ,(logprint "failed to acquire next image" `(e))
+				     (panic! (string "fail")
+					     )))))
+			     (when suboptimal
+			       (setf recreate_swapchain true))
+
+			     (let ((command_buffer
+				    (dot
+				     (vulkano--command_buffer--AutoCommandBufferBuilder--primary_one_time_submit
+				      (device.clone)
+				      (queue.family))
+				     (unwrap)
+				     (begin_render_pass (dot (aref framebuffers image_num)
+							     (clone))
+							false
+							(space vec!
+							       (list
+								(dot
+								 (list 0s0 0s0 1s0 1s0)
+								 (into)))))
+				     (unwrap)
+				     (draw (pipeline.clone)
+					   &dynamic_state
+					   (vertex_buffer.clone)
+					   "()"
+					   "()")
+				     (unwrap)
+				     (end_render_pass)
+				     (unwrap)
+				     #+nil (copy_image_to_buffer (image.clone)
+								 (buf.clone))
+				     #+nil (unwrap)
+				     (build)
+				     (unwrap)))
+				   (future (dot previous_frame_end
+						(take)
+						(unwrap)
+						(join acquire_future)
+						(then_execute (queue.clone)
+							      command_buffer)
+						(unwrap)
+						(then_swapchain_present (queue.clone)
+									(swapchain.clone)
+									image_num)
+						(then_signal_fence_and_flush))))
+			       (case future
+				 ((Ok future)
+				  (setf previous_frame_end (Some (coerce
+								  (Box--new future)
+								  "Box<_>"))))
+				 ((Err e)
+				  ,(logprint "failed to flush future" `(e))
+				  (setf previous_frame_end (Some (coerce
+								  (Box--new (vulkano--sync--now
+									     (device.clone)))
+								  "Box<_>"))))))
+
+
+			     )))
+			 ))))
 		  ,(logprint "queue" `())))))
 	   ,(logprint "end" `())
 	   ;(return (Ok "()"))
