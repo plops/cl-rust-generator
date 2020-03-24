@@ -17,12 +17,9 @@ fn main() {
         println!("{} {}:{} start ", Utc::now(), file!(), line!());
     }
     let mut event_loops = winit::EventsLoop::new();
-    let instance = vulkano::instance::Instance::new(
-        None,
-        &vulkano::instance::InstanceExtensions::none(),
-        None,
-    )
-    .expect("failed to create Vulkan instance");
+    let extensions = vulkano_win::required_extensions();
+    let instance = vulkano::instance::Instance::new(None, &extensions, None)
+        .expect("failed to create Vulkan instance");
     let physical = vulkano::instance::PhysicalDevice::enumerate(&instance)
         .next()
         .expect("no device available");
@@ -45,6 +42,13 @@ fn main() {
         let surface = winit::WindowBuilder::new()
             .build_vk_surface(&event_loops, instance.clone())
             .unwrap();
+        event_loops.run_forever(|event| match event {
+            winit::Event::WindowEvent {
+                event: winit::WindowEvent::CloseRequested,
+                ..
+            } => return winit::ControlFlow::Break,
+            _ => return winit::ControlFlow::Continue,
+        });
         {
             println!("{} {}:{} queue ", Utc::now(), file!(), line!());
         };

@@ -165,10 +165,10 @@ image = \"*\"
 	   (let* ((event_loops (winit--EventsLoop--new))
 		  )
 	     (let (
-		   ; (extensions (vulkano_win--required_extensions))
+		   (extensions (vulkano_win--required_extensions))
 		   (instance (dot (vulkano--instance--Instance--new None
-					; &extensions
-								    (&vulkano--instance--InstanceExtensions--none)
+				        &extensions
+			       ;				    (&vulkano--instance--InstanceExtensions--none)
 								    None)
 				  (expect (string "failed to create Vulkan instance"))))
 		   (physical (dot (vulkano--instance--PhysicalDevice--enumerate &instance)
@@ -661,6 +661,15 @@ image = \"*\"
 				     &event_loops
 				     (instance.clone))
 				    (unwrap))))
+		   (event_loops.run_forever
+		    (lambda (event)
+		      (case event
+			((make-instance winit--Event--WindowEvent
+					:event winit--WindowEvent--CloseRequested
+					"..")
+			 (return winit--ControlFlow--Break))
+			(_
+			 (return winit--ControlFlow--Continue)))))
 		  ,(logprint "queue" `())))))
 	   ,(logprint "end" `())
 	   ;(return (Ok "()"))
