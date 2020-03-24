@@ -109,9 +109,29 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
                 .build(device.clone())
                 .unwrap(),
         );
-        vulkano::command_buffer::AutoCommandBufferBuilder::new(device.clone(), queue.family())
+        let dynamic_state = vulkano::command_buffer::DynamicState {
+            viewports: Some(vec![vulkano::pipeline::viewport::Viewport {
+                origin: [0., 0.],
+                dimensions: [1024., 1024.],
+                depth_range: (0. ..1.0),
+            }]),
+            ..vulkano::command_buffer::DynamicState::none()
+        };
+        let command_buffer =
+            vulkano::command_buffer::AutoCommandBufferBuilder::primary_one_time_submit(
+                device.clone(),
+                queue.family(),
+            )
             .unwrap()
             .begin_render_pass(framebuffer.clone(), false, vec![[0., 0., 1.0, 1.0].into()])
+            .unwrap()
+            .draw(
+                pipeline.clone(),
+                &dynamic_state,
+                vertex_buffer.clone(),
+                (),
+                (),
+            )
             .unwrap()
             .end_render_pass()
             .unwrap();

@@ -581,7 +581,14 @@ image = \"*\"
 							 0)
 							(unwrap)))
 				      (build (device.clone))
-				      (unwrap)))))))
+				      (unwrap))))
+			  (dynamic_state (make-instance vulkano--command_buffer--DynamicState
+							:viewports (Some
+								    (space vec! (list (make-instance vulkano--pipeline--viewport--Viewport
+												     :origin (list 0s0 0s0)
+												     :dimensions (list 1024s0 1024s0)
+												     :depth_range (slice 0s0 1s0)))))
+							".. vulkano::command_buffer::DynamicState::none()")))))
 		   
 		   (let ((command_buffer
 			  (dot
@@ -596,6 +603,12 @@ image = \"*\"
 						      (dot
 						       (list 0s0 0s0 1s0 1s0)
 						       (into)))))
+			   (unwrap)
+			   (draw (pipeline.clone)
+				 &dynamic_state
+				 (vertex_buffer.clone)
+				 "()"
+				 "()")
 			   (unwrap)
 			   (end_render_pass)
 			   (unwrap)))))))
