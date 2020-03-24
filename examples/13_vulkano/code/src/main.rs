@@ -70,6 +70,9 @@ fn main() {
         .expect("failed to create swapchain");
         let (image_num, acquire_future) =
             vulkano::swapchain::acquire_next_image(swapchain.clone(), None).unwrap();
+        {
+            println!("{} {}:{} swapchain  dimensions={:?}  alpha={:?}  format={:?}  caps.min_image_count={:?}  caps.supported_usage_flags={:?}  image_num={:?}", Utc::now(), file!(), line!(), dimensions, alpha, format, caps.min_image_count, caps.supported_usage_flags, image_num);
+        }
         event_loops.run_forever(|event| match event {
             winit::Event::WindowEvent {
                 event: winit::WindowEvent::CloseRequested,

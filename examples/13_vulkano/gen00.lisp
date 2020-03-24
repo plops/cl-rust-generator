@@ -95,7 +95,7 @@
        (println! (string ,(format nil "{} {}:{} ~a ~{~a~^ ~}"
 				  msg
 				  (loop for e in rest collect
-				       (format nil " ~a={}" (emit-rs :code e)))))
+				       (format nil " ~a={:?}" (emit-rs :code e)))))
 
 		 (Utc--now)
 		 (file!)
@@ -697,7 +697,9 @@ image = \"*\"
 			  (dot (vulkano--swapchain--acquire_next_image (swapchain.clone)
 							      None)
 			       (unwrap))))
-
+		     
+		     ,(logprint "swapchain" `(dimensions alpha format caps.min_image_count caps.supported_usage_flags
+							 image_num))
 		   
 		    (event_loops.run_forever
 		     (lambda (event)
