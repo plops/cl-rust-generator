@@ -38,7 +38,7 @@ fn main() {
     .expect("failed to create device");
     let queue = queues.next().unwrap();
     {
-        // render example
+        // render triangle to png
         let vertex_buffer = vulkano::buffer::CpuAccessibleBuffer::from_iter(
             device.clone(),
             vulkano::buffer::BufferUsage::all(),

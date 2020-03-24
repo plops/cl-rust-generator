@@ -497,7 +497,7 @@ image = \"*\"
 			       (unwrap))))))))
 
 	       (progn
-		 "// render example"
+		 "// render triangle to png"
 		 (let ((vertex_buffer
 			(dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
 					  (device.clone)
