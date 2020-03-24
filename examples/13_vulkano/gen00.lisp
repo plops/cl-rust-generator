@@ -473,26 +473,28 @@ image = \"*\"
 					      (unwrap)
 					      (build)
 					      (unwrap)))
-			 (finished (dot command_buffer
-					(execute (queue.clone))
-					(unwrap))))
-		     (dot finished
-			  (then_signal_fence_and_flush)
-			  (unwrap)
-			  (wait None)
-			  (unwrap))
-		     (progn
-		       "// save image"
-		       (let ((buffer_content (dot buf
-						(read)
-						(unwrap)))
-			   (image (dot ("image::ImageBuffer::<image::Rgba<u8>,_>::from_raw"
-					1024 1024
-					"&buffer_content[..]")
-				       (unwrap))))
-		       (dot image
-			    (save (string "image.png"))
-			    (unwrap)))))))
+			 )
+		     (do0
+		      (let ((finished (dot command_buffer
+					   (execute (queue.clone))
+					   (unwrap))))
+			(dot finished
+			     (then_signal_fence_and_flush)
+			     (unwrap)
+			     (wait None)
+			     (unwrap)))
+		      (progn
+			"// save image"
+			(let ((buffer_content (dot buf
+						   (read)
+						   (unwrap)))
+			      (image (dot ("image::ImageBuffer::<image::Rgba<u8>,_>::from_raw"
+					   1024 1024
+					   "&buffer_content[..]")
+					  (unwrap))))
+			  (dot image
+			       (save (string "image.png"))
+			       (unwrap))))))))
 
 	       (progn
 		 "// render example"
@@ -535,6 +537,12 @@ image = \"*\"
 				    vulkano--format--Format--R8G8B8A8Unorm
 				    (Some (queue.family)))
 				   (unwrap)))
+		       (buf (dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
+				 (device.clone)
+				 (vulkano--buffer--BufferUsage--all)
+				 (dot "(0.. 1024*1024*4)"
+				      (map (lambda (_) "0u8"))))
+				 (expect (string "failed to create buffer"))))
 		       (framebuffer (std--sync--Arc--new
 				     (dot (vulkano--framebuffer--Framebuffer--start
 					   (render_pass.clone))
@@ -611,7 +619,33 @@ image = \"*\"
 				 "()")
 			   (unwrap)
 			   (end_render_pass)
-			   (unwrap)))))))
+			   (unwrap)
+			   (copy_image_to_buffer (image.clone)
+						 (buf.clone))
+			   (unwrap)
+			   (build)
+			   (unwrap))))
+		     (do0
+		      (let ((finished (dot command_buffer
+					   (execute (queue.clone))
+					   (unwrap))))
+			(dot finished
+			     (then_signal_fence_and_flush)
+			     (unwrap)
+			     (wait None)
+			     (unwrap)))
+		      (progn
+			"// save image"
+			(let ((buffer_content (dot buf
+						   (read)
+						   (unwrap)))
+			      (image (dot ("image::ImageBuffer::<image::Rgba<u8>,_>::from_raw"
+					   1024 1024
+					   "&buffer_content[..]")
+					  (unwrap))))
+			  (dot image
+			       (save (string "image.png"))
+			       (unwrap))))))))
 
 	       
 

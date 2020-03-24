@@ -80,6 +80,12 @@ fn main() {
             Some(queue.family()),
         )
         .unwrap();
+        let buf = vulkano::buffer::CpuAccessibleBuffer::from_iter(
+            device.clone(),
+            vulkano::buffer::BufferUsage::all(),
+            (0..1024 * 1024 * 4).map(|_| 0u8),
+        )
+        .expect("failed to create buffer");
         let framebuffer = std::sync::Arc::new(
             vulkano::framebuffer::Framebuffer::start(render_pass.clone())
                 .add(image.clone())
@@ -134,7 +140,25 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
             )
             .unwrap()
             .end_render_pass()
+            .unwrap()
+            .copy_image_to_buffer(image.clone(), buf.clone())
+            .unwrap()
+            .build()
             .unwrap();
+        let finished = command_buffer.execute(queue.clone()).unwrap();
+        finished
+            .then_signal_fence_and_flush()
+            .unwrap()
+            .wait(None)
+            .unwrap();
+        {
+            // save image
+            let buffer_content = buf.read().unwrap();
+            let image =
+                image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(1024, 1024, &buffer_content[..])
+                    .unwrap();
+            image.save("image.png").unwrap();
+        };
     };
     {
         println!("{} {}:{} end ", Utc::now(), file!(), line!());
