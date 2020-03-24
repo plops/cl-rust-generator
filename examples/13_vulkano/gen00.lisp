@@ -898,7 +898,7 @@ image = \"*\"
 								       (swapchain.clone)
 								       image_num)
 					       (then_signal_fence_and_flush))))
-			      (case future
+			      (case future 
 				((Ok future)
 				 (setf previous_frame_end (Some (coerce
 								 (Box--new future)
