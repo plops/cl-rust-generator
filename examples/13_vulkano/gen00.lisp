@@ -668,6 +668,7 @@ image = \"*\"
 				    (unwrap))))
 		   (let ((caps (dot (surface.capabilities physical)
 				    (expect (string "failed to get surface capabilities"))))
+			 ;; perhaps we should use window inner_size
 			 (dimensions (caps.current_extent.unwrap_or (list 1280 1024)))
 			 (alpha (dot caps
 				     supported_composite_alpha
@@ -700,7 +701,167 @@ image = \"*\"
 		     
 		     ,(logprint "swapchain" `(dimensions alpha format caps.min_image_count caps.supported_usage_flags
 							 image_num))
+
+
+		     (do0
+		 "// render triangle to swapchain"
+		 (let ((vertex_buffer
+			(dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
+					  (device.clone)
+					  (vulkano--buffer--BufferUsage--all)
+					  (dot (space vec! (list ,@(loop for (x y) in `((-1 -1)
+										    (0 1)
+										    (1 -.5)) collect
+								    `(make-instance Vertex
+										    :position
+										    (list ,(* .5 x)
+											  ,(* .5 y))))))
+					       (into_iter)))
+			     (expect (string "failed to create buffer"))))
+		       (render_pass (std--sync--Arc--new
+				     (dot (vulkano--single_pass_renderpass!
+				       (device.clone)
+				       (space
+					"attachments:"
+					(progn
+					  (space "color:"
+						 (progn
+						   "load: Clear,"
+						   "store: Store,"
+						   "format: swapchain.format(),"
+						   "samples: 1,"))))
+				       (space "pass:"
+					      (progn
+						"color: [color],"
+						"depth_stencil: {}")))
+					  (unwrap)))
+			 )
+		       (image (dot (vulkano--image--StorageImage--new
+				    (device.clone)
+				    (make-instance vulkano--image--Dimensions--Dim2d
+						   :width 1024
+						   :height 1024)
+				    vulkano--format--Format--R8G8B8A8Unorm
+				    (Some (queue.family)))
+				   (unwrap)))
+		       (buf (dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
+				 (device.clone)
+				 (vulkano--buffer--BufferUsage--all)
+				 (dot "(0.. 1024*1024*4)"
+				      (map (lambda (_) "0u8"))))
+				 (expect (string "failed to create buffer"))))
+		       (framebuffer (std--sync--Arc--new
+				     (dot (vulkano--framebuffer--Framebuffer--start
+					   (render_pass.clone))
+					  (add (image.clone))
+					  (unwrap)
+					  (build)
+					  (unwrap)))))
+		   (do0
+		    (space "mod vs"
+			   (progn
+			     (macroexpand
+			      vulkano_shaders--shader!
+			      :ty (string "vertex")
+			      :src
+			      (string#
+			       ,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
+										      (merge-pathnames "trace.vert"
+												       *source-dir*)))))))
+
+		    (space "mod fs"
+			   (progn
+			     (macroexpand
+			      vulkano_shaders--shader!
+			      :ty (string "fragment")
+			      :src
+			      (string#
+			       ,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
+										      (merge-pathnames "trace.frag"
+												       *source-dir*)))))))
+		    (let ((vs (dot (vs--Shader--load (device.clone))
+				   (expect (string "failed to create shader"))))
+			  (fs (dot (fs--Shader--load (device.clone))
+				   (expect (string "failed to create shader"))))
+			  (pipeline (std--sync--Arc--new
+				     (dot
+				      (vulkano--pipeline--GraphicsPipeline--start)
+				      (vertex_input_single_buffer--<Vertex>)
+				      (vertex_shader (vs.main_entry_point)
+						     "()")
+				      (viewports_dynamic_scissors_irrelevant 1)
+				      (fragment_shader (fs.main_entry_point) "()")
+				      (render_pass (dot (vulkano--framebuffer--Subpass--from
+							 (render_pass.clone)
+							 0)
+							(unwrap)))
+				      (build (device.clone))
+				      (unwrap))))
+			  (dynamic_state (make-instance vulkano--command_buffer--DynamicState
+							:line_width None
+							:viewports None
+							:scissors None
+							:compare_mask None
+							:write_mask None
+							:reference None
+							;:viewports
+							#+nil (Some
+							 (space vec! (list (make-instance vulkano--pipeline--viewport--Viewport
+											  :origin (list 0s0 0s0)
+											  :dimensions (list 1024s0 1024s0)
+											  :depth_range (slice 0s0 1s0)))))
+							;".. vulkano::command_buffer::DynamicState::none()"
+							)))))
 		   
+		   (let ((command_buffer
+			  (dot
+			   (vulkano--command_buffer--AutoCommandBufferBuilder--primary_one_time_submit
+			    (device.clone)
+			    (queue.family))
+			   (unwrap)
+			   (begin_render_pass (framebuffer.clone)
+					      false
+					      (space vec!
+						     (list
+						      (dot
+						       (list 0s0 0s0 1s0 1s0)
+						       (into)))))
+			   (unwrap)
+			   (draw (pipeline.clone)
+				 &dynamic_state
+				 (vertex_buffer.clone)
+				 "()"
+				 "()")
+			   (unwrap)
+			   (end_render_pass)
+			   (unwrap)
+			   (copy_image_to_buffer (image.clone)
+						 (buf.clone))
+			   (unwrap)
+			   (build)
+			   (unwrap))))
+		     (do0
+		      (let ((finished (dot command_buffer
+					   (execute (queue.clone))
+					   (unwrap))))
+			(dot finished
+			     (then_signal_fence_and_flush)
+			     (unwrap)
+			     (wait None)
+			     (unwrap)))
+		      (progn
+			"// save image"
+			(let ((buffer_content (dot buf
+						   (read)
+						   (unwrap)))
+			      (image (dot ("image::ImageBuffer::<image::Rgba<u8>,_>::from_raw"
+					   1024 1024
+					   "&buffer_content[..]")
+					  (unwrap))))
+			  (dot image
+			       (save (string "image.png"))
+			       (unwrap))))))))
+		     
 		    (event_loops.run_forever
 		     (lambda (event)
 		       (case event
