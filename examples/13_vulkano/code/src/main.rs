@@ -69,6 +69,15 @@ fn main() {
             match window_size {
                 Some(dimensions) => {
                     let ds: (u32, u32) = dimensions.to_physical(window.get_hidpi_factor()).into();
+                    {
+                        println!(
+                            "{} {}:{} window size  ds={:?}",
+                            Utc::now(),
+                            file!(),
+                            line!(),
+                            ds
+                        );
+                    }
                     return [ds.0, ds.1];
                 }
                 _ => {
@@ -97,10 +106,8 @@ fn main() {
             None,
         )
         .expect("failed to create swapchain");
-        let (image_num, acquire_future) =
-            vulkano::swapchain::acquire_next_image(swapchain.clone(), None).unwrap();
         {
-            println!("{} {}:{} swapchain  dimensions={:?}  alpha={:?}  format={:?}  caps.min_image_count={:?}  caps.supported_usage_flags={:?}  image_num={:?}", Utc::now(), file!(), line!(), dimensions, alpha, format, caps.min_image_count, caps.supported_usage_flags, image_num);
+            println!("{} {}:{} swapchain  dimensions={:?}  alpha={:?}  format={:?}  caps.min_image_count={:?}  caps.supported_usage_flags={:?}", Utc::now(), file!(), line!(), dimensions, alpha, format, caps.min_image_count, caps.supported_usage_flags);
         }
         // render triangle to swapchain
         let vertex_buffer = vulkano::buffer::CpuAccessibleBuffer::from_iter(

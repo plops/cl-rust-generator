@@ -694,6 +694,7 @@ image = \"*\"
 						  (to_physical (window.get_hidpi_factor))
 						  (into))))
 				     (declare (type "(u32, u32)" ds))
+				     ,(logprint "window size" `(ds))
 				     (return (list ds.0 ds.1))))
 				  (t ,(logprint "window size fail" `())
 				     (panic! (string "win size")))))))
@@ -722,14 +723,15 @@ image = \"*\"
 				 true
 				 None)
 				(expect (string "failed to create swapchain"))))
-			  ((values image_num acquire_future)
+			  #+nil ((values image_num acquire_future)
 			   (dot (vulkano--swapchain--acquire_next_image (swapchain.clone)
 									None)
 				(unwrap))))
 		     
 		      ,(logprint "swapchain" `(dimensions alpha format caps.min_image_count caps.supported_usage_flags
-							  image_num))
-
+							  ;image_num
+							  ))
+		      
 
 		      (do0
 		       "// render triangle to swapchain"
