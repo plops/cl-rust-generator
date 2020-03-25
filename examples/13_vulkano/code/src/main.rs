@@ -20,6 +20,17 @@ fn main() {
     let extensions = vulkano_win::required_extensions();
     let instance = vulkano::instance::Instance::new(None, &extensions, None)
         .expect("failed to create Vulkan instance");
+    let _callback =
+        vulkano::instance::debug::DebugCallback::errors_and_warnings(&instance, |msg| {
+            println!(
+                "{} {}:{} debug:  msg.description={:?}",
+                Utc::now(),
+                file!(),
+                line!(),
+                msg.description
+            );
+        })
+        .ok();
     let physical = vulkano::instance::PhysicalDevice::enumerate(&instance)
         .next()
         .expect("no device available");
@@ -49,10 +60,25 @@ fn main() {
         let surface = winit::WindowBuilder::new()
             .build_vk_surface(&event_loops, instance.clone())
             .unwrap();
+        let window = surface.window();
         let caps = surface
             .capabilities(physical)
             .expect("failed to get surface capabilities");
-        let dimensions = caps.current_extent.unwrap_or([1280, 1024]);
+        let dimensions = (|| {
+            let window_size = window.get_inner_size();
+            match window_size {
+                Some(dimensions) => {
+                    let ds: (u32, u32) = dimensions.to_physical(window.get_hidpi_factor()).into();
+                    return [ds.0, ds.1];
+                }
+                _ => {
+                    {
+                        println!("{} {}:{} window size fail ", Utc::now(), file!(), line!());
+                    }
+                    panic!("win size")
+                }
+            };
+        })();
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
         let format = caps.supported_formats[0].0;
         let (swapchain, images) = vulkano::swapchain::Swapchain::new(
@@ -167,9 +193,19 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
                     );
                 }
             };
+            {
+                println!("{} {}:{} next image ", Utc::now(), file!(), line!());
+            }
             let (image_num, acquire_future) =
                 match vulkano::swapchain::acquire_next_image(swapchain.clone(), None) {
                     Ok(r) => r,
+                    Err(vulkano::swapchain::AcquireError::OutOfDate) => {
+                        {
+                            println!("{} {}:{} acquire error ", Utc::now(), file!(), line!());
+                        }
+                        recreate_swapchain = true;
+                        return winit::ControlFlow::Continue;
+                    }
                     Err(e) => {
                         {
                             println!(
@@ -183,6 +219,9 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
                         panic!("fail")
                     }
                 };
+            {
+                println!("{} {}:{} cmd ", Utc::now(), file!(), line!());
+            }
             let command_buffer =
                 vulkano::command_buffer::AutoCommandBufferBuilder::primary_one_time_submit(
                     device.clone(),
