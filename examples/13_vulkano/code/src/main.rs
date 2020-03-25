@@ -184,21 +184,13 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
                     as Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send + Sync>);
             })
             .collect::<Vec<_>>();
-        let mut recreate_swapchain = true;
+        let mut recreate_swapchain = false;
         let mut previous_frame_end = Some(
             (Box::new(vulkano::sync::now(device.clone())) as Box<dyn vulkano::sync::GpuFuture>),
         );
         event_loops.run_forever(|event| {
             previous_frame_end.as_mut().unwrap().cleanup_finished();
             if recreate_swapchain {
-                {
-                    println!(
-                        "{} {}:{} swapchain needs recreation ",
-                        Utc::now(),
-                        file!(),
-                        line!()
-                    );
-                }
                 let dimensions = (|| {
                     let window_size = window.get_inner_size();
                     match window_size {
@@ -237,6 +229,15 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
                         }
                         Err(e) => panic!("{:?}", e),
                     };
+                {
+                    println!(
+                        "{} {}:{} swapchain needs recreation  dimensions={:?}",
+                        Utc::now(),
+                        file!(),
+                        line!(),
+                        dimensions
+                    );
+                }
                 swapchain = new_swapchain;
                 dynamic_state = vulkano::command_buffer::DynamicState {
                     viewports: Some(vec![vulkano::pipeline::viewport::Viewport {
@@ -261,6 +262,9 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
                     .collect::<Vec<_>>();
                 recreate_swapchain = false;
             };
+            {
+                println!("{} {}:{} next image ", Utc::now(), file!(), line!());
+            }
             let (image_num, acquire_future) =
                 match vulkano::swapchain::acquire_next_image(swapchain.clone(), None) {
                     Ok(r) => r,

@@ -858,7 +858,7 @@ image = \"*\"
 							   (unwrap)))
 						     "Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send +Sync>"))))
 				     (collect--<Vec<_>>))))
-			   (let* ((recreate_swapchain true ;false
+			   (let* ((recreate_swapchain false
 				    )
 				  (previous_frame_end (Some (coerce
 							     (Box--new (vulkano--sync--now (device.clone)
@@ -874,7 +874,7 @@ image = \"*\"
 			       (unwrap)
 			       (cleanup_finished))
 			  (when recreate_swapchain
-			    ,(logprint "swapchain needs recreation" `())
+			    
 			    (let ((dimensions ;(caps.current_extent.unwrap_or (list 1280 1024))
 				   ((lambda ()
 				      (let ((window_size (window.get_inner_size)))
@@ -895,6 +895,7 @@ image = \"*\"
 				     ((Err vulkano--swapchain--SwapchainCreationError--UnsupportedDimensions)
 				      (return winit--ControlFlow--Continue))
 				     ((Err e) (panic!  (string "{:?}") e)))))
+			      ,(logprint "swapchain needs recreation" `(dimensions))
 			      (setf swapchain new_swapchain)
 			      (setf dynamic_state
 				    (make-instance vulkano--command_buffer--DynamicState
@@ -923,7 +924,7 @@ image = \"*\"
 				     (collect--<Vec<_>>)))
 			      (setf recreate_swapchain false))
 			    )
-			  ;,(logprint "next image" `())
+			  ,(logprint "next image" `())
 			  (let (((values image_num
 					 acquire_future)
 				 (case (vulkano--swapchain--acquire_next_image
