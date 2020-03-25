@@ -163,15 +163,15 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
                 .build(device.clone())
                 .unwrap(),
         );
-        let dynamic_state = vulkano::command_buffer::DynamicState {
+        let mut dynamic_state = vulkano::command_buffer::DynamicState {
             viewports: Some(vec![vulkano::pipeline::viewport::Viewport {
                 origin: [0., 0.],
-                dimensions: [1024., 1024.],
+                dimensions: [(dimensions[0] as f32), (dimensions[1] as f32)],
                 depth_range: (0. ..1.0),
             }]),
             ..vulkano::command_buffer::DynamicState::none()
         };
-        let framebuffers = images
+        let mut framebuffers = images
             .iter()
             .map(|image| {
                 return (std::sync::Arc::new(
@@ -184,7 +184,7 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
                     as Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send + Sync>);
             })
             .collect::<Vec<_>>();
-        let mut recreate_swapchain = false;
+        let mut recreate_swapchain = true;
         let mut previous_frame_end = Some(
             (Box::new(vulkano::sync::now(device.clone())) as Box<dyn vulkano::sync::GpuFuture>),
         );
@@ -199,10 +199,68 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
                         line!()
                     );
                 }
+                let dimensions = (|| {
+                    let window_size = window.get_inner_size();
+                    match window_size {
+                        Some(dimensions) => {
+                            let ds: (u32, u32) =
+                                dimensions.to_physical(window.get_hidpi_factor()).into();
+                            {
+                                println!(
+                                    "{} {}:{} window size  ds={:?}",
+                                    Utc::now(),
+                                    file!(),
+                                    line!(),
+                                    ds
+                                );
+                            }
+                            return [ds.0, ds.1];
+                        }
+                        _ => {
+                            {
+                                println!(
+                                    "{} {}:{} window size fail ",
+                                    Utc::now(),
+                                    file!(),
+                                    line!()
+                                );
+                            }
+                            panic!("win size")
+                        }
+                    };
+                })();
+                let (new_swapchain, new_images) =
+                    match swapchain.recreate_with_dimension(dimensions) {
+                        Ok(r) => r,
+                        Err(vulkano::swapchain::SwapchainCreationError::UnsupportedDimensions) => {
+                            return winit::ControlFlow::Continue
+                        }
+                        Err(e) => panic!("{:?}", e),
+                    };
+                swapchain = new_swapchain;
+                dynamic_state = vulkano::command_buffer::DynamicState {
+                    viewports: Some(vec![vulkano::pipeline::viewport::Viewport {
+                        origin: [0., 0.],
+                        dimensions: [(dimensions[0] as f32), (dimensions[1] as f32)],
+                        depth_range: (0. ..1.0),
+                    }]),
+                    ..vulkano::command_buffer::DynamicState::none()
+                };
+                framebuffers = new_images
+                    .iter()
+                    .map(|image| {
+                        return (std::sync::Arc::new(
+                            vulkano::framebuffer::Framebuffer::start(render_pass.clone())
+                                .add(image.clone())
+                                .unwrap()
+                                .build()
+                                .unwrap(),
+                        )
+                            as Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send + Sync>);
+                    })
+                    .collect::<Vec<_>>();
+                recreate_swapchain = false;
             };
-            {
-                println!("{} {}:{} next image ", Utc::now(), file!(), line!());
-            }
             let (image_num, acquire_future) =
                 match vulkano::swapchain::acquire_next_image(swapchain.clone(), None) {
                     Ok(r) => r,
@@ -226,9 +284,6 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
                         panic!("fail")
                     }
                 };
-            {
-                println!("{} {}:{} cmd ", Utc::now(), file!(), line!());
-            }
             let command_buffer =
                 vulkano::command_buffer::AutoCommandBufferBuilder::primary_one_time_submit(
                     device.clone(),

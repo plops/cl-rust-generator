@@ -684,7 +684,6 @@ image = \"*\"
 			)
 		    
 		    (let (
-			  ;; perhaps we should use window inner_size
 			  (dimensions ;(caps.current_extent.unwrap_or (list 1280 1024))
 			   ((lambda ()
 			      (let ((window_size (window.get_inner_size)))
@@ -727,10 +726,10 @@ image = \"*\"
 			   (dot (vulkano--swapchain--acquire_next_image (swapchain.clone)
 									None)
 				(unwrap))))
+		      (declare (mutable swapchain))
 		     
 		      ,(logprint "swapchain" `(dimensions alpha format caps.min_image_count caps.supported_usage_flags
-							  ;image_num
-							  ))
+						))
 		      
 
 		      (do0
@@ -829,18 +828,20 @@ image = \"*\"
 					    (unwrap))))
 			  
 				)))
-			 (let ((dynamic_state (make-instance vulkano--command_buffer--DynamicState
-							     ;; :line_width None
-							     ;; :viewports None
-							     ;; :scissors None
-							     ;; :compare_mask None
-							     ;; :write_mask None
-							     ;; :reference None
+			 (let* ((dynamic_state (make-instance vulkano--command_buffer--DynamicState
+							     ; :line_width None
+							     ; :viewports None
+							     ; :scissors None
+							     ; :compare_mask None
+							     ; :write_mask None
+							     ; :reference None
 							     :viewports
-							     (Some
+							      (Some
 							      (space vec! (list (make-instance vulkano--pipeline--viewport--Viewport
 											       :origin (list 0s0 0s0)
-											       :dimensions (list 1024s0 1024s0)
+											       :dimensions (list (coerce (aref dimensions 0) f32)
+														 (coerce (aref dimensions 1) f32))
+											        ;(list 1024s0 1024s0)
 											       :depth_range (slice 0s0 1s0)))))
 							     ".. vulkano::command_buffer::DynamicState::none()"
 							     ))
@@ -858,7 +859,8 @@ image = \"*\"
 							   (unwrap)))
 						     "Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send +Sync>"))))
 				     (collect--<Vec<_>>))))
-			   (let* ((recreate_swapchain false)
+			   (let* ((recreate_swapchain true ;false
+				    )
 				  (previous_frame_end (Some (coerce
 							     (Box--new (vulkano--sync--now (device.clone)
 											   ))
@@ -873,8 +875,56 @@ image = \"*\"
 			       (unwrap)
 			       (cleanup_finished))
 			  (when recreate_swapchain
-			    ,(logprint "swapchain needs recreation" `()))
-			  ,(logprint "next image" `())
+			    ,(logprint "swapchain needs recreation" `())
+			    (let ((dimensions ;(caps.current_extent.unwrap_or (list 1280 1024))
+				   ((lambda ()
+				      (let ((window_size (window.get_inner_size)))
+					(case window_size
+					  ((Some dimensions)
+					   (let ((ds (dot dimensions
+							  (to_physical (window.get_hidpi_factor))
+							  (into))))
+					     (declare (type "(u32, u32)" ds))
+					     ,(logprint "window size" `(ds))
+					     (return (list ds.0 ds.1))))
+					  (t ,(logprint "window size fail" `())
+					     (panic! (string "win size")))))))
+				    )
+				  ((values new_swapchain new_images)
+				   (case (swapchain.recreate_with_dimension dimensions)
+				     ((Ok r) r)
+				     ((Err vulkano--swapchain--SwapchainCreationError--UnsupportedDimensions)
+				      (return winit--ControlFlow--Continue))
+				     ((Err e) (panic!  (string "{:?}") e)))))
+			      (setf swapchain new_swapchain)
+			      (setf dynamic_state
+				    (make-instance vulkano--command_buffer--DynamicState
+						   :viewports
+						   (Some
+						    (space vec! (list (make-instance vulkano--pipeline--viewport--Viewport
+										     :origin (list 0s0 0s0)
+										     :dimensions (list (coerce (aref dimensions 0) f32)
+												       (coerce (aref dimensions 1) f32))
+										     :depth_range (slice 0s0 1s0)))))
+						   ".. vulkano::command_buffer::DynamicState::none()"
+						   ))
+			      (setf framebuffers
+				(dot new_images
+				     (iter)
+				     (map (lambda (image)
+					    (return (coerce
+						     (std--sync--Arc--new
+						      (dot (vulkano--framebuffer--Framebuffer--start
+							    (render_pass.clone))
+							   (add (image.clone))
+							   (unwrap)
+							   (build)
+							   (unwrap)))
+						     "Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send +Sync>"))))
+				     (collect--<Vec<_>>)))
+			      (setf recreate_swapchain false))
+			    )
+			  ;,(logprint "next image" `())
 			  (let (((values image_num
 					 acquire_future)
 				 (case (vulkano--swapchain--acquire_next_image
@@ -890,7 +940,7 @@ image = \"*\"
 				    ,(logprint "failed to acquire next image" `(e))
 				    (panic! (string "fail"))))))
 			    
-			    ,(logprint "cmd" `())
+			    ;,(logprint "cmd" `())
 			    (let ((command_buffer
 				   (dot
 				    (vulkano--command_buffer--AutoCommandBufferBuilder--primary_one_time_submit
