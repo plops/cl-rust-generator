@@ -739,27 +739,27 @@ image = \"*\"
 						"depth_stencil: {}")))
 					  (unwrap)))
 			 )
-		       (image (dot (vulkano--image--StorageImage--new
-				    (device.clone)
-				    (make-instance vulkano--image--Dimensions--Dim2d
-						   :width 1024
-						   :height 1024)
-				    vulkano--format--Format--R8G8B8A8Unorm
-				    (Some (queue.family)))
-				   (unwrap)))
-		       (buf (dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
-				 (device.clone)
-				 (vulkano--buffer--BufferUsage--all)
-				 (dot "(0.. 1024*1024*4)"
-				      (map (lambda (_) "0u8"))))
-				 (expect (string "failed to create buffer"))))
-		       (framebuffer (std--sync--Arc--new
-				     (dot (vulkano--framebuffer--Framebuffer--start
-					   (render_pass.clone))
-					  (add (image.clone))
-					  (unwrap)
-					  (build)
-					  (unwrap)))))
+		 #+nil((image (dot (vulkano--image--StorageImage--new
+				     (device.clone)
+				     (make-instance vulkano--image--Dimensions--Dim2d
+						    :width 1024
+						    :height 1024)
+				     vulkano--format--Format--R8G8B8A8Unorm
+				     (Some (queue.family)))
+				    (unwrap)))
+		  (buf (dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
+			     (device.clone)
+			     (vulkano--buffer--BufferUsage--all)
+			     (dot "(0.. 1024*1024*4)"
+				  (map (lambda (_) "0u8"))))
+			    (expect (string "failed to create buffer"))))
+		   (framebuffer (std--sync--Arc--new
+				 (dot (vulkano--framebuffer--Framebuffer--start
+				       (render_pass.clone))
+				      (add (image.clone))
+				      (unwrap)
+				      (build)
+				      (unwrap))))))
 		   (do0
 		    (space "mod vs"
 			   (progn

@@ -108,29 +108,6 @@ fn main() {
             })
             .unwrap(),
         );
-        let image = vulkano::image::StorageImage::new(
-            device.clone(),
-            vulkano::image::Dimensions::Dim2d {
-                width: 1024,
-                height: 1024,
-            },
-            vulkano::format::Format::R8G8B8A8Unorm,
-            Some(queue.family()),
-        )
-        .unwrap();
-        let buf = vulkano::buffer::CpuAccessibleBuffer::from_iter(
-            device.clone(),
-            vulkano::buffer::BufferUsage::all(),
-            (0..1024 * 1024 * 4).map(|_| 0u8),
-        )
-        .expect("failed to create buffer");
-        let framebuffer = std::sync::Arc::new(
-            vulkano::framebuffer::Framebuffer::start(render_pass.clone())
-                .add(image.clone())
-                .unwrap()
-                .build()
-                .unwrap(),
-        );
         mod vs {
             vulkano_shaders::shader! {ty: "vertex", src: r##"#version 450
 layout(location = 0) in vec2 position;
