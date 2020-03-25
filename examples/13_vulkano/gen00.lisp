@@ -81,7 +81,7 @@
 		 "layout(push_constant) uniform PushConstantData { uint timestamp; uint window_w; uint window_h; uint mouse_x; uint mouse_y;} pc;"
 		 
                  (defun main ()
-		   (setf f_color (vec4 1.0 (/ pc.timestamp 265) 0.0 1.0))))))
+		   (setf f_color (vec4 1.0 (/ pc.timestamp 265.0) (/ gl_FragCoord.x (* 1.0 pc.window_h)) 1.0))))))
 
 
 

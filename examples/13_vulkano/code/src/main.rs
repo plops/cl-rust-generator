@@ -157,7 +157,10 @@ layout(push_constant) uniform PushConstantData {
   uint mouse_y;
 }
 pc;
-void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
+void main() {
+  f_color = vec4((1.0), ((pc.timestamp) / ((265.))),
+                 ((gl_FragCoord.x) / ((((1.0)) * (pc.window_h)))), (1.0));
+}"##}
         }
         let vs = vs::Shader::load(device.clone()).expect("failed to create shader");
         let fs = fs::Shader::load(device.clone()).expect("failed to create shader");
