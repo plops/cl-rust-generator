@@ -926,7 +926,7 @@ image = \"*\"
 				     (queue.family))
 				    (unwrap)
 				    (begin_render_pass (dot (aref framebuffers image_num)
-							    (clone))
+							    (clone)) 
 						       false
 						       (space vec!
 							      (list
