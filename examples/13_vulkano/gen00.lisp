@@ -762,29 +762,7 @@ image = \"*\"
 							(progn
 							  "color: [color],"
 							  "depth_stencil: {}")))
-						(unwrap)))
-			       )
-			     #+nil((image (dot (vulkano--image--StorageImage--new
-						(device.clone)
-						(make-instance vulkano--image--Dimensions--Dim2d
-							       :width 1024
-							       :height 1024)
-						vulkano--format--Format--R8G8B8A8Unorm
-						(Some (queue.family)))
-					       (unwrap)))
-				   (buf (dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
-					      (device.clone)
-					      (vulkano--buffer--BufferUsage--all)
-					      (dot "(0.. 1024*1024*4)"
-						   (map (lambda (_) "0u8"))))
-					     (expect (string "failed to create buffer"))))
-				    (framebuffer (std--sync--Arc--new
-						  (dot (vulkano--framebuffer--Framebuffer--start
-							(render_pass.clone))
-						       (add (image.clone))
-						       (unwrap)
-						       (build)
-						       (unwrap))))))
+						(unwrap)))))
 			 (do0
 			  (space "mod vs"
 				 (progn
@@ -981,6 +959,13 @@ image = \"*\"
 				((Ok future)
 				 (setf previous_frame_end (Some (coerce
 								 (Box--new future)
+								 "Box<_>"))))
+				((Err vulkano--sync--FlushError--OutOfDate)
+				 ,(logprint "out of date" `())
+				 (setf recreate_swapchain true)
+				 (setf previous_frame_end (Some (coerce
+								 (Box--new (vulkano--sync--now
+									    (device.clone)))
 								 "Box<_>"))))
 				((Err e)
 				 ,(logprint "failed to flush future" `(e))

@@ -324,6 +324,14 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
                 Ok(future) => {
                     previous_frame_end = Some((Box::new(future) as Box<_>));
                 }
+                Err(vulkano::sync::FlushError::OutOfDate) => {
+                    {
+                        println!("{} {}:{} out of date ", Utc::now(), file!(), line!());
+                    }
+                    recreate_swapchain = true;
+                    previous_frame_end =
+                        Some((Box::new(vulkano::sync::now(device.clone())) as Box<_>));
+                }
                 Err(e) => {
                     {
                         println!(
