@@ -81,7 +81,7 @@
 		 "layout(push_constant) uniform PushConstantData { uint timestamp; uint window_w; uint window_h; uint mouse_x; uint mouse_y;} pc;"
 		 
                  (defun main ()
-		   (setf f_color (vec4 1.0 0.0 0.0 1.0))))))
+		   (setf f_color (vec4 1.0 (/ pc.timestamp 265) 0.0 1.0))))))
 
 
 
@@ -810,7 +810,7 @@ image = \"*\"
 
 
 			 ;; https://github.com/vulkano-rs/vulkano-examples/blob/1cf9c37073a79a3a0cee60e83c8db8d967218e3e/src/bin/push-constants.rs
-			 (let ((push_constants (make-instance fs--ty--PushConstantData
+			 (let* ((push_constants (make-instance fs--ty--PushConstantData
 							      :timestamp 0
 							      :window_w (aref dimensions 0)
 							      :window_h (aref dimensions 1)
@@ -863,6 +863,7 @@ image = \"*\"
 			       (as_mut)
 			       (unwrap)
 			       (cleanup_finished))
+			  (incf push_constants.timestamp)
 			  (when recreate_swapchain
 			    
 			    (let ((dimensions ;(caps.current_extent.unwrap_or (list 1280 1024))
@@ -950,7 +951,8 @@ image = \"*\"
 					  &dynamic_state
 					  (vertex_buffer.clone)
 					  "()"
-					  "()")
+					  ;"()"
+					  (push_constants.clone))
 				    (unwrap)
 				    (end_render_pass)
 				    (unwrap)

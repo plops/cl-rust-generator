@@ -171,7 +171,7 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
                 .build(device.clone())
                 .unwrap(),
         );
-        let push_constants = fs::ty::PushConstantData {
+        let mut push_constants = fs::ty::PushConstantData {
             timestamp: 0,
             window_w: dimensions[0],
             window_h: dimensions[1],
@@ -205,6 +205,7 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
         );
         event_loops.run_forever(|event| {
             previous_frame_end.as_mut().unwrap().cleanup_finished();
+            push_constants.timestamp += 1;
             if recreate_swapchain {
                 let dimensions = (|| {
                     let window_size = window.get_inner_size();
@@ -320,7 +321,7 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
                     &dynamic_state,
                     vertex_buffer.clone(),
                     (),
-                    (),
+                    push_constants.clone(),
                 )
                 .unwrap()
                 .end_render_pass()
