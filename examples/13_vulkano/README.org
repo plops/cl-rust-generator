@@ -1,0 +1,5 @@
+
+* OutOfHostMemory crash is known on nvidia
+- https://github.com/vulkano-rs/vulkano/issues/1247
+- https://github.com/vulkano-rs/vulkano/issues/923
+  - PresentMode::Immediate instead of Fifo should work
