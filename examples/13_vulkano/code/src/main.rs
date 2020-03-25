@@ -101,7 +101,7 @@ fn main() {
             &queue,
             vulkano::swapchain::SurfaceTransform::Identity,
             alpha,
-            vulkano::swapchain::PresentMode::Fifo,
+            vulkano::swapchain::PresentMode::Immediate,
             true,
             None,
         )

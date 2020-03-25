@@ -718,7 +718,7 @@ image = \"*\"
 				 &queue
 				 vulkano--swapchain--SurfaceTransform--Identity
 				 alpha
-				 vulkano--swapchain--PresentMode--Fifo
+				 vulkano--swapchain--PresentMode--Immediate ; Fifo
 				 true
 				 None)
 				(expect (string "failed to create swapchain"))))
