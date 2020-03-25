@@ -77,6 +77,8 @@
 
 		 "layout(location=0) out vec4 f_color;"
 		 
+
+		 "layout(push_constant) uniform PushConstantData { uint timestamp; uint window_w; uint window_h; uint mouse_x; uint mouse_y;} pc;"
 		 
                  (defun main ()
 		   (setf f_color (vec4 1.0 0.0 0.0 1.0))))))
@@ -805,44 +807,54 @@ image = \"*\"
 					    (unwrap))))
 			  
 				)))
-			 (let* ((dynamic_state (make-instance vulkano--command_buffer--DynamicState
-							     ; :line_width None
-							     ; :viewports None
-							     ; :scissors None
-							     ; :compare_mask None
-							     ; :write_mask None
-							     ; :reference None
-							     :viewports
-							      (Some
-							      (space vec! (list (make-instance vulkano--pipeline--viewport--Viewport
-											       :origin (list 0s0 0s0)
-											       :dimensions (list (coerce (aref dimensions 0) f32)
-														 (coerce (aref dimensions 1) f32))
-											        ;(list 1024s0 1024s0)
-											       :depth_range (slice 0s0 1s0)))))
-							     ".. vulkano::command_buffer::DynamicState::none()"
-							     ))
-			       (framebuffers
-				(dot images
-				     (iter)
-				     (map (lambda (image)
-					    (return (coerce
-						     (std--sync--Arc--new
-						      (dot (vulkano--framebuffer--Framebuffer--start
-							    (render_pass.clone))
-							   (add (image.clone))
-							   (unwrap)
-							   (build)
-							   (unwrap)))
-						     "Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send +Sync>"))))
-				     (collect--<Vec<_>>))))
-			   (let* ((recreate_swapchain false
-				    )
-				  (previous_frame_end (Some (coerce
-							     (Box--new (vulkano--sync--now (device.clone)
-											   ))
-							     "Box<dyn vulkano::sync::GpuFuture>"))))
-			     ))))
+
+
+			 ;; https://github.com/vulkano-rs/vulkano-examples/blob/1cf9c37073a79a3a0cee60e83c8db8d967218e3e/src/bin/push-constants.rs
+			 (let ((push_constants (make-instance fs--ty--PushConstantData
+							      :timestamp 0
+							      :window_w (aref dimensions 0)
+							      :window_h (aref dimensions 1)
+							      :mouse_x 0
+							      :mouse_y 0)))
+			 
+			  (let* ((dynamic_state (make-instance vulkano--command_buffer--DynamicState
+					; :line_width None
+					; :viewports None
+					; :scissors None
+					; :compare_mask None
+					; :write_mask None
+					; :reference None
+							       :viewports
+							       (Some
+								(space vec! (list (make-instance vulkano--pipeline--viewport--Viewport
+												 :origin (list 0s0 0s0)
+												 :dimensions (list (coerce (aref dimensions 0) f32)
+														   (coerce (aref dimensions 1) f32))
+					;(list 1024s0 1024s0)
+												 :depth_range (slice 0s0 1s0)))))
+							       ".. vulkano::command_buffer::DynamicState::none()"
+							       ))
+				 (framebuffers
+				  (dot images
+				       (iter)
+				       (map (lambda (image)
+					      (return (coerce
+						       (std--sync--Arc--new
+							(dot (vulkano--framebuffer--Framebuffer--start
+							      (render_pass.clone))
+							     (add (image.clone))
+							     (unwrap)
+							     (build)
+							     (unwrap)))
+						       "Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send +Sync>"))))
+				       (collect--<Vec<_>>))))
+			    (let* ((recreate_swapchain false
+				     )
+				   (previous_frame_end (Some (coerce
+							      (Box--new (vulkano--sync--now (device.clone)
+											    ))
+							      "Box<dyn vulkano::sync::GpuFuture>"))))
+			      )))))
 		     
 		      (event_loops.run_forever
 		       (lambda (event)

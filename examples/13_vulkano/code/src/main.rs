@@ -149,6 +149,14 @@ void main() { gl_Position = vec4(position, (0.), (1.0)); }"##}
         mod fs {
             vulkano_shaders::shader! {ty: "fragment", src: r##"#version 450
 layout(location = 0) out vec4 f_color;
+layout(push_constant) uniform PushConstantData {
+  uint timestamp;
+  uint window_w;
+  uint window_h;
+  uint mouse_x;
+  uint mouse_y;
+}
+pc;
 void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
         }
         let vs = vs::Shader::load(device.clone()).expect("failed to create shader");
@@ -163,6 +171,13 @@ void main() { f_color = vec4((1.0), (0.), (0.), (1.0)); }"##}
                 .build(device.clone())
                 .unwrap(),
         );
+        let push_constants = fs::ty::PushConstantData {
+            timestamp: 0,
+            window_w: dimensions[0],
+            window_h: dimensions[1],
+            mouse_x: 0,
+            mouse_y: 0,
+        };
         let mut dynamic_state = vulkano::command_buffer::DynamicState {
             viewports: Some(vec![vulkano::pipeline::viewport::Viewport {
                 origin: [0., 0.],
