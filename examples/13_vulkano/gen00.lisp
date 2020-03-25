@@ -706,7 +706,7 @@ image = \"*\"
 			  (format (dot caps
 				       (aref supported_formats 0)
 				       0))
-			  ((values swapchain images)
+			  ((values "mut swapchain" images)
 			   (dot (vulkano--swapchain--Swapchain--new
 				 (device.clone)
 				 (surface.clone)
@@ -726,7 +726,6 @@ image = \"*\"
 			   (dot (vulkano--swapchain--acquire_next_image (swapchain.clone)
 									None)
 				(unwrap))))
-		      (declare (mutable swapchain))
 		     
 		      ,(logprint "swapchain" `(dimensions alpha format caps.min_image_count caps.supported_usage_flags
 						))

@@ -90,7 +90,7 @@ fn main() {
         })();
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
         let format = caps.supported_formats[0].0;
-        let (swapchain, images) = vulkano::swapchain::Swapchain::new(
+        let (mut swapchain, images) = vulkano::swapchain::Swapchain::new(
             device.clone(),
             surface.clone(),
             caps.min_image_count,
