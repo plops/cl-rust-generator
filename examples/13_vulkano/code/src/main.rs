@@ -158,7 +158,8 @@ layout(push_constant) uniform PushConstantData {
 }
 pc;
 void main() {
-  f_color = vec4((1.0), ((pc.timestamp) / ((265.))),
+  f_color = vec4(((pc.mouse_x) / ((((1.0)) * (pc.window_w)))),
+                 ((pc.timestamp) / ((256.))),
                  ((gl_FragCoord.x) / ((((1.0)) * (pc.window_h)))), (1.0));
 }"##}
         }
@@ -386,15 +387,8 @@ void main() {
                         },
                     ..
                 } => {
-                    {
-                        println!(
-                            "{} {}:{} cursor-moved  position={:?}",
-                            Utc::now(),
-                            file!(),
-                            line!(),
-                            position
-                        );
-                    }
+                    push_constants.mouse_x = (position.x as u32);
+                    push_constants.mouse_y = (position.y as u32);
                     return winit::ControlFlow::Continue;
                 }
                 _ => return winit::ControlFlow::Continue,

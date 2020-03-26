@@ -81,7 +81,9 @@
 		 "layout(push_constant) uniform PushConstantData { uint timestamp; uint window_w; uint window_h; uint mouse_x; uint mouse_y;} pc;"
 		 
                  (defun main ()
-		   (setf f_color (vec4 1.0 (/ pc.timestamp 265.0) (/ gl_FragCoord.x (* 1.0 pc.window_h)) 1.0))))))
+		   (setf f_color (vec4 (/ pc.mouse_x (* 1s0 pc.window_w))
+				       (/ pc.timestamp 256.0)
+				       (/ gl_FragCoord.x (* 1.0 pc.window_h)) 1.0))))))
 
 
 
@@ -1007,7 +1009,9 @@ image = \"*\"
 								 position
 								 "..") 
 					   "..")
-			    ,(logprint "cursor-moved" `(position))
+					;,(logprint "cursor-moved" `(position))
+			    (setf push_constants.mouse_x (coerce position.x u32)
+				  push_constants.mouse_y (coerce position.y u32))
 			    (return winit--ControlFlow--Continue))
 			   (_
 			    (return winit--ControlFlow--Continue))
