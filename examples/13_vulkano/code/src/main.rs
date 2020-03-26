@@ -199,9 +199,11 @@ void main() {
   if (tau < (20.)) {
     vec3 pos = ((ro) + (((tau) * (rd))));
     vec3 nor = calcNormal(pos);
-    vec3 sun_dir = normalize(vec3((0.80), (0.40), (-0.20)));
-    float dif = clamp(nor.sun_dir, (0.), (1.0));
-    col = ((vec3((1.0), (8.0), (0.50))) * (dif));
+    vec3 sun_dir = normalize(vec3((0.80), (0.40), (0.20)));
+    float sun_dif = clamp(dot(nor, sun_dir), (0.), (1.0));
+    float sky_dif = clamp(dot(nor, vec3((0.), (1.0), (0.))), (0.), (1.0));
+    col = ((vec3((1.0), (0.70), (0.50))) * (sun_dif));
+    (col) += (((vec3((0.), (0.20), (0.40))) * (sky_dif)));
   };
   f_color = vec4(col, (1.0));
 }"##}
