@@ -7,6 +7,9 @@ https://www.saschawillems.de/blog/2016/08/13/vulkan-tutorial-on-rendering-a-full
 - load shader at runtime (not vulkano)
 https://stackoverflow.com/questions/53092022/is-it-possible-to-compile-a-vulkano-shader-at-runtime
 
+- rust on android
+https://mozilla.github.io/firefox-browser-architecture/experiments/2017-09-21-rust-on-android.html
+
 
 * OutOfHostMemory crash is known on nvidia
 - https://github.com/vulkano-rs/vulkano/issues/1247

@@ -142,7 +142,11 @@
 				    ))
 			      (p (vec2 p0.x (* -1 p0.y)))
 					;(f (smoothstep .25 .26 (length p)))
-			      (an (* .001 pc.timestamp))
+			      (an (/ (* 10.0 pc.mouse_x)
+				     pc.window_w)
+			       
+					;(* .001 pc.timestamp)
+			       )
 			      (ro (vec3 (sin an)
 					(* .1 (sin (* .01 pc.timestamp)))
 					(cos an))) ;; camera

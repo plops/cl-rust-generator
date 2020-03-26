@@ -201,7 +201,7 @@ void main() {
   vec2 p0 = (((((((2.0)) * (gl_FragCoord.xy))) - (iResolution.xy))) /
              (iResolution.y));
   vec2 p = vec2(p0.x, ((-1) * (p0.y)));
-  float an = (((1.00e-3)) * (pc.timestamp));
+  float an = (((((10.)) * (pc.mouse_x))) / (pc.window_w));
   vec3 ro = vec3(sin(an), (((0.10)) * (sin((((1.00e-2)) * (pc.timestamp))))),
                  cos(an));
   vec3 ta = vec3((0.), (0.), (0.));
