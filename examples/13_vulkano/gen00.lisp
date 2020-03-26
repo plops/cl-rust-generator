@@ -142,36 +142,58 @@
 				    ))
 			      (p (vec2 p0.x (* -1 p0.y)))
 					;(f (smoothstep .25 .26 (length p)))
-			      (ro (vec3 0.0 (* .1 (sin (* .01 pc.timestamp))) 1.0)) ;; camera
+			      (an (* .001 pc.timestamp))
+			      (ro (vec3 (sin an)
+					(* .1 (sin (* .01 pc.timestamp)))
+					(cos an))) ;; camera
+			      (ta (vec3 .0 .0 .0))
 			      ;; direction
-			      (rd (normalize (vec3 p -1.5)))
-			      (col (vec3 0.0))
+			      (ww (normalize (- ta ro)))
+			      (uu (normalize (cross ww (vec3 0 1 0))))
+			      (vv (normalize (cross uu ww)))
+			      (rd (normalize ; (vec3 p -1.5)
+				   (+ (* p.x uu)
+				      (* p.y vv)
+				      (* 1.5 ww))))
+			      (col (- (vec3 .3 .5 .9)
+				      (* .5 rd.y))) ;; sky
 			      (tau (castRay ro rd)))
 			  (declare (type vec2 p p0)
+				   (type float an)
 				   (type ivec2 iResolution)
 				   (type float f tau)
-				   (type vec3 col ro rd))
-		       
+				   (type vec3 col ro rd ta ww uu vv))
+
+			  (setf col (mix col ;; sky gradient horizon
+					 (vec3 .7 .75 .8)
+					 (exp (* -10.0 rd.y))))
+			  
 			  (when (< 0 tau)
 			    (let ((pos (+ ro (* tau rd)))
 				  (nor (calcNormal pos))
+				  (mate (vec3 .2 .2 .2)) ;; base color
 				  (sun_dir (normalize (vec3 .8 .4 .2)))
 				  (sun_dif (clamp ("dot" nor sun_dir)
 						  0.0 1.0))
 				  (sun_sha (step (castRay (+ pos (* .001 nor)) sun_dir)
 						 0.0))
 				  (sky_dif (clamp (+ .5 ("dot" nor (vec3 0.0 1.0 0.0)))
+						  0.0 1.0))
+				  (bou_dif (clamp (+ .5 ("dot" nor (vec3 0.0 -1.0 0.0)))
 						  0.0 1.0)))
-			      (declare (type vec3 pos nor sun_dir)
-				       (type float sun_dif sky_dif sun_sha))
+			      (declare (type vec3 pos nor sun_dir mate)
+				       (type float sun_dif sky_dif sun_sha bou_dif))
 			   
-			      (setf col (* (vec3 1.0 .8 .6)
+			      (setf col (* mate
+					   (vec3 7.0 5. 3.)
 					   sun_dif
-					   sun_sha)
-				    )
-			      (incf col (* (vec3 0.0 .05 .2)
-					   sky_dif)
-				    )))
+					   sun_sha))
+			      (incf col (* mate
+					   (vec3 0.5 .8 .9)
+					   sky_dif))
+			      (incf col (* mate 
+					   (vec3 0.7 .3 .2)
+					   bou_dif))))
 			  (setf col (pow col (vec3 .4545)))
 			  (setf f_color (vec4 col 1.0)))))))))
 

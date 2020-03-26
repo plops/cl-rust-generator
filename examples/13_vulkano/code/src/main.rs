@@ -201,22 +201,33 @@ void main() {
   vec2 p0 = (((((((2.0)) * (gl_FragCoord.xy))) - (iResolution.xy))) /
              (iResolution.y));
   vec2 p = vec2(p0.x, ((-1) * (p0.y)));
-  vec3 ro =
-      vec3((0.), (((0.10)) * (sin((((1.00e-2)) * (pc.timestamp))))), (1.0));
-  vec3 rd = normalize(vec3(p, (-1.50)));
-  vec3 col = vec3((0.));
+  float an = (((1.00e-3)) * (pc.timestamp));
+  vec3 ro = vec3(sin(an), (((0.10)) * (sin((((1.00e-2)) * (pc.timestamp))))),
+                 cos(an));
+  vec3 ta = vec3((0.), (0.), (0.));
+  vec3 ww = normalize(((ta) - (ro)));
+  vec3 uu = normalize(cross(ww, vec3(0, 1, 0)));
+  vec3 vv = normalize(cross(uu, ww));
+  vec3 rd =
+      normalize(((((p.x) * (uu))) + (((p.y) * (vv))) + ((((1.50)) * (ww)))));
+  vec3 col = ((vec3((0.30), (0.50), (0.90))) - ((((0.50)) * (rd.y))));
   float tau = castRay(ro, rd);
+  col = mix(col, vec3((0.70), (0.750), (0.80)), exp((((-10.)) * (rd.y))));
   if (0 < tau) {
     vec3 pos = ((ro) + (((tau) * (rd))));
     vec3 nor = calcNormal(pos);
+    vec3 mate = vec3((0.20), (0.20), (0.20));
     vec3 sun_dir = normalize(vec3((0.80), (0.40), (0.20)));
     float sun_dif = clamp(dot(nor, sun_dir), (0.), (1.0));
     float sun_sha =
         step(castRay(((pos) + ((((1.00e-3)) * (nor)))), sun_dir), (0.));
     float sky_dif =
         clamp((((0.50)) + (dot(nor, vec3((0.), (1.0), (0.))))), (0.), (1.0));
-    col = ((vec3((1.0), (0.80), (0.60))) * (sun_dif) * (sun_sha));
-    (col) += (((vec3((0.), (5.00e-2), (0.20))) * (sky_dif)));
+    float bou_dif =
+        clamp((((0.50)) + (dot(nor, vec3((0.), (-1.0), (0.))))), (0.), (1.0));
+    col = ((mate) * (vec3((7.0), 5, 3)) * (sun_dif) * (sun_sha));
+    (col) += (((mate) * (vec3((0.50), (0.80), (0.90))) * (sky_dif)));
+    (col) += (((mate) * (vec3((0.70), (0.30), (0.20))) * (bou_dif)));
   };
   col = pow(col, vec3((0.45450)));
   f_color = vec4(col, (1.0));
