@@ -199,7 +199,7 @@
 					   (vec3 0.7 .3 .2)
 					   bou_dif))))
 			  (setf col (pow col (vec3 .4545)))
-			  (setf f_color (vec4 col 1.0)))))))))
+			  (setf f_color (vec4 col .4)))))))))
 
 
 
@@ -791,8 +791,6 @@ image = \"*\"
 				  (unwrap))))))))
 
 	       
-
-	       
 		  (progn
 		    "// render to window"
 		    "//  https://github.com/vulkano-rs/vulkano-examples/blob/master/src/bin/triangle.rs "
@@ -932,6 +930,7 @@ image = \"*\"
 					      (triangle_strip)
 					      (viewports_dynamic_scissors_irrelevant 1)
 					      (fragment_shader (fs.main_entry_point) "()")
+					      (blend_alpha_blending)
 					      (render_pass (dot (vulkano--framebuffer--Subpass--from
 								 (render_pass.clone)
 								 0)

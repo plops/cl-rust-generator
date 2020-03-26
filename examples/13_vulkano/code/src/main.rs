@@ -230,7 +230,7 @@ void main() {
     (col) += (((mate) * (vec3((0.70), (0.30), (0.20))) * (bou_dif)));
   };
   col = pow(col, vec3((0.45450)));
-  f_color = vec4(col, (1.0));
+  f_color = vec4(col, (0.40));
 }"##}
         }
         let vs = vs::Shader::load(device.clone()).expect("failed to create shader");
@@ -242,6 +242,7 @@ void main() {
                 .triangle_strip()
                 .viewports_dynamic_scissors_irrelevant(1)
                 .fragment_shader(fs.main_entry_point(), ())
+                .blend_alpha_blending()
                 .render_pass(vulkano::framebuffer::Subpass::from(render_pass.clone(), 0).unwrap())
                 .build(device.clone())
                 .unwrap(),
