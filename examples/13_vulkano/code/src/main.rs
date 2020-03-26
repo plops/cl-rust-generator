@@ -188,7 +188,7 @@ void main() {
             vulkano::pipeline::GraphicsPipeline::start()
                 .vertex_input_single_buffer::<Vertex>()
                 .vertex_shader(vs.main_entry_point(), ())
-                .line_list()
+                .triangle_list()
                 .viewports_dynamic_scissors_irrelevant(1)
                 .fragment_shader(fs.main_entry_point(), ())
                 .render_pass(vulkano::framebuffer::Subpass::from(render_pass.clone(), 0).unwrap())
