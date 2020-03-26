@@ -1001,6 +1001,14 @@ image = \"*\"
 					   "..")
 			    (setf recreate_swapchain true)
 			    (return winit--ControlFlow--Continue))
+			   ((make-instance winit--Event--WindowEvent
+					   :event (make-instance winit--WindowEvent--CursorMoved
+								 device_id
+								 position
+								 "..") 
+					   "..")
+			    ,(logprint "cursor-moved" `(position))
+			    (return winit--ControlFlow--Continue))
 			   (_
 			    (return winit--ControlFlow--Continue))
 			 

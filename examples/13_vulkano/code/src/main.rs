@@ -377,6 +377,26 @@ void main() {
                     recreate_swapchain = true;
                     return winit::ControlFlow::Continue;
                 }
+                winit::Event::WindowEvent {
+                    event:
+                        winit::WindowEvent::CursorMoved {
+                            device_id,
+                            position,
+                            ..
+                        },
+                    ..
+                } => {
+                    {
+                        println!(
+                            "{} {}:{} cursor-moved  position={:?}",
+                            Utc::now(),
+                            file!(),
+                            line!(),
+                            position
+                        );
+                    }
+                    return winit::ControlFlow::Continue;
+                }
                 _ => return winit::ControlFlow::Continue,
             }
         });
