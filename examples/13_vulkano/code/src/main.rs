@@ -198,8 +198,9 @@ float castRay(in vec3 ro, vec3 rd) {
 }
 void main() {
   ivec2 iResolution = ivec2(pc.window_w, pc.window_h);
-  vec2 p = (((((((2.0)) * (gl_FragCoord.xy))) - (iResolution.xy))) /
-            (iResolution.y));
+  vec2 p0 = (((((((2.0)) * (gl_FragCoord.xy))) - (iResolution.xy))) /
+             (iResolution.y));
+  vec2 p = vec2(p0.x, ((-1) * (p0.y)));
   vec3 ro = vec3((0.), (0.), (1.0));
   vec3 rd = normalize(vec3(p, (-1.50)));
   vec3 col = vec3((0.));

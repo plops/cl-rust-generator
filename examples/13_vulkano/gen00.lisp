@@ -133,20 +133,21 @@
 			(return tau))
 		      (defun main ()
 			(let ((iResolution (ivec2 pc.window_w pc.window_h))
-			      (p (/ (- (* 2.0 gl_FragCoord.xy)
+			      (p0 (/ (- (* 2.0 gl_FragCoord.xy)
 					;(vec2 pc.window_w pc.window_h)
 				       iResolution.xy
 				       )
 					; pc.window_h
 				    iResolution.y
 				    ))
+			      (p (vec2 p0.x (* -1 p0.y)))
 					;(f (smoothstep .25 .26 (length p)))
 			      (ro (vec3 0.0 0.0 1.0)) ;; camera
 			      ;; direction
 			      (rd (normalize (vec3 p -1.5)))
 			      (col (vec3 0.0))
 			      (tau (castRay ro rd)))
-			  (declare (type vec2 p)
+			  (declare (type vec2 p p0)
 				   (type ivec2 iResolution)
 				   (type float f tau)
 				   (type vec3 col ro rd))
