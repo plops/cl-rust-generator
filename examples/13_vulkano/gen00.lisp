@@ -164,13 +164,14 @@
 			      (declare (type vec3 pos nor sun_dir)
 				       (type float sun_dif sky_dif sun_sha))
 			   
-			      (setf col (* (vec3 1.0 .7 .5)
+			      (setf col (* (vec3 1.0 .8 .6)
 					   sun_dif
 					   sun_sha)
 				    )
-			      (incf col (* (vec3 0.0 .1 .3)
+			      (incf col (* (vec3 0.0 .05 .2)
 					   sky_dif)
 				    )))
+			  (setf col (pow col (vec3 .4545)))
 			  (setf f_color (vec4 col 1.0)))))))))
 
 

@@ -213,9 +213,10 @@ void main() {
         step(castRay(((pos) + ((((1.00e-3)) * (nor)))), sun_dir), (0.));
     float sky_dif =
         clamp((((0.50)) + (dot(nor, vec3((0.), (1.0), (0.))))), (0.), (1.0));
-    col = ((vec3((1.0), (0.70), (0.50))) * (sun_dif) * (sun_sha));
-    (col) += (((vec3((0.), (0.10), (0.30))) * (sky_dif)));
+    col = ((vec3((1.0), (0.80), (0.60))) * (sun_dif) * (sun_sha));
+    (col) += (((vec3((0.), (5.00e-2), (0.20))) * (sky_dif)));
   };
+  col = pow(col, vec3((0.45450)));
   f_color = vec4(col, (1.0));
 }"##}
         }
