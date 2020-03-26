@@ -2,6 +2,10 @@
   (ql:quickload "cl-rust-generator")
   (ql:quickload "cl-cpp-generator2"))
 
+
+(setf *features* (union *features* '(:debug)))
+;(setf *features* (set-difference *features* '(:debug)))
+
 (in-package :cl-cpp-generator2)
 
 (let (;(name "trace.frag")
@@ -183,16 +187,16 @@ image = \"*\"
 		  )
 	     
 	     (let* ((extensions (vulkano_win--required_extensions)))
-	       (setf extensions.ext_debug_report true)
+	       #+debug (setf extensions.ext_debug_report true)
 	      (let (
 		    (instance (dot (vulkano--instance--Instance--new None
 								     &extensions
 								     ;; (&vulkano--instance--InstanceExtensions--none)
-								     ;; None
-								     (space vec! (list (string "VK_LAYER_LUNARG_standard_validation")))
+								     #-debug None
+								     #+debug (space vec! (list (string "VK_LAYER_LUNARG_standard_validation")))
 								     )
 				   (expect (string "failed to create Vulkan instance"))))
-		    (_callback (dot (vulkano--instance--debug--DebugCallback--errors_and_warnings
+		    #+debug (_callback (dot (vulkano--instance--debug--DebugCallback--errors_and_warnings
 				     &instance
 				     (lambda (msg)
 				       ,(logprint "debug:" `(msg.description))))
