@@ -16,8 +16,10 @@ fn main() {
     {
         println!("{} {}:{} start ", Utc::now(), file!(), line!());
     }
+    // https://github.com/vulkano-rs/vulkano-examples/blob/020c546562203f948111508cc7cb67ffd258ab87/src/bin/debug.rs
     let mut event_loops = winit::EventsLoop::new();
-    let extensions = vulkano_win::required_extensions();
+    let mut extensions = vulkano_win::required_extensions();
+    extensions.ext_debug_report = true;
     let instance = vulkano::instance::Instance::new(None, &extensions, None)
         .expect("failed to create Vulkan instance");
     let _callback =
@@ -182,6 +184,7 @@ void main() {
             vulkano::pipeline::GraphicsPipeline::start()
                 .vertex_input_single_buffer::<Vertex>()
                 .vertex_shader(vs.main_entry_point(), ())
+                .line_list()
                 .viewports_dynamic_scissors_irrelevant(1)
                 .fragment_shader(fs.main_entry_point(), ())
                 .render_pass(vulkano::framebuffer::Subpass::from(render_pass.clone(), 0).unwrap())
