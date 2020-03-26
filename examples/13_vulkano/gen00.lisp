@@ -77,7 +77,7 @@
 
 		 "layout(location=0) out vec4 f_color;"
 		 
-
+		 "//  https://www.youtube.com/watch?v=Cfe5UQ-1L9Q&t=1365s"
 		 "layout(push_constant) uniform PushConstantData { uint timestamp; uint window_w; uint window_h; uint mouse_x; uint mouse_y;} pc;"
 		 
                  (defun main ()
@@ -742,8 +742,12 @@ image = \"*\"
 				    (device.clone)
 				    (vulkano--buffer--BufferUsage--all)
 				    (dot (space vec! (list ,@(loop for (x y) in `((-1 -1)
-										  (0 1)
-										  (1 -.5)) collect
+										  (1 -1)
+										  (1 1)
+										  (-1 1)
+										  ;(0 1)
+										  ;(1 -.5)
+										  ) collect
 								  `(make-instance Vertex
 										  :position
 										  (list ,(* .5 x)
