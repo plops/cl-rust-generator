@@ -124,7 +124,13 @@ fn main() {
                     position: [0.50, 0.50],
                 },
                 Vertex {
-                    position: [(-0.50), 0.50],
+                    position: [0.50, 0.50],
+                },
+                Vertex {
+                    position: [0.50, (-0.50)],
+                },
+                Vertex {
+                    position: [(-0.50), (-0.50)],
                 },
             ]
             .into_iter(),

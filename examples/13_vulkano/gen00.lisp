@@ -756,7 +756,9 @@ image = \"*\"
 				    (dot (space vec! (list ,@(loop for (x y) in `((-1 -1)
 										  (1 -1)
 										  (1 1)
-										  (-1 1)
+										  (1 1)
+										  (1 -1)
+										  (-1 -1)
 										  ;(0 1)
 										  ;(1 -.5)
 										  ) collect
