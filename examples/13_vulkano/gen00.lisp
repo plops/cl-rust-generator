@@ -83,23 +83,76 @@
 		 
 		 "//  https://www.youtube.com/watch?v=Cfe5UQ-1L9Q&t=1365s"
 		 "layout(push_constant) uniform PushConstantData { uint timestamp; uint window_w; uint window_h; uint mouse_x; uint mouse_y;} pc;"
+
+
+		 (defun map (pos)
+		   (declare (type "in vec3" pos)
+			    (values float))
+		   (let ((d (- (length pos) .25 ;; size of sphere
+			       )))
+		     (declare (type float d))
+		     (return d)))
+
+		 (defun calcNormal (pos)
+		   (declare (type "in vec3" pos)
+			    (values vec3))
+		   (let ((e (vec2 .0001 .0)))
+		     (declare (type vec2 e))
+		     (return (normalize (vec3 (- (map (+ pos e.xyy))
+						 (map (- pos e.xyy)))
+					      (- (map (+ pos e.yxy))
+						 (map (- pos e.yxy)))
+					      (- (map (+ pos e.yyx))
+						 (map (- pos e.yyx))))))))
+
 		 
-                 (defun main ()
-		   (let ((iResolution (ivec2 pc.window_w pc.window_h))
-			 (p (/ (- (* 2.0 gl_FragCoord.xy)
+		 ;; 00:30:59 / 05:43:05 
+		 ,(let ((far-away 20.0))
+		    `(defun main ()
+		     (let ((iResolution (ivec2 pc.window_w pc.window_h))
+			   (p (/ (- (* 2.0 gl_FragCoord.xy)
 					;(vec2 pc.window_w pc.window_h)
-				  iResolution.xy
-				  )
-			       ; pc.window_h
-					iResolution.y
-			       ))
-			 (f (smoothstep .25 .26 (length p)))
-			 (col (vec3 f f f)))
-		     (declare (type vec2 p)
-			      (type ivec2 iResolution)
-			      (type float f)
-			      (type vec3 col))
-		    (setf f_color (vec4 col 1.0)))))))
+				    iResolution.xy
+				    )
+					; pc.window_h
+				 iResolution.y
+				 ))
+					;(f (smoothstep .25 .26 (length p)))
+			   (ro (vec3 0.0 0.0 1.0)) ;; camera
+			   ;; direction
+			   (rd (normalize (vec3 p -1.5)))
+			   (col (vec3 0.0))
+			   (tau 0.0))
+		       (declare (type vec2 p)
+				(type ivec2 iResolution)
+				(type float f tau)
+				(type vec3 col ro rd))
+
+		       (for  ((= "int i" 0)
+			      (< i 100)
+			      (incf i))
+			     (let ((pos (+ ro (* tau rd)))
+				   (h (map pos)))
+			       (declare (type vec3 pos)
+					(type float h))
+			       (when (< h .001)
+				 break)
+			       (incf tau h)
+			       (when (< ,far-away tau)
+				 break)))
+		       (when (< tau ,far-away)
+			 (let ((pos (+ ro (* tau rd)))
+			       (nor (calcNormal pos))
+			       (sun_dir (normalize (vec3 .8 .4 -.2)))
+			       (dif (clamp (dot nor sun_dir)
+					   0.0 1.0)))
+			   (declare (type vec3 pos nor sun_dir)
+				    (type float dif))
+			   
+			   (setf col (* (vec3 1.0 8.0 .5)
+					dif)
+				 )))
+		       (setf f_color (vec4 col 1.0))))))))
 
 
 
@@ -765,10 +818,11 @@ image = \"*\"
 				      (vulkano--buffer--BufferUsage--all)
 				      (dot (space vec! (list ,@(loop for (x y) in `((-1 -1)
 										    (1 -1)
+										    (-1 1)
 										    (1 1)
-										    (1 1)
-										    (1 -1)
-										    (-1 -1)
+										    
+										    ;(1 -1)
+										    ;(-1 -1)
 					;(0 1)
 					;(1 -.5)
 										    ) collect
@@ -828,7 +882,7 @@ image = \"*\"
 					      ;(vertex_input--<Vertex> (vertex_buffer.clone))
 					      (vertex_shader (vs.main_entry_point)
 							     "()")
-					      (triangle_list)
+					      (triangle_strip)
 					      (viewports_dynamic_scissors_irrelevant 1)
 					      (fragment_shader (fs.main_entry_point) "()")
 					      (render_pass (dot (vulkano--framebuffer--Subpass--from
@@ -966,7 +1020,7 @@ image = \"*\"
 					;,(logprint "cmd" `())
 			      (let ((command_buffer
 				     (dot
-				      (vulkano--command_buffer--AutoCommandBufferBuilder--primary_one_time_submit
+				      (vulkano--command_buffer--AutoCommandBufferBuilder--primary_simultaneous_use ;one_time_submit
 				       (device.clone)
 				       (queue.family))
 				      (unwrap)
@@ -981,6 +1035,7 @@ image = \"*\"
 				      (unwrap)
 				      (draw (pipeline.clone)
 					    &dynamic_state
+					    ;(space vec! (list ))
 					    (vertex_buffer.clone)
 					    "()"
 					;"()"

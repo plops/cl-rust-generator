@@ -127,16 +127,10 @@ fn main() {
                     position: [0.50, (-0.50)],
                 },
                 Vertex {
-                    position: [0.50, 0.50],
+                    position: [(-0.50), 0.50],
                 },
                 Vertex {
                     position: [0.50, 0.50],
-                },
-                Vertex {
-                    position: [0.50, (-0.50)],
-                },
-                Vertex {
-                    position: [(-0.50), (-0.50)],
                 },
             ]
             .into_iter(),
@@ -173,12 +167,42 @@ layout(push_constant) uniform PushConstantData {
   uint mouse_y;
 }
 pc;
+float map(in vec3 pos) {
+  float d = ((length(pos)) - ((0.250)));
+  return d;
+}
+vec3 calcNormal(in vec3 pos) {
+  vec2 e = vec2((1.00e-4), (0.));
+  return normalize(vec3(((map(((pos) + (e.xyy)))) - (map(((pos) - (e.xyy))))),
+                        ((map(((pos) + (e.yxy)))) - (map(((pos) - (e.yxy))))),
+                        ((map(((pos) + (e.yyx)))) - (map(((pos) - (e.yyx)))))));
+}
 void main() {
   ivec2 iResolution = ivec2(pc.window_w, pc.window_h);
   vec2 p = (((((((2.0)) * (gl_FragCoord.xy))) - (iResolution.xy))) /
             (iResolution.y));
-  float f = smoothstep((0.250), (0.260), length(p));
-  vec3 col = vec3(f, f, f);
+  vec3 ro = vec3((0.), (0.), (1.0));
+  vec3 rd = normalize(vec3(p, (-1.50)));
+  vec3 col = vec3((0.));
+  float tau = (0.);
+  for (int i = 0; i < 100; (i)++) {
+    vec3 pos = ((ro) + (((tau) * (rd))));
+    float h = map(pos);
+    if (h < (1.00e-3)) {
+      break;
+    };
+    (tau) += (h);
+    if ((20.) < tau) {
+      break;
+    };
+  }
+  if (tau < (20.)) {
+    vec3 pos = ((ro) + (((tau) * (rd))));
+    vec3 nor = calcNormal(pos);
+    vec3 sun_dir = normalize(vec3((0.80), (0.40), (-0.20)));
+    float dif = clamp(nor.sun_dir, (0.), (1.0));
+    col = ((vec3((1.0), (8.0), (0.50))) * (dif));
+  };
   f_color = vec4(col, (1.0));
 }"##}
         }
@@ -188,7 +212,7 @@ void main() {
             vulkano::pipeline::GraphicsPipeline::start()
                 .vertex_input_single_buffer::<Vertex>()
                 .vertex_shader(vs.main_entry_point(), ())
-                .triangle_list()
+                .triangle_strip()
                 .viewports_dynamic_scissors_irrelevant(1)
                 .fragment_shader(fs.main_entry_point(), ())
                 .render_pass(vulkano::framebuffer::Subpass::from(render_pass.clone(), 0).unwrap())
@@ -329,7 +353,7 @@ void main() {
                     }
                 };
             let command_buffer =
-                vulkano::command_buffer::AutoCommandBufferBuilder::primary_one_time_submit(
+                vulkano::command_buffer::AutoCommandBufferBuilder::primary_simultaneous_use(
                     device.clone(),
                     queue.family(),
                 )

@@ -1,4 +1,13 @@
 
+* Misc
+
+- draw quad with a single triangle
+https://www.saschawillems.de/blog/2016/08/13/vulkan-tutorial-on-rendering-a-fullscreen-quad-without-buffers/
+
+- load shader at runtime
+https://stackoverflow.com/questions/53092022/is-it-possible-to-compile-a-vulkano-shader-at-runtime
+
+
 * OutOfHostMemory crash is known on nvidia
 - https://github.com/vulkano-rs/vulkano/issues/1247
 - https://github.com/vulkano-rs/vulkano/issues/923
