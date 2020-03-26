@@ -201,7 +201,8 @@ void main() {
   vec2 p0 = (((((((2.0)) * (gl_FragCoord.xy))) - (iResolution.xy))) /
              (iResolution.y));
   vec2 p = vec2(p0.x, ((-1) * (p0.y)));
-  vec3 ro = vec3((0.), (0.), (1.0));
+  vec3 ro =
+      vec3((0.), (((0.10)) * (sin((((1.00e-2)) * (pc.timestamp))))), (1.0));
   vec3 rd = normalize(vec3(p, (-1.50)));
   vec3 col = vec3((0.));
   float tau = castRay(ro, rd);

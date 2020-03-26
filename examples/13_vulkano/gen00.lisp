@@ -142,7 +142,7 @@
 				    ))
 			      (p (vec2 p0.x (* -1 p0.y)))
 					;(f (smoothstep .25 .26 (length p)))
-			      (ro (vec3 0.0 0.0 1.0)) ;; camera
+			      (ro (vec3 0.0 (* .1 (sin (* .01 pc.timestamp))) 1.0)) ;; camera
 			      ;; direction
 			      (rd (normalize (vec3 p -1.5)))
 			      (col (vec3 0.0))
