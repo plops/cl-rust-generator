@@ -187,8 +187,10 @@ image = \"*\"
 	      (let (
 		    (instance (dot (vulkano--instance--Instance--new None
 								     &extensions
-					;				    (&vulkano--instance--InstanceExtensions--none)
-								     None)
+								     ;; (&vulkano--instance--InstanceExtensions--none)
+								     ;; None
+								     (space vec! (list (string "VK_LAYER_LUNARG_standard_validation")))
+								     )
 				   (expect (string "failed to create Vulkan instance"))))
 		    (_callback (dot (vulkano--instance--debug--DebugCallback--errors_and_warnings
 				     &instance

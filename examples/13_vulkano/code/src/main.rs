@@ -20,8 +20,12 @@ fn main() {
     let mut event_loops = winit::EventsLoop::new();
     let mut extensions = vulkano_win::required_extensions();
     extensions.ext_debug_report = true;
-    let instance = vulkano::instance::Instance::new(None, &extensions, None)
-        .expect("failed to create Vulkan instance");
+    let instance = vulkano::instance::Instance::new(
+        None,
+        &extensions,
+        vec!["VK_LAYER_LUNARG_standard_validation"],
+    )
+    .expect("failed to create Vulkan instance");
     let _callback =
         vulkano::instance::debug::DebugCallback::errors_and_warnings(&instance, |msg| {
             println!(
