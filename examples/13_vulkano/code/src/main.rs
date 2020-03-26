@@ -152,6 +152,7 @@ void main() { gl_Position = vec4(position, (0.), (1.0)); }"##}
         mod fs {
             vulkano_shaders::shader! {ty: "fragment", src: r##"#version 450
 layout(location = 0) out vec4 f_color;
+//  https://www.youtube.com/watch?v=Cfe5UQ-1L9Q&t=1365s
 layout(push_constant) uniform PushConstantData {
   uint timestamp;
   uint window_w;
@@ -161,9 +162,12 @@ layout(push_constant) uniform PushConstantData {
 }
 pc;
 void main() {
-  f_color = vec4(((pc.mouse_x) / ((((1.0)) * (pc.window_w)))),
-                 ((pc.timestamp) / ((256.))),
-                 ((gl_FragCoord.x) / ((((1.0)) * (pc.window_h)))), (1.0));
+  ivec2 iResolution = ivec2(pc.window_w, pc.window_h);
+  vec2 p = (((((((2.0)) * (gl_FragCoord.xy))) - (iResolution.xy))) /
+            (iResolution.y));
+  float f = smoothstep((0.250), (0.260), length(p));
+  vec3 col = vec3(f, f, f);
+  f_color = vec4(col, (1.0));
 }"##}
         }
         let vs = vs::Shader::load(device.clone()).expect("failed to create shader");

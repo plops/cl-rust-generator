@@ -81,9 +81,21 @@
 		 "layout(push_constant) uniform PushConstantData { uint timestamp; uint window_w; uint window_h; uint mouse_x; uint mouse_y;} pc;"
 		 
                  (defun main ()
-		   (setf f_color (vec4 (/ pc.mouse_x (* 1s0 pc.window_w))
-				       (/ pc.timestamp 256.0)
-				       (/ gl_FragCoord.x (* 1.0 pc.window_h)) 1.0))))))
+		   (let ((iResolution (ivec2 pc.window_w pc.window_h))
+			 (p (/ (- (* 2.0 gl_FragCoord.xy)
+					;(vec2 pc.window_w pc.window_h)
+				  iResolution.xy
+				  )
+			       ; pc.window_h
+					iResolution.y
+			       ))
+			 (f (smoothstep .25 .26 (length p)))
+			 (col (vec3 f f f)))
+		     (declare (type vec2 p)
+			      (type ivec2 iResolution)
+			      (type float f)
+			      (type vec3 col))
+		    (setf f_color (vec4 col 1.0)))))))
 
 
 
