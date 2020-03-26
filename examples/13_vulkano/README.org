@@ -3,3 +3,11 @@
 - https://github.com/vulkano-rs/vulkano/issues/1247
 - https://github.com/vulkano-rs/vulkano/issues/923
   - PresentMode::Immediate instead of Fifo should work
+
+* vkQueuePresentKHR: Presenting image without calling vkGetPhysicalDeviceSurfaceSupportKHR
+
+- is this bad?
+- https://github.com/KhronosGroup/Vulkan-ValidationLayers/issues/1282
+#+begin_example
+Platform-specific versions of the present-support function do not check for surface compatibility, hence the warning. https://vulkan.lunarg.com/doc/view/1.0.33.0/linux/vkspec.chunked/ch29s04.html: "Not all physical devices will include WSI support. Within a physical device, not all queue families will support presentation. WSI support and compatibility can be determined in a platform-neutral manner (which determines support for presentation to a particular surface object) and additionally may be determined in platform-specific manners (which determine support for presentation on the specified physical device but do not guarantee support for presentation to a particular surface object)."
+#+end_example
