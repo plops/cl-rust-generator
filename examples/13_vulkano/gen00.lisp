@@ -88,10 +88,11 @@
 		 (defun map (pos)
 		   (declare (type "in vec3" pos)
 			    (values float))
-		   (let ((d (- (length pos) .25 ;; size of sphere
-			       )))
-		     (declare (type float d))
-		     (return d)))
+		   (let ((d1 (- (length pos) .25 ;; size of sphere
+			       ))
+			 (d2 (+ pos.y .25)))
+		     (declare (type float d1 d2))
+		     (return (min d1 d2))))
 
 		 (defun calcNormal (pos)
 		   (declare (type "in vec3" pos)
@@ -105,59 +106,72 @@
 					      (- (map (+ pos e.yyx))
 						 (map (- pos e.yyx))))))))
 
-		 
-		 ;; 00:30:59 / 05:43:05 
-		 ,(let ((far-away 20.0))
-		    `(defun main ()
-		     (let ((iResolution (ivec2 pc.window_w pc.window_h))
-			   (p (/ (- (* 2.0 gl_FragCoord.xy)
-					;(vec2 pc.window_w pc.window_h)
-				    iResolution.xy
-				    )
-					; pc.window_h
-				 iResolution.y
-				 ))
-					;(f (smoothstep .25 .26 (length p)))
-			   (ro (vec3 0.0 0.0 1.0)) ;; camera
-			   ;; direction
-			   (rd (normalize (vec3 p -1.5)))
-			   (col (vec3 0.0))
-			   (tau 0.0))
-		       (declare (type vec2 p)
-				(type ivec2 iResolution)
-				(type float f tau)
-				(type vec3 col ro rd))
+		
 
-		       (for  ((= "int i" 0)
-			      (< i 100)
-			      (incf i))
-			     (let ((pos (+ ro (* tau rd)))
-				   (h (map pos)))
-			       (declare (type vec3 pos)
-					(type float h))
-			       (when (< h .001)
-				 break)
-			       (incf tau h)
-			       (when (< ,far-away tau)
-				 break)))
-		       (when (< tau ,far-away)
-			 (let ((pos (+ ro (* tau rd)))
-			       (nor (calcNormal pos))
-			       (sun_dir (normalize (vec3 .8 .4 .2)))
-			       (sun_dif (clamp ("dot" nor sun_dir)
-					       0.0 1.0))
-			       (sky_dif (clamp (+ .5 ("dot" nor (vec3 0.0 1.0 0.0)))
-					       0.0 1.0)))
-			   (declare (type vec3 pos nor sun_dir)
-				    (type float sun_dif sky_dif))
+		 ,@(let ((far-away 20.0))
+		    `(
+		       (defun castRay (ro rd)
+			 (declare (type "in vec3" ro)
+				  (type vec3 rd)
+				  (values float))
+			 (let ((tau 0.0))
+			   (declare (type float tau))
+			  (for  ((= "int i" 0)
+				 (< i 100)
+				 (incf i))
+				(let ((pos (+ ro (* tau rd)))
+				      (h (map pos)))
+				  (declare (type vec3 pos)
+					   (type float h))
+				  (when (< h .001)
+				    break)
+				  (incf tau h)
+				  (when (< ,far-away tau)
+				    break))))
+			(when (< ,far-away tau)
+			  (setf tau -1.0))
+			(return tau))
+		      (defun main ()
+			(let ((iResolution (ivec2 pc.window_w pc.window_h))
+			      (p (/ (- (* 2.0 gl_FragCoord.xy)
+					;(vec2 pc.window_w pc.window_h)
+				       iResolution.xy
+				       )
+					; pc.window_h
+				    iResolution.y
+				    ))
+					;(f (smoothstep .25 .26 (length p)))
+			      (ro (vec3 0.0 0.0 1.0)) ;; camera
+			      ;; direction
+			      (rd (normalize (vec3 p -1.5)))
+			      (col (vec3 0.0))
+			      (tau (castRay ro rd)))
+			  (declare (type vec2 p)
+				   (type ivec2 iResolution)
+				   (type float f tau)
+				   (type vec3 col ro rd))
+		       
+			  (when (< 0 tau)
+			    (let ((pos (+ ro (* tau rd)))
+				  (nor (calcNormal pos))
+				  (sun_dir (normalize (vec3 .8 .4 .2)))
+				  (sun_dif (clamp ("dot" nor sun_dir)
+						  0.0 1.0))
+				  (sun_sha (step (castRay (+ pos (* .001 nor)) sun_dir)
+						 0.0))
+				  (sky_dif (clamp (+ .5 ("dot" nor (vec3 0.0 1.0 0.0)))
+						  0.0 1.0)))
+			      (declare (type vec3 pos nor sun_dir)
+				       (type float sun_dif sky_dif sun_sha))
 			   
-			   (setf col (* (vec3 1.0 .7 .5)
-					sun_dif)
-				 )
-			   (incf col (* (vec3 0.0 .1 .3)
-					sky_dif)
-				 )))
-		       (setf f_color (vec4 col 1.0))))))))
+			      (setf col (* (vec3 1.0 .7 .5)
+					   sun_dif
+					   sun_sha)
+				    )
+			      (incf col (* (vec3 0.0 .1 .3)
+					   sky_dif)
+				    )))
+			  (setf f_color (vec4 col 1.0)))))))))
 
 
 
@@ -833,8 +847,8 @@ image = \"*\"
 										    ) collect
 								    `(make-instance Vertex
 										    :position
-										    (list ,(* .5 x)
-											  ,(* .5 y))))))
+										    (list ,(* 1.0 x)
+											  ,(* -1.0 y))))))
 					   (into_iter)))
 				     (expect (string "failed to create buffer"))))
 			       (render_pass (std--sync--Arc--new

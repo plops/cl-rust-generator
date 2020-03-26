@@ -121,16 +121,16 @@ fn main() {
             vulkano::buffer::BufferUsage::all(),
             vec![
                 Vertex {
-                    position: [(-0.50), (-0.50)],
+                    position: [(-1.0), 1.0],
                 },
                 Vertex {
-                    position: [0.50, (-0.50)],
+                    position: [1.0, 1.0],
                 },
                 Vertex {
-                    position: [(-0.50), 0.50],
+                    position: [(-1.0), (-1.0)],
                 },
                 Vertex {
-                    position: [0.50, 0.50],
+                    position: [1.0, (-1.0)],
                 },
             ]
             .into_iter(),
@@ -168,8 +168,9 @@ layout(push_constant) uniform PushConstantData {
 }
 pc;
 float map(in vec3 pos) {
-  float d = ((length(pos)) - ((0.250)));
-  return d;
+  float d1 = ((length(pos)) - ((0.250)));
+  float d2 = ((pos.y) + ((0.250)));
+  return min(d1, d2);
 }
 vec3 calcNormal(in vec3 pos) {
   vec2 e = vec2((1.00e-4), (0.));
@@ -177,13 +178,7 @@ vec3 calcNormal(in vec3 pos) {
                         ((map(((pos) + (e.yxy)))) - (map(((pos) - (e.yxy))))),
                         ((map(((pos) + (e.yyx)))) - (map(((pos) - (e.yyx)))))));
 }
-void main() {
-  ivec2 iResolution = ivec2(pc.window_w, pc.window_h);
-  vec2 p = (((((((2.0)) * (gl_FragCoord.xy))) - (iResolution.xy))) /
-            (iResolution.y));
-  vec3 ro = vec3((0.), (0.), (1.0));
-  vec3 rd = normalize(vec3(p, (-1.50)));
-  vec3 col = vec3((0.));
+float castRay(in vec3 ro, vec3 rd) {
   float tau = (0.);
   for (int i = 0; i < 100; (i)++) {
     vec3 pos = ((ro) + (((tau) * (rd))));
@@ -195,15 +190,31 @@ void main() {
     if ((20.) < tau) {
       break;
     };
-  }
-  if (tau < (20.)) {
+  };
+  if ((20.) < tau) {
+    tau = (-1.0);
+  };
+  return tau;
+}
+void main() {
+  ivec2 iResolution = ivec2(pc.window_w, pc.window_h);
+  vec2 p = (((((((2.0)) * (gl_FragCoord.xy))) - (iResolution.xy))) /
+            (iResolution.y));
+  vec3 ro = vec3((0.), (0.), (1.0));
+  vec3 rd = normalize(vec3(p, (-1.50)));
+  vec3 col = vec3((0.));
+  float tau = castRay(ro, rd);
+  if (0 < tau) {
     vec3 pos = ((ro) + (((tau) * (rd))));
     vec3 nor = calcNormal(pos);
     vec3 sun_dir = normalize(vec3((0.80), (0.40), (0.20)));
     float sun_dif = clamp(dot(nor, sun_dir), (0.), (1.0));
-    float sky_dif = clamp(dot(nor, vec3((0.), (1.0), (0.))), (0.), (1.0));
-    col = ((vec3((1.0), (0.70), (0.50))) * (sun_dif));
-    (col) += (((vec3((0.), (0.20), (0.40))) * (sky_dif)));
+    float sun_sha =
+        step(castRay(((pos) + ((((1.00e-3)) * (nor)))), sun_dir), (0.));
+    float sky_dif =
+        clamp((((0.50)) + (dot(nor, vec3((0.), (1.0), (0.))))), (0.), (1.0));
+    col = ((vec3((1.0), (0.70), (0.50))) * (sun_dif) * (sun_sha));
+    (col) += (((vec3((0.), (0.10), (0.30))) * (sky_dif)));
   };
   f_color = vec4(col, (1.0));
 }"##}
