@@ -896,23 +896,24 @@ image = \"*\"
 				      (device.clone)
 				      (vulkano--buffer--BufferUsage--all)
 				      (dot (space vec!						  
-						  (list  ,@(let ((phi-n 7)
-								(theta-n 13))
+						  (list  ,@(let ((phi-n 13)
+								(theta-n 5))
 							     (loop for phi-i below phi-n append
 								  (loop for theta-i below theta-n collect
 								       (let* ((r .25)
 									      (phi (* 2 pi (/ phi-i (* 1.0 phi-n))))
 									      (theta (* pi (/ theta-i (* 1.0 theta-n))))
-									      (x (* r (sin theta) (cos phi))
+									      (x (coerce (* r (sin theta) (cos phi)) 'single-float)
 										)
 									      
-									      (y
-									       
-									       (* r (sin theta)
-										  (sin phi))
+									      (y (coerce
+										  (* r (sin theta)
+										     (sin phi))
+										  'single-float)
 										
 										)
-									      (z (* r (cos theta))
+									      (z (coerce (* r (cos theta))
+											 'single-float)
 										))
 									 `(make-instance Vertex
 											 :position
