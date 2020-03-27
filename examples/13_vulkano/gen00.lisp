@@ -106,7 +106,7 @@
 					      (- (map (+ pos e.yyx))
 						 (map (- pos e.yyx))))))))
 
-		
+		;; 1:09
 
 		 ,@(let ((far-away 20.0))
 		    `(
