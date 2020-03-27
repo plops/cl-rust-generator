@@ -877,6 +877,26 @@ image = \"*\"
 											  ,(* -1.0 y))))))
 					   (into_iter)))
 				     (expect (string "failed to create buffer"))))
+			       (vertex_buffer2
+				(dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
+				      (device.clone)
+				      (vulkano--buffer--BufferUsage--all)
+				      (dot (space vec! (list ,@(loop for (x y) in `((-1 -1)
+										    (1 -1)
+										    (-1 1)
+										    (1 1)
+										    
+										    ;(1 -1)
+										    ;(-1 -1)
+					;(0 1)
+					;(1 -.5)
+										    ) collect
+								    `(make-instance Vertex
+										    :position
+										    (list ,(* .5 x)
+											  ,(* -.5 y))))))
+					   (into_iter)))
+				     (expect (string "failed to create buffer"))))
 			       (render_pass (std--sync--Arc--new
 					     (dot (vulkano--single_pass_renderpass!
 						   (device.clone)
@@ -1081,10 +1101,14 @@ image = \"*\"
 				      (unwrap)
 				      (draw (pipeline.clone)
 					    &dynamic_state
-					    ;(space vec! (list ))
 					    (vertex_buffer.clone)
 					    "()"
-					;"()"
+					    (push_constants.clone))
+				      (unwrap)
+				      (draw (pipeline.clone)
+					    &dynamic_state
+					    (vertex_buffer2.clone)
+					    "()"
 					    (push_constants.clone))
 				      (unwrap)
 				      (end_render_pass)

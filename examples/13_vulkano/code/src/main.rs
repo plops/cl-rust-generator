@@ -136,6 +136,26 @@ fn main() {
             .into_iter(),
         )
         .expect("failed to create buffer");
+        let vertex_buffer2 = vulkano::buffer::CpuAccessibleBuffer::from_iter(
+            device.clone(),
+            vulkano::buffer::BufferUsage::all(),
+            vec![
+                Vertex {
+                    position: [(-0.50), 0.50],
+                },
+                Vertex {
+                    position: [0.50, 0.50],
+                },
+                Vertex {
+                    position: [(-0.50), (-0.50)],
+                },
+                Vertex {
+                    position: [0.50, (-0.50)],
+                },
+            ]
+            .into_iter(),
+        )
+        .expect("failed to create buffer");
         let render_pass = std::sync::Arc::new(
             vulkano::single_pass_renderpass!(device.clone(), attachments: {
                                     color: {
@@ -396,6 +416,14 @@ void main() {
                     pipeline.clone(),
                     &dynamic_state,
                     vertex_buffer.clone(),
+                    (),
+                    push_constants.clone(),
+                )
+                .unwrap()
+                .draw(
+                    pipeline.clone(),
+                    &dynamic_state,
+                    vertex_buffer2.clone(),
                     (),
                     push_constants.clone(),
                 )
