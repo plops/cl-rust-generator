@@ -878,13 +878,7 @@ image = \"*\"
 				      (dot (space vec! (list ,@(loop for (x y) in `((-1 -1)
 										    (1 -1)
 										    (-1 1)
-										    (1 1)
-										    
-										    ;(1 -1)
-										    ;(-1 -1)
-					;(0 1)
-					;(1 -.5)
-										    ) collect
+										    (1 1)) collect
 								    `(make-instance Vertex
 										    :position
 										    (list ,(* 1.0 x)
@@ -896,21 +890,41 @@ image = \"*\"
 				(dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
 				      (device.clone)
 				      (vulkano--buffer--BufferUsage--all)
-				      (dot (space vec! (list ,@(loop for (x y z) in `((-1 -1 0)
-										    (1 -1 0)
-										    (-1 1 0)
-										    (1 1 0)
-										    
-										    ;(1 -1)
-										    ;(-1 -1)
-					;(0 1)
-					;(1 -.5)
-										    ) collect
+				      (dot (space vec!
+						  #+nil (list ,@(loop for (x y) in `((-1 -1)
+										    (1 -1)
+										    (-1 1)
+										    (1 1)) collect
 								    `(make-instance Vertex
 										    :position
-										    (list ,(* .5 x)
-											  ,(* -.5 y)
-											  ,(* 1.0 z))))))
+										    (list ,(* 1.0 x)
+											  ,(* -1.0 y)
+											  0.0))))
+						  
+						  (list  ,(let ((phi-n 3)
+								(theta-n 5))
+							    `(do0
+							      ,@(loop for phi-i below phi-n append
+								   (loop for theta-i below theta-n collect
+									(let* ((r .25)
+									       (phi (/ phi-i (* 1.0 phi-n)))
+									       (theta (/ theta-i (* 1.0 theta-n)))
+									       (x (* r (sin theta) (cos phi))
+										 )
+									       
+									       (y
+										
+										(* r ;(sin theta)
+										   (sin phi))
+					;(* r (sin theta) (sin phi))
+										 )
+									       (z (* r (cos theta))
+										 ))
+									  `(make-instance Vertex
+											  :position
+											  (list ,(* 1.0 x)
+												,(* 1.0 y)
+												,(* 1.0 z))))))))))
 					   (into_iter)))
 				     (expect (string "failed to create buffer"))))
 			       (render_pass (std--sync--Arc--new
@@ -1231,3 +1245,5 @@ image = \"*\"
 			 "#![allow(unused_parens)]"
 					;(use (chrono (curly DateTime Utc)))
 			 ,code)))))
+
+

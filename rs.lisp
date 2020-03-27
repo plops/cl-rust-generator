@@ -380,12 +380,13 @@ entry return-values contains a list of return values"
   (let* ((a f)
 	 (digits 1)
 	 (b (- a 1)))
-    (unless (= a 0)
+    (unless (= a 0) ; (< (abs a) 1d-30)
      (loop while (< 1d-12
 		     (/ (abs (- a b))
 		       (abs a))
 		     ) do
 	  (setf b (read-from-string (format nil "~,vG" digits a)))
+	  (format t "~a" b)
 	  (incf digits)))
     (format nil "~,vG" digits a))
 

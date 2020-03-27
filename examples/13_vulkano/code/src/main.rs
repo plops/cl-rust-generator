@@ -139,20 +139,21 @@ fn main() {
         let vertex_buffer2 = vulkano::buffer::CpuAccessibleBuffer::from_iter(
             device.clone(),
             vulkano::buffer::BufferUsage::all(),
-            vec![
-                Vertex {
-                    position: [(-0.50), 0.50, 0.],
-                },
-                Vertex {
-                    position: [0.50, 0.50, 0.],
-                },
-                Vertex {
-                    position: [(-0.50), (-0.50), 0.],
-                },
-                Vertex {
-                    position: [0.50, (-0.50), 0.],
-                },
-            ]
+            vec! [        Vertex {position: [0.    , 0.    , 0.250    ]};
+        Vertex {position: [4.96673320e-2, 0.    , 0.245016650    ]};
+        Vertex {position: [9.7354585e-2, 0.    , 0.230265240    ]};
+        Vertex {position: [0.141160620    , 0.    , 0.20633390    ]};
+        Vertex {position: [0.179339020    , 0.    , 0.174176680    ]};
+        Vertex {position: [0.    , 8.1798680e-2, 0.250    ]};
+        Vertex {position: [4.6933490e-2, 8.1798680e-2, 0.245016650    ]};
+        Vertex {position: [9.1995890e-2, 8.1798680e-2, 0.230265240    ]};
+        Vertex {position: [0.133390710    , 8.1798680e-2, 0.20633390    ]};
+        Vertex {position: [0.169467660    , 8.1798680e-2, 0.174176680    ]};
+        Vertex {position: [0.    , 0.154592450    , 0.250    ]};
+        Vertex {position: [3.9032920e-2, 0.154592450    , 0.245016650    ]};
+        Vertex {position: [7.6509720e-2, 0.154592450    , 0.230265240    ]};
+        Vertex {position: [0.110936330    , 0.154592450    , 0.20633390    ]};
+        Vertex {position: [0.140940250    , 0.154592450    , 0.174176680    ]};]
             .into_iter(),
         )
         .expect("failed to create buffer");
