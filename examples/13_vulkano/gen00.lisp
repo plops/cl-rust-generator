@@ -3,6 +3,10 @@
   (ql:quickload "cl-cpp-generator2"))
 
 
+(declaim (optimize (speed 0)
+		   (safety 3)
+		   (debug 3)))
+
 (setf *features* (union *features* '(:debug)))
 ;(setf *features* (set-difference *features* '(:debug)))
 
@@ -220,6 +224,7 @@
 
 
 (in-package :cl-rust-generator)
+(trace emit-rs)
 ;; https://vulkano.rs/guide/example-operation
 (progn
   (defparameter *source-dir* #P"examples/13_vulkano/code/src/")
@@ -914,17 +919,17 @@ image = \"*\"
 									       
 									       (y
 										
-										(* r ;(sin theta)
+										(* r (sin theta)
 										   (sin phi))
-					;(* r (sin theta) (sin phi))
+				
 										 )
 									       (z (* r (cos theta))
 										 ))
 									  `(make-instance Vertex
 											  :position
-											  (list ,(* 1.0 x)
-												,(* 1.0 y)
-												,(* 1.0 z))))))))))
+											  (list ,x
+												,y
+												,z)))))))))
 					   (into_iter)))
 				     (expect (string "failed to create buffer"))))
 			       (render_pass (std--sync--Arc--new

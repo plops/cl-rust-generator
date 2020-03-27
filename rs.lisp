@@ -6,7 +6,12 @@
 	 (:export
 	  #:write-source
 	  #:emit-rs)))
-;(setf *features* (union *features* '(:generic-c)))
+
+
+(declaim (optimize (speed 0)
+		   (safety 3)
+		   (debug 3)))
+					;(setf *features* (union *features* '(:generic-c)))
 ;(setf *features* (set-difference *features* '(:generic-c)))
 (in-package :cl-rust-generator)
 
@@ -349,6 +354,7 @@ entry return-values contains a list of return values"
   "print a single floating point number as a string with a given nr. of
   digits. parse it again and increase nr. of digits until the same bit
   pattern."
+  
   (let* ((a f)
 	 (digits 1)
 	 (b (- a 1)))
@@ -357,6 +363,7 @@ entry return-values contains a list of return values"
 		     (/ (abs (- a b))
 		       (abs a))
 		     ) do
+	  (format t "f32 ~a~%" (list f digits b))
 	  (setf b (read-from-string (format nil "~,vG" digits a)))
 	  (incf digits)))
     (format nil "~,vG" digits a))
@@ -380,14 +387,15 @@ entry return-values contains a list of return values"
   (let* ((a f)
 	 (digits 1)
 	 (b (- a 1)))
-    (unless (= a 0) ; (< (abs a) 1d-30)
-     (loop while (< 1d-12
+    ;(format t "f64 ~a~%" f)
+    (unless (= a 0)			; (< (abs a) 1d-30)
+      (loop while (< 1d-7
 		     (/ (abs (- a b))
-		       (abs a))
+			(abs a))
 		     ) do
-	  (setf b (read-from-string (format nil "~,vG" digits a)))
-	  (format t "~a" b)
-	  (incf digits)))
+	   (setf b (read-from-string (format nil "~,vG" digits a)))
+					;(format t "~a" b)
+	   (incf digits)))
     (format nil "~,vG" digits a))
 
   #+nil
@@ -406,6 +414,7 @@ entry return-values contains a list of return values"
     (flet ((emit (code &optional (dl 0))
 	     "change the indentation level. this is used in do"
 	     (emit-rs :code code :level (+ dl level) :hook-defun hook-defun)))
+      ;(format t "~a~%" code)
       (if code
 	  (if (listp code)
 	      (progn
