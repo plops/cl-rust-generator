@@ -4,11 +4,18 @@
 - draw quad with a single triangle
 https://www.saschawillems.de/blog/2016/08/13/vulkan-tutorial-on-rendering-a-fullscreen-quad-without-buffers/
 
+
+- load shader at runtime (vulkano)
+https://github.com/vulkano-rs/vulkano-examples/blob/master/src/bin/runtime-shader/main.rs
+
 - load shader at runtime (not vulkano)
 https://stackoverflow.com/questions/53092022/is-it-possible-to-compile-a-vulkano-shader-at-runtime
 
+
 - rust on android
 https://mozilla.github.io/firefox-browser-architecture/experiments/2017-09-21-rust-on-android.html
+
+
 
 
 * OutOfHostMemory crash is known on nvidia
