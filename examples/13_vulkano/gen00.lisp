@@ -224,7 +224,7 @@
 
 
 (in-package :cl-rust-generator)
-(trace emit-rs)
+;(trace emit-rs)
 ;; https://vulkano.rs/guide/example-operation
 (progn
   (defparameter *source-dir* #P"examples/13_vulkano/code/src/")

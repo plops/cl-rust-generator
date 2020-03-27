@@ -363,7 +363,7 @@ entry return-values contains a list of return values"
 		     (/ (abs (- a b))
 		       (abs a))
 		     ) do
-	  (format t "f32 ~a~%" (list f digits b))
+	  ;(format t "f32 ~a~%" (list f digits b))
 	  (setf b (read-from-string (format nil "~,vG" digits a)))
 	  (incf digits)))
     (format nil "~,vG" digits a))
@@ -385,7 +385,7 @@ entry return-values contains a list of return values"
   pattern."
 
   (let* ((a f)
-	 (digits 20)
+	 (digits 1)
 	 (b (- a 1)))
 
     (unless (= a 0)			; (< (abs a) 1d-30)
@@ -395,11 +395,11 @@ entry return-values contains a list of return values"
 		     ) do
 	   (let ((str (format nil "~20,vG"  digits a))
 		 (*read-default-float-format* 'double-float))
-	     (format t "f64 ~a~%" (list f digits b str))
+	     ;(format t "f64 ~a~%" (list f digits b str))
 	     (setf b (read-from-string str)))
 					;(format t "~a" b)
 	   (incf digits)))
-    (format nil "~,vG" digits a))
+    (format nil "~,v,,,,,'eG" digits a))
 
   #+nil
   (let* ((ff (coerce f 'double-float))
