@@ -896,10 +896,10 @@ image = \"*\"
 				(dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
 				      (device.clone)
 				      (vulkano--buffer--BufferUsage--all)
-				      (dot (space vec! (list ,@(loop for (x y z) in `((-1 -1 -1)
-										    (1 -1 -1)
-										    (-1 1 -1)
-										    (1 1 -1)
+				      (dot (space vec! (list ,@(loop for (x y z) in `((-1 -1 0)
+										    (1 -1 0)
+										    (-1 1 0)
+										    (1 1 0)
 										    
 										    ;(1 -1)
 										    ;(-1 -1)
@@ -991,7 +991,7 @@ image = \"*\"
 					      (vertex_input_single_buffer--<Vertex>)
 					      (vertex_shader (vs.main_entry_point)
 							     "()")
-					      (triangle_strip)
+					      (line_strip)
 					      (viewports_dynamic_scissors_irrelevant 1)
 					      (fragment_shader (fs2.main_entry_point) "()")
 					      (blend_alpha_blending)

@@ -141,16 +141,16 @@ fn main() {
             vulkano::buffer::BufferUsage::all(),
             vec![
                 Vertex {
-                    position: [(-0.50), 0.50, (-1.0)],
+                    position: [(-0.50), 0.50, 0.],
                 },
                 Vertex {
-                    position: [0.50, 0.50, (-1.0)],
+                    position: [0.50, 0.50, 0.],
                 },
                 Vertex {
-                    position: [(-0.50), (-0.50), (-1.0)],
+                    position: [(-0.50), (-0.50), 0.],
                 },
                 Vertex {
-                    position: [0.50, (-0.50), (-1.0)],
+                    position: [0.50, (-0.50), 0.],
                 },
             ]
             .into_iter(),
@@ -285,7 +285,7 @@ void main() { f_color = vec4((1.0), (0.20), (0.20), (0.70)); }"##}
             vulkano::pipeline::GraphicsPipeline::start()
                 .vertex_input_single_buffer::<Vertex>()
                 .vertex_shader(vs.main_entry_point(), ())
-                .triangle_strip()
+                .line_strip()
                 .viewports_dynamic_scissors_irrelevant(1)
                 .fragment_shader(fs2.main_entry_point(), ())
                 .blend_alpha_blending()
