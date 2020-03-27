@@ -68,11 +68,11 @@
 		`(do0
                  "#version 450"
  
-		 "layout(location=0) in vec2 position;"
+		 "layout(location=0) in vec3 position;"
 		 
 		 
                  (defun main ()
-		   (setf gl_Position (vec4 position 0.0 1.0)))))
+		   (setf gl_Position (vec4 position 1.0)))))
   (write-source (asdf:system-relative-pathname 'cl-rust-generator
 					       (merge-pathnames "trace.frag"
 								*source-dir*))
@@ -277,7 +277,7 @@ image = \"*\"
 	 (do0
 	  "#[derive(Default,Copy,Clone)]"
 	  (defstruct0 Vertex
-	      (position "[f32;2]"))
+	      (position "[f32;3]"))
 	  (vulkano--impl_vertex! Vertex position))
 	 
 	 (defun main ()
@@ -874,17 +874,18 @@ image = \"*\"
 								    `(make-instance Vertex
 										    :position
 										    (list ,(* 1.0 x)
-											  ,(* -1.0 y))))))
+											  ,(* -1.0 y)
+											  0.0)))))
 					   (into_iter)))
 				     (expect (string "failed to create buffer"))))
 			       (vertex_buffer2
 				(dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
 				      (device.clone)
 				      (vulkano--buffer--BufferUsage--all)
-				      (dot (space vec! (list ,@(loop for (x y) in `((-1 -1)
-										    (1 -1)
-										    (-1 1)
-										    (1 1)
+				      (dot (space vec! (list ,@(loop for (x y z) in `((-1 -1 -1)
+										    (1 -1 -1)
+										    (-1 1 -1)
+										    (1 1 -1)
 										    
 										    ;(1 -1)
 										    ;(-1 -1)
@@ -894,7 +895,8 @@ image = \"*\"
 								    `(make-instance Vertex
 										    :position
 										    (list ,(* .5 x)
-											  ,(* -.5 y))))))
+											  ,(* -.5 y)
+											  ,(* 1.0 z))))))
 					   (into_iter)))
 				     (expect (string "failed to create buffer"))))
 			       (render_pass (std--sync--Arc--new

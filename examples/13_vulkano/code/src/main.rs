@@ -9,7 +9,7 @@ use winit::EventsLoop;
 use winit::WindowBuilder;
 #[derive(Default, Copy, Clone)]
 struct Vertex {
-    position: [f32; 2],
+    position: [f32; 3],
 }
 vulkano::impl_vertex!(Vertex, position);
 fn main() {
@@ -121,16 +121,16 @@ fn main() {
             vulkano::buffer::BufferUsage::all(),
             vec![
                 Vertex {
-                    position: [(-1.0), 1.0],
+                    position: [(-1.0), 1.0, 0.],
                 },
                 Vertex {
-                    position: [1.0, 1.0],
+                    position: [1.0, 1.0, 0.],
                 },
                 Vertex {
-                    position: [(-1.0), (-1.0)],
+                    position: [(-1.0), (-1.0), 0.],
                 },
                 Vertex {
-                    position: [1.0, (-1.0)],
+                    position: [1.0, (-1.0), 0.],
                 },
             ]
             .into_iter(),
@@ -141,16 +141,16 @@ fn main() {
             vulkano::buffer::BufferUsage::all(),
             vec![
                 Vertex {
-                    position: [(-0.50), 0.50],
+                    position: [(-0.50), 0.50, (-1.0)],
                 },
                 Vertex {
-                    position: [0.50, 0.50],
+                    position: [0.50, 0.50, (-1.0)],
                 },
                 Vertex {
-                    position: [(-0.50), (-0.50)],
+                    position: [(-0.50), (-0.50), (-1.0)],
                 },
                 Vertex {
-                    position: [0.50, (-0.50)],
+                    position: [0.50, (-0.50), (-1.0)],
                 },
             ]
             .into_iter(),
@@ -172,8 +172,8 @@ fn main() {
         );
         mod vs {
             vulkano_shaders::shader! {ty: "vertex", src: r##"#version 450
-layout(location = 0) in vec2 position;
-void main() { gl_Position = vec4(position, (0.), (1.0)); }"##}
+layout(location = 0) in vec3 position;
+void main() { gl_Position = vec4(position, (1.0)); }"##}
         }
         mod fs {
             vulkano_shaders::shader! {ty: "fragment", src: r##"#version 450
