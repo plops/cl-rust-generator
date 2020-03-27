@@ -895,41 +895,30 @@ image = \"*\"
 				(dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
 				      (device.clone)
 				      (vulkano--buffer--BufferUsage--all)
-				      (dot (space vec!
-						  #+nil (list ,@(loop for (x y) in `((-1 -1)
-										    (1 -1)
-										    (-1 1)
-										    (1 1)) collect
-								    `(make-instance Vertex
-										    :position
-										    (list ,(* 1.0 x)
-											  ,(* -1.0 y)
-											  0.0))))
-						  
-						  (list  ,(let ((phi-n 3)
-								(theta-n 5))
-							    `(do0
-							      ,@(loop for phi-i below phi-n append
-								   (loop for theta-i below theta-n collect
-									(let* ((r .25)
-									       (phi (/ phi-i (* 1.0 phi-n)))
-									       (theta (/ theta-i (* 1.0 theta-n)))
-									       (x (* r (sin theta) (cos phi))
-										 )
+				      (dot (space vec!						  
+						  (list  ,@(let ((phi-n 7)
+								(theta-n 13))
+							     (loop for phi-i below phi-n append
+								  (loop for theta-i below theta-n collect
+								       (let* ((r .25)
+									      (phi (* 2 pi (/ phi-i (* 1.0 phi-n))))
+									      (theta (* pi (/ theta-i (* 1.0 theta-n))))
+									      (x (* r (sin theta) (cos phi))
+										)
+									      
+									      (y
 									       
-									       (y
+									       (* r (sin theta)
+										  (sin phi))
 										
-										(* r (sin theta)
-										   (sin phi))
-				
-										 )
-									       (z (* r (cos theta))
-										 ))
-									  `(make-instance Vertex
-											  :position
-											  (list ,x
-												,y
-												,z)))))))))
+										)
+									      (z (* r (cos theta))
+										))
+									 `(make-instance Vertex
+											 :position
+											 (list ,x
+											       ,y
+											       ,z))))))))
 					   (into_iter)))
 				     (expect (string "failed to create buffer"))))
 			       (render_pass (std--sync--Arc--new
