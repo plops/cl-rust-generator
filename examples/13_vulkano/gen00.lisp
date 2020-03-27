@@ -199,7 +199,21 @@
 					   (vec3 0.7 .3 .2)
 					   bou_dif))))
 			  (setf col (pow col (vec3 .4545)))
-			  (setf f_color (vec4 col .4)))))))))
+			  (setf f_color (vec4 col .4))))))))
+  (write-source (asdf:system-relative-pathname 'cl-rust-generator
+					       (merge-pathnames "trace2.frag"
+								*source-dir*))
+		`(do0
+                 "#version 450"
+
+		 "layout(location=0) out vec4 f_color;"
+		 
+		 
+		 "layout(push_constant) uniform PushConstantData { uint timestamp; uint window_w; uint window_h; uint mouse_x; uint mouse_y;} pc;"
+
+
+		 (defun main ()
+		   (setf f_color (vec4 1.0 .2 .2 .7))))))
 
 
 
@@ -938,20 +952,48 @@ image = \"*\"
 				       ,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
 											      (merge-pathnames "trace.frag"
 													       *source-dir*)))))))
+
+			    (space "mod fs2"
+				   (progn
+				     (macroexpand
+				      vulkano_shaders--shader!
+				      :ty (string "fragment")
+				      :src
+				      (string#
+				       ,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
+											      (merge-pathnames "trace2.frag"
+													       *source-dir*)))))))
 			    (let ((vs (dot (vs--Shader--load (device.clone))
 					   (expect (string "failed to create shader"))))
 				  (fs (dot (fs--Shader--load (device.clone))
+					   (expect (string "failed to create shader"))))
+				  (fs2 (dot (fs--Shader--load (device.clone))
 					   (expect (string "failed to create shader"))))
 				  (pipeline (std--sync--Arc--new
 					     (dot
 					      (vulkano--pipeline--GraphicsPipeline--start)
 					      (vertex_input_single_buffer--<Vertex>)
-					      ;(vertex_input--<Vertex> (vertex_buffer.clone))
 					      (vertex_shader (vs.main_entry_point)
 							     "()")
 					      (triangle_strip)
 					      (viewports_dynamic_scissors_irrelevant 1)
 					      (fragment_shader (fs.main_entry_point) "()")
+					      (blend_alpha_blending)
+					      (render_pass (dot (vulkano--framebuffer--Subpass--from
+								 (render_pass.clone)
+								 0)
+								(unwrap)))
+					      (build (device.clone))
+					      (unwrap))))
+				  (pipeline2 (std--sync--Arc--new
+					     (dot
+					      (vulkano--pipeline--GraphicsPipeline--start)
+					      (vertex_input_single_buffer--<Vertex>)
+					      (vertex_shader (vs.main_entry_point)
+							     "()")
+					      (triangle_strip)
+					      (viewports_dynamic_scissors_irrelevant 1)
+					      (fragment_shader (fs2.main_entry_point) "()")
 					      (blend_alpha_blending)
 					      (render_pass (dot (vulkano--framebuffer--Subpass--from
 								 (render_pass.clone)
@@ -1107,7 +1149,7 @@ image = \"*\"
 					    "()"
 					    (push_constants.clone))
 				      (unwrap)
-				      (draw (pipeline.clone)
+				      (draw (pipeline2.clone)
 					    &dynamic_state
 					    (vertex_buffer2.clone)
 					    "()"

@@ -253,8 +253,22 @@ void main() {
   f_color = vec4(col, (0.40));
 }"##}
         }
+        mod fs2 {
+            vulkano_shaders::shader! {ty: "fragment", src: r##"#version 450
+layout(location = 0) out vec4 f_color;
+layout(push_constant) uniform PushConstantData {
+  uint timestamp;
+  uint window_w;
+  uint window_h;
+  uint mouse_x;
+  uint mouse_y;
+}
+pc;
+void main() { f_color = vec4((1.0), (0.20), (0.20), (0.70)); }"##}
+        }
         let vs = vs::Shader::load(device.clone()).expect("failed to create shader");
         let fs = fs::Shader::load(device.clone()).expect("failed to create shader");
+        let fs2 = fs::Shader::load(device.clone()).expect("failed to create shader");
         let pipeline = std::sync::Arc::new(
             vulkano::pipeline::GraphicsPipeline::start()
                 .vertex_input_single_buffer::<Vertex>()
@@ -262,6 +276,18 @@ void main() {
                 .triangle_strip()
                 .viewports_dynamic_scissors_irrelevant(1)
                 .fragment_shader(fs.main_entry_point(), ())
+                .blend_alpha_blending()
+                .render_pass(vulkano::framebuffer::Subpass::from(render_pass.clone(), 0).unwrap())
+                .build(device.clone())
+                .unwrap(),
+        );
+        let pipeline2 = std::sync::Arc::new(
+            vulkano::pipeline::GraphicsPipeline::start()
+                .vertex_input_single_buffer::<Vertex>()
+                .vertex_shader(vs.main_entry_point(), ())
+                .triangle_strip()
+                .viewports_dynamic_scissors_irrelevant(1)
+                .fragment_shader(fs2.main_entry_point(), ())
                 .blend_alpha_blending()
                 .render_pass(vulkano::framebuffer::Subpass::from(render_pass.clone(), 0).unwrap())
                 .build(device.clone())
@@ -421,7 +447,7 @@ void main() {
                 )
                 .unwrap()
                 .draw(
-                    pipeline.clone(),
+                    pipeline2.clone(),
                     &dynamic_state,
                     vertex_buffer2.clone(),
                     (),
