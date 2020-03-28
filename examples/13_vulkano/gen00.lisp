@@ -96,22 +96,9 @@
 		 
                    (defun main ()
 		     (setf gl_Position (vec4 position 1.0)))))
-  #+nil (let ((shader-name "trace")
-	(shader-type "vert"))
-   (write-source (asdf:system-relative-pathname 'cl-rust-generator
-						(merge-pathnames (format nil "~a.~a" shader-name shader-type)
-								 *source-dir*))
-		 )
 
-   (sb-ext:run-program "/usr/bin/glslangValidator"
-		       (list (format nil "~a.~a" shader-name shader-type)
-			     "-V"
-			     "-S" shader-type "-o" (format nil "~a_~a.spv" shader-name shader-type))))
-  
-  (write-source (asdf:system-relative-pathname 'cl-rust-generator
-					       (merge-pathnames "trace.frag"
-								*source-dir*))
-		`(do0
+  (compile-shader "trace" "frag"
+		  `(do0
                  "#version 450"
 
 		 "layout(location=0) out vec4 f_color;"
@@ -235,10 +222,9 @@
 					   bou_dif))))
 			  (setf col (pow col (vec3 .4545)))
 			  (setf f_color (vec4 col .4))))))))
-  (write-source (asdf:system-relative-pathname 'cl-rust-generator
-					       (merge-pathnames "trace2.frag"
-								*source-dir*))
-		`(do0
+
+  (compile-shader "trace2" "frag"
+		  `(do0
                  "#version 450"
 
 		 "layout(location=0) out vec4 f_color;"
