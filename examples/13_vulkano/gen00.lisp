@@ -12,6 +12,8 @@
 
 (in-package :cl-cpp-generator2)
 
+
+
 (let (;(name "trace.frag")
       (w 512s0)
       (h 512s0))
@@ -66,17 +68,46 @@
 				   to_write))))
 		 
 		 ))
-  (write-source (asdf:system-relative-pathname 'cl-rust-generator
-					       (merge-pathnames "trace.vert"
-								*source-dir*))
-		`(do0
-                 "#version 450"
+
+  (defun compile-shader (shader-name shader-type code)
+    (let ((shader-name "trace")
+	  (shader-type "vert")
+	  (filename (asdf:system-relative-pathname 'cl-rust-generator
+						(merge-pathnames (format nil "~a.~a" shader-name shader-type)
+								 *source-dir*)))
+	  (filename-out (asdf:system-relative-pathname 'cl-rust-generator
+						(merge-pathnames (format nil "~a_~a.spv" shader-name shader-type)
+								 *source-dir*))))
+      
+   (write-source filename
+		 code)
+
+   (sb-ext:run-program "/usr/bin/glslangValidator"
+		       (list (namestring filename)
+			     "-V"
+			     "-S" shader-type "-o"
+			     (namestring filename-out) ))))
+  (compile-shader "trace" "vert"
+		  `(do0
+                   "#version 450"
  
-		 "layout(location=0) in vec3 position;"
+		   "layout(location=0) in vec3 position;"
 		 
 		 
-                 (defun main ()
-		   (setf gl_Position (vec4 position 1.0)))))
+                   (defun main ()
+		     (setf gl_Position (vec4 position 1.0)))))
+  #+nil (let ((shader-name "trace")
+	(shader-type "vert"))
+   (write-source (asdf:system-relative-pathname 'cl-rust-generator
+						(merge-pathnames (format nil "~a.~a" shader-name shader-type)
+								 *source-dir*))
+		 )
+
+   (sb-ext:run-program "/usr/bin/glslangValidator"
+		       (list (format nil "~a.~a" shader-name shader-type)
+			     "-V"
+			     "-S" shader-type "-o" (format nil "~a_~a.spv" shader-name shader-type))))
+  
   (write-source (asdf:system-relative-pathname 'cl-rust-generator
 					       (merge-pathnames "trace.frag"
 								*source-dir*))

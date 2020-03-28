@@ -7,15 +7,24 @@ https://www.saschawillems.de/blog/2016/08/13/vulkan-tutorial-on-rendering-a-full
 
 - load shader at runtime (vulkano)
 https://github.com/vulkano-rs/vulkano-examples/blob/master/src/bin/runtime-shader/main.rs
+https://github.com/vulkano-rs/vulkano-examples/blob/1cf9c37073a79a3a0cee60e83c8db8d967218e3e/src/bin/runtime-shader/main.rs
 
-- load shader at runtime (not vulkano)
+- load shader at runtime (not vulkano but shows use of notify)
 https://stackoverflow.com/questions/53092022/is-it-possible-to-compile-a-vulkano-shader-at-runtime
+
+- vulkano render engine
+https://github.com/cynic64/render-engine
 
 
 - rust on android
 https://mozilla.github.io/firefox-browser-architecture/experiments/2017-09-21-rust-on-android.html
 
 
+- alternative rust bindings for vulkan
+https://github.com/MaikKlein/ash
+
+- raytracing
+https://github.com/gwihlidal/ash-nv-rt
 
 
 * OutOfHostMemory crash is known on nvidia
