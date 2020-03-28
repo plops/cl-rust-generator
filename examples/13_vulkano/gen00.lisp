@@ -158,7 +158,8 @@
 			(return tau))
 		      (defun main ()
 			(let ((iResolution (ivec2 pc.window_w pc.window_h))
-			      (p0 (/ (- (* 2.0 gl_FragCoord.xy)
+			      (p0 (/ (- (* 2.0 gl_FragCoord.xy
+					   )
 					;(vec2 pc.window_w pc.window_h)
 				       iResolution.xy
 				       )
@@ -970,40 +971,35 @@ image = \"*\"
 						    'cl-rust-generator
 						    (merge-pathnames fn
 								     *source-dir*))))
-				      `(do0
-					#+runtime-shader
-					(progn
-					  (let ((f (dot (std--fs--File--open (string ,full-fn))
-							(expect (string (format nil "can't find ~a" full-fn))))))
-					    (let* ((v (space vec! (list))))
-					      (dot f
-						   (read_to_end "&mut v")
-						   (unwrap))
-					      (space unsafe
-						     (dot
-						      (progn
-							(vulkano--pipeline--shader--ShaderModule--new
-							 (device.clone)
-							 &v
-							 ))
-						      (unwrap))))))
-					#-runtime-shader
-					(space
-					,(format nil "mod ~a" mod)
-					(progn
-					  
-					  
-					  #-runtime-shader
-					  (macroexpand
-					   vulkano_shaders--shader!
-					   :ty (string ,type)
-					   :src
-					   (string#
-					    ,(read-file-into-string
-					      (asdf:system-relative-pathname
-					       'cl-rust-generator
-					       (merge-pathnames fn
-								*source-dir*)))))))))))
+				     `(space
+				       ,(format nil "mod ~a" mod)
+				       (progn
+					 #-runtime-shader
+					 (let ((f (dot (std--fs--File--open (string ,full-fn))
+						       (expect (string (format nil "can't find ~a" full-fn))))))
+					   (let* ((v (space vec! (list))))
+					     (dot f
+						  (read_to_end "&mut v")
+						  (unwrap))
+					     (space unsafe
+						    (dot
+						     (progn
+						       (vulkano--pipeline--shader--ShaderModule--new
+							(device.clone)
+							&v
+							))
+						     (unwrap)))))
+					 #+runtime-shader
+					 (macroexpand
+					  vulkano_shaders--shader!
+					  :ty (string ,type)
+					  :src
+					  (string#
+					   ,(read-file-into-string
+					     (asdf:system-relative-pathname
+					      'cl-rust-generator
+					      (merge-pathnames fn
+							       *source-dir*))))))))))
 			    (let ((vs (dot (vs--Shader--load (device.clone))
 					   (expect (string "failed to create shader"))))
 				  (fs (dot (fs--Shader--load (device.clone))
