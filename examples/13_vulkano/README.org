@@ -32,6 +32,80 @@ cargo install cargo-expand
 cargo expand
 #+end_example
 
+#+begin_example
+                   65592u32,
+                    ];
+                    unsafe {
+                        Ok(Shader {
+                            shader: ::vulkano::pipeline::shader::ShaderModule::from_words(
+                                device, &words,
+                            )?,
+                        })
+                    }
+                }
+                #[doc = r" Returns the module that was created."]
+                #[allow(dead_code)]
+                #[inline]
+                pub fn module(
+                    &self,
+                ) -> &::std::sync::Arc<::vulkano::pipeline::shader::ShaderModule> {
+                    &self.shader
+                }
+                #[doc = r" Returns a logical struct describing the entry point named `{ep_name}`."]
+                #[inline]
+                #[allow(unsafe_code)]
+                pub fn main_entry_point(
+                    &self,
+                ) -> ::vulkano::pipeline::shader::GraphicsEntryPoint<
+                    (),
+                    MainInput,
+                    MainOutput,
+                    Layout,
+                > {
+                    unsafe {
+                        #[allow(dead_code)]
+                        static NAME: [u8; 5usize] = [109u8, 97u8, 105u8, 110u8, 0];
+                        self.shader.graphics_entry_point(
+                            ::std::ffi::CStr::from_ptr(NAME.as_ptr() as *const _),
+                            MainInput,
+                            MainOutput,
+                            Layout(ShaderStages {
+                                fragment: true,
+                                ..ShaderStages::none()
+                            }),
+                            ::vulkano::pipeline::shader::GraphicsShaderType::Fragment,
+                        )
+                    }
+                }
+            }
+            pub struct MainInput;
+            #[automatically_derived]
+            #[allow(unused_qualifications)]
+            impl ::core::fmt::Debug for MainInput {
+                fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+                    match *self {
+                        MainInput => {
+                            let mut debug_trait_builder = f.debug_tuple("MainInput");
+                            debug_trait_builder.finish()
+                        }
+                    }
+                }
+            }
+            #[automatically_derived]
+            #[allow(unused_qualifications)]
+            impl ::core::marker::Copy for MainInput {}
+            #[automatically_derived]
+            #[allow(unused_qualifications)]
+            impl ::core::clone::Clone for MainInput {
+                #[inline]
+                fn clone(&self) -> MainInput {
+                    {
+                        *self
+                    }
+                }
+            }
+#+end_example
+
 
 * OutOfHostMemory crash is known on nvidia
 - https://github.com/vulkano-rs/vulkano/issues/1247
