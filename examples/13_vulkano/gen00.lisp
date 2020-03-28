@@ -7,8 +7,11 @@
 		   (safety 3)
 		   (debug 3)))
 
-(setf *features* (union *features* '(:debug)))
-;(setf *features* (set-difference *features* '(:debug)))
+(setf *features* (union *features* '(:debug
+				     :runtime-shader)))
+(setf *features* (set-difference *features* '(;:debug
+					      ;:runtime-shader
+					      )))
 
 (in-package :cl-cpp-generator2)
 
@@ -956,39 +959,29 @@ image = \"*\"
 							    "color: [color],"
 							    "depth_stencil: {}")))
 						  (unwrap)))))
+			   
 			   (do0
-			    (space "mod vs"
-				   (progn
-				     (macroexpand
-				      vulkano_shaders--shader!
-				      :ty (string "vertex")
-				      :src
-				      (string#
-				       ,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
-											      (merge-pathnames "trace.vert"
-													       *source-dir*)))))))
-
-			    (space "mod fs"
-				   (progn
-				     (macroexpand
-				      vulkano_shaders--shader!
-				      :ty (string "fragment")
-				      :src
-				      (string#
-				       ,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
-											      (merge-pathnames "trace.frag"
-													       *source-dir*)))))))
-
-			    (space "mod fs2"
-				   (progn
-				     (macroexpand
-				      vulkano_shaders--shader!
-				      :ty (string "fragment")
-				      :src
-				      (string#
-				       ,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
-											      (merge-pathnames "trace2.frag"
-													       *source-dir*)))))))
+			    #-runtime-shader
+			    (do0
+			     )
+			    #+runtime-shader
+			    (do0
+			     ,@(loop for (mod type fn) in `((vs vertex "trace.vert")
+							    (fs vertex "trace.frag")
+							    (fs2 vertex "trace2.frag"))
+				  collect
+				    `(space ,(format nil "mod ~a" mod)
+				    (progn
+				      (macroexpand
+				       vulkano_shaders--shader!
+				       :ty (string ,type)
+				       :src
+				       (string#
+					,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
+											       (merge-pathnames fn
+														*source-dir*))))))))
+			     
+			     )
 			    (let ((vs (dot (vs--Shader--load (device.clone))
 					   (expect (string "failed to create shader"))))
 				  (fs (dot (fs--Shader--load (device.clone))

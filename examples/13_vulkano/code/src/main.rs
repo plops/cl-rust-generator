@@ -359,7 +359,7 @@ layout(location = 0) in vec3 position;
 void main() { gl_Position = vec4(position, (1.0)); }"##}
         }
         mod fs {
-            vulkano_shaders::shader! {ty: "fragment", src: r##"#version 450
+            vulkano_shaders::shader! {ty: "vertex", src: r##"#version 450
 layout(location = 0) out vec4 f_color;
 //  https://www.youtube.com/watch?v=Cfe5UQ-1L9Q&t=1365s
 layout(push_constant) uniform PushConstantData {
@@ -437,7 +437,7 @@ void main() {
 }"##}
         }
         mod fs2 {
-            vulkano_shaders::shader! {ty: "fragment", src: r##"#version 450
+            vulkano_shaders::shader! {ty: "vertex", src: r##"#version 450
 layout(location = 0) out vec4 f_color;
 layout(push_constant) uniform PushConstantData {
   uint timestamp;
