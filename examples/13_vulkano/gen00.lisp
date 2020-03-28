@@ -974,21 +974,23 @@ image = \"*\"
 				     `(space
 				       ,(format nil "mod ~a" mod)
 				       (progn
-					 #-runtime-shader
-					 (let ((f (dot (std--fs--File--open (string ,full-fn))
-						       (expect (string (format nil "can't find ~a" full-fn))))))
-					   (let* ((v (space vec! (list))))
-					     (dot f
-						  (read_to_end "&mut v")
-						  (unwrap))
-					     (space unsafe
-						    (dot
-						     (progn
-						       (vulkano--pipeline--shader--ShaderModule--new
-							(device.clone)
-							&v
-							))
-						     (unwrap)))))
+					 #+runtime-shader
+					 (let ((shader_runtime
+						(progn
+						  (let ((f (dot (std--fs--File--open (string ,full-fn))
+								(expect (string (format nil "can't find ~a" full-fn))))))
+						    (let* ((v (space vec! (list))))
+						      (dot f
+							   (read_to_end "&mut v")
+							   (unwrap))
+						      (space unsafe
+							     (dot
+							      (progn
+								(vulkano--pipeline--shader--ShaderModule--new
+								 (device.clone)
+								 &v
+								 ))
+							      (unwrap)))))))))
 					 #+runtime-shader
 					 (macroexpand
 					  vulkano_shaders--shader!

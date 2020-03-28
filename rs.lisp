@@ -413,9 +413,9 @@ entry return-values contains a list of return values"
 			  
 (progn
   (defparameter *keywords-without-semicolon* `(defun if for include
-						     dotimes while case do0 progn case
+						     dotimes while case do0 do0-no-final-semicolon progn case
 						     space defstruct0 impl use mod
-						     extern unsafe macroexpand))
+						     extern unsafe macroexpand space let let*))
   (defun emit-rs (&key code (str nil)  (level 0) (hook-defun nil))
     "evaluate s-expressions in code, emit a string. if hook-defun is not nil, hook-defun will be called with every function definition. this functionality is intended to collect function declarations."
     (flet ((emit (code &optional (dl 0))
@@ -581,9 +581,9 @@ entry return-values contains a list of return values"
 						      (and (listp x)
 							   (member (car x)
 								   *keywords-without-semicolon*))
-						      (= count (length args)))
+						      (= count (- (length args) 1)))
 						  "" 
-						  ";")))
+						  (format nil "; // ~a" count))))
 				     (incf count)))
 			       args)))))
 		  (include (let ((args (cdr code)))
