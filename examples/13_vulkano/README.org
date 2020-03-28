@@ -26,6 +26,12 @@ https://github.com/MaikKlein/ash
 - raytracing
 https://github.com/gwihlidal/ash-nv-rt
 
+- look at expanded macros
+#+begin_example
+cargo install cargo-expand
+cargo expand
+#+end_example
+
 
 * OutOfHostMemory crash is known on nvidia
 - https://github.com/vulkano-rs/vulkano/issues/1247
