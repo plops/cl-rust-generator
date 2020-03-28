@@ -355,123 +355,24 @@ fn main() {
             })
             .unwrap(),
         );
-        let shader_runtime = {
+        let vs = {
             let mut f  = std::fs::File::open("/home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.vert").expect("can't find /home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.vert");
             let mut v = vec![];
             f.read_to_end(&mut v).unwrap();
             unsafe { vulkano::pipeline::shader::ShaderModule::new(device.clone(), &v) }.unwrap()
         };
-        mod vs {
-            vulkano_shaders::shader! {ty: "vertex", src: r##"#version 450
-layout(location = 0) in vec3 position;
-void main() { gl_Position = vec4(position, (1.0)); }"##}
-        }
-        let shader_runtime = {
+        let fs = {
             let mut f  = std::fs::File::open("/home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.frag").expect("can't find /home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.frag");
             let mut v = vec![];
             f.read_to_end(&mut v).unwrap();
             unsafe { vulkano::pipeline::shader::ShaderModule::new(device.clone(), &v) }.unwrap()
         };
-        mod fs {
-            vulkano_shaders::shader! {ty: "fragment", src: r##"#version 450
-layout(location = 0) out vec4 f_color;
-//  https://www.youtube.com/watch?v=Cfe5UQ-1L9Q&t=1365s
-layout(push_constant) uniform PushConstantData {
-  uint timestamp;
-  uint window_w;
-  uint window_h;
-  uint mouse_x;
-  uint mouse_y;
-}
-pc;
-float map(in vec3 pos) {
-  float d1 = ((length(pos)) - ((0.250)));
-  float d2 = ((pos.y) + ((0.250)));
-  return min(d1, d2);
-}
-vec3 calcNormal(in vec3 pos) {
-  vec2 e = vec2((1.00e-4), (0.));
-  return normalize(vec3(((map(((pos) + (e.xyy)))) - (map(((pos) - (e.xyy))))),
-                        ((map(((pos) + (e.yxy)))) - (map(((pos) - (e.yxy))))),
-                        ((map(((pos) + (e.yyx)))) - (map(((pos) - (e.yyx)))))));
-}
-float castRay(in vec3 ro, vec3 rd) {
-  float tau = (0.);
-  for (int i = 0; i < 100; (i)++) {
-    vec3 pos = ((ro) + (((tau) * (rd))));
-    float h = map(pos);
-    if (h < (1.00e-3)) {
-      break;
-    };
-    (tau) += (h);
-    if ((20.) < tau) {
-      break;
-    };
-  };
-  if ((20.) < tau) {
-    tau = (-1.0);
-  };
-  return tau;
-}
-void main() {
-  ivec2 iResolution = ivec2(pc.window_w, pc.window_h);
-  vec2 p0 = (((((((2.0)) * (gl_FragCoord.xy))) - (iResolution.xy))) /
-             (iResolution.y));
-  vec2 p = vec2(p0.x, ((-1) * (p0.y)));
-  float an = (((((10.)) * (pc.mouse_x))) / (pc.window_w));
-  vec3 ro = vec3(sin(an), (((0.10)) * (sin((((1.00e-2)) * (pc.timestamp))))),
-                 cos(an));
-  vec3 ta = vec3((0.), (0.), (0.));
-  vec3 ww = normalize(((ta) - (ro)));
-  vec3 uu = normalize(cross(ww, vec3(0, 1, 0)));
-  vec3 vv = normalize(cross(uu, ww));
-  vec3 rd =
-      normalize(((((p.x) * (uu))) + (((p.y) * (vv))) + ((((1.50)) * (ww)))));
-  vec3 col = ((vec3((0.30), (0.50), (0.90))) - ((((0.50)) * (rd.y))));
-  float tau = castRay(ro, rd);
-  col = mix(col, vec3((0.70), (0.750), (0.80)), exp((((-10.)) * (rd.y))));
-  if (0 < tau) {
-    vec3 pos = ((ro) + (((tau) * (rd))));
-    vec3 nor = calcNormal(pos);
-    vec3 mate = vec3((0.20), (0.20), (0.20));
-    vec3 sun_dir = normalize(vec3((0.80), (0.40), (0.20)));
-    float sun_dif = clamp(dot(nor, sun_dir), (0.), (1.0));
-    float sun_sha =
-        step(castRay(((pos) + ((((1.00e-3)) * (nor)))), sun_dir), (0.));
-    float sky_dif =
-        clamp((((0.50)) + (dot(nor, vec3((0.), (1.0), (0.))))), (0.), (1.0));
-    float bou_dif =
-        clamp((((0.50)) + (dot(nor, vec3((0.), (-1.0), (0.))))), (0.), (1.0));
-    col = ((mate) * (vec3((7.0), 5, 3)) * (sun_dif) * (sun_sha));
-    (col) += (((mate) * (vec3((0.50), (0.80), (0.90))) * (sky_dif)));
-    (col) += (((mate) * (vec3((0.70), (0.30), (0.20))) * (bou_dif)));
-  };
-  col = pow(col, vec3((0.45450)));
-  f_color = vec4(col, (0.40));
-}"##}
-        }
-        let shader_runtime = {
+        let fs2 = {
             let mut f  = std::fs::File::open("/home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace2.frag").expect("can't find /home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace2.frag");
             let mut v = vec![];
             f.read_to_end(&mut v).unwrap();
             unsafe { vulkano::pipeline::shader::ShaderModule::new(device.clone(), &v) }.unwrap()
         };
-        mod fs2 {
-            vulkano_shaders::shader! {ty: "fragment", src: r##"#version 450
-layout(location = 0) out vec4 f_color;
-layout(push_constant) uniform PushConstantData {
-  uint timestamp;
-  uint window_w;
-  uint window_h;
-  uint mouse_x;
-  uint mouse_y;
-}
-pc;
-void main() { f_color = vec4((1.0), (0.20), (0.20), (0.70)); }"##}
-        }
-        let vs = vs::Shader::load(device.clone()).expect("failed to create shader");
-        let fs = fs::Shader::load(device.clone()).expect("failed to create shader");
-        let fs2 = fs::Shader::load(device.clone()).expect("failed to create shader");
         let pipeline = std::sync::Arc::new(
             vulkano::pipeline::GraphicsPipeline::start()
                 .vertex_input_single_buffer::<Vertex>()

@@ -714,6 +714,7 @@ entry return-values contains a list of return values"
 			  ))
 		  (byte  (format nil "b'~a'" (cadr code)))
 		  (string (format nil "\"~a\"" (cadr code)))
+		  (string-b (format nil "b\"~a\"" (cadr code))) 
 		  (string# (let* ((str (cadr code))
 				   (n-of-hash (count #\# str))
 				   (list-of-hash (loop for i upto n-of-hash collect "#")))
