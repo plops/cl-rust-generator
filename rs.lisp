@@ -412,6 +412,10 @@ entry return-values contains a list of return values"
     (substitute #\e #\d s)))
 			  
 (progn
+  (defparameter *keywords-without-semicolon* `(defun if for include
+						     dotimes while case do0 progn case
+						     space defstruct0 impl use mod
+						     extern unsafe macroexpand))
   (defun emit-rs (&key code (str nil)  (level 0) (hook-defun nil))
     "evaluate s-expressions in code, emit a string. if hook-defun is not nil, hook-defun will be called with every function definition. this functionality is intended to collect function declarations."
     (flet ((emit (code &optional (dl 0))
@@ -534,10 +538,8 @@ entry return-values contains a list of return values"
 							
 							(and (listp x)
 							     (member (car x)
-								     `(defun if for include
-									     dotimes while case do0 progn case
-									     space defstruct0 impl use mod
-									     extern unsafe macroexpand))))
+								     *keywords-without-semicolon*
+								     )))
 						    "" 
 						    ";"))))
 				  (cdr code)))
@@ -557,6 +559,33 @@ entry return-values contains a list of return values"
 						      ""
 						      ";"))))
 				    (cddr code))))))
+		  (do0-no-final-semicolon
+		   (with-output-to-string (s)
+		     ;; do0 {form}*
+		     ;; write each form into a newline, keep current indentation level
+		     (let ((count 0)
+			   (args (cdr code)))
+		      (format s "~{~&~a~}"
+			      (mapcar
+			       #'(lambda (x)
+				   (prog1
+				    (let ((b (emit `(indent ,x) 0)))
+				      (format nil "~a~a"
+					      b
+					      ;; don't add semicolon if there is already one
+					      ;; don't add semicolon after last statement
+					      ;; or if x contains a string
+					      ;; or if x is an s-expression with a c thing that doesn't end with semicolon
+					      (if (or (eq #\; (aref b (- (length b) 1)))
+						      (and (typep x 'string))
+						      (and (listp x)
+							   (member (car x)
+								   *keywords-without-semicolon*))
+						      (= count (length args)))
+						  "" 
+						  ";")))
+				     (incf count)))
+			       args)))))
 		  (include (let ((args (cdr code)))
 			     ;; include {name}*
 			     ;; (include <stdio.h>)   => #include <stdio.h>
@@ -571,6 +600,14 @@ entry return-values contains a list of return values"
 		  (progn (with-output-to-string (s)
 			   ;; progn {form}*
 			   ;; like do but surrounds forms with braces.
+			   ;; don't place semicolon after last statement (implicit return in rust)
+			   (format s "{~{~&~a~}~&}" (mapcar #'(lambda (x) (emit `(indent (do0-no-final-semicolon ,x)) 1)) (cdr code)))))
+		  (block (with-output-to-string (s)
+			   ;; progn {form}*
+			   ;; like do but surrounds forms with braces.
+			   ;; like progn but semicolon after last statement
+			   ;; equivalent to (progn (bla) "()")
+			   ;; https://doc.rust-lang.org/reference/expressions/block-expr.html
 			   (format s "{~{~&~a~}~&}" (mapcar #'(lambda (x) (emit `(indent (do0 ,x)) 1)) (cdr code)))))
 		  (do (with-output-to-string (s)
 			;; do {form}*

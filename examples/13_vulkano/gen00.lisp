@@ -961,27 +961,49 @@ image = \"*\"
 						  (unwrap)))))
 			   
 			   (do0
-			    #-runtime-shader
-			    (do0
-			     )
-			    #+runtime-shader
 			    (do0
 			     ,@(loop for (mod type fn) in `((vs vertex "trace.vert")
-							    (fs vertex "trace.frag")
-							    (fs2 vertex "trace2.frag"))
+							    (fs fragment "trace.frag")
+							    (fs2 fragment "trace2.frag"))
 				  collect
-				    `(space ,(format nil "mod ~a" mod)
-				    (progn
-				      (macroexpand
-				       vulkano_shaders--shader!
-				       :ty (string ,type)
-				       :src
-				       (string#
-					,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
-											       (merge-pathnames fn
-														*source-dir*))))))))
-			     
-			     )
+				    (let ((full-fn (asdf:system-relative-pathname
+						    'cl-rust-generator
+						    (merge-pathnames fn
+								     *source-dir*))))
+				      `(do0
+					#+runtime-shader
+					(progn
+					  (let ((f (dot (std--fs--File--open (string ,full-fn))
+							(expect (string (format nil "can't find ~a" full-fn))))))
+					    (let* ((v (space vec! (list))))
+					      (dot f
+						   (read_to_end "&mut v")
+						   (unwrap))
+					      (space unsafe
+						     (dot
+						      (progn
+							(vulkano--pipeline--shader--ShaderModule--new
+							 (device.clone)
+							 &v
+							 ))
+						      (unwrap))))))
+					#-runtime-shader
+					(space
+					,(format nil "mod ~a" mod)
+					(progn
+					  
+					  
+					  #-runtime-shader
+					  (macroexpand
+					   vulkano_shaders--shader!
+					   :ty (string ,type)
+					   :src
+					   (string#
+					    ,(read-file-into-string
+					      (asdf:system-relative-pathname
+					       'cl-rust-generator
+					       (merge-pathnames fn
+								*source-dir*)))))))))))
 			    (let ((vs (dot (vs--Shader--load (device.clone))
 					   (expect (string "failed to create shader"))))
 				  (fs (dot (fs--Shader--load (device.clone))
