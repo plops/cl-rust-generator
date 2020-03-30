@@ -977,6 +977,7 @@ image = \"*\"
 								     *source-dir*)))
 					  (input (format nil "ShaderInput_~a" mod))
 					  (output (format nil "ShaderOutput_~a" mod))
+					  (layout (format nil "ShaderLayout_~a" mod))
 					  (input-iter (format nil "ShaderInputIter_~a" mod))
 					  (output-iter (format nil "ShaderOutputIter_~a" mod)))
 				      `(do0
@@ -1110,7 +1111,32 @@ image = \"*\"
 						     "impl vulkano::pipeline::shader::ExactSizeIterator for ~a"
 						     output-iter)
 						   (progn
-						     ))))
+						     )))
+					   (do0
+					    "#[derive(Debug,Copy,Clone)]"
+					    ,(format nil "struct ~a(ShaderStages);" layout)
+					    (space ,(format
+						     nil
+						     "unsafe impl vulkano::pipeline::shader::PipelineLayoutDesc for ~a"
+						     layout)
+						   (progn
+						     (defun num_sets ("&self")
+						       (declare (values usize))
+						       (return 0))
+						     (defun num_bindings_in_set ("&self" "_set: usize")
+						       (declare (values Option<usize>))
+						       (return None))
+						     (defun descriptor ("&self" "_set: usize" "_binding: usize")
+						       (declare (values Option<DescriptorDesc>))
+						       (return None))
+						     (defun num_push_constants_ranges ("&self")
+						       (declare (values usize))
+						       (return 0))
+						     (defun push_constants_range ("&self" "_num: usize")
+						       (declare (values Option<PipelineLayoutDescPcRange>))
+						       (return None)))))
+					   
+					   )
 					 )
 					#-runtime-shader
 					(space

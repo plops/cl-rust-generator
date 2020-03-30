@@ -435,6 +435,25 @@ fn main() {
             }
         }
         impl vulkano::pipeline::shader::ExactSizeIterator for ShaderOutputIter_vs {}
+        #[derive(Debug, Copy, Clone)]
+        struct ShaderLayout_vs(ShaderStages);
+        unsafe impl vulkano::pipeline::shader::PipelineLayoutDesc for ShaderLayout_vs {
+            fn num_sets(&self) -> usize {
+                return 0;
+            }
+            fn num_bindings_in_set(&self, _set: usize) -> Option<usize> {
+                return None;
+            }
+            fn descriptor(&self, _set: usize, _binding: usize) -> Option<DescriptorDesc> {
+                return None;
+            }
+            fn num_push_constants_ranges(&self) -> usize {
+                return 0;
+            }
+            fn push_constants_range(&self, _num: usize) -> Option<PipelineLayoutDescPcRange> {
+                return None;
+            }
+        }
         let fs = {
             let mut f  = std::fs::File::open("/home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.frag").expect("can't find /home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.frag");
             let mut v = vec![];
@@ -515,6 +534,25 @@ fn main() {
             }
         }
         impl vulkano::pipeline::shader::ExactSizeIterator for ShaderOutputIter_fs {}
+        #[derive(Debug, Copy, Clone)]
+        struct ShaderLayout_fs(ShaderStages);
+        unsafe impl vulkano::pipeline::shader::PipelineLayoutDesc for ShaderLayout_fs {
+            fn num_sets(&self) -> usize {
+                return 0;
+            }
+            fn num_bindings_in_set(&self, _set: usize) -> Option<usize> {
+                return None;
+            }
+            fn descriptor(&self, _set: usize, _binding: usize) -> Option<DescriptorDesc> {
+                return None;
+            }
+            fn num_push_constants_ranges(&self) -> usize {
+                return 0;
+            }
+            fn push_constants_range(&self, _num: usize) -> Option<PipelineLayoutDescPcRange> {
+                return None;
+            }
+        }
         let fs2 = {
             let mut f  = std::fs::File::open("/home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace2.frag").expect("can't find /home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace2.frag");
             let mut v = vec![];
@@ -595,6 +633,25 @@ fn main() {
             }
         }
         impl vulkano::pipeline::shader::ExactSizeIterator for ShaderOutputIter_fs2 {}
+        #[derive(Debug, Copy, Clone)]
+        struct ShaderLayout_fs2(ShaderStages);
+        unsafe impl vulkano::pipeline::shader::PipelineLayoutDesc for ShaderLayout_fs2 {
+            fn num_sets(&self) -> usize {
+                return 0;
+            }
+            fn num_bindings_in_set(&self, _set: usize) -> Option<usize> {
+                return None;
+            }
+            fn descriptor(&self, _set: usize, _binding: usize) -> Option<DescriptorDesc> {
+                return None;
+            }
+            fn num_push_constants_ranges(&self) -> usize {
+                return 0;
+            }
+            fn push_constants_range(&self, _num: usize) -> Option<PipelineLayoutDescPcRange> {
+                return None;
+            }
+        }
         let pipeline = std::sync::Arc::new(
             vulkano::pipeline::GraphicsPipeline::start()
                 .vertex_input_single_buffer::<Vertex>()
