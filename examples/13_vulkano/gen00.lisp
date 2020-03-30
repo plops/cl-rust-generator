@@ -974,7 +974,9 @@ image = \"*\"
 				    (let ((full-fn (asdf:system-relative-pathname
 						    'cl-rust-generator
 						    (merge-pathnames fn
-								     *source-dir*))))
+								     *source-dir*)))
+					  (input (format nil "ShaderInput_~a" mod))
+					  (input-iter (format nil "ShaderInputIter_~a" mod)))
 				      `(do0
 					(do0
 					   #+runtime-shader
@@ -993,7 +995,20 @@ image = \"*\"
 								   (device.clone)
 								   &v
 								   ))
-								(unwrap))))))))))
+								(unwrap))))))))
+					     "#[derive(Debug,Copy,Clone,PartialEq,Eq,Hash)]"
+					     ,(format nil "struct ~a;" input)
+					     (space ,(format
+						      nil
+						      "unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ~a"
+						      input
+						      )
+						    (progn
+						      (setf "type Iter" ,input-iter)
+						      (defun elements (&self)
+							(declare (values ,input-iter))
+							(return (,input-iter 0))))))
+					   )
 					#-runtime-shader
 					(space
 					,(format nil "mod ~a" mod)

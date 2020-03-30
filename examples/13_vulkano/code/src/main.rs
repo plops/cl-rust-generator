@@ -361,18 +361,42 @@ fn main() {
             f.read_to_end(&mut v).unwrap();
             unsafe { vulkano::pipeline::shader::ShaderModule::new(device.clone(), &v) }.unwrap()
         };
+        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+        struct ShaderInput_vs;
+        unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ShaderInput_vs {
+            type Iter = ShaderInputIter_vs;
+            fn elements(&self) -> ShaderInputIter_vs {
+                return ShaderInputIter_vs(0);
+            }
+        }
         let fs = {
             let mut f  = std::fs::File::open("/home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.frag").expect("can't find /home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.frag");
             let mut v = vec![];
             f.read_to_end(&mut v).unwrap();
             unsafe { vulkano::pipeline::shader::ShaderModule::new(device.clone(), &v) }.unwrap()
         };
+        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+        struct ShaderInput_fs;
+        unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ShaderInput_fs {
+            type Iter = ShaderInputIter_fs;
+            fn elements(&self) -> ShaderInputIter_fs {
+                return ShaderInputIter_fs(0);
+            }
+        }
         let fs2 = {
             let mut f  = std::fs::File::open("/home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace2.frag").expect("can't find /home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace2.frag");
             let mut v = vec![];
             f.read_to_end(&mut v).unwrap();
             unsafe { vulkano::pipeline::shader::ShaderModule::new(device.clone(), &v) }.unwrap()
         };
+        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+        struct ShaderInput_fs2;
+        unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ShaderInput_fs2 {
+            type Iter = ShaderInputIter_fs2;
+            fn elements(&self) -> ShaderInputIter_fs2 {
+                return ShaderInputIter_fs2(0);
+            }
+        }
         let pipeline = std::sync::Arc::new(
             vulkano::pipeline::GraphicsPipeline::start()
                 .vertex_input_single_buffer::<Vertex>()
