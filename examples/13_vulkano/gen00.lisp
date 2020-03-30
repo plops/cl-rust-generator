@@ -979,100 +979,132 @@ image = \"*\"
 					  (input-iter (format nil "ShaderInputIter_~a" mod)))
 				      `(do0
 					(do0
-					   #+runtime-shader
-					   (let ((,mod
-						  (progn
-						    (let* ((f (dot (std--fs--File--open (string ,full-fn))
-								  (expect (string ,(format nil "can't find ~a" full-fn))))))
-						      (let* ((v (space vec! (list))))
-							(dot f
-							     (read_to_end "&mut v")
-							     (unwrap))
-							(space unsafe
-							       (dot
-								(progn
-								  (vulkano--pipeline--shader--ShaderModule--new
-								   (device.clone)
-								   &v
-								   ))
-								(unwrap))))))))
-					     "#[derive(Debug,Copy,Clone,PartialEq,Eq,Hash)]"
-					     ,(format nil "struct ~a;" input)
-					     (space ,(format
-						      nil
-						      "unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ~a"
-						      input
-						      )
-						    (progn
-						      (setf "type Iter" ,input-iter)
-						      (defun elements (&self)
-							(declare (values ,input-iter))
-							(return (,input-iter 0))))))
-					   )
+					 #+runtime-shader
+					 (let ((,mod
+						(progn
+						  (let* ((f (dot (std--fs--File--open (string ,full-fn))
+								 (expect (string ,(format nil "can't find ~a" full-fn))))))
+						    (let* ((v (space vec! (list))))
+						      (dot f
+							   (read_to_end "&mut v")
+							   (unwrap))
+						      (space unsafe
+							     (dot
+							      (progn
+								(vulkano--pipeline--shader--ShaderModule--new
+								 (device.clone)
+								 &v
+								 ))
+							      (unwrap))))))))
+					   (do0
+					    "#[derive(Debug,Copy,Clone,PartialEq,Eq,Hash)]"
+					    ,(format nil "struct ~a;" input)
+					    (space ,(format
+						     nil
+						     "unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ~a"
+						     input)
+						   (progn
+						     (setf "type Iter" ,input-iter)
+						     (defun elements (&self)
+						       (declare (values ,input-iter))
+						       (return (,input-iter 0))))))
+					   (do0
+					    "#[derive(Debug,Copy,Clone)]"
+					    ,(format nil "struct ~a(u16);" input-iter)
+					    (space ,(format
+						     nil
+						     "impl vulkano::pipeline::shader::Iterator for ~a"
+						     input-iter)
+						   (progn
+						     (setf "type Item" "vulkano::pipeline::shader::ShaderInterfaceDefEntry")
+
+						     (do0
+						      "#[inline]"
+						      (defun next ("&mut self")
+							(declare (values "Option<Self::Item>"))
+							"// - on entry per location, non-overlapping"
+							"// - each element must not be longer than 128 bytes"
+
+							,@(loop for e in `(("1..2" Format--R32G32B32Sfloat color)
+									   ("0..1" Format--R32G32B32Sfloat color))
+							       and i from 0
+							     collect
+							       (destructuring-bind (location format name) e
+								 `(when (== self.0 ,i)
+								   (incf self.0)
+								   (return
+								     (Some
+								      (make-instance
+								       "vulkano::pipeline::shader::ShaderInterfaceDefEntry"
+								       :location ,location
+								       :format ,format
+								       :name (Some (std--borrow--Cow--Borrowed (string ,name)))))))))
+							(return None)))))))
+					 )
 					#-runtime-shader
 					(space
-					,(format nil "mod ~a" mod)
-					(progn
-					  (macroexpand
-					   vulkano_shaders--shader!
-					   :ty (string ,type)
-					   :src
-					   (string#
-					    ,(read-file-into-string
-					      (asdf:system-relative-pathname
-					       'cl-rust-generator
-					       (merge-pathnames fn
-								*source-dir*)))))))))))
+					 ,(format nil "mod ~a" mod)
+					 (progn
+					   (macroexpand
+					    vulkano_shaders--shader!
+					    :ty (string ,type)
+					    :src
+					    (string#
+					     ,(read-file-into-string
+					       (asdf:system-relative-pathname
+						'cl-rust-generator
+						(merge-pathnames fn
+								 *source-dir*)))))))))))
 			    (let (#-runtime-shader (vs (dot (vs--Shader--load (device.clone))
 							    (expect (string "failed to create shader"))))
-				  #-runtime-shader (fs (dot (fs--Shader--load (device.clone))
-					   (expect (string "failed to create shader"))))
-				  #-runtime-shader (fs2 (dot (fs--Shader--load (device.clone))
-					    (expect (string "failed to create shader"))))
-				  (pipeline (std--sync--Arc--new
-					     (dot
-					      (vulkano--pipeline--GraphicsPipeline--start)
-					      (vertex_input_single_buffer--<Vertex>)
-					      
-					      (vertex_shader
-					       #-runtime-shader  (vs.main_entry_point)
-					       #+runtime-shader
-					       (space
-						unsafe
-						(progn
-						  (dot vs
-						       (graphics_entry_point
-							(std--ffi--CStr--from_bytes_with_nul_unchecked
-							 (string-b "main\\0"))))))
-					       "()")
-					      (triangle_strip)
-					      (viewports_dynamic_scissors_irrelevant 1)
-					      #-runtime-shader  (fragment_shader (fs.main_entry_point) "()")
-					      (blend_alpha_blending)
-					      (render_pass (dot (vulkano--framebuffer--Subpass--from
-								 (render_pass.clone)
-								 0)
-								(unwrap)))
-					      (build (device.clone))
-					      (unwrap))))
-				  (pipeline2 (std--sync--Arc--new
-					      (dot
-					       (vulkano--pipeline--GraphicsPipeline--start)
-					       (vertex_input_single_buffer--<Vertex>)
-					       #-runtime-shader  (vertex_shader (vs.main_entry_point)
-							      "()")
-					       (line_strip)
-					       (viewports_dynamic_scissors_irrelevant 1)
-					       #-runtime-shader (fragment_shader (fs2.main_entry_point) "()")
-					       (blend_alpha_blending)
-					       (render_pass (dot (vulkano--framebuffer--Subpass--from
-								  (render_pass.clone)
-								  0)
-								 (unwrap)))
-					       (build (device.clone))
-					       (unwrap))))
-				  
-				  )))
+						   #-runtime-shader (fs (dot (fs--Shader--load (device.clone))
+									     (expect (string "failed to create shader"))))
+						   #-runtime-shader (fs2 (dot (fs--Shader--load (device.clone))
+									      (expect (string "failed to create shader"))))
+						   (pipeline (std--sync--Arc--new
+							      (dot
+							       (vulkano--pipeline--GraphicsPipeline--start)
+							       (vertex_input_single_buffer--<Vertex>)
+							       
+							       (vertex_shader
+								#-runtime-shader  (vs.main_entry_point)
+								#+runtime-shader
+								(space
+								 unsafe
+								 (progn
+								   (dot vs
+									(graphics_entry_point
+									 (std--ffi--CStr--from_bytes_with_nul_unchecked
+									  (string-b "main\\0"))))))
+								"()")
+							       (triangle_strip)
+							       (viewports_dynamic_scissors_irrelevant 1)
+							       #-runtime-shader  (fragment_shader (fs.main_entry_point) "()")
+							       (blend_alpha_blending)
+							       (render_pass (dot (vulkano--framebuffer--Subpass--from
+										  (render_pass.clone)
+										  0)
+										 (unwrap)))
+							       (build (device.clone))
+							       (unwrap))))
+						   (pipeline2 (std--sync--Arc--new
+							       (dot
+								(vulkano--pipeline--GraphicsPipeline--start)
+								(vertex_input_single_buffer--<Vertex>)
+								#-runtime-shader  (vertex_shader (vs.main_entry_point)
+												 "()")
+								(line_strip)
+								(viewports_dynamic_scissors_irrelevant 1)
+								#-runtime-shader (fragment_shader (fs2.main_entry_point) "()")
+								(blend_alpha_blending)
+								(render_pass (dot (vulkano--framebuffer--Subpass--from
+										   (render_pass.clone)
+										   0)
+										  (unwrap)))
+								(build (device.clone))
+								(unwrap))))
+						   
+						   )))
 			   (let ((ep (fs2.main_entry_point)))
 			    ,(logprint "fs2" `(ep.input ep.output)))
 			   ;; https://github.com/vulkano-rs/vulkano-examples/blob/1cf9c37073a79a3a0cee60e83c8db8d967218e3e/src/bin/push-constants.rs

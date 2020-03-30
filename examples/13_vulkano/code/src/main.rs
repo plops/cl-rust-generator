@@ -369,6 +369,33 @@ fn main() {
                 return ShaderInputIter_vs(0);
             }
         }
+        #[derive(Debug, Copy, Clone)]
+        struct ShaderInputIter_vs(u16);
+        impl vulkano::pipeline::shader::Iterator for ShaderInputIter_vs {
+            type Item = vulkano::pipeline::shader::ShaderInterfaceDefEntry;
+            #[inline]
+            fn next(&mut self) -> Option<Self::Item> {
+                // - on entry per location, non-overlapping
+                // - each element must not be longer than 128 bytes
+                if (self.0) == (0) {
+                    self.0 += 1;
+                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
+                        location: 1..2,
+                        format: Format::R32G32B32Sfloat,
+                        name: Some(std::borrow::Cow::Borrowed("color")),
+                    });
+                }
+                if (self.0) == (1) {
+                    self.0 += 1;
+                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
+                        location: 0..1,
+                        format: Format::R32G32B32Sfloat,
+                        name: Some(std::borrow::Cow::Borrowed("color")),
+                    });
+                }
+                return None;
+            }
+        }
         let fs = {
             let mut f  = std::fs::File::open("/home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.frag").expect("can't find /home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.frag");
             let mut v = vec![];
@@ -383,6 +410,33 @@ fn main() {
                 return ShaderInputIter_fs(0);
             }
         }
+        #[derive(Debug, Copy, Clone)]
+        struct ShaderInputIter_fs(u16);
+        impl vulkano::pipeline::shader::Iterator for ShaderInputIter_fs {
+            type Item = vulkano::pipeline::shader::ShaderInterfaceDefEntry;
+            #[inline]
+            fn next(&mut self) -> Option<Self::Item> {
+                // - on entry per location, non-overlapping
+                // - each element must not be longer than 128 bytes
+                if (self.0) == (0) {
+                    self.0 += 1;
+                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
+                        location: 1..2,
+                        format: Format::R32G32B32Sfloat,
+                        name: Some(std::borrow::Cow::Borrowed("color")),
+                    });
+                }
+                if (self.0) == (1) {
+                    self.0 += 1;
+                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
+                        location: 0..1,
+                        format: Format::R32G32B32Sfloat,
+                        name: Some(std::borrow::Cow::Borrowed("color")),
+                    });
+                }
+                return None;
+            }
+        }
         let fs2 = {
             let mut f  = std::fs::File::open("/home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace2.frag").expect("can't find /home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace2.frag");
             let mut v = vec![];
@@ -395,6 +449,33 @@ fn main() {
             type Iter = ShaderInputIter_fs2;
             fn elements(&self) -> ShaderInputIter_fs2 {
                 return ShaderInputIter_fs2(0);
+            }
+        }
+        #[derive(Debug, Copy, Clone)]
+        struct ShaderInputIter_fs2(u16);
+        impl vulkano::pipeline::shader::Iterator for ShaderInputIter_fs2 {
+            type Item = vulkano::pipeline::shader::ShaderInterfaceDefEntry;
+            #[inline]
+            fn next(&mut self) -> Option<Self::Item> {
+                // - on entry per location, non-overlapping
+                // - each element must not be longer than 128 bytes
+                if (self.0) == (0) {
+                    self.0 += 1;
+                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
+                        location: 1..2,
+                        format: Format::R32G32B32Sfloat,
+                        name: Some(std::borrow::Cow::Borrowed("color")),
+                    });
+                }
+                if (self.0) == (1) {
+                    self.0 += 1;
+                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
+                        location: 0..1,
+                        format: Format::R32G32B32Sfloat,
+                        name: Some(std::borrow::Cow::Borrowed("color")),
+                    });
+                }
+                return None;
             }
         }
         let pipeline = std::sync::Arc::new(
