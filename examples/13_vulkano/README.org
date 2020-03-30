@@ -1,4 +1,11 @@
 
+* Raymarching
+- https://www.youtube.com/watch?v=Ff0jJyyiVyw&t=916s
+- https://www.youtube.com/watch?v=PGtv-dBi2wE&t=243s
+- sdf of box https://www.youtube.com/watch?v=62-pRVZuS5c
+- sdf of line https://www.youtube.com/watch?v=PMltMdi1Wzg
+- sphere gears https://www.youtube.com/watch?v=bdICU2uvOdU
+
 * Misc
 
 - draw quad with a single triangle

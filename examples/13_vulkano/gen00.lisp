@@ -10,7 +10,7 @@
 (setf *features* (union *features* '(:debug
 				     :runtime-shader)))
 (setf *features* (set-difference *features* '(;:debug
-					      :runtime-shader
+					      ;:runtime-shader
 					      )))
 
 (in-package :cl-cpp-generator2)
