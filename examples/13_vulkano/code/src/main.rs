@@ -395,7 +395,46 @@ fn main() {
                 }
                 return None;
             }
+            #[inline]
+            fn size_hint(&mut self) -> (usize, Option<usize>) {
+                // - exact number of entries left in iterator
+                let len = ((2 - self.0) as usize);
+                return (len, Some(len));
+            }
         }
+        impl vulkano::pipeline::shader::ExactSizeIterator for ShaderInputIter_vs {}
+        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+        struct ShaderOutput_vs;
+        unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ShaderInput_vs {
+            type Iter = ShaderInputIter_vs;
+            fn elements(&self) -> ShaderInputIter_vs {
+                return ShaderInputIter_vs(0);
+            }
+        }
+        #[derive(Debug, Copy, Clone)]
+        struct ShaderOutputIter_vs(u16);
+        impl vulkano::pipeline::shader::Iterator for ShaderOutputIter_vs {
+            type Item = vulkano::pipeline::shader::ShaderInterfaceDefEntry;
+            #[inline]
+            fn next(&mut self) -> Option<Self::Item> {
+                if (self.0) == (0) {
+                    self.0 += 1;
+                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
+                        location: 0..1,
+                        format: Format::R32G32B32Sfloat,
+                        name: Some(std::borrow::Cow::Borrowed("v_color")),
+                    });
+                }
+                return None;
+            }
+            #[inline]
+            fn size_hint(&mut self) -> (usize, Option<usize>) {
+                // - exact number of entries left in iterator
+                let len = ((2 - self.0) as usize);
+                return (len, Some(len));
+            }
+        }
+        impl vulkano::pipeline::shader::ExactSizeIterator for ShaderOutputIter_vs {}
         let fs = {
             let mut f  = std::fs::File::open("/home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.frag").expect("can't find /home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.frag");
             let mut v = vec![];
@@ -436,7 +475,46 @@ fn main() {
                 }
                 return None;
             }
+            #[inline]
+            fn size_hint(&mut self) -> (usize, Option<usize>) {
+                // - exact number of entries left in iterator
+                let len = ((2 - self.0) as usize);
+                return (len, Some(len));
+            }
         }
+        impl vulkano::pipeline::shader::ExactSizeIterator for ShaderInputIter_fs {}
+        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+        struct ShaderOutput_fs;
+        unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ShaderInput_fs {
+            type Iter = ShaderInputIter_fs;
+            fn elements(&self) -> ShaderInputIter_fs {
+                return ShaderInputIter_fs(0);
+            }
+        }
+        #[derive(Debug, Copy, Clone)]
+        struct ShaderOutputIter_fs(u16);
+        impl vulkano::pipeline::shader::Iterator for ShaderOutputIter_fs {
+            type Item = vulkano::pipeline::shader::ShaderInterfaceDefEntry;
+            #[inline]
+            fn next(&mut self) -> Option<Self::Item> {
+                if (self.0) == (0) {
+                    self.0 += 1;
+                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
+                        location: 0..1,
+                        format: Format::R32G32B32Sfloat,
+                        name: Some(std::borrow::Cow::Borrowed("v_color")),
+                    });
+                }
+                return None;
+            }
+            #[inline]
+            fn size_hint(&mut self) -> (usize, Option<usize>) {
+                // - exact number of entries left in iterator
+                let len = ((2 - self.0) as usize);
+                return (len, Some(len));
+            }
+        }
+        impl vulkano::pipeline::shader::ExactSizeIterator for ShaderOutputIter_fs {}
         let fs2 = {
             let mut f  = std::fs::File::open("/home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace2.frag").expect("can't find /home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace2.frag");
             let mut v = vec![];
@@ -477,7 +555,46 @@ fn main() {
                 }
                 return None;
             }
+            #[inline]
+            fn size_hint(&mut self) -> (usize, Option<usize>) {
+                // - exact number of entries left in iterator
+                let len = ((2 - self.0) as usize);
+                return (len, Some(len));
+            }
         }
+        impl vulkano::pipeline::shader::ExactSizeIterator for ShaderInputIter_fs2 {}
+        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+        struct ShaderOutput_fs2;
+        unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ShaderInput_fs2 {
+            type Iter = ShaderInputIter_fs2;
+            fn elements(&self) -> ShaderInputIter_fs2 {
+                return ShaderInputIter_fs2(0);
+            }
+        }
+        #[derive(Debug, Copy, Clone)]
+        struct ShaderOutputIter_fs2(u16);
+        impl vulkano::pipeline::shader::Iterator for ShaderOutputIter_fs2 {
+            type Item = vulkano::pipeline::shader::ShaderInterfaceDefEntry;
+            #[inline]
+            fn next(&mut self) -> Option<Self::Item> {
+                if (self.0) == (0) {
+                    self.0 += 1;
+                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
+                        location: 0..1,
+                        format: Format::R32G32B32Sfloat,
+                        name: Some(std::borrow::Cow::Borrowed("v_color")),
+                    });
+                }
+                return None;
+            }
+            #[inline]
+            fn size_hint(&mut self) -> (usize, Option<usize>) {
+                // - exact number of entries left in iterator
+                let len = ((2 - self.0) as usize);
+                return (len, Some(len));
+            }
+        }
+        impl vulkano::pipeline::shader::ExactSizeIterator for ShaderOutputIter_fs2 {}
         let pipeline = std::sync::Arc::new(
             vulkano::pipeline::GraphicsPipeline::start()
                 .vertex_input_single_buffer::<Vertex>()

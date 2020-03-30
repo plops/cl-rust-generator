@@ -976,7 +976,9 @@ image = \"*\"
 						    (merge-pathnames fn
 								     *source-dir*)))
 					  (input (format nil "ShaderInput_~a" mod))
-					  (input-iter (format nil "ShaderInputIter_~a" mod)))
+					  (output (format nil "ShaderOutput_~a" mod))
+					  (input-iter (format nil "ShaderInputIter_~a" mod))
+					  (output-iter (format nil "ShaderOutputIter_~a" mod)))
 				      `(do0
 					(do0
 					 #+runtime-shader
@@ -1039,7 +1041,76 @@ image = \"*\"
 								       :location ,location
 								       :format ,format
 								       :name (Some (std--borrow--Cow--Borrowed (string ,name)))))))))
-							(return None)))))))
+							(return None)))
+						     (do0
+						      "#[inline]"
+						      (defun size_hint ("&mut self")
+							(declare (values "(usize,Option<usize>)"))
+							"// - exact number of entries left in iterator"
+							(let ((len (coerce (- 2 self.0) usize)))
+							  (return (values len (Some len)))))))))
+					   (do0
+					    (space ,(format
+						     nil
+						     "impl vulkano::pipeline::shader::ExactSizeIterator for ~a"
+						     input-iter)
+						   (progn
+						     )))
+					   (do0
+					    "#[derive(Debug,Copy,Clone,PartialEq,Eq,Hash)]"
+					    ,(format nil "struct ~a;" output)
+					    (space ,(format
+						     nil
+						     "unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ~a"
+						     input)
+						   (progn
+						     (setf "type Iter" ,input-iter)
+						     (defun elements (&self)
+						       (declare (values ,input-iter))
+						       (return (,input-iter 0))))))
+					   (do0
+					    "#[derive(Debug,Copy,Clone)]"
+					    ,(format nil "struct ~a(u16);" output-iter)
+					    (space ,(format
+						     nil
+						     "impl vulkano::pipeline::shader::Iterator for ~a"
+						     output-iter)
+						   (progn
+						     (setf "type Item" "vulkano::pipeline::shader::ShaderInterfaceDefEntry")
+
+						     (do0
+						      "#[inline]"
+						      (defun next ("&mut self")
+							(declare (values "Option<Self::Item>"))
+							,@(loop for e in `(
+									   ("0..1" Format--R32G32B32Sfloat v_color))
+							       and i from 0
+							     collect
+							       (destructuring-bind (location format name) e
+								 `(when (== self.0 ,i)
+								   (incf self.0)
+								   (return
+								     (Some
+								      (make-instance
+								       "vulkano::pipeline::shader::ShaderInterfaceDefEntry"
+								       :location ,location
+								       :format ,format
+								       :name (Some (std--borrow--Cow--Borrowed (string ,name)))))))))
+							(return None)))
+						     (do0
+						      "#[inline]"
+						      (defun size_hint ("&mut self")
+							(declare (values "(usize,Option<usize>)"))
+							"// - exact number of entries left in iterator"
+							(let ((len (coerce (- 2 self.0) usize)))
+							  (return (values len (Some len)))))))))
+					   (do0
+					    (space ,(format
+						     nil
+						     "impl vulkano::pipeline::shader::ExactSizeIterator for ~a"
+						     output-iter)
+						   (progn
+						     ))))
 					 )
 					#-runtime-shader
 					(space
