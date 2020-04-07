@@ -10,7 +10,7 @@
 (setf *features* (union *features* '(:debug
 				     :runtime-shader)))
 (setf *features* (set-difference *features* '(;:debug
-					      ;:runtime-shader
+					      :runtime-shader
 					      )))
 
 (in-package :cl-cpp-generator2)
@@ -1202,7 +1202,7 @@ image = \"*\"
 								(unwrap))))
 						   
 						   )))
-			   (let ((ep (fs2.main_entry_point)))
+			   #+runtime-shader (let ((ep (fs2.main_entry_point)))
 			    ,(logprint "fs2" `(ep.input ep.output)))
 			   ;; https://github.com/vulkano-rs/vulkano-examples/blob/1cf9c37073a79a3a0cee60e83c8db8d967218e3e/src/bin/push-constants.rs
 			   (let* ((push_constants (make-instance fs--ty--PushConstantData
@@ -1432,3 +1432,4 @@ image = \"*\"
 			 ,code)))))
 
 
+carg 

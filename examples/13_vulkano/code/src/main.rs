@@ -355,316 +355,115 @@ fn main() {
             })
             .unwrap(),
         );
-        let vs = {
-            let mut f  = std::fs::File::open("/home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.vert").expect("can't find /home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.vert");
-            let mut v = vec![];
-            f.read_to_end(&mut v).unwrap();
-            unsafe { vulkano::pipeline::shader::ShaderModule::new(device.clone(), &v) }.unwrap()
-        };
-        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-        struct ShaderInput_vs;
-        unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ShaderInput_vs {
-            type Iter = ShaderInputIter_vs;
-            fn elements(&self) -> ShaderInputIter_vs {
-                return ShaderInputIter_vs(0);
-            }
+
+        mod vs {
+            vulkano_shaders::shader! {ty: "vertex", src: r##"#version 450
+layout(location = 0) in vec3 position;
+void main() { gl_Position = vec4(position, (1.0)); }"##}
         }
-        #[derive(Debug, Copy, Clone)]
-        struct ShaderInputIter_vs(u16);
-        impl vulkano::pipeline::shader::Iterator for ShaderInputIter_vs {
-            type Item = vulkano::pipeline::shader::ShaderInterfaceDefEntry;
-            #[inline]
-            fn next(&mut self) -> Option<Self::Item> {
-                // - on entry per location, non-overlapping
-                // - each element must not be longer than 128 bytes
-                if (self.0) == (0) {
-                    self.0 += 1;
-                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
-                        location: 1..2,
-                        format: Format::R32G32B32Sfloat,
-                        name: Some(std::borrow::Cow::Borrowed("color")),
-                    });
-                }
-                if (self.0) == (1) {
-                    self.0 += 1;
-                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
-                        location: 0..1,
-                        format: Format::R32G32B32Sfloat,
-                        name: Some(std::borrow::Cow::Borrowed("color")),
-                    });
-                }
-                return None;
-            }
-            #[inline]
-            fn size_hint(&mut self) -> (usize, Option<usize>) {
-                // - exact number of entries left in iterator
-                let len = ((2 - self.0) as usize);
-                return (len, Some(len));
-            }
+
+        mod fs {
+            vulkano_shaders::shader! {ty: "fragment", src: r##"#version 450
+layout(location = 0) out vec4 f_color;
+//  https://www.youtube.com/watch?v=Cfe5UQ-1L9Q&t=1365s
+layout(push_constant) uniform PushConstantData {
+  uint timestamp;
+  uint window_w;
+  uint window_h;
+  uint mouse_x;
+  uint mouse_y;
+}
+pc;
+float map(in vec3 pos) {
+  float d1 = ((length(pos)) - ((0.250)));
+  float d2 = ((pos.y) + ((0.250)));
+  return min(d1, d2);
+}
+vec3 calcNormal(in vec3 pos) {
+  vec2 e = vec2((1.00e-4), (0.));
+  return normalize(vec3(((map(((pos) + (e.xyy)))) - (map(((pos) - (e.xyy))))),
+                        ((map(((pos) + (e.yxy)))) - (map(((pos) - (e.yxy))))),
+                        ((map(((pos) + (e.yyx)))) - (map(((pos) - (e.yyx)))))));
+}
+float castRay(in vec3 ro, vec3 rd) {
+  float tau = (0.);
+  for (int i = 0; i < 100; (i)++) {
+    vec3 pos = ((ro) + (((tau) * (rd))));
+    float h = map(pos);
+    if (h < (1.00e-3)) {
+      break;
+    };
+    (tau) += (h);
+    if ((20.) < tau) {
+      break;
+    };
+  };
+  if ((20.) < tau) {
+    tau = (-1.0);
+  };
+  return tau;
+}
+void main() {
+  ivec2 iResolution = ivec2(pc.window_w, pc.window_h);
+  vec2 p0 = (((((((2.0)) * (gl_FragCoord.xy))) - (iResolution.xy))) /
+             (iResolution.y));
+  vec2 p = vec2(p0.x, ((-1) * (p0.y)));
+  float an = (((((10.)) * (pc.mouse_x))) / (pc.window_w));
+  vec3 ro = vec3(sin(an), (((0.10)) * (sin((((1.00e-2)) * (pc.timestamp))))),
+                 cos(an));
+  vec3 ta = vec3((0.), (0.), (0.));
+  vec3 ww = normalize(((ta) - (ro)));
+  vec3 uu = normalize(cross(ww, vec3(0, 1, 0)));
+  vec3 vv = normalize(cross(uu, ww));
+  vec3 rd =
+      normalize(((((p.x) * (uu))) + (((p.y) * (vv))) + ((((1.50)) * (ww)))));
+  vec3 col = ((vec3((0.30), (0.50), (0.90))) - ((((0.50)) * (rd.y))));
+  float tau = castRay(ro, rd);
+  col = mix(col, vec3((0.70), (0.750), (0.80)), exp((((-10.)) * (rd.y))));
+  if (0 < tau) {
+    vec3 pos = ((ro) + (((tau) * (rd))));
+    vec3 nor = calcNormal(pos);
+    vec3 mate = vec3((0.20), (0.20), (0.20));
+    vec3 sun_dir = normalize(vec3((0.80), (0.40), (0.20)));
+    float sun_dif = clamp(dot(nor, sun_dir), (0.), (1.0));
+    float sun_sha =
+        step(castRay(((pos) + ((((1.00e-3)) * (nor)))), sun_dir), (0.));
+    float sky_dif =
+        clamp((((0.50)) + (dot(nor, vec3((0.), (1.0), (0.))))), (0.), (1.0));
+    float bou_dif =
+        clamp((((0.50)) + (dot(nor, vec3((0.), (-1.0), (0.))))), (0.), (1.0));
+    col = ((mate) * (vec3((7.0), 5, 3)) * (sun_dif) * (sun_sha));
+    (col) += (((mate) * (vec3((0.50), (0.80), (0.90))) * (sky_dif)));
+    (col) += (((mate) * (vec3((0.70), (0.30), (0.20))) * (bou_dif)));
+  };
+  col = pow(col, vec3((0.45450)));
+  f_color = vec4(col, (0.40));
+}"##}
         }
-        impl vulkano::pipeline::shader::ExactSizeIterator for ShaderInputIter_vs {}
-        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-        struct ShaderOutput_vs;
-        unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ShaderInput_vs {
-            type Iter = ShaderInputIter_vs;
-            fn elements(&self) -> ShaderInputIter_vs {
-                return ShaderInputIter_vs(0);
-            }
+
+        mod fs2 {
+            vulkano_shaders::shader! {ty: "fragment", src: r##"#version 450
+layout(location = 0) out vec4 f_color;
+layout(push_constant) uniform PushConstantData {
+  uint timestamp;
+  uint window_w;
+  uint window_h;
+  uint mouse_x;
+  uint mouse_y;
+}
+pc;
+void main() { f_color = vec4((1.0), (0.20), (0.20), (0.70)); }"##}
         }
-        #[derive(Debug, Copy, Clone)]
-        struct ShaderOutputIter_vs(u16);
-        impl vulkano::pipeline::shader::Iterator for ShaderOutputIter_vs {
-            type Item = vulkano::pipeline::shader::ShaderInterfaceDefEntry;
-            #[inline]
-            fn next(&mut self) -> Option<Self::Item> {
-                if (self.0) == (0) {
-                    self.0 += 1;
-                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
-                        location: 0..1,
-                        format: Format::R32G32B32Sfloat,
-                        name: Some(std::borrow::Cow::Borrowed("v_color")),
-                    });
-                }
-                return None;
-            }
-            #[inline]
-            fn size_hint(&mut self) -> (usize, Option<usize>) {
-                // - exact number of entries left in iterator
-                let len = ((2 - self.0) as usize);
-                return (len, Some(len));
-            }
-        }
-        impl vulkano::pipeline::shader::ExactSizeIterator for ShaderOutputIter_vs {}
-        #[derive(Debug, Copy, Clone)]
-        struct ShaderLayout_vs(ShaderStages);
-        unsafe impl vulkano::pipeline::shader::PipelineLayoutDesc for ShaderLayout_vs {
-            fn num_sets(&self) -> usize {
-                return 0;
-            }
-            fn num_bindings_in_set(&self, _set: usize) -> Option<usize> {
-                return None;
-            }
-            fn descriptor(&self, _set: usize, _binding: usize) -> Option<DescriptorDesc> {
-                return None;
-            }
-            fn num_push_constants_ranges(&self) -> usize {
-                return 0;
-            }
-            fn push_constants_range(&self, _num: usize) -> Option<PipelineLayoutDescPcRange> {
-                return None;
-            }
-        }
-        let fs = {
-            let mut f  = std::fs::File::open("/home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.frag").expect("can't find /home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace.frag");
-            let mut v = vec![];
-            f.read_to_end(&mut v).unwrap();
-            unsafe { vulkano::pipeline::shader::ShaderModule::new(device.clone(), &v) }.unwrap()
-        };
-        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-        struct ShaderInput_fs;
-        unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ShaderInput_fs {
-            type Iter = ShaderInputIter_fs;
-            fn elements(&self) -> ShaderInputIter_fs {
-                return ShaderInputIter_fs(0);
-            }
-        }
-        #[derive(Debug, Copy, Clone)]
-        struct ShaderInputIter_fs(u16);
-        impl vulkano::pipeline::shader::Iterator for ShaderInputIter_fs {
-            type Item = vulkano::pipeline::shader::ShaderInterfaceDefEntry;
-            #[inline]
-            fn next(&mut self) -> Option<Self::Item> {
-                // - on entry per location, non-overlapping
-                // - each element must not be longer than 128 bytes
-                if (self.0) == (0) {
-                    self.0 += 1;
-                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
-                        location: 1..2,
-                        format: Format::R32G32B32Sfloat,
-                        name: Some(std::borrow::Cow::Borrowed("color")),
-                    });
-                }
-                if (self.0) == (1) {
-                    self.0 += 1;
-                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
-                        location: 0..1,
-                        format: Format::R32G32B32Sfloat,
-                        name: Some(std::borrow::Cow::Borrowed("color")),
-                    });
-                }
-                return None;
-            }
-            #[inline]
-            fn size_hint(&mut self) -> (usize, Option<usize>) {
-                // - exact number of entries left in iterator
-                let len = ((2 - self.0) as usize);
-                return (len, Some(len));
-            }
-        }
-        impl vulkano::pipeline::shader::ExactSizeIterator for ShaderInputIter_fs {}
-        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-        struct ShaderOutput_fs;
-        unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ShaderInput_fs {
-            type Iter = ShaderInputIter_fs;
-            fn elements(&self) -> ShaderInputIter_fs {
-                return ShaderInputIter_fs(0);
-            }
-        }
-        #[derive(Debug, Copy, Clone)]
-        struct ShaderOutputIter_fs(u16);
-        impl vulkano::pipeline::shader::Iterator for ShaderOutputIter_fs {
-            type Item = vulkano::pipeline::shader::ShaderInterfaceDefEntry;
-            #[inline]
-            fn next(&mut self) -> Option<Self::Item> {
-                if (self.0) == (0) {
-                    self.0 += 1;
-                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
-                        location: 0..1,
-                        format: Format::R32G32B32Sfloat,
-                        name: Some(std::borrow::Cow::Borrowed("v_color")),
-                    });
-                }
-                return None;
-            }
-            #[inline]
-            fn size_hint(&mut self) -> (usize, Option<usize>) {
-                // - exact number of entries left in iterator
-                let len = ((2 - self.0) as usize);
-                return (len, Some(len));
-            }
-        }
-        impl vulkano::pipeline::shader::ExactSizeIterator for ShaderOutputIter_fs {}
-        #[derive(Debug, Copy, Clone)]
-        struct ShaderLayout_fs(ShaderStages);
-        unsafe impl vulkano::pipeline::shader::PipelineLayoutDesc for ShaderLayout_fs {
-            fn num_sets(&self) -> usize {
-                return 0;
-            }
-            fn num_bindings_in_set(&self, _set: usize) -> Option<usize> {
-                return None;
-            }
-            fn descriptor(&self, _set: usize, _binding: usize) -> Option<DescriptorDesc> {
-                return None;
-            }
-            fn num_push_constants_ranges(&self) -> usize {
-                return 0;
-            }
-            fn push_constants_range(&self, _num: usize) -> Option<PipelineLayoutDescPcRange> {
-                return None;
-            }
-        }
-        let fs2 = {
-            let mut f  = std::fs::File::open("/home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace2.frag").expect("can't find /home/martin/stage/cl-rust-generator/examples/13_vulkano/code/src/trace2.frag");
-            let mut v = vec![];
-            f.read_to_end(&mut v).unwrap();
-            unsafe { vulkano::pipeline::shader::ShaderModule::new(device.clone(), &v) }.unwrap()
-        };
-        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-        struct ShaderInput_fs2;
-        unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ShaderInput_fs2 {
-            type Iter = ShaderInputIter_fs2;
-            fn elements(&self) -> ShaderInputIter_fs2 {
-                return ShaderInputIter_fs2(0);
-            }
-        }
-        #[derive(Debug, Copy, Clone)]
-        struct ShaderInputIter_fs2(u16);
-        impl vulkano::pipeline::shader::Iterator for ShaderInputIter_fs2 {
-            type Item = vulkano::pipeline::shader::ShaderInterfaceDefEntry;
-            #[inline]
-            fn next(&mut self) -> Option<Self::Item> {
-                // - on entry per location, non-overlapping
-                // - each element must not be longer than 128 bytes
-                if (self.0) == (0) {
-                    self.0 += 1;
-                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
-                        location: 1..2,
-                        format: Format::R32G32B32Sfloat,
-                        name: Some(std::borrow::Cow::Borrowed("color")),
-                    });
-                }
-                if (self.0) == (1) {
-                    self.0 += 1;
-                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
-                        location: 0..1,
-                        format: Format::R32G32B32Sfloat,
-                        name: Some(std::borrow::Cow::Borrowed("color")),
-                    });
-                }
-                return None;
-            }
-            #[inline]
-            fn size_hint(&mut self) -> (usize, Option<usize>) {
-                // - exact number of entries left in iterator
-                let len = ((2 - self.0) as usize);
-                return (len, Some(len));
-            }
-        }
-        impl vulkano::pipeline::shader::ExactSizeIterator for ShaderInputIter_fs2 {}
-        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-        struct ShaderOutput_fs2;
-        unsafe impl vulkano::pipeline::shader::ShaderInterfaceDef for ShaderInput_fs2 {
-            type Iter = ShaderInputIter_fs2;
-            fn elements(&self) -> ShaderInputIter_fs2 {
-                return ShaderInputIter_fs2(0);
-            }
-        }
-        #[derive(Debug, Copy, Clone)]
-        struct ShaderOutputIter_fs2(u16);
-        impl vulkano::pipeline::shader::Iterator for ShaderOutputIter_fs2 {
-            type Item = vulkano::pipeline::shader::ShaderInterfaceDefEntry;
-            #[inline]
-            fn next(&mut self) -> Option<Self::Item> {
-                if (self.0) == (0) {
-                    self.0 += 1;
-                    return Some(vulkano::pipeline::shader::ShaderInterfaceDefEntry {
-                        location: 0..1,
-                        format: Format::R32G32B32Sfloat,
-                        name: Some(std::borrow::Cow::Borrowed("v_color")),
-                    });
-                }
-                return None;
-            }
-            #[inline]
-            fn size_hint(&mut self) -> (usize, Option<usize>) {
-                // - exact number of entries left in iterator
-                let len = ((2 - self.0) as usize);
-                return (len, Some(len));
-            }
-        }
-        impl vulkano::pipeline::shader::ExactSizeIterator for ShaderOutputIter_fs2 {}
-        #[derive(Debug, Copy, Clone)]
-        struct ShaderLayout_fs2(ShaderStages);
-        unsafe impl vulkano::pipeline::shader::PipelineLayoutDesc for ShaderLayout_fs2 {
-            fn num_sets(&self) -> usize {
-                return 0;
-            }
-            fn num_bindings_in_set(&self, _set: usize) -> Option<usize> {
-                return None;
-            }
-            fn descriptor(&self, _set: usize, _binding: usize) -> Option<DescriptorDesc> {
-                return None;
-            }
-            fn num_push_constants_ranges(&self) -> usize {
-                return 0;
-            }
-            fn push_constants_range(&self, _num: usize) -> Option<PipelineLayoutDescPcRange> {
-                return None;
-            }
-        }
+        let vs = vs::Shader::load(device.clone()).expect("failed to create shader");
+        let fs = fs::Shader::load(device.clone()).expect("failed to create shader");
+        let fs2 = fs::Shader::load(device.clone()).expect("failed to create shader");
         let pipeline = std::sync::Arc::new(
             vulkano::pipeline::GraphicsPipeline::start()
                 .vertex_input_single_buffer::<Vertex>()
-                .vertex_shader(
-                    unsafe {
-                        vs.graphics_entry_point(std::ffi::CStr::from_bytes_with_nul_unchecked(
-                            b"main\0",
-                        ))
-                    },
-                    (),
-                )
+                .vertex_shader(vs.main_entry_point(), ())
                 .triangle_strip()
                 .viewports_dynamic_scissors_irrelevant(1)
+                .fragment_shader(fs.main_entry_point(), ())
                 .blend_alpha_blending()
                 .render_pass(vulkano::framebuffer::Subpass::from(render_pass.clone(), 0).unwrap())
                 .build(device.clone())
@@ -673,24 +472,15 @@ fn main() {
         let pipeline2 = std::sync::Arc::new(
             vulkano::pipeline::GraphicsPipeline::start()
                 .vertex_input_single_buffer::<Vertex>()
+                .vertex_shader(vs.main_entry_point(), ())
                 .line_strip()
                 .viewports_dynamic_scissors_irrelevant(1)
+                .fragment_shader(fs2.main_entry_point(), ())
                 .blend_alpha_blending()
                 .render_pass(vulkano::framebuffer::Subpass::from(render_pass.clone(), 0).unwrap())
                 .build(device.clone())
                 .unwrap(),
         );
-        let ep = fs2.main_entry_point();
-        {
-            println!(
-                "{} {}:{} fs2  ep.input={:?}  ep.output={:?}",
-                Utc::now(),
-                file!(),
-                line!(),
-                ep.input,
-                ep.output
-            )
-        }
         let mut push_constants = fs::ty::PushConstantData {
             timestamp: 0,
             window_w: dimensions[0],
