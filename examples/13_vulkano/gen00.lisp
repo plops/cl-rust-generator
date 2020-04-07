@@ -9,7 +9,7 @@
 
 (setf *features* (union *features* '(:debug
 				     :runtime-shader)))
-(setf *features* (set-difference *features* '(;:debug
+(setf *features* (set-difference *features* '(:debug
 					      :runtime-shader
 					      )))
 
