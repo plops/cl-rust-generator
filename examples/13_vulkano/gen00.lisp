@@ -10,7 +10,7 @@
 (setf *features* (union *features* '(:debug
 				     :runtime-shader)))
 (setf *features* (set-difference *features* '(:debug
-					      :runtime-shader
+					       :runtime-shader
 					      )))
 
 (in-package :cl-cpp-generator2)
@@ -1028,8 +1028,8 @@ image = \"*\"
 							"// - on entry per location, non-overlapping"
 							"// - each element must not be longer than 128 bytes"
 
-							,@(loop for e in `(("1..2" Format--R32G32B32Sfloat color)
-									   ("0..1" Format--R32G32B32Sfloat color))
+							,@(loop for e in `(("1..2" vulkano--format--Format--R32G32B32Sfloat color)
+									   ("0..1" vulkano--format--Format--R32G32B32Sfloat color))
 							       and i from 0
 							     collect
 							       (destructuring-bind (location format name) e
@@ -1084,7 +1084,7 @@ image = \"*\"
 						      (defun next ("&mut self")
 							(declare (values "Option<Self::Item>"))
 							,@(loop for e in `(
-									   ("0..1" Format--R32G32B32Sfloat v_color))
+									   ("0..1" vulkano--format--Format--R32G32B32Sfloat v_color))
 							       and i from 0
 							     collect
 							       (destructuring-bind (location format name) e
@@ -1203,7 +1203,7 @@ image = \"*\"
 						   
 						   )))
 			   #+runtime-shader (let ((ep (fs2.main_entry_point)))
-			    ,(logprint "fs2" `(ep.input ep.output)))
+					      ,(logprint "fs2" `(ep.input ep.output)))
 			   ;; https://github.com/vulkano-rs/vulkano-examples/blob/1cf9c37073a79a3a0cee60e83c8db8d967218e3e/src/bin/push-constants.rs
 			   (let* ((push_constants (make-instance fs--ty--PushConstantData
 								 :timestamp 0
@@ -1432,4 +1432,4 @@ image = \"*\"
 			 ,code)))))
 
 
-carg 
+ 
