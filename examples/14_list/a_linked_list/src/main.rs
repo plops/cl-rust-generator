@@ -1,6 +1,3 @@
-
-use std::mem;
-
 // 1. Define the List and Node structures
 // We use a generic type T so the list can hold any data type.
 pub struct List<T> {
