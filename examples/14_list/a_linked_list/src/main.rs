@@ -95,11 +95,12 @@ pub struct Iter<'a, T> {
 }
 
 impl<T> List<T> {
-    pub fn iter(&self) -> Iter<T> {
-        Iter { 
-            next: self.head.as_deref() 
-        }
+// We add <'_, T> to explicitly link the lifetimes
+pub fn iter(&self) -> Iter<'_, T> {
+    Iter { 
+        next: self.head.as_deref() 
     }
+}
 }
 
 impl<'a, T> Iterator for Iter<'a, T> {
