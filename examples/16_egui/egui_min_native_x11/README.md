@@ -1,0 +1,3 @@
+- 196 cargo packets
+- initial build 1 min 15 sec
+- release binary 7.6MB
