@@ -5,6 +5,6 @@ authors = ["wolpumba@gmail.com"]
 edition = "2024"
 
 [dependencies]
-glium = "0.34"
-winit = "0.28"
+glium = { version = "0.34", features = ["glutin-winit", "glutin_backend", "raw-window-handle", "winit"], default-features = false }
+winit = { version = "0.28", features = ["x11"], default-features = false }
 nalgebra = "0.32"

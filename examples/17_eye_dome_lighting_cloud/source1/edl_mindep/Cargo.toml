@@ -4,10 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-# Minimal windowing and context
-winit = "0.28"
-glutin = "0.30"
-glutin-winit = "0.3"
+winit = { version = "0.28", features = ["x11"], default-features = false }
+glutin = { version = "0.30", features = ["glx"], default-features = false }
+glutin-winit = { version = "0.3", features = ["glx"], default-features = false }
 # Minimal Graphics & Math
 glow = "0.13"
 glam = "0.24"
