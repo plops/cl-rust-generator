@@ -4,6 +4,6 @@ version = "0.1.0"
 authors = ["wolpumba@gmail.com"]
 
 [dependencies]
-glium = "0.34"
-winit = "0.28"
+glium = { version = "0.34", features = ["glutin-winit", "glutin_backend", "raw-window-handle", "winit"], default-features = false }
+winit = { version = "0.28", features = ["x11"], default-features = false }
 nalgebra = "0.32"
