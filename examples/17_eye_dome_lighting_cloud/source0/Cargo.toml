@@ -2,6 +2,7 @@
 name = "edl_cloud"
 version = "0.1.0"
 authors = ["wolpumba@gmail.com"]
+edition = "2024"
 
 [dependencies]
 glium = "0.34"
