@@ -1,0 +1,9 @@
+[package]
+name = "edl_cloud"
+version = "0.1.0"
+authors = ["wolpumba@gmail.com"]
+
+[dependencies]
+glium = "0.34"
+winit = "0.28"
+nalgebra = "0.32"
