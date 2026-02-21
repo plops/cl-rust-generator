@@ -1,0 +1,13 @@
+[package]
+name = "edl_mindep"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Minimal windowing and context
+winit = "0.28"
+glutin = "0.30"
+glutin-winit = "0.3"
+# Minimal Graphics & Math
+glow = "0.13"
+glam = "0.24"
