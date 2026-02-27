@@ -188,7 +188,11 @@ impl BrowserPool {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         // Extract whatever HTML content is available
-        let html = page.content().await?;
+        let html = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            page.content()
+        ).await
+        .map_err(|_| "Timeout getting page content")??;
         Ok(html)
     }
 }

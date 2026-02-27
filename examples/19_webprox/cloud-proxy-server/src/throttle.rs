@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(75);
-const BANDWIDTH_BUDGET_BYTES_PER_SEC: usize = 10 * 1024; // 10KB/s
+const BANDWIDTH_BUDGET_BYTES_PER_SEC: usize = 50 * 1024; // 50KB/s
 const BUDGET_WINDOW: Duration = Duration::from_secs(1);
 
 /// Priority levels for egress messages
@@ -128,7 +128,16 @@ impl PriorityQueue {
                 continue;
             }
             if let Some(data) = queue.front() {
-                if self.budget.can_send(data.len()) {
+                // Starvation prevention: if the budget is currently unused (bytes_sent == 0)
+                // and the message is larger than the total budget, let it through anyway.
+                // Otherwise it will be stuck forever.
+                let can_send = if self.budget.bytes_sent == 0 && data.len() > BANDWIDTH_BUDGET_BYTES_PER_SEC {
+                    true
+                } else {
+                    self.budget.can_send(data.len())
+                };
+
+                if can_send {
                     let data = queue.pop_front().unwrap();
                     self.budget.record(data.len());
                     let priority = match i {

@@ -291,6 +291,7 @@ async fn handle_navigate(
     compressor: &mut PatchCompressor,
     dom_tx: &mpsc::Sender<()>,
 ) {
+    tracing::info!("Handling navigate request for {}", nav.url);
     let sid = if nav.session_id.is_empty() {
         let new_id = generate_session_id();
         match browser_pool.new_page_with_dom_watcher(dom_tx.clone()).await {

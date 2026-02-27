@@ -49,6 +49,8 @@ impl HtmlVisitor for LinkRewriter {
             href.to_string()
         };
 
+
+
         let id = self.counter;
         self.counter += 1;
         self.link_map.insert(id, absolute_url);
