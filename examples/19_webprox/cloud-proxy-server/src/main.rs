@@ -32,6 +32,14 @@ struct Args {
     /// Load fonts
     #[arg(long, default_value_t = false)]
     load_fonts: bool,
+
+    /// Path to the TLS certificate file (PEM)
+    #[arg(long)]
+    tls_cert: Option<String>,
+
+    /// Path to the TLS private key file (PEM)
+    #[arg(long)]
+    tls_key: Option<String>,
 }
 
 #[tokio::main]
@@ -45,6 +53,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if args.no_headless {
         tracing::info!("Running in visible mode (headless disabled)");
     }
+
+    let tls_config = if let (Some(cert_path), Some(key_path)) = (&args.tls_cert, &args.tls_key) {
+        tracing::info!("Configuring TLS using cert: {}, key: {}", cert_path, key_path);
+        let cert = std::fs::read_to_string(cert_path)?;
+        let key = std::fs::read_to_string(key_path)?;
+        let identity = tonic::transport::Identity::from_pem(cert, key);
+        Some(tonic::transport::ServerTlsConfig::new().identity(identity))
+    } else if args.tls_cert.is_some() || args.tls_key.is_some() {
+        return Err("Both --tls-cert and --tls-key must be provided to enable TLS".into());
+    } else {
+        None
+    };
 
     let session_manager = SessionManager::new();
 
@@ -64,7 +84,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let backend = BrowserBackend::new(session_manager, !args.no_headless, flags).await?;
     let svc = BrowsingServiceServer::new(backend);
 
-    Server::builder()
+    let mut builder = Server::builder();
+    if let Some(config) = tls_config {
+        builder = builder.tls_config(config)?;
+    }
+
+    builder
         .add_service(svc)
         .serve(addr)
         .await?;

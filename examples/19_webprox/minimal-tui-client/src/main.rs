@@ -33,6 +33,10 @@ struct Args {
     /// URL to navigate to on startup
     #[arg(short, long)]
     url: Option<String>,
+
+    /// Path to a custom TLS CA certificate (PEM) to trust
+    #[arg(long)]
+    tls_ca: Option<String>,
 }
 
 #[tokio::main]
@@ -43,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture, cursor::Hide)?;
 
-    let result = run_app(&args.server, args.url).await;
+    let result = run_app(&args.server, args.url, args.tls_ca).await;
 
     execute!(
         stdout,
@@ -59,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn run_app(addr: &str, initial_url: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_app(addr: &str, initial_url: Option<String>, tls_ca: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut page_state = PageState::new();
     let renderer = TerminalRenderer::new();
     let mut input_handler = InputHandler::new();
@@ -69,7 +73,7 @@ async fn run_app(addr: &str, initial_url: Option<String>) -> Result<(), Box<dyn 
     let mut scroll_offset: usize = 0;
 
     let (_term_width, term_height) = terminal::size()?;
-    let mut connection = ServerConnection::new(addr.to_string());
+    let mut connection = ServerConnection::new(addr.to_string(), tls_ca);
 
     // Initial connection
     status_bar.set_message("Connecting...");

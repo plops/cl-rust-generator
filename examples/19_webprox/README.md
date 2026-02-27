@@ -124,6 +124,47 @@ Keystrokes are forwarded to the focused form field in the remote browser. Press 
 
 Links appear as `[Link Text][1]` with numeric IDs. On terminals that support OSC 8 hyperlinks (Ghostty, WezTerm, iTerm2), links are clickable natively. On other terminals, click with the mouse to follow a link, or note the numeric ID.
 
+## Security / TLS
+
+To encrypt the gRPC connection, you can launch the server and client with TLS enabled.
+
+First, generate a certificate authority (CA) and a server certificate signed by it:
+```bash
+# 1. Create a CA certificate and key
+openssl genrsa -out ca-key.pem 4096
+openssl req -new -x509 -key ca-key.pem -out ca-cert.pem -days 3650 -subj "/CN=Webprox CA"
+
+# 2. Create a server key and certificate signing request (CSR)
+openssl genrsa -out key.pem 4096
+openssl req -new -key key.pem -out server.csr -subj "/CN=localhost"
+
+# 3. Sign the server CSR with the CA
+cat <<EOF > server.ext
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+IP.1 = ::1
+IP.2 = 127.0.0.1
+EOF
+
+openssl x509 -req -in server.csr -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial -out cert.pem -days 365 -extfile server.ext
+```
+
+Start the server using the generated server certificate and key:
+```bash
+cargo run --bin cloud-proxy-server -- --tls-cert cert.pem --tls-key key.pem
+```
+*(Note: When the server is started with TLS, clients must use TLS to connect; plaintext connections are rejected at the transport layer.)*
+
+Start the client pointing to an `https://` endpoint. Provide the CA certificate with `--tls-ca` to trust the server:
+```bash
+cargo run --bin minimal-tui-client -- --server https://localhost:50051 --tls-ca ca-cert.pem
+```
+
 ## Architecture
 
 ```

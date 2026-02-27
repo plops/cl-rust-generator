@@ -22,14 +22,16 @@ pub struct ServerConnection {
     addr: String,
     pub state: ConnectionState,
     last_url: Option<String>,
+    tls_ca: Option<String>,
 }
 
 impl ServerConnection {
-    pub fn new(addr: String) -> Self {
+    pub fn new(addr: String, tls_ca: Option<String>) -> Self {
         Self {
             addr,
             state: ConnectionState::Offline,
             last_url: None,
+            tls_ca,
         }
     }
 
@@ -44,9 +46,20 @@ impl ServerConnection {
         ),
         Box<dyn std::error::Error>,
     > {
-        let channel = Channel::from_shared(self.addr.clone())?
-            .connect()
-            .await?;
+        let mut endpoint = Channel::from_shared(self.addr.clone())?;
+
+        if self.addr.starts_with("https://") {
+            let mut tls_config = tonic::transport::ClientTlsConfig::new();
+            if let Some(ref ca_path) = self.tls_ca {
+                let ca = std::fs::read_to_string(ca_path)?;
+                tls_config = tls_config.ca_certificate(tonic::transport::Certificate::from_pem(ca));
+            } else {
+                tls_config = tls_config.with_native_roots();
+            }
+            endpoint = endpoint.tls_config(tls_config)?;
+        }
+
+        let channel = endpoint.connect().await?;
 
         let mut client = BrowsingServiceClient::new(channel);
 
