@@ -53,6 +53,7 @@ impl InputDispatcher {
     }
 
     /// Click on a link by navigating to its URL via JS evaluation
+    #[allow(dead_code)]
     pub async fn click_link(
         page: &Page,
         url: &str,

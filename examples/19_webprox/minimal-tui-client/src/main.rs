@@ -1,5 +1,8 @@
+#[allow(dead_code)]
 mod connection;
+#[allow(dead_code)]
 mod echo;
+#[allow(dead_code)]
 mod input;
 mod renderer;
 mod state;

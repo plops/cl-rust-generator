@@ -1,0 +1,6 @@
+[package]
+name = "egui_min_native_x11"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]

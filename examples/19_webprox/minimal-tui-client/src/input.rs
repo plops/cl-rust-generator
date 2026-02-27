@@ -165,7 +165,7 @@ impl InputHandler {
                     InputAction::ToggleInputMode
                 }
                 KeyCode::Enter => {
-                    let text = self.text_buffer.clone();
+                    let _text = self.text_buffer.clone();
                     self.text_buffer.clear();
                     InputAction::Submit
                 }

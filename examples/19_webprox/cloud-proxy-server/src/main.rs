@@ -1,15 +1,17 @@
 mod browser;
+#[allow(dead_code)]
 mod compressor;
+#[allow(dead_code)]
 mod differ;
 mod extractor;
 mod input;
 mod service;
 mod session;
+#[allow(dead_code)]
 mod throttle;
 
 use service::BrowserBackend;
 use session::SessionManager;
-use tracing_subscriber;
 
 use proto_definitions::browser::browsing_service_server::BrowsingServiceServer;
 use tonic::transport::Server;

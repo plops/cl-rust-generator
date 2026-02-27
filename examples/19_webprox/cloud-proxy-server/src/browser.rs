@@ -1,6 +1,6 @@
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::fetch::{
-    ContinueRequestParams, EventRequestPaused, FailRequestParams, RequestPattern,
+    ContinueRequestParams, EventRequestPaused, FailRequestParams,
 };
 use chromiumoxide::cdp::browser_protocol::network::ErrorReason;
 use chromiumoxide::Page;

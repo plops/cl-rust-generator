@@ -10,3 +10,4 @@ glutin-winit = { version = "0.3", features = ["glx"], default-features = false }
 # Minimal Graphics & Math
 glow = "0.13"
 glam = "0.24"
+bytemuck = "1.25.0"
