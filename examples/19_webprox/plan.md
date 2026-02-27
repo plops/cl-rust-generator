@@ -83,6 +83,59 @@
 
 ---
 
+### MODULE STRUCTURE & DESIGN PATTERNS
+
+#### Server Crate: `cloud-proxy-server`
+
+Each module has a single responsibility. The gRPC service layer delegates to domain modules — it never contains business logic directly (Facade pattern).
+
+| File | Responsibility | Key Types / Traits |
+| :--- | :--- | :--- |
+| `main.rs` | Entry point, config parsing, tonic server startup | `Config`, `main()` |
+| `service.rs` | `BrowsingService` tonic trait impl, stream wiring | `BrowserBackend`, `impl BrowsingService` |
+| `session.rs` | Session lifecycle: create, lookup, idle reap | `SessionManager`, `Session`, `SessionId` |
+| `browser.rs` | Chromiumoxide init, CDP network interception, page pool | `BrowserPool`, `PageHandle` |
+| `extractor.rs` | Readability → sanitize → Markdown → link_map pipeline | `ExtractionPipeline`, `LinkMap` |
+| `differ.rs` | mt-dom VDOM state, diff computation, patch serialization | `VdomState`, `DomPatch` |
+| `compressor.rs` | Zstd dictionary management, persistent-context compression | `PatchCompressor` |
+| `throttle.rs` | Event debouncer, priority queue, bandwidth budgeting | `Debouncer`, `PriorityQueue`, `BandwidthBudget` |
+| `input.rs` | InputRequest → CDP `dispatchKeyEvent`, focus tracking | `InputDispatcher`, `FocusTracker` |
+
+Design patterns applied:
+
+*   **Facade** (`service.rs`): The gRPC handler is a thin orchestrator. On `NavigateRequest` it calls `session.get_or_create()` → `browser.navigate()` → `extractor.process()` → serializes and sends. No domain logic lives here.
+*   **Pipeline / Chain of Responsibility** (`extractor.rs`): Content flows through discrete stages: `raw HTML → readability scoring → semantic sanitization → Markdown conversion → link_map injection`. Each stage is a function or trait impl that takes input and returns transformed output, composable and independently testable.
+*   **Background Task** (`session.rs`): The session reaper runs as a `tokio::spawn`'d loop with `tokio::time::interval(Duration::from_secs(60))`, scanning for sessions exceeding the idle threshold and dropping their chromiumoxide contexts.
+*   **Producer-Consumer** (`throttle.rs` ↔ `service.rs`): CDP events are pushed into a `tokio::sync::mpsc` channel by the browser event listener. The debouncer consumes from this channel, aggregates events over the 50-100ms window, and produces a single coalesced patch for the gRPC stream.
+
+#### Client Crate: `minimal-tui-client`
+
+The client uses an actor-like architecture: the gRPC connection and the TUI renderer run in separate async tasks, communicating via channels. This keeps the render loop responsive even when the network is slow.
+
+| File | Responsibility | Key Types / Traits |
+| :--- | :--- | :--- |
+| `main.rs` | Entry point, event loop orchestration, channel wiring | `main()`, `AppState` |
+| `connection.rs` | Tonic client, bidirectional stream, reconnection with backoff | `ServerConnection`, `ReconnectPolicy` |
+| `state.rs` | Local page state, link_map resolution, VDOM patch application | `PageState`, `LinkResolver` |
+| `renderer.rs` | Markdown → ANSI rendering, OSC 8 link formatting, layout | `TerminalRenderer`, `AnsiStyle` |
+| `input.rs` | Crossterm event capture, hit-box map, text input mode toggle | `InputHandler`, `HitBoxMap`, `InputMode` |
+| `echo.rs` | Local echo logic, loading indicators, status bar | `LocalEcho`, `StatusBar` |
+
+Design patterns applied:
+
+*   **Actor / Channel Architecture** (`main.rs`): Two long-lived tasks — `connection_task` owns the gRPC stream and sends `PageUpdate` messages into a `tokio::sync::mpsc` channel; `render_task` consumes from that channel and redraws. User input flows the opposite direction via a second channel. Neither task blocks the other.
+*   **State Machine** (`input.rs`): The client operates in one of three modes — `Normal` (scrolling, clicking), `TextInput` (keystrokes forwarded to server), `Connecting` (input suppressed). Transitions are explicit and driven by user actions or connection events.
+*   **Observer** (`echo.rs` ↔ `state.rs`): When `state.rs` applies a server update, it notifies `echo.rs` to clear any pending local echo indicators (e.g., remove "[Loading...]" once the real content arrives).
+*   **Strategy** (`renderer.rs`): Link rendering switches between OSC 8 and hit-box strategies based on terminal capability detection at startup. The renderer holds a `LinkStrategy` trait object, swapped once during init.
+
+#### File Size Guidelines
+
+*   Target 200-400 lines per module. If a module exceeds ~500 lines, split by sub-concern (e.g., `extractor.rs` could split into `readability.rs` + `markdown.rs` + `linkmap.rs` if the pipeline grows).
+*   Keep `main.rs` under 100 lines — it should only wire things together.
+*   Trait definitions shared across modules go in a `types.rs` or `lib.rs` re-export.
+
+---
+
 ### DEPENDENCY ARCHITECTURE MATRIX
 
 | Subsystem | Primary Crate | Feature Flags (Constraint Enforcement) | Implementation Goal |
