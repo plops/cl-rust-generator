@@ -7,6 +7,7 @@ pub enum InputMode {
     Normal,    // Scrolling, clicking
     TextInput, // Keystrokes forwarded to server
     UrlBar,    // Typing a URL
+    Follow,    // Typing a numeric link ID
 }
 
 /// A rectangular hit region on screen mapped to a link ID
@@ -116,6 +117,11 @@ impl InputHandler {
                     self.url_buffer.clear();
                     InputAction::None
                 }
+                KeyCode::Char('f') => {
+                    self.mode = InputMode::Follow;
+                    self.text_buffer.clear();
+                    InputAction::None
+                }
                 KeyCode::Char('i') => {
                     self.mode = InputMode::TextInput;
                     self.text_buffer.clear();
@@ -174,6 +180,32 @@ impl InputHandler {
                 KeyCode::Char(c) => {
                     self.text_buffer.push(c);
                     InputAction::TypeText(c.to_string())
+                }
+                _ => InputAction::None,
+            },
+            InputMode::Follow => match key.code {
+                KeyCode::Enter => {
+                    let id_str = self.text_buffer.clone();
+                    self.text_buffer.clear();
+                    self.mode = InputMode::Normal;
+                    if let Ok(id) = id_str.parse::<u32>() {
+                        InputAction::Click(id)
+                    } else {
+                        InputAction::None
+                    }
+                }
+                KeyCode::Esc => {
+                    self.text_buffer.clear();
+                    self.mode = InputMode::Normal;
+                    InputAction::None
+                }
+                KeyCode::Backspace => {
+                    self.text_buffer.pop();
+                    InputAction::None
+                }
+                KeyCode::Char(c) if c.is_ascii_digit() => {
+                    self.text_buffer.push(c);
+                    InputAction::None
                 }
                 _ => InputAction::None,
             },

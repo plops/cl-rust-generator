@@ -263,6 +263,7 @@ async fn run_session_loop(
                             InputMode::Normal => "NORMAL",
                             InputMode::TextInput => "INPUT",
                             InputMode::UrlBar => "URL",
+                            InputMode::Follow => "FOLLOW",
                         };
                         status_bar.set_mode(mode_str);
                         render_all(renderer, page_state, status_bar, *scroll_offset, h, hitbox_map);
@@ -272,6 +273,9 @@ async fn run_session_loop(
 
                 if input_handler.mode == InputMode::UrlBar {
                     status_bar.set_message(format!("URL: {}_", input_handler.url_buffer));
+                    render_all(renderer, page_state, status_bar, *scroll_offset, h, hitbox_map);
+                } else if input_handler.mode == InputMode::Follow {
+                    status_bar.set_message(format!("Link ID: {}_", input_handler.text_buffer));
                     render_all(renderer, page_state, status_bar, *scroll_offset, h, hitbox_map);
                 }
             }
