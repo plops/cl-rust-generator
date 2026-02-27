@@ -1,4 +1,5 @@
 use chromiumoxide::browser::{Browser, BrowserConfig};
+use chromiumoxide::cdp::browser_protocol::dom::EventDocumentUpdated;
 use chromiumoxide::cdp::browser_protocol::fetch::{
     ContinueRequestParams, EventRequestPaused, FailRequestParams,
 };
@@ -6,6 +7,7 @@ use chromiumoxide::cdp::browser_protocol::network::ErrorReason;
 use chromiumoxide::Page;
 use futures_util::StreamExt;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 /// File extensions to block for bandwidth savings
 const BLOCKED_EXTENSIONS: &[&str] = &[
@@ -44,6 +46,7 @@ impl BrowserPool {
     }
 
     /// Create a new page (tab) for a session, with network interception
+    #[allow(dead_code)]
     pub async fn new_page(&self) -> Result<Page, Box<dyn std::error::Error + Send + Sync>> {
         let page = self.browser.new_page("about:blank").await?;
 
@@ -51,6 +54,36 @@ impl BrowserPool {
         Self::spawn_request_interceptor(&page).await?;
 
         Ok(page)
+    }
+
+    /// Create a new page with a DOM mutation notification channel
+    pub async fn new_page_with_dom_watcher(
+        &self,
+        dom_tx: mpsc::Sender<()>,
+    ) -> Result<Page, Box<dyn std::error::Error + Send + Sync>> {
+        let page = self.browser.new_page("about:blank").await?;
+
+        Self::spawn_request_interceptor(&page).await?;
+        Self::spawn_dom_watcher(&page, dom_tx).await?;
+
+        Ok(page)
+    }
+
+    /// Listen for DOM.documentUpdated events and notify via channel
+    async fn spawn_dom_watcher(
+        page: &Page,
+        dom_tx: mpsc::Sender<()>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut events = page.event_listener::<EventDocumentUpdated>().await?;
+
+        tokio::spawn(async move {
+            while let Some(_event) = events.next().await {
+                // Notify that the DOM changed — debouncer will coalesce
+                let _ = dom_tx.try_send(());
+            }
+        });
+
+        Ok(())
     }
 
     /// Listen for fetch events and block images/media/css/fonts

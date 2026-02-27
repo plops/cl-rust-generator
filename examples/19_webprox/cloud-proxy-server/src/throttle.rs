@@ -16,6 +16,7 @@ pub enum Priority {
 
 /// A prioritized message ready for transmission
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct PrioritizedMessage {
     pub priority: Priority,
     pub data: Vec<u8>,

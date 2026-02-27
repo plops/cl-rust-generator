@@ -5,7 +5,6 @@ mod extractor;
 mod input;
 mod service;
 mod session;
-#[allow(dead_code)]
 mod throttle;
 
 use service::BrowserBackend;

@@ -71,6 +71,12 @@ impl SessionManager {
         }
     }
 
+    /// Get the current URL for a session
+    pub async fn get_current_url(&self, id: &str) -> Option<String> {
+        let sessions = self.sessions.lock().await;
+        sessions.get(id).and_then(|s| s.current_url.clone())
+    }
+
     /// Store the link_map for a session (used for click resolution)
     #[allow(dead_code)] // called from tokio::spawn in service.rs
     pub async fn set_link_map(&self, id: &str, link_map: LinkMap) {
