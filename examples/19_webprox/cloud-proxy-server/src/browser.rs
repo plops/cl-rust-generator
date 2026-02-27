@@ -8,29 +8,40 @@ use chromiumoxide::Page;
 use futures_util::StreamExt;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use crate::service::ResourceFlags;
 
 /// File extensions to block for bandwidth savings
-const BLOCKED_EXTENSIONS: &[&str] = &[
-    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp",
-    ".mp4", ".webm", ".ogg", ".mp3", ".wav", ".flac",
-    ".css", ".woff", ".woff2", ".ttf", ".eot", ".otf",
-];
+const IMAGE_EXTENSIONS: &[&str] = &[".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp"];
+const MEDIA_EXTENSIONS: &[&str] = &[".mp4", ".webm", ".ogg", ".mp3", ".wav", ".flac"];
+const CSS_EXTENSIONS: &[&str] = &[".css"];
+const FONT_EXTENSIONS: &[&str] = &[".woff", ".woff2", ".ttf", ".eot", ".otf"];
 
 pub struct BrowserPool {
     browser: Arc<Browser>,
+    flags: ResourceFlags,
 }
 
 impl BrowserPool {
-    pub async fn new(headless: bool) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        tracing::info!("Initializing browser with headless={}", headless);
+    pub async fn new(
+        headless: bool,
+        flags: ResourceFlags,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        tracing::info!("Initializing browser with headless={}, flags={:?}", headless, flags);
         
         let mut builder = BrowserConfig::builder()
             .no_sandbox()
-            .arg("--disable-images")
-            .arg("--blink-settings=imagesEnabled=false")
-            .arg("--disable-remote-fonts")
             .user_data_dir(format!("/tmp/chromiumoxide-{}", fastrand::u64(..)))
             .enable_request_intercept();
+
+        if !flags.load_images && !flags.load_all {
+            builder = builder
+                .arg("--disable-images")
+                .arg("--blink-settings=imagesEnabled=false");
+        }
+
+        if !flags.load_fonts && !flags.load_all {
+            builder = builder.arg("--disable-remote-fonts");
+        }
 
         // Configure headless mode
         if headless {
@@ -55,6 +66,7 @@ impl BrowserPool {
 
         Ok(Self {
             browser: Arc::new(browser),
+            flags,
         })
     }
 
@@ -64,7 +76,7 @@ impl BrowserPool {
         let page = self.browser.new_page("about:blank").await?;
 
         // Spawn a task to intercept and block heavy resources on this page
-        Self::spawn_request_interceptor(&page).await?;
+        Self::spawn_request_interceptor(&page, self.flags.clone()).await?;
 
         Ok(page)
     }
@@ -76,7 +88,7 @@ impl BrowserPool {
     ) -> Result<Page, Box<dyn std::error::Error + Send + Sync>> {
         let page = self.browser.new_page("about:blank").await?;
 
-        Self::spawn_request_interceptor(&page).await?;
+        Self::spawn_request_interceptor(&page, self.flags.clone()).await?;
         Self::spawn_dom_watcher(&page, dom_tx).await?;
 
         Ok(page)
@@ -102,6 +114,7 @@ impl BrowserPool {
     /// Listen for fetch events and block images/media/css/fonts
     async fn spawn_request_interceptor(
         page: &Page,
+        flags: ResourceFlags,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut events = page.event_listener::<EventRequestPaused>().await?;
         let page_clone = page.clone();
@@ -109,9 +122,20 @@ impl BrowserPool {
         tokio::spawn(async move {
             while let Some(event) = events.next().await {
                 let url = event.request.url.to_lowercase();
-                let should_block = BLOCKED_EXTENSIONS
-                    .iter()
-                    .any(|ext| url.contains(ext));
+                
+                let mut should_block = false;
+
+                if !flags.load_all {
+                    if !flags.load_images && IMAGE_EXTENSIONS.iter().any(|ext| url.contains(ext)) {
+                        should_block = true;
+                    } else if !flags.load_media && MEDIA_EXTENSIONS.iter().any(|ext| url.contains(ext)) {
+                        should_block = true;
+                    } else if !flags.load_css && CSS_EXTENSIONS.iter().any(|ext| url.contains(ext)) {
+                        should_block = true;
+                    } else if !flags.load_fonts && FONT_EXTENSIONS.iter().any(|ext| url.contains(ext)) {
+                        should_block = true;
+                    }
+                }
 
                 if should_block {
                     // Abort the request
@@ -131,16 +155,40 @@ impl BrowserPool {
         Ok(())
     }
 
-    /// Navigate a page to a URL and wait for load
+    /// Navigate a page to a URL and extract content.
+    /// Uses a timeout to avoid hanging when blocked resources prevent the load event.
     pub async fn navigate(
         page: &Page,
         url: &str,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        page.goto(url).await?.wait_for_navigation().await?;
+        // Start navigation but don't wait forever for the load event.
+        // Blocked resources (CSS, fonts, images) can prevent the load event
+        // from firing, so we use a timeout and grab content regardless.
+        let nav_result = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            async {
+                page.goto(url).await?.wait_for_navigation().await
+            },
+        )
+        .await;
 
-        // Extract the full HTML content
+        match nav_result {
+            Ok(Ok(_)) => {
+                tracing::debug!("Navigation completed normally for {}", url);
+            }
+            Ok(Err(e)) => {
+                tracing::warn!("Navigation error for {}: {}, extracting anyway", url, e);
+            }
+            Err(_) => {
+                tracing::warn!("Navigation timed out for {}, extracting available content", url);
+            }
+        }
+
+        // Small delay to let any remaining JS execute
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Extract whatever HTML content is available
         let html = page.content().await?;
-
         Ok(html)
     }
 }

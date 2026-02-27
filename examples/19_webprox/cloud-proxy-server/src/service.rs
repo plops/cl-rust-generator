@@ -17,6 +17,15 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::Stream;
 use tonic::{Request, Response, Status, Streaming};
 
+#[derive(Clone, Debug, Default)]
+pub struct ResourceFlags {
+    pub load_images: bool,
+    pub load_media: bool,
+    pub load_css: bool,
+    pub load_fonts: bool,
+    pub load_all: bool,
+}
+
 fn generate_session_id() -> String {
     format!("{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..))
 }
@@ -42,8 +51,9 @@ impl BrowserBackend {
     pub async fn new(
         session_manager: SessionManager,
         headless: bool,
+        flags: ResourceFlags,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let browser_pool = Arc::new(BrowserPool::new(headless).await?);
+        let browser_pool = Arc::new(BrowserPool::new(headless, flags).await?);
         Ok(Self {
             browser_pool,
             session_manager,

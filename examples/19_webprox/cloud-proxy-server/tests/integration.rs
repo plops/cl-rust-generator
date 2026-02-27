@@ -29,7 +29,8 @@ async fn start_server() -> SocketAddr {
         let reaper = session_manager.clone();
         tokio::spawn(async move { reaper.reap_idle_sessions_loop().await });
 
-        let backend = BrowserBackend::new(session_manager, true).await.unwrap();
+        let flags = cloud_proxy_server::service::ResourceFlags::default();
+        let backend = BrowserBackend::new(session_manager, true, flags).await.unwrap();
         let svc = BrowsingServiceServer::new(backend);
 
         Server::builder()
