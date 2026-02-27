@@ -1,0 +1,39 @@
+[package]
+name = "cloud-proxy-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "cloud-proxy-server"
+path = "src/main.rs"
+
+[dependencies]
+proto-definitions = { path = "../proto-definitions" }
+
+# gRPC — no default features, only HTTP/2 transport + prost codegen
+tonic = { version = "0.12", default-features = false, features = ["transport", "prost"] }
+prost = "0.13"
+
+# Async runtime — only the features we actually call
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+# Stream utilities — lighter than full `futures`
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tokio-stream = { version = "0.1", default-features = false }
+
+# Browser automation
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
+
+# Content extraction
+readability-rust = "0.1"
+html-to-markdown-rs = { version = "2.25", default-features = false, features = ["visitor"] }
+
+# Compression — no default features, just the compressor
+zstd = { version = "0.13", default-features = false }
+
+# Session IDs — tiny footprint vs uuid
+fastrand = "2"
+
+# Logging — minimal subscriber
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi"] }

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "deepwiki": {
+      "url": "https://mcp.deepwiki.com/mcp",
+      "autoApprove": [
+        "ask_question",
+        "ask_question"
+      ]
+    }
+  }
+}

@@ -1,0 +1,28 @@
+[package]
+name = "minimal-tui-client"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "minimal-tui-client"
+path = "src/main.rs"
+
+[dependencies]
+proto-definitions = { path = "../proto-definitions" }
+
+# gRPC client — minimal features
+tonic = { version = "0.12", default-features = false, features = ["transport", "prost", "channel"] }
+prost = "0.13"
+
+# Async runtime — only what the event loop needs
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+# Stream utilities — lighter than full `futures`
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tokio-stream = { version = "0.1", default-features = false }
+
+# Terminal input — event-stream not needed since we poll synchronously
+crossterm = { version = "0.28", default-features = false, features = ["events"] }
+
+# Decompression for DOM patches
+zstd = { version = "0.13", default-features = false }

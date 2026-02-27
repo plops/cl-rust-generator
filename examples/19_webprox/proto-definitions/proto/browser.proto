@@ -1,0 +1,61 @@
+syntax = "proto3";
+package browser;
+
+service BrowsingService {
+  // Bidirectional stream for interactive browsing
+  rpc Session(stream Interaction) returns (stream PageUpdate);
+}
+
+message Interaction {
+  oneof type {
+    NavigateRequest navigate = 1;
+    ClickRequest click = 2;
+    InputRequest input = 3;
+  }
+}
+
+message NavigateRequest {
+  string url = 1;
+  string session_id = 2;
+}
+
+message ClickRequest {
+  uint32 link_id = 1;
+  string session_id = 2;
+}
+
+message InputRequest {
+  string text = 1;
+  string session_id = 2;
+  bool is_submit = 3;
+}
+
+message PageUpdate {
+  oneof content {
+    PreRenderedPage full_page = 1;
+    DomDelta patch = 2;
+    StatusMessage status = 3;
+  }
+}
+
+message PreRenderedPage {
+  string markdown = 1;
+  map<uint32, string> link_map = 2;
+  string title = 3;
+  string url = 4;
+}
+
+message DomDelta {
+  bytes compressed_patch = 1;
+}
+
+message StatusMessage {
+  string message = 1;
+  StatusLevel level = 2;
+}
+
+enum StatusLevel {
+  INFO = 0;
+  WARNING = 1;
+  ERROR = 2;
+}
