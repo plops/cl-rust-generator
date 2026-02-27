@@ -26,3 +26,6 @@ crossterm = { version = "0.28", default-features = false, features = ["events"] 
 
 # Decompression for DOM patches
 zstd = { version = "0.13", default-features = false }
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }

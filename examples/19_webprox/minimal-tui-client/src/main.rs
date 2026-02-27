@@ -10,6 +10,7 @@ use input::{InputAction, InputHandler, InputMode, HitBoxMap};
 use renderer::TerminalRenderer;
 use state::PageState;
 
+use clap::Parser;
 use crossterm::{
     cursor,
     event::EnableMouseCapture,
@@ -21,17 +22,28 @@ use proto_definitions::browser::*;
 use std::io;
 use std::time::Duration;
 
+#[derive(Parser, Debug)]
+#[command(name = "minimal-tui-client")]
+#[command(about = "Remote browser TUI client", long_about = None)]
+struct Args {
+    /// Server address
+    #[arg(short, long, default_value = "http://[::1]:50051")]
+    server: String,
+
+    /// URL to navigate to on startup
+    #[arg(short, long)]
+    url: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "http://[::1]:50051".to_string());
+    let args = Args::parse();
 
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture, cursor::Hide)?;
 
-    let result = run_app(&addr).await;
+    let result = run_app(&args.server, args.url).await;
 
     execute!(
         stdout,
@@ -47,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_app(addr: &str, initial_url: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut page_state = PageState::new();
     let renderer = TerminalRenderer::new();
     let mut input_handler = InputHandler::new();
@@ -81,8 +93,21 @@ async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    status_bar.set_message("Press 'g' to enter URL, 'q' to quit");
-    render_all(&renderer, &page_state, &status_bar, scroll_offset, term_height, &mut hitbox_map);
+    // Navigate to initial URL if provided
+    if let Some(url) = initial_url {
+        connection.set_last_url(url.clone());
+        status_bar.set_message(format!("Loading {}...", url));
+        render_all(&renderer, &page_state, &status_bar, scroll_offset, term_height, &mut hitbox_map);
+        let _ = interaction_tx.send(Interaction {
+            r#type: Some(interaction::Type::Navigate(NavigateRequest {
+                url,
+                session_id: String::new(),
+            })),
+        }).await;
+    } else {
+        status_bar.set_message("Press 'g' to enter URL, 'q' to quit");
+        render_all(&renderer, &page_state, &status_bar, scroll_offset, term_height, &mut hitbox_map);
+    }
 
     // Main event loop with reconnection
     loop {
