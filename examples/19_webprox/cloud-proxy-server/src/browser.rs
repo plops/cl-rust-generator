@@ -21,16 +21,28 @@ pub struct BrowserPool {
 }
 
 impl BrowserPool {
-    pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let config = BrowserConfig::builder()
+    pub async fn new(headless: bool) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        tracing::info!("Initializing browser with headless={}", headless);
+        
+        let mut builder = BrowserConfig::builder()
             .no_sandbox()
-            .arg("--headless=new")
-            .arg("--disable-gpu")
             .arg("--disable-images")
             .arg("--blink-settings=imagesEnabled=false")
             .arg("--disable-remote-fonts")
             .user_data_dir(format!("/tmp/chromiumoxide-{}", fastrand::u64(..)))
-            .enable_request_intercept()
+            .enable_request_intercept();
+
+        // Configure headless mode
+        if headless {
+            tracing::info!("Adding --headless=new flag");
+            builder = builder.arg("--headless=new");
+        } else {
+            // Use with_head() to run in visible mode
+            tracing::info!("Using with_head() for visible mode");
+            builder = builder.with_head();
+        }
+
+        let config = builder
             .build()
             .map_err(|e| format!("Browser config error: {}", e))?;
 

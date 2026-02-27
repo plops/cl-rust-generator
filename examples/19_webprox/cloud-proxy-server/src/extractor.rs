@@ -66,7 +66,23 @@ impl ExtractionPipeline {
         // Stage 2: Markdown with link rewriting
         let (markdown, link_map) = Self::to_markdown_with_links(&clean_html);
 
-        ExtractionResult { markdown, link_map, title }
+        // Stage 3: Fallback if Readability stripped too much content
+        // Count non-whitespace lines in the markdown
+        let content_lines = markdown.lines()
+            .filter(|line| !line.trim().is_empty())
+            .count();
+        
+        if content_lines < 5 {
+            tracing::warn!("Readability produced minimal content ({} lines), retrying with raw HTML", content_lines);
+            let (raw_markdown, raw_link_map) = Self::to_markdown_with_links(&sanitized);
+            ExtractionResult { 
+                markdown: raw_markdown, 
+                link_map: raw_link_map, 
+                title 
+            }
+        } else {
+            ExtractionResult { markdown, link_map, title }
+        }
     }
 
     /// Strip data: URIs from src/href attributes to prevent panics in the

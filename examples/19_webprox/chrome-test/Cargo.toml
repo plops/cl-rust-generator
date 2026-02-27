@@ -1,0 +1,9 @@
+[package]
+name = "chrome-test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+futures-util = "0.3"

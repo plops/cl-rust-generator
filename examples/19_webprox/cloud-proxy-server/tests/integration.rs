@@ -29,7 +29,7 @@ async fn start_server() -> SocketAddr {
         let reaper = session_manager.clone();
         tokio::spawn(async move { reaper.reap_idle_sessions_loop().await });
 
-        let backend = BrowserBackend::new(session_manager).await.unwrap();
+        let backend = BrowserBackend::new(session_manager, true).await.unwrap();
         let svc = BrowsingServiceServer::new(backend);
 
         Server::builder()

@@ -3,6 +3,7 @@ members = [
     "proto-definitions",
     "cloud-proxy-server",
     "minimal-tui-client",
+    "chrome-test",
 ]
 resolver = "2"
 

@@ -41,8 +41,9 @@ pub struct BrowserBackend {
 impl BrowserBackend {
     pub async fn new(
         session_manager: SessionManager,
+        headless: bool,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let browser_pool = Arc::new(BrowserPool::new().await?);
+        let browser_pool = Arc::new(BrowserPool::new(headless).await?);
         Ok(Self {
             browser_pool,
             session_manager,
