@@ -1,14 +1,5 @@
-mod browser;
-mod compressor;
-mod differ;
-mod extractor;
-mod input;
-mod service;
-mod session;
-mod throttle;
-
-use service::BrowserBackend;
-use session::SessionManager;
+use cloud_proxy_server::service::BrowserBackend;
+use cloud_proxy_server::session::SessionManager;
 
 use proto_definitions::browser::browsing_service_server::BrowsingServiceServer;
 use tonic::transport::Server;
@@ -22,7 +13,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let session_manager = SessionManager::new();
 
-    // Spawn the idle session reaper
     let reaper_sessions = session_manager.clone();
     tokio::spawn(async move {
         reaper_sessions.reap_idle_sessions_loop().await;

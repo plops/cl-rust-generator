@@ -51,26 +51,49 @@ impl HtmlVisitor for LinkRewriter {
     }
 }
 
-/// The full extraction pipeline: raw HTML → readability → markdown → link_map
+/// The full extraction pipeline: raw HTML -> readability -> markdown -> link_map
 pub struct ExtractionPipeline;
 
 impl ExtractionPipeline {
     /// Run the full pipeline on raw HTML
     pub fn process(html: &str, _url: &str) -> ExtractionResult {
-        // Stage 1: Readability — extract main content
-        let (clean_html, title) = Self::extract_readable(html);
+        // Stage 0: Strip data URIs that cause panics in html-to-markdown-rs
+        let sanitized = Self::strip_data_uris(html);
 
-        // Stage 2: Convert to Markdown with link rewriting via visitor
+        // Stage 1: Readability
+        let (clean_html, title) = Self::extract_readable(&sanitized);
+
+        // Stage 2: Markdown with link rewriting
         let (markdown, link_map) = Self::to_markdown_with_links(&clean_html);
 
-        ExtractionResult {
-            markdown,
-            link_map,
-            title,
-        }
+        ExtractionResult { markdown, link_map, title }
     }
 
-    /// Use readability-rust to strip non-semantic content
+    /// Strip data: URIs from src/href attributes to prevent panics in the
+    /// markdown converter (it chokes on base64 blobs with bad byte indexing)
+    fn strip_data_uris(html: &str) -> String {
+        let mut result = String::with_capacity(html.len());
+        let mut rest = html;
+        while let Some(pos) = rest.find("data:") {
+            let before = &rest[..pos];
+            let in_attr = before.ends_with("=\"") || before.ends_with("='");
+            if in_attr {
+                result.push_str(before);
+                result.push('#');
+                let after = &rest[pos..];
+                let end = after.find('"')
+                    .or_else(|| after.find('\''))
+                    .unwrap_or(after.len());
+                rest = &rest[pos + end..];
+            } else {
+                result.push_str(&rest[..pos + 5]);
+                rest = &rest[pos + 5..];
+            }
+        }
+        result.push_str(rest);
+        result
+    }
+
     fn extract_readable(html: &str) -> (String, String) {
         match Readability::new(html, None) {
             Ok(mut parser) => match parser.parse() {
@@ -91,15 +114,25 @@ impl ExtractionPipeline {
         }
     }
 
-    /// Convert HTML to Markdown, replacing URLs with numeric IDs via visitor
+    /// Convert HTML to Markdown with catch_unwind as safety net against library panics
     fn to_markdown_with_links(html: &str) -> (String, LinkMap) {
         let rewriter = Rc::new(RefCell::new(LinkRewriter::new()));
-        let visitor_handle = Some(rewriter.clone() as Rc<RefCell<dyn HtmlVisitor>>);
+        let rewriter_clone = rewriter.clone();
+        let html_owned = html.to_string();
 
-        let markdown = match convert_with_visitor(html, None, visitor_handle) {
-            Ok(md) => md,
-            Err(e) => {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let visitor = Some(rewriter_clone as Rc<RefCell<dyn HtmlVisitor>>);
+            convert_with_visitor(&html_owned, None, visitor)
+        }));
+
+        let markdown = match result {
+            Ok(Ok(md)) => md,
+            Ok(Err(e)) => {
                 tracing::warn!("Markdown conversion failed: {:?}, stripping tags", e);
+                Self::strip_tags(html)
+            }
+            Err(_) => {
+                tracing::warn!("Markdown converter panicked, falling back to tag stripping");
                 Self::strip_tags(html)
             }
         };
@@ -108,7 +141,6 @@ impl ExtractionPipeline {
         (markdown, link_map)
     }
 
-    /// Fallback tag stripper
     fn strip_tags(html: &str) -> String {
         let mut result = String::new();
         let mut in_tag = false;
@@ -123,7 +155,6 @@ impl ExtractionPipeline {
         result
     }
 
-    /// Fallback title extraction from <title> tag
     fn extract_title_fallback(html: &str) -> String {
         if let Some(start) = html.find("<title>") {
             let start = start + 7;

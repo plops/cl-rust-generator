@@ -3,6 +3,10 @@ name = "cloud-proxy-server"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "cloud_proxy_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "cloud-proxy-server"
 path = "src/main.rs"
@@ -37,3 +41,6 @@ fastrand = "2"
 # Logging — minimal subscriber
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }

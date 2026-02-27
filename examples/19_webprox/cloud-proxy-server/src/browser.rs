@@ -29,6 +29,7 @@ impl BrowserPool {
             .arg("--disable-images")
             .arg("--blink-settings=imagesEnabled=false")
             .arg("--disable-remote-fonts")
+            .user_data_dir(format!("/tmp/chromiumoxide-{}", fastrand::u64(..)))
             .enable_request_intercept()
             .build()
             .map_err(|e| format!("Browser config error: {}", e))?;
