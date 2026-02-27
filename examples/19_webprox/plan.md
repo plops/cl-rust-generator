@@ -1,116 +1,80 @@
-# **Implementation Plan: Low-Bandwidth Remote Browser Isolation (RBI)**
+### IMPLEMENTATION ROADMAP
 
-## **Project Overview**
-**Objective:** Build a minimalist, terminal-based web browser where a Rust/Playwright server renders pages, prunes the DOM semantically, and streams highly compressed (`Zstd`) differential updates to a lightweight, Tokio-free Rust terminal client via gRPC. 
+#### **Phase 1: Project Scaffolding & Core Architecture (Weeks 1-2)**
+*Objective: Establish the monorepo, configure the Rust toolchain for binary optimization, and define the gRPC transport layer.*
 
-**Core Stack:** Rust, gRPC (`grpcio` or custom `h2`), Protobuf (`prost`), Playwright, Ratatui, Zstandard.
+*   **1.1 Repository & Workspace Setup:**
+    *   Initialize a Cargo workspace with two core crates: `cloud-proxy-server` and `minimal-tui-client`.
+    *   Establish a shared `proto-definitions` crate.
+*   **1.2 Toolchain & Profile Optimization:**
+    *   Enforce `opt-level = "z"`, `lto = true`, `codegen-units = 1`, `panic = "abort"`, and `strip = true` in the release profile of `Cargo.toml`.
+    *   Audit transitive dependencies using `cargo tree` to prevent version duplication (e.g., ensuring only one version of `indexmap` is compiled).
+*   **1.3 Protobuf Schema Implementation:**
+    *   Write the `browser.proto` schema, defining the `BrowsingService` bidirectional stream.
+    *   Implement the `Interaction` (Navigate, Click, Input) and `PageUpdate` (PreRenderedPage, DomDelta) `oneof` message structures.
+    *   Use `prost` and `tonic-build` to generate type-safe Rust structs from the schema.
 
----
+#### **Phase 2: Cloud Browser & Extraction Engine (Weeks 3-5)**
+*Objective: Deploy the headless browser, execute semantic sanitization, and output Markdown.*
 
-## **Phase 1: Repository Structure & Base Configuration (Weeks 1-2)**
-*Goal: Establish a Cargo Workspace and configure dependencies adhering to the "Minimalist Runtime" philosophy.*
+*   **2.1 CDP Automation Pipeline:**
+    *   Integrate `chromiumoxide` to spawn an asynchronous headless Chromium instance.
+    *   Configure network interceptors via CDP to block all `.png`, `.jpg`, `.mp4`, `.css`, and `.woff2` requests, simulating a strict text-only environment at the proxy level.
+*   **2.2 Readability & Markdown Transcoding:**
+    *   Pipe the raw HTML from the Chromium instance into the `readability-rust` engine to score and strip non-semantic DOM trees (ads, sidebars).
+    *   Implement `html-to-markdown-rs` utilizing a custom visitor pattern to mutate `<a>` tags.
+    *   **Crucial Data Structure:** Implement the `link_map<uint32, string>`. Replace all inline URLs with short numeric IDs (e.g., `[Link Text](1)`) to preserve wire bandwidth.
 
-### 1.1 Workspace Setup
-Create a Cargo workspace containing three distinct crates:
-*   `proto-lib`: Shared library containing the gRPC/Protobuf definitions and generated Rust code.
-*   `rbi-server`: The heavyweight remote browser engine and gRPC server.
-*   `rbi-client`: The highly optimized, minimal-dependency TUI client.
+#### **Phase 3: VDOM Diffing & Transport Optimization (Weeks 6-8)**
+*Objective: Enable dynamic page updates using minimal delta payloads.*
 
-### 1.2 Dependency Management (Strict "No-Bloat" Rules)
-*   **`proto-lib`:** Use `prost` and `prost-build` (avoids the heavier `protobuf-rust`).
-*   **gRPC Layer:** Use `grpcio` (C-core wrapper) or a minimal `smol`-based gRPC implementation to avoid pulling in the multithreaded Tokio executor.
-*   **`rbi-client`:** Include `ratatui` and `crossterm`, but strictly configure `default-features = false`. Include `zstd-safe` for bare-metal compression.
-*   **`rbi-server`:** Include `playwright-rs` (or a bridge to a Node.js Playwright runner if Rust bindings lack specific CDP features), `zstd-safe`, and an optimized allocator like `mimalloc`.
+*   **3.1 VDOM Synchronization:**
+    *   Integrate the `mt-dom` crate on the server to maintain an in-memory Virtual DOM of the current page state.
+    *   Establish an event listener on the CDP socket. On DOM mutation, compute the `mt-dom` patch (insertions, deletions, text updates).
+*   **3.2 Compression & Debouncing:**
+    *   Implement a `tokio::sync::mpsc` channel to aggregate rapid CDP events ("event debouncing") over a 50-100ms window to prevent network saturation.
+    *   Initialize a persistent-context `zstd` compression dictionary. Compress the `mt-dom` patch before serializing it into the `DomDelta` protobuf bytes field.
 
-### 1.3 Compiler Optimizations
-Configure the workspace `Cargo.toml` for aggressive binary size and performance optimizations:
-```toml
-[profile.release]
-lto = true
-codegen-units = 1
-opt-level = "z"
-strip = true
-```
+#### **Phase 4: Terminal Client Implementation (Weeks 9-10)**
+*Objective: Build the zero-bloat Unix TUI for consuming the gRPC stream.*
 
----
+*   **4.1 TUI Foundation:**
+    *   Initialize `tuinix` directly over `libc` to bypass heavy widget frameworks. Enable raw terminal mode and alternate screen buffer (`smcup`).
+*   **4.2 Rendering & Interactivity:**
+    *   Write a custom Markdown renderer that maps header/list structures to truecolor ANSI sequences.
+    *   **Link Resolution:** Implement the OSC 8 escape sequence (`\x1b]8;;{url}\x1b\\{label}\x1b]8;;\x1b\\`) mapper, resolving numeric IDs from the server's `link_map`.
+    *   Integrate `crossterm` event handling as a fallback for mouse tracking (X10/SGR protocols) to capture clicks on non-OSC-8 compliant terminals. Send local X/Y coordinates to a local hit-box map to trigger `ClickRequest` events.
 
-## **Phase 2: Protocol Definition & Optimization (Week 2)**
-*Goal: Implement and optimize the data transport layer to ensure maximum semantic density.*
+#### **Phase 5: Bandwidth Throttling & System Tuning (Weeks 11-12)**
+*Objective: Guarantee operational stability under strict 10KB/s constraints.*
 
-### 2.1 Protobuf Implementation
-*   Implement the provided `.proto` schema (`BrowserService`, `NavigationRequest`, `PageUpdate`, etc.).
-*   Ensure the use of `oneof` for `update` (Snapshot vs. Mutation) and `uint32` for DOM Node IDs to minimize byte-size.
-
-### 2.2 Zstandard Pipeline Configuration
-*   Implement compression middleware on both Server and Client.
-*   **Optimization:** Train a custom `Zstd` dictionary using a dataset of common structural HTML/text patterns. Distribute this dictionary file to both the client and server to push compression ratios beyond 150:1.
-
----
-
-## **Phase 3: Server-Side Engine Development (Weeks 3-5)**
-*Goal: Build the DOM-pruning, Playwright-driven rendering engine and gRPC server.*
-
-### 3.1 Playwright Initialization & Network Interception
-*   Initialize headless browser instances with multi-context support.
-*   Configure **Network Interception** (`page.route("**/*")`) to aggressively block all images, CSS, fonts, videos, and analytics scripts at the browser level.
-
-### 3.2 The Semantic Pruning Engine (DOM Downsampling)
-*   Write an injection script to linearize the DOM. 
-*   **Rules:** Strip all decorative elements (`<div>`, `<span>` wrappers). Retain and assign `uint32` IDs to `<a>`, `<button>`, `<input>`, and text nodes.
-*   Generate the initial `Snapshot` gRPC message from this pruned tree.
-
-### 3.3 Differential Streaming (`MutationObserver`)
-*   Inject JavaScript via `addInitScript` to attach a `MutationObserver` to `document.documentElement`.
-*   Watch for `childList`, `attributes`, and `characterData`.
-*   Expose a Rust binding to the browser (`expose_binding`). When mutations occur, format them into the `Mutation` proto message.
-*   **Rate Limiting:** Implement a queue/throttle. If mutation throughput exceeds ~8KB/s, pause streaming and wait for the DOM to settle, then send a fresh Snapshot.
-
-### 3.4 Server gRPC Methods
-*   Implement the `OpenPage` server-streaming RPC.
-*   Implement the `SendAction` RPC. When an action is received (e.g., `NodeID: 42, Click`), map it to the corresponding Playwright element via CDP and execute `element.click()`.
+*   **5.1 Priority Queuing System:**
+    *   Implement a 4-tier egress queue on the server stream.
+    *   *Algorithm:* If buffer utilization > 80% of the 10KB/s quota, aggressively drop Priority 3 (Incremental DOM patches) and prioritize Priority 1 (Status messages) and Priority 2 (Markdown structure).
+*   **5.2 End-to-End Simulation:**
+    *   Deploy the server to a cloud staging environment.
+    *   Use Linux `tc` (Traffic Control) to artificially throttle the network interface to exactly 10KB/s.
+    *   Measure CPU utilization, memory footprint, and client rendering latency. Target sub-500ms interaction feedback loops.
 
 ---
 
-## **Phase 4: Client-Side Terminal Interface (Weeks 6-7)**
-*Goal: Build a dumb-terminal client that transforms gRPC state into a readable UI.*
+### DEPENDENCY ARCHITECTURE MATRIX
 
-### 4.1 State Management (Virtual DOM)
-*   Create a local state struct representing the linearized DOM tree.
-*   Implement update logic: Initial `Snapshot` replaces the tree; incoming `Mutation` messages append, delete, or modify specific nodes by ID.
-
-### 4.2 Immediate-Mode Rendering (`ratatui`)
-*   Implement a linear "Reader View" layout engine.
-*   Render text contiguously. Style interactive nodes explicitly (e.g., underline links, wrap buttons in `[ ]`).
-*   **Hit-Mapping:** During the render pass loop, calculate the terminal screen `Rect` (X, Y, Width, Height) for every interactive element and store it in a volatile frame state.
-
-### 4.3 Input Handling & Local Echo
-*   Capture `MouseEvent` and keyboard events via `crossterm`.
-*   On mouse click, intersect the (X, Y) coordinates with the frame's Hit-Map. 
-*   If a match is found, fire the `SendAction` gRPC request.
-*   **Latency Mitigation (Local Echo):** Instantly change the styling of the clicked element locally (e.g., change text to yellow or append "[Loading...]") so the user isn't paralyzed while the 10KB/s round-trip completes.
+| Subsystem | Primary Crate | Feature Flags (Constraint Enforcement) | Implementation Goal |
+| :--- | :--- | :--- | :--- |
+| **gRPC Transceiver** | `tonic` | `default-features = false`, `tls`, `prost` | Exclude HTTP/1.1 overhead; strictly HTTP/2 binary framing. |
+| **Browser Runner** | `chromiumoxide` | `_default_` | Asynchronous DevTools socket interfacing. |
+| **DOM Diffing** | `mt-dom` | `_default_` | Isolate generic VDOM diff generation without web-sys bloat. |
+| **Compression** | `zstd` | `experimental`, `dictionaries` | Dictionary-based persistent-state patch compression. |
+| **UI Rendering** | `tuinix` | `_default_` | Direct `libc` bindings; no `ncurses` or `crossterm` UI overlap. |
 
 ---
 
-## **Phase 5: Testing, Simulation & Refinement (Week 8)**
-*Goal: Validate the 10KB/s constraint and ensure stability.*
+### CRITICAL RISK MITIGATION
 
-### 5.1 Bandwidth Constraint Simulation
-*   Use Linux `tc` (Traffic Control) or `NetEm` to artificially restrict the server interface to a strict 10KB/s limit and introduce 300ms latency.
-*   Monitor protocol timeouts and adjust gRPC keep-alive and chunking settings.
-
-### 5.2 Real-World Benchmarking
-*   Test against notoriously "heavy" websites (e.g., news portals, modern SPAs).
-*   Verify that memory usage remains stable on the server when handling multiple browser contexts.
-*   Verify client binary size remains strictly minimal (target: < 3MB).
-
----
-
-## **Resource Allocation & Milestones**
-
-| Milestone | Deliverable | Est. Timeline |
-| :--- | :--- | :--- |
-| **M1: Architecture** | Workspace setup, pure-proto payload definitions, gRPC layer tests. | End of Week 2 |
-| **M2: Heavy Lifting** | Playwright server running, intercepting network, pruning DOM into JSON/Proto. | End of Week 4 |
-| **M3: Streaming** | MutationObserver injected, continuous differential streaming working. | End of Week 5 |
-| **M4: The Client** | Ratatui rendering VDOM, hit-map working, clicks successfully reaching server. | End of Week 7 |
-| **M5: Optimization** | Zstd dictionary training, strict 10KB/s testing, binary size shrinking. | End of Week 8 |
+1.  **Risk:** gRPC stream saturation from heavy JavaScript single-page applications (SPAs) causing endless DOM mutations.
+    *   **Mitigation:** Implement strict debouncing in the `BrowserBackend::session` loop. Cap DOM diff transmissions to a maximum of 2 frames per second (2Hz).
+2.  **Risk:** Uncontrollable binary size bloat due to `tonic` and `chromiumoxide` transitive dependencies.
+    *   **Mitigation:** Enforce nightly Rust `build-std` compilation in the CI pipeline to strip and recompile the standard library with `panic=abort`.
+3.  **Risk:** Terminal incompatibility with OSC 8 hyperlinking.
+    *   **Mitigation:** The `crossterm` mouse coordinate map (Graceful Degradation matrix) must be initialized automatically if the `COLORTERM` or `TERM_PROGRAM` environment variables do not indicate modern emulator support (e.g., Ghostty, WezTerm).
