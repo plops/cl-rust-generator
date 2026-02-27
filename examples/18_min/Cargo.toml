@@ -1,0 +1,11 @@
+[package]
+name = "minimal_example"
+version = "0.1.0"
+edition = "2024"
+
+[profile.release]
+opt-level = "z"      # Optimize for size (use "s" if "z" is larger)
+lto = true           # Enable Link Time Optimization
+codegen-units = 1    # Reduce parallel code generation units
+panic = "abort"      # Remove stack unwinding code
+strip = true         # Automatically strip symbols and debug info
