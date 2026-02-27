@@ -45,5 +45,8 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 # CLI argument parsing
 clap = { version = "4", features = ["derive"] }
 
+# URL handling
+url = "2.5"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }

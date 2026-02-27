@@ -5,6 +5,7 @@ use std::rc::Rc;
 use html_to_markdown_rs::convert_with_visitor;
 use html_to_markdown_rs::visitor::{HtmlVisitor, NodeContext, VisitResult};
 use readability_rust::Readability;
+use url::Url;
 
 /// Maps numeric link IDs to full URLs
 pub type LinkMap = HashMap<u32, String>;
@@ -21,13 +22,15 @@ pub struct ExtractionResult {
 struct LinkRewriter {
     counter: u32,
     link_map: HashMap<u32, String>,
+    base_url: Option<Url>,
 }
 
 impl LinkRewriter {
-    fn new() -> Self {
+    fn new(base_url: Option<Url>) -> Self {
         Self {
             counter: 1,
             link_map: HashMap::new(),
+            base_url,
         }
     }
 }
@@ -40,14 +43,16 @@ impl HtmlVisitor for LinkRewriter {
         text: &str,
         _title: Option<&str>,
     ) -> VisitResult {
-        if href.starts_with("http://") || href.starts_with("https://") {
-            let id = self.counter;
-            self.counter += 1;
-            self.link_map.insert(id, href.to_string());
-            VisitResult::Custom(format!("[{}]({})", text, id))
+        let absolute_url = if let Some(base) = &self.base_url {
+            base.join(href).map(|u| u.to_string()).unwrap_or_else(|_| href.to_string())
         } else {
-            VisitResult::Continue
-        }
+            href.to_string()
+        };
+
+        let id = self.counter;
+        self.counter += 1;
+        self.link_map.insert(id, absolute_url);
+        VisitResult::Custom(format!("[{}]({})", text, id))
     }
 }
 
@@ -56,7 +61,7 @@ pub struct ExtractionPipeline;
 
 impl ExtractionPipeline {
     /// Run the full pipeline on raw HTML
-    pub fn process(html: &str, _url: &str) -> ExtractionResult {
+    pub fn process(html: &str, url: &str) -> ExtractionResult {
         // Stage 0: Strip data URIs that cause panics in html-to-markdown-rs
         let sanitized = Self::strip_data_uris(html);
 
@@ -64,7 +69,7 @@ impl ExtractionPipeline {
         let (clean_html, title) = Self::extract_readable(&sanitized);
 
         // Stage 2: Markdown with link rewriting
-        let (markdown, link_map) = Self::to_markdown_with_links(&clean_html);
+        let (markdown, link_map) = Self::to_markdown_with_links(&clean_html, url);
 
         // Stage 3: Fallback if Readability stripped too much content
         // Count non-whitespace lines in the markdown
@@ -74,7 +79,7 @@ impl ExtractionPipeline {
         
         if content_lines < 5 {
             tracing::warn!("Readability produced minimal content ({} lines), retrying with raw HTML", content_lines);
-            let (raw_markdown, raw_link_map) = Self::to_markdown_with_links(&sanitized);
+            let (raw_markdown, raw_link_map) = Self::to_markdown_with_links(&sanitized, url);
             ExtractionResult { 
                 markdown: raw_markdown, 
                 link_map: raw_link_map, 
@@ -131,8 +136,9 @@ impl ExtractionPipeline {
     }
 
     /// Convert HTML to Markdown with catch_unwind as safety net against library panics
-    fn to_markdown_with_links(html: &str) -> (String, LinkMap) {
-        let rewriter = Rc::new(RefCell::new(LinkRewriter::new()));
+    fn to_markdown_with_links(html: &str, base_url: &str) -> (String, LinkMap) {
+        let base = Url::parse(base_url).ok();
+        let rewriter = Rc::new(RefCell::new(LinkRewriter::new(base)));
         let rewriter_clone = rewriter.clone();
         let html_owned = html.to_string();
 

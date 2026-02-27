@@ -1,7 +1,7 @@
 use cloud_proxy_server::extractor::ExtractionPipeline;
 
 fn main() {
-    let html = std::fs::read_to_string("/tmp/hn.html").expect("save HN html to /tmp/hn.html first");
+    let html = std::fs::read_to_string("/home/kiel/stage/cl-rust-generator/examples/19_webprox/hn.html").expect("save HN html to hn.html first");
     let result = ExtractionPipeline::process(&html, "https://news.ycombinator.com");
     println!("=== TITLE ===");
     println!("{}", result.title);
