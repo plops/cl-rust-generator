@@ -1,7 +1,5 @@
 mod browser;
-#[allow(dead_code)]
 mod compressor;
-#[allow(dead_code)]
 mod differ;
 mod extractor;
 mod input;

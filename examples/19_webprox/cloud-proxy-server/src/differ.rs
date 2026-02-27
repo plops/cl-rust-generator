@@ -12,6 +12,7 @@ pub enum VdomNode {
 
 /// A patch describing a change between two VDOM states
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub enum DomPatch {
     ReplaceText { path: Vec<usize>, new_text: String },
     InsertChild { path: Vec<usize>, index: usize, node: VdomNode },

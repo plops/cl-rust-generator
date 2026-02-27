@@ -2,14 +2,13 @@
 mod connection;
 #[allow(dead_code)]
 mod echo;
-#[allow(dead_code)]
 mod input;
 mod renderer;
 mod state;
 
 use connection::ServerConnection;
 use echo::{LocalEcho, StatusBar};
-use input::{InputAction, InputHandler, InputMode};
+use input::{InputAction, InputHandler, InputMode, HitBoxMap};
 use renderer::TerminalRenderer;
 use state::PageState;
 
@@ -56,6 +55,7 @@ async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut page_state = PageState::new();
     let renderer = TerminalRenderer::new();
     let mut input_handler = InputHandler::new();
+    let mut hitbox_map = HitBoxMap::new();
     let mut local_echo = LocalEcho::new();
     let mut status_bar = StatusBar::new();
     let mut scroll_offset: usize = 0;
@@ -66,7 +66,7 @@ async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
 
     // Initial connection
     status_bar.set_message("Connecting...");
-    render_all(&renderer, &page_state, &status_bar, scroll_offset, term_height);
+    render_all(&renderer, &page_state, &status_bar, scroll_offset, term_height, &mut hitbox_map);
 
     let (interaction_tx, mut update_stream) = match connection.connect().await {
         Ok(pair) => {
@@ -76,11 +76,11 @@ async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => {
             status_bar.set_message(format!("Connection failed: {}", e));
             status_bar.set_connection("Offline");
-            render_all(&renderer, &page_state, &status_bar, scroll_offset, term_height);
+            render_all(&renderer, &page_state, &status_bar, scroll_offset, term_height, &mut hitbox_map);
 
             // Wait for quit
             loop {
-                let action = input_handler.poll(Duration::from_millis(100));
+                let action = input_handler.poll(Duration::from_millis(100), &hitbox_map);
                 if matches!(action, InputAction::Quit) {
                     return Ok(());
                 }
@@ -89,7 +89,7 @@ async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     status_bar.set_message("Press 'g' to enter URL, 'q' to quit");
-    render_all(&renderer, &page_state, &status_bar, scroll_offset, term_height);
+    render_all(&renderer, &page_state, &status_bar, scroll_offset, term_height, &mut hitbox_map);
 
     // Main event loop: poll input and server updates
     loop {
@@ -108,26 +108,26 @@ async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
                             &mut connection,
                         );
                         let (_, h) = terminal::size().unwrap_or((80, 24));
-                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h);
+                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
                     }
                     Some(Err(e)) => {
                         status_bar.set_message(format!("Stream error: {}", e));
                         status_bar.set_connection("Disconnected");
                         let (_, h) = terminal::size().unwrap_or((80, 24));
-                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h);
+                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
                         break;
                     }
                     None => {
                         status_bar.set_connection("Disconnected");
                         let (_, h) = terminal::size().unwrap_or((80, 24));
-                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h);
+                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
                         break;
                     }
                 }
             }
 
             _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                let action = input_handler.poll(Duration::from_millis(1));
+                let action = input_handler.poll(Duration::from_millis(1), &hitbox_map);
                 let (_, h) = terminal::size().unwrap_or((80, 24));
 
                 match action {
@@ -135,7 +135,7 @@ async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
                     InputAction::Navigate(url) => {
                         connection.set_last_url(url.clone());
                         status_bar.set_message(format!("Loading {}...", url));
-                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h);
+                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
                         let _ = interaction_tx.send(Interaction {
                             r#type: Some(interaction::Type::Navigate(NavigateRequest {
                                 url,
@@ -178,11 +178,11 @@ async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
                     }
                     InputAction::ScrollUp => {
                         scroll_offset = scroll_offset.saturating_sub(3);
-                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h);
+                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
                     }
                     InputAction::ScrollDown => {
                         scroll_offset += 3;
-                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h);
+                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
                     }
                     InputAction::ToggleInputMode => {
                         let mode_str = match input_handler.mode {
@@ -191,7 +191,7 @@ async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
                             InputMode::UrlBar => "URL",
                         };
                         status_bar.set_mode(mode_str);
-                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h);
+                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
                     }
                     InputAction::None => {}
                 }
@@ -199,7 +199,7 @@ async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
                 // Show URL bar input if in UrlBar mode
                 if input_handler.mode == InputMode::UrlBar {
                     status_bar.set_message(format!("URL: {}_", input_handler.url_buffer));
-                    render_all(&renderer, &page_state, &status_bar, scroll_offset, h);
+                    render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
                 }
             }
         }
@@ -244,7 +244,8 @@ fn render_all(
     status_bar: &StatusBar,
     scroll_offset: usize,
     term_height: u16,
+    hitbox_map: &mut crate::input::HitBoxMap,
 ) {
-    renderer.render(page_state, scroll_offset, term_height);
+    renderer.render(page_state, scroll_offset, term_height, hitbox_map);
     renderer.render_status_bar(&status_bar.message, &status_bar.connection_status, term_height);
 }

@@ -71,7 +71,6 @@ pub struct InputHandler {
     pub mode: InputMode,
     pub url_buffer: String,
     pub text_buffer: String,
-    pub hitbox_map: HitBoxMap,
 }
 
 impl InputHandler {
@@ -80,24 +79,23 @@ impl InputHandler {
             mode: InputMode::Normal,
             url_buffer: String::new(),
             text_buffer: String::new(),
-            hitbox_map: HitBoxMap::new(),
         }
     }
 
     /// Poll for input events with a timeout
-    pub fn poll(&mut self, timeout: Duration) -> InputAction {
+    pub fn poll(&mut self, timeout: Duration, hitbox_map: &HitBoxMap) -> InputAction {
         if event::poll(timeout).unwrap_or(false) {
             if let Ok(ev) = event::read() {
-                return self.handle_event(ev);
+                return self.handle_event(ev, hitbox_map);
             }
         }
         InputAction::None
     }
 
-    fn handle_event(&mut self, ev: Event) -> InputAction {
+    fn handle_event(&mut self, ev: Event, hitbox_map: &HitBoxMap) -> InputAction {
         match ev {
             Event::Key(key) => self.handle_key(key),
-            Event::Mouse(mouse) => self.handle_mouse(mouse),
+            Event::Mouse(mouse) => Self::handle_mouse(mouse, hitbox_map),
             Event::Resize(_, _) => InputAction::None,
             _ => InputAction::None,
         }
@@ -182,10 +180,10 @@ impl InputHandler {
         }
     }
 
-    fn handle_mouse(&mut self, mouse: MouseEvent) -> InputAction {
+    fn handle_mouse(mouse: MouseEvent, hitbox_map: &HitBoxMap) -> InputAction {
         match mouse.kind {
             MouseEventKind::Down(_) => {
-                if let Some(link_id) = self.hitbox_map.hit_test(mouse.column, mouse.row) {
+                if let Some(link_id) = hitbox_map.hit_test(mouse.column, mouse.row) {
                     InputAction::Click(link_id)
                 } else {
                     InputAction::None

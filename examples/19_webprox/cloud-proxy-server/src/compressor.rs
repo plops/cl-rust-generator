@@ -22,10 +22,12 @@ impl PatchCompressor {
 }
 
 /// Decompressor for the client side
+#[allow(dead_code)]
 pub struct PatchDecompressor {
     decompressor: Decompressor<'static>,
 }
 
+#[allow(dead_code)]
 impl PatchDecompressor {
     pub fn new() -> Self {
         let decompressor = Decompressor::new().expect("Failed to create zstd decompressor");

@@ -72,7 +72,7 @@ impl SessionManager {
     }
 
     /// Store the link_map for a session (used for click resolution)
-    #[allow(dead_code)]
+    #[allow(dead_code)] // called from tokio::spawn in service.rs
     pub async fn set_link_map(&self, id: &str, link_map: LinkMap) {
         let mut sessions = self.sessions.lock().await;
         if let Some(session) = sessions.get_mut(id) {
@@ -81,7 +81,7 @@ impl SessionManager {
     }
 
     /// Resolve a link_id to a URL for a given session
-    #[allow(dead_code)]
+    #[allow(dead_code)] // called from tokio::spawn in service.rs
     pub async fn resolve_link(&self, id: &str, link_id: u32) -> Option<String> {
         let sessions = self.sessions.lock().await;
         sessions
