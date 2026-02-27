@@ -1,6 +1,4 @@
-#[allow(dead_code)]
 mod connection;
-#[allow(dead_code)]
 mod echo;
 mod input;
 mod renderer;
@@ -29,14 +27,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nth(1)
         .unwrap_or_else(|| "http://[::1]:50051".to_string());
 
-    // Enter raw mode and alternate screen
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture, cursor::Hide)?;
 
     let result = run_app(&addr).await;
 
-    // Restore terminal
     execute!(
         stdout,
         LeaveAlternateScreen,
@@ -61,14 +57,13 @@ async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut scroll_offset: usize = 0;
 
     let (_term_width, term_height) = terminal::size()?;
-
     let mut connection = ServerConnection::new(addr.to_string());
 
     // Initial connection
     status_bar.set_message("Connecting...");
     render_all(&renderer, &page_state, &status_bar, scroll_offset, term_height, &mut hitbox_map);
 
-    let (interaction_tx, mut update_stream) = match connection.connect().await {
+    let (mut interaction_tx, mut update_stream) = match connection.connect().await {
         Ok(pair) => {
             status_bar.set_connection("Connected");
             pair
@@ -77,8 +72,6 @@ async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
             status_bar.set_message(format!("Connection failed: {}", e));
             status_bar.set_connection("Offline");
             render_all(&renderer, &page_state, &status_bar, scroll_offset, term_height, &mut hitbox_map);
-
-            // Wait for quit
             loop {
                 let action = input_handler.poll(Duration::from_millis(100), &hitbox_map);
                 if matches!(action, InputAction::Quit) {
@@ -91,51 +84,107 @@ async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
     status_bar.set_message("Press 'g' to enter URL, 'q' to quit");
     render_all(&renderer, &page_state, &status_bar, scroll_offset, term_height, &mut hitbox_map);
 
-    // Main event loop: poll input and server updates
+    // Main event loop with reconnection
     loop {
-        // Check for server updates (non-blocking)
+        let should_reconnect = run_session_loop(
+            &mut interaction_tx,
+            &mut update_stream,
+            &mut page_state,
+            &renderer,
+            &mut input_handler,
+            &mut hitbox_map,
+            &mut local_echo,
+            &mut status_bar,
+            &mut scroll_offset,
+            &mut connection,
+        )
+        .await;
+
+        if !should_reconnect {
+            return Ok(()); // User quit
+        }
+
+        // Attempt reconnection
+        status_bar.set_message("Reconnecting...");
+        status_bar.set_connection(connection.status_text());
+        let (_, h) = terminal::size().unwrap_or((80, 24));
+        render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
+
+        match connection.reconnect().await {
+            Ok((tx, stream)) => {
+                interaction_tx = tx;
+                update_stream = stream;
+                status_bar.set_connection("Connected");
+                status_bar.set_message("Reconnected");
+                let (_, h) = terminal::size().unwrap_or((80, 24));
+                render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
+            }
+            Err(_) => {
+                status_bar.set_connection("Offline");
+                status_bar.set_message("Reconnection failed. Press 'q' to quit.");
+                let (_, h) = terminal::size().unwrap_or((80, 24));
+                render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
+                loop {
+                    let action = input_handler.poll(Duration::from_millis(100), &hitbox_map);
+                    if matches!(action, InputAction::Quit) {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Run the main session loop. Returns true if we should reconnect, false if user quit.
+async fn run_session_loop(
+    interaction_tx: &mut tokio::sync::mpsc::Sender<Interaction>,
+    update_stream: &mut tonic::Streaming<PageUpdate>,
+    page_state: &mut PageState,
+    renderer: &TerminalRenderer,
+    input_handler: &mut InputHandler,
+    hitbox_map: &mut HitBoxMap,
+    local_echo: &mut LocalEcho,
+    status_bar: &mut StatusBar,
+    scroll_offset: &mut usize,
+    connection: &mut ServerConnection,
+) -> bool {
+    loop {
         tokio::select! {
             biased;
 
             update = update_stream.next() => {
                 match update {
                     Some(Ok(page_update)) => {
-                        handle_page_update(
-                            page_update,
-                            &mut page_state,
-                            &mut local_echo,
-                            &mut status_bar,
-                            &mut connection,
-                        );
+                        handle_page_update(page_update, page_state, local_echo, status_bar, connection);
                         let (_, h) = terminal::size().unwrap_or((80, 24));
-                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
+                        render_all(renderer, page_state, status_bar, *scroll_offset, h, hitbox_map);
                     }
                     Some(Err(e)) => {
                         status_bar.set_message(format!("Stream error: {}", e));
                         status_bar.set_connection("Disconnected");
                         let (_, h) = terminal::size().unwrap_or((80, 24));
-                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
-                        break;
+                        render_all(renderer, page_state, status_bar, *scroll_offset, h, hitbox_map);
+                        return true; // reconnect
                     }
                     None => {
                         status_bar.set_connection("Disconnected");
                         let (_, h) = terminal::size().unwrap_or((80, 24));
-                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
-                        break;
+                        render_all(renderer, page_state, status_bar, *scroll_offset, h, hitbox_map);
+                        return true; // reconnect
                     }
                 }
             }
 
             _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                let action = input_handler.poll(Duration::from_millis(1), &hitbox_map);
+                let action = input_handler.poll(Duration::from_millis(1), hitbox_map);
                 let (_, h) = terminal::size().unwrap_or((80, 24));
 
                 match action {
-                    InputAction::Quit => return Ok(()),
+                    InputAction::Quit => return false,
                     InputAction::Navigate(url) => {
                         connection.set_last_url(url.clone());
                         status_bar.set_message(format!("Loading {}...", url));
-                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
+                        render_all(renderer, page_state, status_bar, *scroll_offset, h, hitbox_map);
                         let _ = interaction_tx.send(Interaction {
                             r#type: Some(interaction::Type::Navigate(NavigateRequest {
                                 url,
@@ -177,12 +226,12 @@ async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
                         }).await;
                     }
                     InputAction::ScrollUp => {
-                        scroll_offset = scroll_offset.saturating_sub(3);
-                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
+                        *scroll_offset = scroll_offset.saturating_sub(3);
+                        render_all(renderer, page_state, status_bar, *scroll_offset, h, hitbox_map);
                     }
                     InputAction::ScrollDown => {
-                        scroll_offset += 3;
-                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
+                        *scroll_offset += 3;
+                        render_all(renderer, page_state, status_bar, *scroll_offset, h, hitbox_map);
                     }
                     InputAction::ToggleInputMode => {
                         let mode_str = match input_handler.mode {
@@ -191,21 +240,18 @@ async fn run_app(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
                             InputMode::UrlBar => "URL",
                         };
                         status_bar.set_mode(mode_str);
-                        render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
+                        render_all(renderer, page_state, status_bar, *scroll_offset, h, hitbox_map);
                     }
                     InputAction::None => {}
                 }
 
-                // Show URL bar input if in UrlBar mode
                 if input_handler.mode == InputMode::UrlBar {
                     status_bar.set_message(format!("URL: {}_", input_handler.url_buffer));
-                    render_all(&renderer, &page_state, &status_bar, scroll_offset, h, &mut hitbox_map);
+                    render_all(renderer, page_state, status_bar, *scroll_offset, h, hitbox_map);
                 }
             }
         }
     }
-
-    Ok(())
 }
 
 fn handle_page_update(
@@ -227,9 +273,12 @@ fn handle_page_update(
             connection.set_last_url(page.url);
             status_bar.set_message(format!("{}", page_state.title));
         }
-        Some(page_update::Content::Patch(_delta)) => {
-            // TODO: decompress and apply DOM delta
-            status_bar.set_message("Received incremental update");
+        Some(page_update::Content::Patch(delta)) => {
+            if page_state.apply_patch(&delta.compressed_patch) {
+                status_bar.set_message("Incremental update applied");
+            } else {
+                status_bar.set_message("Patch apply failed, awaiting full refresh");
+            }
         }
         Some(page_update::Content::Status(msg)) => {
             status_bar.set_message(&msg.message);
@@ -244,7 +293,7 @@ fn render_all(
     status_bar: &StatusBar,
     scroll_offset: usize,
     term_height: u16,
-    hitbox_map: &mut crate::input::HitBoxMap,
+    hitbox_map: &mut HitBoxMap,
 ) {
     renderer.render(page_state, scroll_offset, term_height, hitbox_map);
     renderer.render_status_bar(&status_bar.message, &status_bar.connection_status, term_height);

@@ -25,6 +25,7 @@ impl LocalEcho {
     }
 
     /// Check if a link is in loading state
+    #[allow(dead_code)]
     pub fn is_loading(&self, link_id: u32) -> bool {
         self.loading_links.iter().any(|(id, _)| *id == link_id)
     }
@@ -40,6 +41,7 @@ impl LocalEcho {
     }
 
     /// Get the current local input echo text
+    #[allow(dead_code)]
     pub fn input_text(&self) -> &str {
         &self.input_buffer
     }
