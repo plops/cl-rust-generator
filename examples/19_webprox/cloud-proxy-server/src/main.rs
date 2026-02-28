@@ -8,6 +8,7 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(name = "cloud-proxy-server")]
 #[command(about = "Remote browser proxy server", long_about = None)]
+#[command(version)]
 struct Args {
     /// Disable headless mode (show browser window)
     #[arg(long, default_value_t = false)]

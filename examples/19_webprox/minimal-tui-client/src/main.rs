@@ -25,6 +25,7 @@ use std::time::Duration;
 #[derive(Parser, Debug)]
 #[command(name = "minimal-tui-client")]
 #[command(about = "Remote browser TUI client", long_about = None)]
+#[command(version)]
 struct Args {
     /// Server address
     #[arg(short, long, default_value = "http://[::1]:50051")]
