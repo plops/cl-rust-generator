@@ -1,4 +1,5 @@
 pub mod browser;
+pub mod config;
 pub mod compressor;
 pub mod differ;
 pub mod extractor;

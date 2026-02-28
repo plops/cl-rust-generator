@@ -6,6 +6,7 @@ use chromiumoxide::cdp::browser_protocol::fetch::{
 use chromiumoxide::cdp::browser_protocol::network::ErrorReason;
 use chromiumoxide::Page;
 use futures_util::StreamExt;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use crate::service::ResourceFlags;
@@ -26,44 +27,75 @@ impl BrowserPool {
         headless: bool,
         flags: ResourceFlags,
         chrome_binary: Option<String>,
+        extra_chrome_args: Vec<String>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         tracing::info!("Initializing browser with headless={}, flags={:?}", headless, flags);
-        
+
+        let selected_chrome_binary = chrome_binary.or_else(detect_chrome_binary);
+        let mut launch_args: Vec<String> = Vec::new();
+
         let mut builder = BrowserConfig::builder()
             .no_sandbox()
             .user_data_dir(format!("/tmp/chromiumoxide-{}", fastrand::u64(..)))
             .enable_request_intercept();
 
-        if let Some(path) = chrome_binary {
-            tracing::info!("Using custom browser executable: {}", path);
+        if let Some(path) = selected_chrome_binary.clone() {
+            tracing::info!("Using browser executable: {}", path);
             builder = builder.chrome_executable(path);
+        } else {
+            tracing::info!("Using chromiumoxide auto-detected browser executable");
         }
 
         if !flags.load_images && !flags.load_all {
+            launch_args.push("--disable-images".to_string());
+            launch_args.push("--blink-settings=imagesEnabled=false".to_string());
             builder = builder
                 .arg("--disable-images")
                 .arg("--blink-settings=imagesEnabled=false");
         }
 
         if !flags.load_fonts && !flags.load_all {
+            launch_args.push("--disable-remote-fonts".to_string());
             builder = builder.arg("--disable-remote-fonts");
         }
 
         // Configure headless mode
         if headless {
-            tracing::info!("Adding --headless=new flag");
-            builder = builder.arg("--headless=new");
+            tracing::info!("Using chromium new headless mode");
+            builder = builder.new_headless_mode();
         } else {
             // Use with_head() to run in visible mode
             tracing::info!("Using with_head() for visible mode");
             builder = builder.with_head();
         }
 
+        if !extra_chrome_args.is_empty() {
+            tracing::info!("Adding {} extra Chrome arg(s) from config/CLI", extra_chrome_args.len());
+            launch_args.extend(extra_chrome_args.iter().cloned());
+            builder = builder.args(extra_chrome_args.iter().cloned());
+        }
+
+        tracing::debug!(
+            executable = selected_chrome_binary.as_deref().unwrap_or("<auto-detect>"),
+            ?launch_args,
+            "Browser launch settings (chromiumoxide also appends built-in default args)"
+        );
+
         let config = builder
             .build()
             .map_err(|e| format!("Browser config error: {}", e))?;
 
-        let (browser, mut handler) = Browser::launch(config).await?;
+        let (browser, mut handler) = Browser::launch(config).await.map_err(|e| {
+            let message = e.to_string();
+            if message.contains("unknown flag `disable-background-networking`") {
+                std::io::Error::other(
+                    "Browser wrapper rejected Chromium flags. Set a real binary path with \
+                     --chrome-binary or config `chrome_binary`, and retry.",
+                )
+            } else {
+                std::io::Error::other(format!("Browser launch failed: {}", e))
+            }
+        })?;
 
         // Spawn the CDP handler loop
         tokio::spawn(async move {
@@ -201,4 +233,41 @@ impl BrowserPool {
         .map_err(|_| "Timeout getting page content")??;
         Ok(html)
     }
+}
+
+fn detect_chrome_binary() -> Option<String> {
+    const ABSOLUTE_CANDIDATES: &[&str] = &[
+        "/usr/lib/chromium-browser/chrome",
+        "/usr/lib/chromium/chromium",
+        "/snap/chromium/current/usr/lib/chromium-browser/chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium",
+    ];
+    const PATH_CANDIDATES: &[&str] = &[
+        "google-chrome-stable",
+        "google-chrome",
+        "chromium",
+        "chrome",
+        "chrome-browser",
+        "chromium-browser",
+    ];
+
+    for candidate in ABSOLUTE_CANDIDATES {
+        if Path::new(candidate).is_file() {
+            return Some((*candidate).to_string());
+        }
+    }
+
+    let path_env = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_env) {
+        for bin in PATH_CANDIDATES {
+            let candidate = dir.join(bin);
+            if candidate.is_file() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    None
 }

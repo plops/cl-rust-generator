@@ -70,6 +70,15 @@ cargo run --bin cloud-proxy-server
 
 # Release
 ./target/release/cloud-proxy-server
+
+# Verbose launch diagnostics
+./target/release/cloud-proxy-server --log-level debug
+
+# Add custom Chromium flags
+./target/release/cloud-proxy-server --chrome-arg=--disable-gpu --chrome-arg=--proxy-server=http://127.0.0.1:8080
+
+# Load settings from TOML config
+./target/release/cloud-proxy-server --config ./server.toml
 ```
 
 The server listens on `[::1]:50051` (IPv6 localhost) by default. You'll see:
@@ -218,7 +227,30 @@ A 75ms debouncer coalesces rapid DOM mutation events before triggering re-extrac
 
 ## Configuration
 
-There's no config file — the server binds to `[::1]:50051` and the client connects there by default. To change the address, pass it as the first argument to the client.
+The server now supports an optional TOML config file via `--config <PATH>`.
+
+Example `server.toml`:
+
+```toml
+log_level = "debug"
+chrome_binary = "/usr/bin/chromium"
+extra_chrome_args = [
+  "--disable-gpu",
+  "--proxy-server=http://127.0.0.1:8080",
+]
+no_headless = false
+load_all = false
+load_images = false
+load_media = false
+load_css = false
+load_fonts = false
+```
+
+Precedence:
+- CLI values override config file values.
+- `--chrome-arg` values are appended after `extra_chrome_args`.
+
+The server still binds to `[::1]:50051` and the client connects there by default. To change the address, pass it as the first argument to the client.
 
 To simulate a bandwidth-constrained link for testing:
 
@@ -232,7 +264,8 @@ sudo tc qdisc del dev lo root
 
 ## Troubleshooting
 
-- **"Browser config error"** — Chromium isn't found. Make sure `chromium-browser` or `google-chrome` is in your `$PATH`.
+- **Launch fails with unknown Chromium flags** — your distro wrapper may reject Chrome flags. Set `--chrome-binary /path/to/real/chrome` (or `chrome_binary` in config) and run with `--log-level debug` to inspect launch settings.
+- **"Browser config error"** — Chromium isn't found. Make sure `chromium`/`google-chrome` exists in your `$PATH`, or set `--chrome-binary`.
 - **Client shows "Connection failed"** — The server isn't running, or you're connecting to the wrong address. Check that the server started successfully.
 - **Blank page after navigation** — Some SPAs require JavaScript execution time. The server waits for navigation to complete, but very heavy JS apps may not render fully.
 - **Garbled terminal after crash** — Run `reset` to restore your terminal state.

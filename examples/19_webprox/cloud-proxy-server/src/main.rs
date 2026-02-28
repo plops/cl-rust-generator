@@ -1,15 +1,25 @@
 use cloud_proxy_server::service::BrowserBackend;
 use cloud_proxy_server::session::SessionManager;
+use cloud_proxy_server::config::ServerConfigFile;
 
 use proto_definitions::browser::browsing_service_server::BrowsingServiceServer;
 use tonic::transport::Server;
 use clap::Parser;
+use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
 #[command(name = "cloud-proxy-server")]
 #[command(about = "Remote browser proxy server", long_about = None)]
 #[command(version)]
 struct Args {
+    /// Optional TOML config file path
+    #[arg(long)]
+    config: Option<String>,
+
+    /// Tracing filter/directive (examples: info, debug, cloud_proxy_server=debug)
+    #[arg(long)]
+    log_level: Option<String>,
+
     /// Disable headless mode (show browser window)
     #[arg(long, default_value_t = false)]
     no_headless: bool,
@@ -45,17 +55,34 @@ struct Args {
     /// Path to Chrome/Chromium executable (overrides auto-detection)
     #[arg(long)]
     chrome_binary: Option<String>,
+
+    /// Extra Chrome launch argument (repeatable)
+    #[arg(long = "chrome-arg")]
+    chrome_args: Vec<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    tracing_subscriber::fmt::init();
-
     let args = Args::parse();
+    let file_config = load_config(args.config.as_deref())?;
+    let log_level = resolve_log_level(&args, &file_config);
+    init_tracing(&log_level)?;
+
+    let no_headless = args.no_headless || file_config.no_headless.unwrap_or(false);
+    let load_all = args.load_all || file_config.load_all.unwrap_or(false);
+    let load_images = args.load_images || file_config.load_images.unwrap_or(false);
+    let load_media = args.load_media || file_config.load_media.unwrap_or(false);
+    let load_css = args.load_css || file_config.load_css.unwrap_or(false);
+    let load_fonts = args.load_fonts || file_config.load_fonts.unwrap_or(false);
+    let chrome_binary = args
+        .chrome_binary
+        .clone()
+        .or(file_config.chrome_binary.clone());
+    let extra_chrome_args = resolve_chrome_args(&args, &file_config);
 
     let addr = "[::1]:50051".parse()?;
     tracing::info!("Starting cloud-proxy-server on {}", addr);
-    if args.no_headless {
+    if no_headless {
         tracing::info!("Running in visible mode (headless disabled)");
     }
 
@@ -79,18 +106,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
 
     let flags = cloud_proxy_server::service::ResourceFlags {
-        load_images: args.load_images,
-        load_media: args.load_media,
-        load_css: args.load_css,
-        load_fonts: args.load_fonts,
-        load_all: args.load_all,
+        load_images,
+        load_media,
+        load_css,
+        load_fonts,
+        load_all,
     };
 
     let backend = BrowserBackend::new(
         session_manager,
-        !args.no_headless,
+        !no_headless,
         flags,
-        args.chrome_binary,
+        chrome_binary,
+        extra_chrome_args,
     )
     .await?;
     let svc = BrowsingServiceServer::new(backend);
@@ -105,5 +133,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .serve(addr)
         .await?;
 
+    Ok(())
+}
+
+fn load_config(path: Option<&str>) -> Result<ServerConfigFile, Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(path) = path {
+        let loaded = ServerConfigFile::load(std::path::Path::new(path))
+            .map_err(|e| format!("Failed to load config '{}': {}", path, e))?;
+        tracing::debug!("Loaded server config from {}", path);
+        Ok(loaded)
+    } else {
+        Ok(ServerConfigFile::default())
+    }
+}
+
+fn resolve_log_level(args: &Args, config: &ServerConfigFile) -> String {
+    args.log_level
+        .clone()
+        .or_else(|| config.log_level.clone())
+        .unwrap_or_else(|| "info".to_string())
+}
+
+fn resolve_chrome_args(args: &Args, config: &ServerConfigFile) -> Vec<String> {
+    let mut merged = config.extra_chrome_args.clone().unwrap_or_default();
+    merged.extend(args.chrome_args.clone());
+    merged
+}
+
+fn init_tracing(directive: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let filter = EnvFilter::try_new(directive)
+        .map_err(|e| format!("Invalid --log-level directive '{}': {}", directive, e))?;
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .init();
     Ok(())
 }

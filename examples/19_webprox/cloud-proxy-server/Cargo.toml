@@ -1,6 +1,6 @@
 [package]
 name = "cloud-proxy-server"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 
 [lib]
@@ -40,10 +40,12 @@ fastrand = "2"
 
 # Logging — minimal subscriber
 tracing = { version = "0.1", default-features = false, features = ["std"] }
-tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi", "env-filter"] }
 
 # CLI argument parsing
 clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 
 # URL handling
 url = "2.5"

@@ -2,6 +2,13 @@
 
 All notable changes to `examples/19_webprox` are documented in this file.
 
+## [0.1.5] - 2026-02-28
+
+### Added
+- `cloud-proxy-server`: `--config <PATH>` support for loading server/browser settings from TOML.
+- `cloud-proxy-server`: `extra_chrome_args` config + repeatable `--chrome-arg` CLI option for custom Chromium launch flags.
+- `cloud-proxy-server`: `--log-level` for configurable tracing verbosity (including debug launch diagnostics).
+
 ## [0.1.4] - 2026-02-28
 
 ### Added
