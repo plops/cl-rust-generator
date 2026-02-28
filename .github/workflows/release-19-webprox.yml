@@ -74,8 +74,21 @@ jobs:
           fi
           tag_version="${BASH_REMATCH[1]}"
 
-          server_version="$(sed -n 's/^version = \"\\([^\"]*\\)\"/\\1/p' examples/19_webprox/cloud-proxy-server/Cargo.toml | head -n1)"
-          client_version="$(sed -n 's/^version = \"\\([^\"]*\\)\"/\\1/p' examples/19_webprox/minimal-tui-client/Cargo.toml | head -n1)"
+          read_version() {
+            local manifest="$1"
+            awk '
+              /^\[package\]/ { in_package=1; next }
+              /^\[/ && $0 !~ /^\[package\]/ { in_package=0 }
+              in_package && /^version[[:space:]]*=/ {
+                gsub(/"/, "", $3)
+                print $3
+                exit
+              }
+            ' "$manifest"
+          }
+
+          server_version="$(read_version examples/19_webprox/cloud-proxy-server/Cargo.toml)"
+          client_version="$(read_version examples/19_webprox/minimal-tui-client/Cargo.toml)"
 
           if [ -z "$server_version" ] || [ -z "$client_version" ]; then
             echo "Failed to read crate version(s) from Cargo.toml." >&2
@@ -111,18 +124,19 @@ jobs:
             target: x86_64-unknown-linux-gnu
             asset_name: webprox-linux-amd64
             archive_ext: tar.gz
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            asset_name: webprox-macos-amd64
-            archive_ext: tar.gz
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            asset_name: webprox-macos-arm64
-            archive_ext: tar.gz
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            asset_name: webprox-windows-amd64
-            archive_ext: zip
+          # Temporarily disabled for faster iteration:
+          # - os: macos-latest
+          #   target: x86_64-apple-darwin
+          #   asset_name: webprox-macos-amd64
+          #   archive_ext: tar.gz
+          # - os: macos-latest
+          #   target: aarch64-apple-darwin
+          #   asset_name: webprox-macos-arm64
+          #   archive_ext: tar.gz
+          # - os: windows-latest
+          #   target: x86_64-pc-windows-msvc
+          #   asset_name: webprox-windows-amd64
+          #   archive_ext: zip
 
     steps:
       - name: Checkout code
