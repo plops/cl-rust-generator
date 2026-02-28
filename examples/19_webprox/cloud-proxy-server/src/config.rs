@@ -4,6 +4,7 @@ use std::path::Path;
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ServerConfigFile {
+    pub listen_addr: Option<String>,
     pub no_headless: Option<bool>,
     pub load_all: Option<bool>,
     pub load_images: Option<bool>,

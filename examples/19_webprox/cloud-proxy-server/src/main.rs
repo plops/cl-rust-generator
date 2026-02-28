@@ -6,6 +6,7 @@ use proto_definitions::browser::browsing_service_server::BrowsingServiceServer;
 use tonic::transport::Server;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
+use std::net::SocketAddr;
 
 #[derive(Parser, Debug)]
 #[command(name = "cloud-proxy-server")]
@@ -80,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .or(file_config.chrome_binary.clone());
     let extra_chrome_args = resolve_chrome_args(&args, &file_config);
 
-    let addr = "[::1]:50051".parse()?;
+    let addr = resolve_listen_addr(&file_config)?;
     tracing::info!("Starting cloud-proxy-server on {}", addr);
     if no_headless {
         tracing::info!("Running in visible mode (headless disabled)");
@@ -152,6 +153,15 @@ fn resolve_log_level(args: &Args, config: &ServerConfigFile) -> String {
         .clone()
         .or_else(|| config.log_level.clone())
         .unwrap_or_else(|| "info".to_string())
+}
+
+fn resolve_listen_addr(config: &ServerConfigFile) -> Result<SocketAddr, Box<dyn std::error::Error + Send + Sync>> {
+    let raw = config
+        .listen_addr
+        .as_deref()
+        .unwrap_or("[::1]:50051");
+    raw.parse::<SocketAddr>()
+        .map_err(|e| format!("Invalid listen_addr '{}': {}", raw, e).into())
 }
 
 fn resolve_chrome_args(args: &Args, config: &ServerConfigFile) -> Vec<String> {

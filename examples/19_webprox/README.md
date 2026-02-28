@@ -87,6 +87,8 @@ The server listens on `[::1]:50051` (IPv6 localhost) by default. You'll see:
 Starting cloud-proxy-server on [::1]:50051
 ```
 
+Set `listen_addr` in `server.toml` to change this (for example, `[::]:50051` for all IPv6 interfaces or `0.0.0.0:50051` for all IPv4 interfaces).
+
 ### 2. Start the client
 
 In a separate terminal:
@@ -232,6 +234,7 @@ The server now supports an optional TOML config file via `--config <PATH>`.
 Example `server.toml`:
 
 ```toml
+listen_addr = "0.0.0.0:50051"
 log_level = "debug"
 chrome_binary = "/usr/bin/chromium"
 extra_chrome_args = [
@@ -250,7 +253,9 @@ Precedence:
 - CLI values override config file values.
 - `--chrome-arg` values are appended after `extra_chrome_args`.
 
-The server still binds to `[::1]:50051` and the client connects there by default. To change the address, pass it as the first argument to the client.
+`listen_addr` controls the server bind address and defaults to `[::1]:50051` if omitted.
+
+The client still connects to `http://[::1]:50051` by default. If the server bind address changes, pass the server URL as the first argument to the client.
 
 To simulate a bandwidth-constrained link for testing:
 

@@ -2,6 +2,14 @@
 
 All notable changes to `examples/19_webprox` are documented in this file.
 
+## [0.1.6] - 2026-02-28
+
+### Added
+- `cloud-proxy-server`: `listen_addr` TOML config to control server bind interface/address (default remains `[::1]:50051`).
+
+### Changed
+- Documentation: README now describes `listen_addr` with examples for all-interface binds (`[::]:50051`, `0.0.0.0:50051`).
+
 ## [0.1.5] - 2026-02-28
 
 ### Added
