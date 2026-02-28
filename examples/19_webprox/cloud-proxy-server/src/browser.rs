@@ -25,6 +25,7 @@ impl BrowserPool {
     pub async fn new(
         headless: bool,
         flags: ResourceFlags,
+        chrome_binary: Option<String>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         tracing::info!("Initializing browser with headless={}, flags={:?}", headless, flags);
         
@@ -32,6 +33,11 @@ impl BrowserPool {
             .no_sandbox()
             .user_data_dir(format!("/tmp/chromiumoxide-{}", fastrand::u64(..)))
             .enable_request_intercept();
+
+        if let Some(path) = chrome_binary {
+            tracing::info!("Using custom browser executable: {}", path);
+            builder = builder.chrome_executable(path);
+        }
 
         if !flags.load_images && !flags.load_all {
             builder = builder

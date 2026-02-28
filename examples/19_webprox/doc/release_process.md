@@ -42,6 +42,7 @@ A manual run is also possible with `workflow_dispatch`.
 ## Step-by-Step
 
 1. Prepare your changes in `examples/19_webprox`.
+   - Update `examples/19_webprox/CHANGELOG.md` with release notes for the new version.
 2. Commit and push to your branch/main.
 3. Create and push a release tag:
 

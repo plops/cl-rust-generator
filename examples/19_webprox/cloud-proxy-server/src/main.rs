@@ -41,6 +41,10 @@ struct Args {
     /// Path to the TLS private key file (PEM)
     #[arg(long)]
     tls_key: Option<String>,
+
+    /// Path to Chrome/Chromium executable (overrides auto-detection)
+    #[arg(long)]
+    chrome_binary: Option<String>,
 }
 
 #[tokio::main]
@@ -82,7 +86,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         load_all: args.load_all,
     };
 
-    let backend = BrowserBackend::new(session_manager, !args.no_headless, flags).await?;
+    let backend = BrowserBackend::new(
+        session_manager,
+        !args.no_headless,
+        flags,
+        args.chrome_binary,
+    )
+    .await?;
     let svc = BrowsingServiceServer::new(backend);
 
     let mut builder = Server::builder();

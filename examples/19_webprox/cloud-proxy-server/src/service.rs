@@ -52,8 +52,9 @@ impl BrowserBackend {
         session_manager: SessionManager,
         headless: bool,
         flags: ResourceFlags,
+        chrome_binary: Option<String>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let browser_pool = Arc::new(BrowserPool::new(headless, flags).await?);
+        let browser_pool = Arc::new(BrowserPool::new(headless, flags, chrome_binary).await?);
         Ok(Self {
             browser_pool,
             session_manager,
