@@ -25,7 +25,7 @@ Wie beim ../19_webprox Projekt soll auch hier der Server mittels gRPC angebunden
 
 Der Browser auf dem Cloud-Server soll normalerweise im Headless-Modus  laufen, aber für debugging-Zwecke soll auch ein normaler Modus, wo man das Bild sieht, eingeschaltet werden können. Schaue dir das ../19_webprox Projekt genauer an und schlage Optionen vor, die sinnvoll sind, wie zum Beispiel für Konfigurationshandling und sowas.
 
-Erstelle einen Plan für die neue Implementierung dieser Idee. Gehe dabei bereits auf die Strukturierung des Programms ein. Wir wollen eine gute Maintainable Architektur verwenden. Unter Nutzung von Programming Patterns wollen wir die einzelnen Module voneinander entkoppeln. Und der Plan soll das bereits ordentlich erläutern und diskutieren. 
+Erstelle einen Plan (03_plan.md) für die neue Implementierung dieser Idee. Gehe dabei bereits auf die Strukturierung des Programms ein. Wir wollen eine gute Maintainable Architektur verwenden. Unter Nutzung von Programming Patterns wollen wir die einzelnen Module voneinander entkoppeln. Und der Plan soll das bereits ordentlich erläutern und diskutieren. 
 
 Auch die Testinfrastruktur soll im Plan bedacht werden. Da wir KI-Agenten für die Entwicklung benutzen, ist es nützlich, jedem der Programme ausreichende Kommandozeilenparameter zu geben. Der Client sollte zum Beispiel eine Anfrage absetzen und die empfangenen Informationen als Text oder Bild in eine Datei abspeichern, sodass der Agent die Resultate überprüfen kann.  
 Damit sollte es recht einfach möglich sein, Integrationstests umzusetzen, die der Agent selbstständig ausführt. Und die dann später vielleicht auch automatisiert werden können, ohne agenten Einsatz. 
@@ -41,6 +41,7 @@ cd  /home/kiel/stage/cl-rust-generator/examples/20_webprox_avif/
 
 
 declare -a FILES=(
+02_plan_draft.md
 ../19_webprox/rust_grpc_remote_browser_proxy.md
 ../19_webprox/plan.md
 ../19_webprox/README.md
