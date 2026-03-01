@@ -1,6 +1,7 @@
 # Test output files
 *.json
 *.png
+*.avif
 
 # Rust build artifacts
 /target/
