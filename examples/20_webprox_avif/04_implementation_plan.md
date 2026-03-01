@@ -144,36 +144,57 @@ Wenn der Client `SearchRequest` sendet:
 
 ```rust
 pub async fn execute_search(page: &chromiumoxide::Page, query: &str) -> proto_def::SearchResults {
+    // Alternative: page.find_xpaths(&format!("//*[contains(text(), '{}')]", query)).await
+    // Aber JS Injection ermöglicht die Extraktion von Kontext-Snippets (umgebender Text).
     let js_script = format!(r#"
         (() => {{
-            // Nutze window.find oder TreeWalker um den Text '{query}' zu finden
-            // Extrahiere offsetTop und umgebenden Text
-            // ... (JS Logik)
+            // ... (JS Logik zur Suche und Kontext-Extraktion)
         }})();
     "#);
-    // ... auswerten und als SearchResults via gRPC zurücksenden
+    // ...
 }
 ```
 
-### 3.3. AV1 Video Pipeline (Pseudocode)
+### 3.3. AV1 Video Pipeline (Präzisierung)
 ```rust
 // cloud-render-srv/src/video.rs
 use rav1e::prelude::*;
+use std::sync::Arc;
 
-pub fn encode_frame(encoder: &mut Context<u16>, rgba_pixels: &[u8], width: usize, height: usize) -> Vec<u8> {
-    // 1. Konvertiere RGBA (von Chrome) zu YUV420
-    let yuv_frame = core_utils::rgba_to_yuv420(rgba_pixels, width, height);
+pub fn encode_frame(ctx: &mut Context<u8>, rgba_pixels: &[u8], width: usize, height: usize) -> Vec<u8> {
+    // 1. Konvertiere RGBA (von Chrome) zu YUV420 (8-bit)
+    // rav1e benötigt planares YUV. 
+    let yuv_data = core_utils::rgba_to_yuv420_planar(rgba_pixels, width, height);
     
-    // 2. Sende Frame an rav1e
-    let mut frame = encoder.new_frame();
-    // ... fülle frame.planes ...
-    encoder.send_frame(frame).unwrap();
+    // 2. Erstelle einen neuen Frame im Encoder-Kontext
+    let mut frame = ctx.new_frame();
     
-    // 3. Empfange komprimierte AV1-Bytes
-    let packet = encoder.receive_packet().unwrap();
-    packet.data.to_vec()
+    // Plane 0: Y, Plane 1: U, Plane 2: V
+    // Die Längen müssen exakt dem Chroma-Sampling entsprechen (z.B. 4:2:0)
+    let y_len = width * height;
+    let uv_len = (width / 2) * (height / 2);
+    
+    frame.planes[0].data_origin_mut()[..y_len].copy_from_slice(&yuv_data.y);
+    frame.planes[1].data_origin_mut()[..uv_len].copy_from_slice(&yuv_data.u);
+    frame.planes[2].data_origin_mut()[..uv_len].copy_from_slice(&yuv_data.v);
+    
+    // 3. Sende Frame an rav1e
+    ctx.send_frame(Arc::new(frame)).expect("Failed to send frame to rav1e");
+    
+    // 4. Empfange komprimierte AV1-Packets
+    let mut encoded_data = Vec::new();
+    loop {
+        match ctx.receive_packet() {
+            Ok(packet) => encoded_data.extend_from_slice(&packet.data),
+            Err(EncoderStatus::NeedMoreData) => break,
+            Err(e) => panic!("rav1e error: {:?}", e),
+        }
+    }
+    encoded_data
 }
 ```
+> [!NOTE]
+> `rav1e` arbeitet standardmäßig asynchron. `receive_packet` kann `NeedMoreData` zurückgeben, bevor das erste Paket geliefert wird (Pipeline-Delay). Der Server sollte dies beim ersten Frame berücksichtigen.
 
 ---
 
@@ -210,8 +231,12 @@ async fn network_loop(state: SharedState) {
     while let Some(update) = stream.next().await {
         match update.update {
             Some(ServerUpdate::VideoFrame(frame)) => {
-                // 1. Dekodiere AV1 via rav1d zu RGB
-                let rgb_pixels = decode_av1(&frame.av1_data);
+                // 1. Dekodiere AV1 via rav1d
+                // WICHTIG: rav1d nutzt aktuell eine C-kompatible API (FFI).
+                // Die Rückgabe ist ein YUV-Picture, das manuell nach RGB konvertiert werden muss.
+                let yuv_pixels = decode_av1_to_yuv(&frame.av1_data);
+                let rgb_pixels = core_utils::yuv420_to_rgba(&yuv_pixels);
+
                 // 2. Speichere im State
                 let mut lock = state.lock().unwrap();
                 lock.latest_frame = Some(rgb_pixels);
@@ -342,15 +367,30 @@ fn main() {
     let cli = Cli::parse();
 
     if cli.test_mode {
-        // Starte NUR die Tokio Runtime, kein Macroquad Fenster!
+        // WICHTIG: Macroquad/Miniquad können aktuell nicht ohne Fenster-Initialisierung laufen.
+        // Um einen ECHT kopflosen Test zu ermöglichen, muss die Logik hier 
+        // VOR/OHNE den Aufruf von macroquad::main ausgeführt werden.
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             run_headless_test_agent(cli).await;
         });
+        // Beende das Programm, bevor Macroquad die Grafik-Backend initialisiert
+        std::process::exit(0);
     } else {
-        // Normaler GUI Start
-        macroquad::Window::from_config(conf(), async_main());
+        // Normaler GUI Start via Macroquad Makro (intern)
+        // Wir rufen hier eine Funktion auf, die das Makro nutzt oder 
+        // verwenden direkt macroquad::Window::from_config
+        macroquad::Window::from_config(
+            Conf { window_title: "AV1 Remote Browser".to_string(), ..Default::default() },
+            async_render_loop(cli)
+        );
     }
+}
+
+async fn async_render_loop(cli: Cli) {
+    let shared_state = Arc::new(Mutex::new(PageState::default()));
+    // Starte Netzwerk-Loop hier oder übergebe sie
+    render_loop(shared_state).await;
 }
 
 async fn run_headless_test_agent(cli: Cli) {
