@@ -1,4 +1,28 @@
-# Implementation Deviation: rav1d API Migration
+# Implementation Deviation: AVIF Decoder Solution
+
+## Current Solution (2026-03-01)
+
+**We are now using the `aom-decode` crate as our AVIF decoder solution.** This approach provides a stable, well-documented, and functional AVIF decoding capability that successfully handles our use case.
+
+### Key Components
+
+- **aom-decode crate**: GitLab repository `https://gitlab.com/kornelski/aom-decode`
+- **Documentation**: Available via deepwiki MCP at `plops/aom-decode`
+- **FFI Interface**: Uses official `libaom-sys` bindings to the native libaom C library
+- **API Level**: High-level `Avif` API with automatic container parsing and YUV→RGB conversion
+
+### Verification Status
+
+✅ **Proof of concept completed**: Successfully decoded 1920x1200 AVIF image  
+✅ **Ground truth testing**: Created and verified with `scrot` + `avifenc`  
+✅ **Visual verification**: Decoded output matches original image  
+✅ **Type safety**: Proper Rust types with automatic memory management  
+
+---
+
+# Historical: rav1d API Migration
+
+*The following section documents our previous attempts with the rav1d branch and is retained for reference.*
 
 ## Overview
 
@@ -174,8 +198,22 @@ impl Picture {
 
 ## Recommendation
 
+### Current Solution: aom-decode
+
+The `aom-decode` crate is the recommended solution for this project because:
+
+- **Stability**: Uses official libaom FFI bindings
+- **Documentation**: Comprehensive documentation available via deepwiki MCP
+- **Maturity**: Well-maintained with clear API design
+- **Safety**: Proper Rust abstractions with automatic memory management
+- **Features**: High-level API handles container parsing and color conversion automatically
+
+### Historical Context: rav1d Branch
+
+*The following recommendation pertains to our previous rav1d approach and is retained for historical reference.*
+
 ### Short-term
-The Rust API branch is the correct choice for this project because:
+The Rust API branch was the correct choice for this project because:
 - **Safety**: Eliminates memory safety risks
 - **Productivity**: Significantly faster development
 - **Maintainability**: Cleaner, more readable code
@@ -189,12 +227,20 @@ The Rust API branch is the correct choice for this project because:
 
 ## Conclusion
 
-The migration to the `leo030303/rav1d:add-rust-api` branch was a necessary and beneficial deviation from the original plan. It transformed a complex, unsafe implementation into a clean, safe, and maintainable solution that aligns with Rust's safety principles while meeting all project requirements.
+**Current Status**: The migration to the `aom-decode` crate represents a successful resolution to our AVIF decoding challenges. This solution provides:
 
-This deviation demonstrates the importance of:
+- **Functional decoder**: Successfully decodes AVIF files with verified output
+- **Stable foundation**: Built on official libaom FFI bindings
+- **Comprehensive documentation**: Available via deepwiki MCP at `plops/aom-decode`
+- **Production-ready**: Type-safe, memory-safe, and well-maintained
+
+**Historical Context**: The migration to the `leo030303/rav1d:add-rust-api` branch was a necessary and beneficial deviation from the original plan. It transformed a complex, unsafe implementation into a clean, safe, and maintainable solution that aligns with Rust's safety principles while meeting all project requirements.
+
+This evolution demonstrates the importance of:
 - **Research**: Investigating alternative implementations
 - **Flexibility**: Willingness to adapt when better solutions emerge
 - **Pragmatism**: Choosing practical solutions over theoretical purity
-- **Safety**: Prioritizing memory safety in systems programming
+- **Documentation**: Leveraging available resources like deepwiki MCP
+- **Verification**: Creating and testing with ground truth data
 
 The resulting implementation is more robust, maintainable, and aligned with best practices for Rust development.
