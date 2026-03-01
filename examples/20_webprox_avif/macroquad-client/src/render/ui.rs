@@ -39,7 +39,8 @@ pub fn draw_ui_and_frame(state: &Arc<Mutex<ClientState>>, texture: Option<&Textu
             render_offset_y,
             WHITE,
             DrawTextureParams {
-                dest_size: Some(vec2(screen_width(), screen_height())),
+                // Ensure 1:1 rendering scale to perfectly match the unscaled DOM metadata
+                dest_size: Some(vec2(tex.width(), tex.height())),
                 ..Default::default()
             },
         );

@@ -151,6 +151,7 @@ async fn run_browser_session(
     // Force keyframe mode for client compatibility
     enc.min_key_frame_interval = 1;  // Every frame is a keyframe
     enc.max_key_frame_interval = 1;  // Force all frames to be keyframes
+    enc.low_latency = true;          // Crucial: disables frame reordering to minimize delay
     
     let cfg = Config::new().with_encoder_config(enc).with_threads(2);
     let mut ctx: Context<u8> = cfg.new_context().map_err(|e| format!("Encoder error: {:?}", e))?;
@@ -181,6 +182,7 @@ async fn run_browser_session(
     let mut frame_count = 0;
     let mut current_viewport_y = 0i32;
     let mut force_keyframes = true; // Default to simplified mode
+    let mut viewport_y_queue = std::collections::VecDeque::new(); // Tracks exact Y for buffered frames
     
     loop {
         info!("[Server] Starting frame {} iteration", frame_count);
@@ -234,10 +236,18 @@ async fn run_browser_session(
                         current_viewport_y = (current_viewport_y + scroll.delta_y).max(0);
                         info!("[Server] Scroll event: delta_y={}, old_viewport={}, new_viewport={}", 
                             scroll.delta_y, old_viewport_y, current_viewport_y);
-                        // Execute scroll in browser
-                        let scroll_script = format!("window.scrollTo(0, {});", current_viewport_y);
+                        
+                        // Execute instant scroll in browser and return actual clamped scroll position
+                        let scroll_script = format!(
+                            "(() => {{ window.scrollTo({{top: {}, behavior: 'instant'}}); return window.scrollY; }})()", 
+                            current_viewport_y
+                        );
                         debug!("[Server] Executing scroll script: {}", scroll_script);
-                        let _ = page.evaluate(scroll_script.as_str()).await?;
+                        if let Ok(res) = page.evaluate(scroll_script.as_str()).await {
+                            if let Ok(actual_y) = res.into_value::<f64>() {
+                                current_viewport_y = actual_y as i32;
+                            }
+                        }
                         tokio::time::sleep(Duration::from_millis(100)).await;
                         info!("[Server] Browser scroll completed, viewport now at: {}", current_viewport_y);
                     }
@@ -278,27 +288,38 @@ async fn run_browser_session(
         frame.planes[2].copy_from_raw_u8(&yuv_image.v, yuv_image.v_stride as usize, 1);
         
         println!("[Server] Sending frame to encoder...");
-        ctx.send_frame(frame).map_err(|e| format!("Send frame error: {:?}", e))?;
-        println!("[Server] Frame sent to encoder");
+        match ctx.send_frame(frame) {
+            Ok(_) => {
+                println!("[Server] Frame sent to encoder");
+                // Store the current state to guarantee metadata perfectly aligns with the encoded image
+                viewport_y_queue.push_back(current_viewport_y);
+            },
+            Err(e) => {
+                warn!("[Server] Send frame error: {:?}", e);
+            }
+        }
         
         info!("[Server] Receiving encoded packets...");
         // Receive encoded packets
         let mut packet_count = 0;
         let mut found_packet = false;
         
-        // Try to receive packets with a timeout
+        // Try to receive packets
         while let Ok(packet) = ctx.receive_packet() {
             found_packet = true;
+            // Pop the viewport_y belonging exactly to the frame that finished encoding
+            let packet_viewport_y = viewport_y_queue.pop_front().unwrap_or(current_viewport_y);
+            
             println!("[Server] Sending packet {} with {} bytes", packet_count, packet.data.len());
             let update = ServerUpdate {
                 update: Some(proto_def::graphical_proxy::server_update::Update::Frame(VideoFrame {
                     av1_data: packet.data,
                     is_keyframe: force_keyframes || packet.frame_type == FrameType::KEY,
                     viewport_x: 0,
-                    viewport_y: current_viewport_y,
+                    viewport_y: packet_viewport_y,
                 })),
             };
-            info!("[Server] Sending frame {} with viewport_y={}", packet_count, current_viewport_y);
+            info!("[Server] Sending frame {} with viewport_y={}", packet_count, packet_viewport_y);
             if tx.send(Ok(update)).await.is_err() {
                 println!("[Server] Client disconnected");
                 return Ok(()); // Client disconnected
