@@ -15,6 +15,7 @@ message ClientEvent {
     ViewportResize resize = 5;
     StreamConfig config = 6;
     SearchRequest search = 7;
+    RawImageData test_image = 8;
   }
 }
 
@@ -30,6 +31,12 @@ message StreamConfig {
 }
 message SearchRequest { string query = 1; }
 
+message RawImageData {
+  uint32 width = 1;
+  uint32 height = 2;
+  bytes rgb_data = 3;  // RGB8 format (3 bytes per pixel)
+}
+
 // --- SERVER -> CLIENT ---
 message ServerUpdate {
   oneof update {
@@ -37,6 +44,7 @@ message ServerUpdate {
     SpatialMetadata spatial_data = 2;
     SearchResults search_results = 3;
     SystemStatus status = 4;
+    TestFrameResult test_frame = 5;
   }
 }
 
@@ -73,4 +81,9 @@ message SearchMatch {
 
 message SystemStatus {
   string message = 1;
+}
+
+message TestFrameResult {
+  bytes av1_data = 1;
+  bool is_keyframe = 2;
 }

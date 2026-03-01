@@ -16,6 +16,8 @@ use std::time::Duration;
 mod browser;
 use browser::{ChromeRunner, CdpStream, extract_spatial_metadata, ExtractedMetadata};
 
+mod session;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about = "AV1 Remote Browser Server")]
 struct Cli {
@@ -126,6 +128,12 @@ async fn run_browser_session(
     loop {
         // Handle client events
         if let Some(Ok(event)) = client_stream.next().await {
+            // Check for test image event first to avoid borrow issues
+            if let Some(proto_def::graphical_proxy::client_event::Event::TestImage(_)) = &event.event {
+                let _ = session::handle_test_image_event(event, &tx).await;
+                continue;
+            }
+            
             if let Some(client_event) = event.event {
                 match client_event {
                     proto_def::graphical_proxy::client_event::Event::Config(config) => {

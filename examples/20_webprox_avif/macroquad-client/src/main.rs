@@ -15,6 +15,11 @@ use aom_decode::{Config, Decoder, FrameTempRef, RowsIters};
 use image::{ImageBuffer, Rgba};
 use yuv::color;
 
+// Integration test module
+mod integration_test;
+use integration_test::cli::ClientCli;
+use integration_test::parse_integration_test_args;
+
 // Client image struct to avoid naming conflicts
 #[derive(Clone)]
 struct ClientImage {
@@ -92,8 +97,32 @@ struct ClientState {
     event_sender: Option<tokio::sync::mpsc::Sender<ClientEvent>>,
 }
 
-#[macroquad::main("AV1 Remote Browser")]
-async fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Parse CLI arguments
+    let cli = clap::Parser::parse();
+    
+    // Check for integration test mode
+    if let Some(test_args) = parse_integration_test_args(cli) {
+        println!("[Client] Running in integration test mode");
+        
+        // Run integration test
+        integration_test::run_integration_test(
+            &test_args.test_image,
+            &test_args.server_addr,
+            test_args.tolerance,
+            test_args.output_result.as_deref(),
+        ).await?;
+        
+        // Integration test will handle exit codes
+        return Ok(());
+    }
+    
+    // Normal GUI mode
+    run_gui_mode().await
+}
+
+async fn run_gui_mode() -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(Mutex::new(ClientState {
         frame_width: 1280,
         frame_height: 720,
