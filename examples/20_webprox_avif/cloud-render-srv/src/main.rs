@@ -121,12 +121,17 @@ async fn run_browser_session(
     
     let mut frame_count = 0;
     let mut current_viewport_y = 0i32;
+    let mut force_keyframes = true; // Default to simplified mode
     
     loop {
         // Handle client events
         if let Some(Ok(event)) = client_stream.next().await {
             if let Some(client_event) = event.event {
                 match client_event {
+                    proto_def::graphical_proxy::client_event::Event::Config(config) => {
+                        force_keyframes = config.force_keyframes;
+                        println!("Client updated stream config - force_keyframes: {}", force_keyframes);
+                    }
                     proto_def::graphical_proxy::client_event::Event::Navigate(navigate) => {
                         println!("Navigating to: {}", navigate.url);
                         CdpStream::navigate_to(&page, &navigate.url).await?;
@@ -186,7 +191,7 @@ async fn run_browser_session(
             let update = ServerUpdate {
                 update: Some(proto_def::graphical_proxy::server_update::Update::Frame(VideoFrame {
                     av1_data: packet.data,
-                    is_keyframe: packet.frame_type == FrameType::KEY || frame_count % 30 == 0,
+                    is_keyframe: force_keyframes || packet.frame_type == FrameType::KEY,
                     viewport_x: 0,
                     viewport_y: current_viewport_y,
                 })),

@@ -26,6 +26,7 @@ message ViewportResize { uint32 width = 1; uint32 height = 2; }
 message StreamConfig {
   bool enable_video = 1;
   bool enable_spatial_links = 2;
+  bool force_keyframes = 3;
 }
 message SearchRequest { string query = 1; }
 

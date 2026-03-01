@@ -129,8 +129,17 @@ async fn main() {
                 state_lock.event_sender = Some(tx_events.clone());
             }
             
-            // Send initial event to establish stream
-            let _ = tx_events.send(ClientEvent { event: None }).await;
+            // Send initial stream configuration
+            let config_event = ClientEvent {
+                event: Some(proto_def::graphical_proxy::client_event::Event::Config(
+                    proto_def::graphical_proxy::StreamConfig {
+                        enable_video: true,
+                        enable_spatial_links: true,
+                        force_keyframes: true, // Simplified mode for single-frame AVIF decoder
+                    }
+                ))
+            };
+            let _ = tx_events.send(config_event).await;
             
             let request = Request::new(tokio_stream::wrappers::ReceiverStream::new(rx_events));
             let mut stream = client.stream_session(request).await.expect("Stream session failed").into_inner();

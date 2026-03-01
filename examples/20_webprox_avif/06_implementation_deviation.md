@@ -18,6 +18,10 @@
 ✅ **Visual verification**: Decoded output matches original image  
 ✅ **Type safety**: Proper Rust types with automatic memory management  
 
+### Keyframe Enforcement Requirement
+
+The `aom-decode` crate is designed specifically for still AVIF images and doesn't support video sequences with interframe dependencies. To enable simplified single-frame AVIF decoding, we added client-controlled keyframe enforcement via the gRPC protocol. The client sends a `StreamConfig` message with `force_keyframes: true`, causing the server to encode all frames as keyframes. This eliminates interframe dependencies, allowing each AVIF frame to be decoded independently without maintaining reference frames.  
+
 ---
 
 # Historical: rav1d API Migration
