@@ -27,11 +27,9 @@ impl<Message> canvas::Program<Message> for VideoCanvas {
         
         // Clear background
         frame.fill_rectangle(
-            Rectangle::new(
-                iced::Point::new(0.0, 0.0),
-                Size::new(bounds.width, bounds.height),
-            ),
-            Color::from_rgb(0.1, 0.1, 0.1),
+            iced::Point::new(0.0, 0.0),
+            Size::new(bounds.width, bounds.height),
+            Color::from_rgb(0.1, 0.1, 0.1)
         );
         
         // Draw video frame if available
@@ -61,14 +59,16 @@ impl<Message> canvas::Program<Message> for VideoCanvas {
                 
                 // Draw semi-transparent blue overlay
                 frame.fill_rectangle(
-                    link_bounds,
-                    Color::new(0.0, 0.5, 1.0, 0.3),
+                    iced::Point::new(link_bounds.x, link_bounds.y),
+                    Size::new(link_bounds.width, link_bounds.height),
+                    Color::new(0.0, 0.5, 1.0, 0.3)
                 );
                 
                 // Draw border
                 frame.stroke_rectangle(
-                    link_bounds,
-                    canvas::Stroke::default().with_color(Color::BLUE).with_width(2.0),
+                    iced::Point::new(link_bounds.x, link_bounds.y),
+                    Size::new(link_bounds.width, link_bounds.height),
+                    canvas::Stroke::default().with_color(Color::from_rgb(0.0, 0.0, 1.0)).with_width(2.0),
                 );
                 
                 // Draw link label (truncated if too long)
@@ -97,7 +97,11 @@ impl<Message> canvas::Program<Message> for VideoCanvas {
                 Size::new(scrollbar_width, scrollbar_height),
             );
             
-            frame.fill_rectangle(scrollbar_bounds, Color::from_rgb(0.5, 0.5, 0.5));
+            frame.fill_rectangle(
+                iced::Point::new(scrollbar_bounds.x, scrollbar_bounds.y),
+                Size::new(scrollbar_bounds.width, scrollbar_bounds.height),
+                Color::from_rgb(0.5, 0.5, 0.5)
+            );
         }
         
         vec![frame.into_geometry()]

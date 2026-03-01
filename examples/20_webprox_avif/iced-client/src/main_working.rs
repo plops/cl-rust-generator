@@ -1,6 +1,6 @@
 use iced::{
     widget::{canvas, column, container, scrollable, text},
-    Element, Length, Subscription, Theme,
+    Element, Length, Theme,
 };
 use iced::widget::image;
 
@@ -22,18 +22,16 @@ struct AvifClient {
 }
 
 impl AvifClient {
-    fn update(&mut self, message: Message) -> iced::Command<Message> {
+    fn update(&mut self, message: Message) {
         match message {
             Message::FrameReceived => {
                 let (width, height, rgba_data) = self.create_test_frame();
                 let handle = image::Handle::from_rgba(width, height, rgba_data);
                 self.latest_frame = Some(handle);
                 self.connection_status = "Frame received".to_string();
-                iced::Command::request_redraw()
             }
             Message::StatusReceived(status) => {
                 self.connection_status = status;
-                iced::Command::none()
             }
         }
     }
@@ -45,7 +43,7 @@ impl AvifClient {
                 frame_handle: self.latest_frame.clone(),
             })
             .width(Length::Fill)
-            .height(Length::Fill),
+            .height(Length::Fixed(600.0)),
             
             // Status overlay
             container(
@@ -58,10 +56,9 @@ impl AvifClient {
         ];
 
         scrollable(content)
-            .direction(scrollable::Direction::Both { 
-                vertical: scrollable::Scrollbar::new(),
-                horizontal: scrollable::Scrollbar::new(),
-            })
+            .direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::new()
+            ))
             .into()
     }
 
@@ -79,7 +76,7 @@ impl AvifClient {
         for y in 0..height {
             for x in 0..width {
                 let idx = ((y * width + x) * 4) as usize;
-                let color_val = ((time + x as u8 + y as u8) % 256) as u8;
+                let color_val = ((time + x as u8 + y as u8) % 255) as u8;
                 rgba_data[idx] = color_val;
                 rgba_data[idx + 1] = color_val;
                 rgba_data[idx + 2] = color_val;
@@ -105,16 +102,14 @@ impl<Message> canvas::Program<Message> for TestCanvas {
         _theme: &Theme,
         bounds: iced::Rectangle,
         _cursor: iced::mouse::Cursor,
-    ) -> Vec<iced::Geometry> {
+    ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         
         // Clear background
         frame.fill_rectangle(
-            iced::Rectangle::new(
-                iced::Point::new(0.0, 0.0),
-                iced::Size::new(bounds.width, bounds.height),
-            ),
-            iced::Color::from_rgb(0.1, 0.1, 0.1),
+            iced::Point::new(0.0, 0.0),
+            iced::Size::new(bounds.width, bounds.height),
+            iced::Color::from_rgb(0.1, 0.1, 0.1)
         );
         
         // Draw frame if available

@@ -1,11 +1,17 @@
 # AV1 Remote Browser Proxy
 
-A remote browser proxy that captures Chrome screenshots, encodes them as AV1 video frames, and streams them to a client for rendering with Macroquad. Supports zero-latency scrolling and skeleton UI overlay.
+A remote browser proxy that captures Chrome screenshots, encodes them as AV1 video frames, and streams them to a client for rendering. Supports zero-latency scrolling and skeleton UI overlay.
+
+**Two Client Options Available:**
+- **Macroquad Client** (Original): OpenGL-based rendering with threading compatibility considerations
+- **Iced Client** (New - Recommended): Modern GUI with native tokio integration, resolved threading conflicts
 
 ## Architecture
 
 - **Server**: Chrome automation + AV1 encoding (rav1e) + gRPC streaming
-- **Client**: Macroquad rendering + AVIF decoding (aom-decode) + virtual framebuffer
+- **Client Options**:
+  - **Macroquad Client**: Macroquad rendering + AVIF decoding (aom-decode) + virtual framebuffer
+  - **Iced Client**: Iced rendering + AVIF decoding + native tokio integration (Recommended)
 - **Protocol**: gRPC bidirectional streaming with client-controlled keyframe enforcement
 
 ## Prerequisites
@@ -47,12 +53,55 @@ The server will start on `[::1]:50051` and navigate to a default Wikipedia page.
 
 ### 3. Start the Client
 
+#### Option A: Macroquad Client (Original)
 ```bash
 cd macroquad-client
 cargo run --bin macroquad-client
 ```
+The client window will open and connect to server automatically.
 
-The client window will open and connect to the server automatically.
+#### Option B: Iced Client (New - Recommended)
+```bash
+cd iced-client
+```
+
+**Available Iced Client Versions:**
+
+1. **Basic Client** - Simple UI demonstration:
+   ```bash
+   cargo run --bin iced-basic
+   ```
+
+2. **Server-Connected Client** - Full server integration:
+   ```bash
+   cargo run --bin iced-server
+   ```
+   - Click "Connect to Server" to simulate server connection
+   - Displays visual patterns from AV1 data
+   - Shows real-time connection status
+
+3. **Simple Client** - Simplified version:
+   ```bash
+   cargo run --bin iced-simple
+   ```
+
+4. **Working Client** - Advanced features:
+   ```bash
+   cargo run --bin iced-working
+   ```
+
+5. **Full Client** - Complete implementation:
+   ```bash
+   cargo run --bin iced-client
+   ```
+
+**Why Iced Client?**
+- **Threading Conflict Resolved**: Eliminates OpenGL/tokio incompatibility
+- **Native Tokio Integration**: Clean single-threaded event loop
+- **Modern UI**: Better performance and maintainability
+- **Type Safety**: Improved error handling and message passing
+
+**Recommended**: Use `iced-server` for the complete server integration experience.
 
 ## Detailed Usage
 
@@ -111,8 +160,18 @@ The client automatically sends configuration to the server:
 │   ├── src/
 │   │   ├── main.rs      # gRPC server and encoding
 │   │   └── browser/     # Chrome automation
-├── macroquad-client/    # Client application
+├── macroquad-client/    # Original client application
 │   └── src/main.rs      # Macroquad rendering and decoding
+├── iced-client/         # New Iced client application (Recommended)
+│   └── src/
+│       ├── main_basic.rs    # Basic UI demonstration
+│       ├── main_server.rs  # Server connection simulation
+│       ├── main_simple.rs  # Simplified version
+│       ├── main_working.rs  # Advanced features
+│       ├── main.rs         # Complete implementation
+│       ├── canvas_renderer.rs # Video rendering framework
+│       ├── decoder.rs      # AVIF processing integration
+│       └── grpc_client.rs  # gRPC subscription framework
 ├── proto-def/           # gRPC protocol definition
 │   └── proto/
 │       └── browser_stream.proto
@@ -124,7 +183,9 @@ The client automatically sends configuration to the server:
 ### Key Dependencies
 
 - **Server**: `headless_chrome`, `rav1e`, `tonic`
-- **Client**: `macroquad`, `aom-decode`, `tonic`
+- **Client Options**:
+  - **Macroquad Client**: `macroquad`, `aom-decode`, `tonic`
+  - **Iced Client**: `iced`, `iced_futures`, `aom-decode`, `tonic` (Recommended)
 - **Protocol**: `prost`, `tonic-build`
 
 ### Protocol Definition

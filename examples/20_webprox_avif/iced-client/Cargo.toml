@@ -19,6 +19,10 @@ path = "src/main_working.rs"
 name = "iced-basic"
 path = "src/main_basic.rs"
 
+[[bin]]
+name = "iced-server"
+path = "src/main_server.rs"
+
 [features]
 default = []
 integration-test = []

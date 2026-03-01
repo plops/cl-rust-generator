@@ -1,6 +1,6 @@
 use iced::{
     widget::{canvas, column, container, scrollable, text},
-    Element, Length, Subscription, Theme, Command,
+    Element, Length, Subscription,
 };
 use iced::widget::image;
 
@@ -71,7 +71,7 @@ impl AvifClient {
                     ..metadata
                 };
                 
-                let handle = image::Handle::from_pixels(width, height, rgba_data);
+                let handle = image::Handle::from_rgba(width, height, rgba_data);
                 self.latest_frame = Some(handle);
                 self.frame_metadata = Some(updated_metadata);
                 self.server_viewport = metadata.viewport_y;
@@ -83,23 +83,20 @@ impl AvifClient {
         }
     }
     
-    fn update(&mut self, message: Message) -> Command<Message> {
+    fn update(&mut self, message: Message) {
         match message {
             Message::FrameReceived(av1_data, metadata) => {
                 self.handle_frame_received(av1_data, metadata);
-                Command::request_redraw()
             }
             
             Message::SpatialDataReceived(metadata) => {
                 self.page_title = metadata.title;
                 self.doc_dimensions = (metadata.document_width, metadata.document_height);
                 self.links = metadata.links;
-                Command::none()
             }
             
             Message::StatusReceived(status) => {
                 self.connection_status = status;
-                Command::none()
             }
             
             Message::Scrolled(delta_y) => {
@@ -110,43 +107,36 @@ impl AvifClient {
                 if let Some(ref mut subscription) = self.grpc_subscription {
                     subscription.send_scroll_event(delta_y);
                 }
-                
-                Command::none()
             }
             
             Message::LinkClicked(url) => {
                 if let Some(ref mut subscription) = self.grpc_subscription {
                     subscription.send_navigate_event(url);
                 }
-                Command::none()
             }
             
             Message::NavigateRequested(url) => {
                 if let Some(ref mut subscription) = self.grpc_subscription {
                     subscription.send_navigate_event(url);
                 }
-                Command::none()
             }
             
             Message::Connected => {
                 self.is_connected = true;
                 self.connection_status = "Connected".to_string();
-                Command::none()
             }
             
             Message::Disconnected => {
                 self.is_connected = false;
                 self.connection_status = "Disconnected".to_string();
-                Command::none()
             }
             
             Message::Error(error) => {
                 self.connection_status = format!("Error: {}", error);
-                Command::none()
             }
             
             Message::CanvasRedraw => {
-                Command::request_redraw()
+                // Redraw handled automatically by Iced
             }
         }
     }
@@ -173,15 +163,14 @@ impl AvifClient {
                     text(format!("Status: {}", self.connection_status)).size(14),
                 ]
             )
-            .padding(10)
-            .style(container::Style::solid(iced::Color::new(0.0, 0.0, 0.0, 0.7))),
+            .padding(10),
         ];
 
         scrollable(content)
-            .direction(scrollable::Direction::Both(
-                scrollable::Scrollbar::new(),
-                scrollable::Scrollbar::new(),
-            ))
+            .direction(scrollable::Direction::Both {
+                vertical: scrollable::Scrollbar::new(),
+                horizontal: scrollable::Scrollbar::new(),
+            })
             .into()
     }
 
@@ -210,5 +199,5 @@ impl AvifClient {
 }
 
 fn main() -> iced::Result {
-    iced::run("AV1 Remote Browser", AvifClient::update, AvifClient::view, AvifClient::subscription)
+    iced::run("AV1 Remote Browser", AvifClient::update, AvifClient::view)
 }

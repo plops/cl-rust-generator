@@ -1,5 +1,5 @@
 use iced::futures::StreamExt;
-use iced_futures::subscription::{self, Subscription};
+use iced_futures::subscription::Subscription;
 use futures::stream::unfold;
 use tonic::Request;
 use tokio::sync::mpsc as tokio_mpsc;
@@ -50,20 +50,21 @@ pub struct GrpcSubscription {
 
 impl GrpcSubscription {
     pub fn subscription() -> Subscription<Result<GrpcMessage, String>> {
-        Subscription::run_with_id("grpc_stream", async {
-            unfold(State::Connecting, |state| async move {
-                match state {
-                    State::Connecting => connect_to_server().await,
-                    State::Connected { mut stream, event_sender } => {
-                        match handle_stream(&mut stream, &event_sender).await {
-                            Ok(Some(message)) => (Some(Ok(message)), State::Connected { stream, event_sender }),
-                            Ok(None) => (Some(Ok(GrpcMessage::Disconnected)), State::Connecting),
-                            Err(error) => (Some(Err(error)), State::Connecting),
-                        }
+        Subscription::run_with_id("grpc_stream", unfold(State::Connecting, |state| async move {
+            match state {
+                State::Connecting => {
+                    let (result, new_state) = connect_to_server().await;
+                    Some((result, new_state))
+                }
+                State::Connected { mut stream, event_sender } => {
+                    match handle_stream(&mut stream, &event_sender).await {
+                        Ok(Some(message)) => Some((Ok(message), State::Connected { stream, event_sender })),
+                        Ok(None) => Some((Ok(GrpcMessage::Disconnected), State::Connecting)),
+                        Err(error) => Some((Err(error), State::Connecting)),
                     }
                 }
-            }).flatten()
-        })
+            }
+        }))
     }
     
     pub fn send_scroll_event(&mut self, delta_y: i32) {
@@ -157,8 +158,9 @@ async fn handle_stream(
         Some(Ok(update)) => {
             match update.update {
                 Some(server_update::Update::Frame(frame)) => {
+                    let av1_data = frame.av1_data.clone();
                     let metadata = FrameMetadata::from(frame);
-                    Ok(Some(GrpcMessage::Frame(frame.av1_data, metadata)))
+                    Ok(Some(GrpcMessage::Frame(av1_data, metadata)))
                 }
                 Some(server_update::Update::SpatialData(metadata)) => {
                     Ok(Some(GrpcMessage::SpatialMetadata(metadata)))

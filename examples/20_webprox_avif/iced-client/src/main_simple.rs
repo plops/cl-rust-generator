@@ -3,7 +3,6 @@ use iced::{
     Element, Length, Theme,
 };
 use iced::widget::image;
-use iced::Command;
 
 mod decoder_simple;
 
@@ -25,7 +24,7 @@ struct AvifClient {
 }
 
 impl AvifClient {
-    fn update(&mut self, message: Message) -> iced::Command<Message> {
+    fn update(&mut self, message: Message) {
         match message {
             Message::FrameReceived => {
                 // Simulate frame reception
@@ -33,11 +32,9 @@ impl AvifClient {
                 let handle = image::Handle::from_rgba(width, height, rgba_data);
                 self.latest_frame = Some(handle);
                 self.connection_status = "Frame received".to_string();
-                iced::Command::request_redraw()
             }
             Message::StatusReceived(status) => {
                 self.connection_status = status;
-                iced::Command::none()
             }
         }
     }
@@ -62,10 +59,9 @@ impl AvifClient {
         ];
 
         scrollable(content)
-            .direction(scrollable::Direction::Both { 
-                vertical: scrollable::Scrollbar::new(),
-                horizontal: scrollable::Scrollbar::new(),
-            })
+            .direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::new()
+            ))
             .into()
     }
 
@@ -109,10 +105,11 @@ impl<Message> canvas::Program<Message> for TestCanvas {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         
         // Clear background
-        frame.fill_rectangle(&iced::Rectangle::new(
+        frame.fill_rectangle(
             iced::Point::new(0.0, 0.0),
             iced::Size::new(bounds.width, bounds.height),
-        ), iced::Color::from_rgb(0.1, 0.1, 0.1));
+            iced::Color::from_rgb(0.1, 0.1, 0.1)
+        );
         
         // Draw frame if available
         if let Some(ref handle) = self.frame_handle {
