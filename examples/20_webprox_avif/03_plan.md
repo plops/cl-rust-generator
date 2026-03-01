@@ -1,7 +1,7 @@
 # Architektur- & Implementierungsplan: Graphical Remote Browser Proxy (AV1)
 **Datei:** `03_plan.md`
 **Status:** In Planung
-**Kern-Technologien:** Rust, gRPC (`tonic`), `chromiumoxide`, `rav1e` (Encoder), `rav1d` (Decoder), `macroquad` / `miniquad` (GUI)
+**Kern-Technologien:** Rust, gRPC (`tonic`), `chromiumoxide`, `rav1e` (Encoder), `rav1d` (Decoder), `macroquad` / `miniquad` (GUI), `yuv` (Farbkonvertierung)
 
 ## 1. Executive Summary
 Dieses Projekt implementiert einen bandbreiteneffizienten, grafischen Cloud-Browser-Proxy. Ein auf einem Cloud-Server laufender Headless-Browser (Chromium) rendert Webseiten und extrahiert Rohbilder (PNG). Diese werden mittels AV1 (`rav1e`) hochkomprimiert und per gRPC an einen extrem leichtgewichtigen, hardwarebeschleunigten Client (`macroquad`) gestreamt. 
@@ -164,6 +164,7 @@ macroquad-client --test-mode \
                  --timeout 5000
 ```
 Der Agent liest `frame_output.png` ein oder nutzt ein CLI-Image-Tool (wie ImageMagick), um zu prüfen, ob Pixel geschrieben wurden.
+Zusätzlich soll ein Tooling implementiert werden (oder externe Tools wie `maim` oder `import` genutzt werden), um Screenshots vom tatsächlichen X-Window des Clients zu erstellen. Diese "Final Render" Bilder werden gegen die vom Server gelieferten Referenz-Frames verglichen, um sicherzustellen, dass das Macroquad-Rendering (Scrolling-Offsets, Texturen) exakt arbeitet.
 
 ### 6.2. Server Debugging & Metriken
 ```bash

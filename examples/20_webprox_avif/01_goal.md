@@ -15,6 +15,9 @@ https://github.com/not-fl3/miniquad
 Wahrscheinlich brauchen wir auch Text Output (also Fonts) und andere Dinge, zum Beispiel Rechtecke zu zeichnen. Deshalb wird die folgende Bibliothek wahrscheinlich auch nützlich sein. 
 https://github.com/not-fl3/macroquad
 
+Für die Farbraumkonvertierung (RGB <-> YUV) soll explizit die Bibliothek `yuv` verwendet werden, um Performance und Korrektheit sicherzustellen.
+https://crates.io/crates/yuv
+
 Nutze bei der Planung das DeepWiki MCP oder die dokumentation vom deepwiki https://deepwiki.com/not-fl3/macroquad (die verzeichnisstruktur ist equivalent zu github) m erkundungen ueber die Bibliotheken zu machen und um die beste Loesung zu finden.
 
   
@@ -28,7 +31,8 @@ Der Browser auf dem Cloud-Server soll normalerweise im Headless-Modus  laufen, a
 Erstelle einen Plan (03_plan.md) für die neue Implementierung dieser Idee. Gehe dabei bereits auf die Strukturierung des Programms ein. Wir wollen eine gute Maintainable Architektur verwenden. Unter Nutzung von Programming Patterns wollen wir die einzelnen Module voneinander entkoppeln. Und der Plan soll das bereits ordentlich erläutern und diskutieren. 
 
 Auch die Testinfrastruktur soll im Plan bedacht werden. Da wir KI-Agenten für die Entwicklung benutzen, ist es nützlich, jedem der Programme ausreichende Kommandozeilenparameter zu geben. Der Client sollte zum Beispiel eine Anfrage absetzen und die empfangenen Informationen als Text oder Bild in eine Datei abspeichern, sodass der Agent die Resultate überprüfen kann.  
-Damit sollte es recht einfach möglich sein, Integrationstests umzusetzen, die der Agent selbstständig ausführt. Und die dann später vielleicht auch automatisiert werden können, ohne agenten Einsatz. 
+Damit sollte es recht einfach möglich sein, Integrationstests umzusetzen, die der Agent selbstständig ausführt. Das Fenster darf bei Tests ruhig kurz aufblitzen, um eine realistische Umgebung zu gewährleisten. 
+Ein fortgeschrittener Test-Ansatz soll vorsehen, Screenshots direkt vom X-Window-System des Clients zu beziehen und diese mit dem vom Server gesendeten Originalbild zu vergleichen, um die Korrektheit der Rendering-Pipeline (inkl. Scrolling und Framebuffer) zu validieren.
 
 Vielleicht nicht im ersten Implementierungsschritt, aber vorgesehen sollte es schon sein, ist die Volltextsuche. Es sollte die vom Browser übernommen werden. 
 textsuche soll serverseitig stattfinden aber die suchergebnisse mit umliegenden textzeilen sollen in den metadaten fuer die gesamte seite unabhaengig vom aktuell sichtbaren bildschirmanteil an den clienten gesendet werden

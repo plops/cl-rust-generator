@@ -99,7 +99,7 @@ pub type SharedState = Arc<Mutex<PageState>>;
 
 ## 3. Server-Implementierung (`cloud-render-srv`)
 
-Der Server nutzt `chromiumoxide` im Hintergrund und extrahiert sowohl das Bild als auch den DOM.
+Der Server nutzt `chromiumoxide` im Hintergrund und extrahiert sowohl das Bild als auch den DOM. Für die Suche wird ein robuster Multi-Strategie-Ansatz gewählt.
 
 ### 3.1. DOM Metadaten Extraktion (JavaScript Injektion)
 Anstatt den HTML-Baum in Rust zu parsen, lassen wir die Chrome-V8-Engine die Arbeit machen. Dieser Code wird nach jedem Scrollen oder Navigation-Complete injiziert:
@@ -144,53 +144,74 @@ Wenn der Client `SearchRequest` sendet:
 
 ```rust
 pub async fn execute_search(page: &chromiumoxide::Page, query: &str) -> proto_def::SearchResults {
-    // Alternative: page.find_xpaths(&format!("//*[contains(text(), '{}')]", query)).await
-    // Aber JS Injection ermöglicht die Extraktion von Kontext-Snippets (umgebender Text).
+    // Robuster Ansatz:
+    // 1. Primär: JS Injection für präzise Kontext-Extrahierung und offsetTop.
+    // 2. Fallback/Validierung: Chrome's native DOM Suche (XPath/CSS) falls JS blockiert oder fehlschlägt.
+    
     let js_script = format!(r#"
         (() => {{
-            // ... (JS Logik zur Suche und Kontext-Extraktion)
+            const results = [];
+            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+            const regex = new RegExp(JSON.stringify("{query}").slice(1, -1), 'gi'); 
+            
+            let node;
+            while (node = walker.nextNode()) {{
+                let match;
+                while ((match = regex.exec(node.nodeValue)) !== null) {{
+                    const range = document.createRange();
+                    range.setStart(node, match.index);
+                    range.setEnd(node, match.index + match[0].length);
+                    const rect = range.getBoundingClientRect();
+                    
+                    results.push({{
+                        absolute_y: Math.round(rect.top + window.scrollY),
+                        context_snippet: node.nodeValue.substring(
+                            Math.max(0, match.index - 40), 
+                            Math.min(node.nodeValue.length, match.index + match[0].length + 40)
+                        ).replace(/\n/g, ' ')
+                    }});
+                }}
+            }}
+            return results;
         }})();
     "#);
-    // ...
+    
+    // ... Mapping & gRPC Versand
 }
 ```
 
-### 3.3. AV1 Video Pipeline (Präzisierung)
+### 3.3. AV1 Video Pipeline (nutzt `yuv` Crate)
 ```rust
 // cloud-render-srv/src/video.rs
 use rav1e::prelude::*;
+use yuv::*; // High performance YUV handling
 use std::sync::Arc;
 
 pub fn encode_frame(ctx: &mut Context<u8>, rgba_pixels: &[u8], width: usize, height: usize) -> Vec<u8> {
-    // 1. Konvertiere RGBA (von Chrome) zu YUV420 (8-bit)
-    // rav1e benötigt planares YUV. 
-    let yuv_data = core_utils::rgba_to_yuv420_planar(rgba_pixels, width, height);
+    // 1. Konvertiere RGBA zu YUV420 Planar mittels 'yuv' crate
+    let mut planar_image = YuvPlanarImageMut::<u8>::alloc(width as u32, height as u32, YuvChromaSubsampling::Yuv420);
     
+    // Wir nehmen RGBA mit 4 Bytes pro Pixel an
+    let rgba_stride = width * 4;
+    
+    rgb_to_yuv420(
+        &mut planar_image,
+        rgba_pixels,
+        rgba_stride as u32,
+        YuvRange::Limited,
+        YuvStandardMatrix::Bt601,
+    ).expect("YUV conversion failed");
+
     // 2. Erstelle einen neuen Frame im Encoder-Kontext
     let mut frame = ctx.new_frame();
     
+    // Kopiere Planar-Daten in rav1e Frame
     // Plane 0: Y, Plane 1: U, Plane 2: V
-    // Die Längen müssen exakt dem Chroma-Sampling entsprechen (z.B. 4:2:0)
-    let y_len = width * height;
-    let uv_len = (width / 2) * (height / 2);
+    frame.planes[0].copy_from_raw_u8(planar_image.y.data, planar_image.y.stride as usize, 1);
+    frame.planes[1].copy_from_raw_u8(planar_image.u.data, planar_image.u.stride as usize, 1);
+    frame.planes[2].copy_from_raw_u8(planar_image.v.data, planar_image.v.stride as usize, 1);
     
-    frame.planes[0].data_origin_mut()[..y_len].copy_from_slice(&yuv_data.y);
-    frame.planes[1].data_origin_mut()[..uv_len].copy_from_slice(&yuv_data.u);
-    frame.planes[2].data_origin_mut()[..uv_len].copy_from_slice(&yuv_data.v);
-    
-    // 3. Sende Frame an rav1e
-    ctx.send_frame(Arc::new(frame)).expect("Failed to send frame to rav1e");
-    
-    // 4. Empfange komprimierte AV1-Packets
-    let mut encoded_data = Vec::new();
-    loop {
-        match ctx.receive_packet() {
-            Ok(packet) => encoded_data.extend_from_slice(&packet.data),
-            Err(EncoderStatus::NeedMoreData) => break,
-            Err(e) => panic!("rav1e error: {:?}", e),
-        }
-    }
-    encoded_data
+    // ... (Encoding wie gehabt)
 }
 ```
 > [!NOTE]
@@ -232,12 +253,19 @@ async fn network_loop(state: SharedState) {
         match update.update {
             Some(ServerUpdate::VideoFrame(frame)) => {
                 // 1. Dekodiere AV1 via rav1d
-                // WICHTIG: rav1d nutzt aktuell eine C-kompatible API (FFI).
-                // Die Rückgabe ist ein YUV-Picture, das manuell nach RGB konvertiert werden muss.
-                let yuv_pixels = decode_av1_to_yuv(&frame.av1_data);
-                let rgb_pixels = core_utils::yuv420_to_rgba(&yuv_pixels);
+                let yuv_pixels = decode_av1_to_yuv_planar(&frame.av1_data);
+                
+                // 2. Nutze 'yuv' crate für YUV -> RGBA
+                let mut rgba = vec![0u8; (width * height * 4) as usize];
+                yuv420_to_rgb(
+                    &yuv_pixels, // Rav1dPicture -> YuvPlanarImage Mapping notwendig
+                    &mut rgba,
+                    (width * 4) as u32,
+                    YuvRange::Limited,
+                    YuvStandardMatrix::Bt601,
+                ).expect("RGBA conversion failed");
 
-                // 2. Speichere im State
+                // 3. Speichere im State
                 let mut lock = state.lock().unwrap();
                 lock.latest_frame = Some(rgb_pixels);
                 lock.server_viewport_y = frame.viewport_y;
@@ -367,15 +395,15 @@ fn main() {
     let cli = Cli::parse();
 
     if cli.test_mode {
-        // WICHTIG: Macroquad/Miniquad können aktuell nicht ohne Fenster-Initialisierung laufen.
-        // Um einen ECHT kopflosen Test zu ermöglichen, muss die Logik hier 
-        // VOR/OHNE den Aufruf von macroquad::main ausgeführt werden.
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            run_headless_test_agent(cli).await;
-        });
-        // Beende das Programm, bevor Macroquad die Grafik-Backend initialisiert
-        std::process::exit(0);
+        // Starte Macroquad REALE UI für maximale Test-Tiefe
+        // Der Test-Agent läuft parallel und kann Screenshots vom Client-Fenster machen.
+        macroquad::Window::from_config(
+            Conf { 
+                window_title: "TEST: AV1 Remote Browser".to_string(), 
+                ..Default::default() 
+            },
+            async_test_main(cli)
+        );
     } else {
         // Normaler GUI Start via Macroquad Makro (intern)
         // Wir rufen hier eine Funktion auf, die das Makro nutzt oder 
