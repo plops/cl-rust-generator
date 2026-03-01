@@ -54,7 +54,7 @@ The following is the high-fidelity markdown extracted for the user. It isolates 
 
 ### **System Configuration**
 - **Date:** March 1, 2026
-- **AI Orchestrator:** Antigravity (Advanced Agentic Coding by Google DeepMind)
+- **AI Orchestrator:** Antigravity (Advanced Agentic Coding by Google DeepMind) with Gemini 3 Flash
 - **Version:** v2026.3.01-STABLE
 - **Browser Tech:** MCP-Driven Headless Chromium (Native Orchestration)
 - **Extension Interface:** Model Context Protocol (MCP) Browser Subagent (Direct Control)
@@ -74,14 +74,12 @@ The following is the high-fidelity markdown extracted for the user. It isolates 
 ## **Representative Visual Documentation**
 
 ### **Full Task Execution Recording**
-The following video captures the agent's complete interaction sequence, including handling the cookie banner and navigating sub-menus to find valuation metrics and news.
-
-![Task Recording](/home/kiel/stage/cl-rust-generator/examples/19_webprox/doc/case_study_video.webp)
+*Note: The original recording (`case_study_video.webp`) was unfortunately corrupted during the extraction process (AI-side encoding error) and has been removed to preserve document integrity.*
 
 ### **Representative Still Frame**
-This frame shows the state of the page after the agent successfully cleared the navigation hurdles and reached the primary data view for COHR.
+This frame shows the state of the page after the agent successfully cleared the navigation hurdles. **Optimized for modern browsers (AVIF: ~35KB, an 81.5% reduction).**
 
-![COHR Data State](/home/kiel/stage/cl-rust-generator/examples/19_webprox/doc/case_study_frame.png)
+![COHR Data State](case_study_frame.avif)
 
 ---
 
