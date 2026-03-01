@@ -1,0 +1,23 @@
+[package]
+name = "macroquad-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+macroquad = "0.4"
+tokio = { version = "1.0", features = ["full"] }
+tonic = "0.10"
+proto-def = { path = "../proto-def" }
+# For decoder, let's try 'dav1d' first as a reliable wrapper
+dav1d = "0.10" 
+yuv = "0.1" # awxkee crate
+clap = { version = "4.0", features = ["derive"] }
+futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+env_logger = "0.10"
+core-utils = { path = "../core-utils" }
+tokio-stream = "0.1"
+async-stream = "0.3"
+num_cpus = "1.0"

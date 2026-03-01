@@ -1,0 +1,21 @@
+[package]
+name = "cloud-render-srv"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.0", features = ["full"] }
+tonic = "0.10"
+proto-def = { path = "../proto-def" }
+rav1e = "0.13" # Or whatever's current
+yuv = "0.1" # awxkee crate
+image = "0.24"
+clap = { version = "4.0", features = ["derive"] }
+futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+env_logger = "0.10"
+num_cpus = "1.0"
+tokio-stream = "0.1"
+core-utils = { path = "../core-utils" }
