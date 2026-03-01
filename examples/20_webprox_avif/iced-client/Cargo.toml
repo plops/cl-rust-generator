@@ -1,15 +1,31 @@
 [package]
-name = "macroquad-client"
+name = "iced-client"
 version = "0.1.0"
 edition = "2021"
+
+[[bin]]
+name = "iced-client"
+path = "src/main.rs"
+
+[[bin]]
+name = "iced-simple"
+path = "src/main_simple.rs"
+
+[[bin]]
+name = "iced-working"
+path = "src/main_working.rs"
+
+[[bin]]
+name = "iced-basic"
+path = "src/main_basic.rs"
 
 [features]
 default = []
 integration-test = []
 
 [dependencies]
-macroquad = "0.4"
-miniquad = "0.4"
+iced = { version = "0.13", features = ["tokio", "canvas", "image", "advanced"] }
+iced_futures = { version = "0.13", features = ["tokio"] }
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync", "time"] }
 tonic = { version = "0.12" }
 prost = "0.13"
@@ -27,5 +43,3 @@ chrono = { version = "0.4", features = ["serde"] }
 yuv = "0.1"
 imgref = "1.10"
 rgb = "0.8"
-
-# Remove [workspace]
