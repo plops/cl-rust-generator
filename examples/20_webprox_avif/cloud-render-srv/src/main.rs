@@ -2,6 +2,7 @@ use std::pin::Pin;
 use tokio::sync::mpsc;
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tonic::{transport::Server, Request, Response, Status};
+use clap::{Parser, Subcommand};
 
 use proto_def::graphical_proxy::{
     remote_browser_server::{RemoteBrowser, RemoteBrowserServer},
@@ -11,6 +12,29 @@ use proto_def::graphical_proxy::{
 use rav1e::prelude::*;
 use image::{RgbaImage, Rgba};
 use std::time::Duration;
+
+mod browser;
+use browser::{ChromeRunner, CdpStream, extract_spatial_metadata};
+
+#[derive(Parser, Debug)]
+#[command(author, version, about = "AV1 Remote Browser Server")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Test Chrome extraction - capture screenshot and extract link metadata
+    TestScreencast {
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Start the gRPC server
+    Serve,
+}
 
 pub struct RemoteBrowserImpl {}
 
@@ -107,15 +131,95 @@ async fn run_mock_encoder(tx: mpsc::Sender<Result<ServerUpdate, Status>>) -> Res
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = "[::1]:50051".parse()?;
-    let browser_service = RemoteBrowserImpl {};
+    let cli = Cli::parse();
+    
+    match cli.command {
+        Some(Commands::TestScreencast { url, output }) => {
+            println!("Testing Chrome extraction for URL: {}", url);
+            test_chrome_extraction(&url, output.as_deref()).await?;
+        }
+        Some(Commands::Serve) | None => {
+            let addr = "[::1]:50051".parse()?;
+            let browser_service = RemoteBrowserImpl {};
 
-    println!("Starting gRPC server at {}", addr);
+            println!("Starting gRPC server at {}", addr);
 
-    Server::builder()
-        .add_service(RemoteBrowserServer::new(browser_service))
-        .serve(addr)
-        .await?;
+            Server::builder()
+                .add_service(RemoteBrowserServer::new(browser_service))
+                .serve(addr)
+                .await?;
+        }
+    }
 
+    Ok(())
+}
+
+async fn test_chrome_extraction(url: &str, output_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Starting Chrome extraction test...");
+    
+    // Initialize Chrome runner
+    let mut chrome = ChromeRunner::new(true).await?;
+    let page = chrome.new_page().await?;
+    
+    println!("Navigating to URL: {}", url);
+    CdpStream::navigate_to(&page, url).await?;
+    
+    println!("Capturing screenshot...");
+    let screenshot = CdpStream::capture_screenshot(&page).await?;
+    
+    // Save screenshot if output path provided
+    if let Some(output) = output_path {
+        screenshot.save(output)?;
+        println!("Screenshot saved to: {}", output);
+    }
+    
+    println!("Extracting spatial metadata...");
+    let metadata = extract_spatial_metadata(&page).await?;
+    
+    println!("Page Title: {}", metadata.title);
+    println!("Document Size: {}x{}", metadata.document_width, metadata.document_height);
+    println!("Found {} links:", metadata.links.len());
+    
+    for (i, link) in metadata.links.iter().take(10).enumerate() {
+        println!("  {}. {} at ({},{}) size {}x{}", 
+                 i + 1, 
+                 link.label.chars().take(30).collect::<String>(),
+                 link.x, link.y, link.width, link.height);
+    }
+    
+    if metadata.links.len() > 10 {
+        println!("  ... and {} more links", metadata.links.len() - 10);
+    }
+    
+    // Save metadata as JSON (manual serialization since protobuf types don't have serde derive)
+    let metadata_manual = serde_json::json!({
+        "title": metadata.title,
+        "document_width": metadata.document_width,
+        "document_height": metadata.document_height,
+        "links": metadata.links.iter().map(|link| {
+            serde_json::json!({
+                "id": link.id,
+                "url": link.url,
+                "label": link.label,
+                "x": link.x,
+                "y": link.y,
+                "width": link.width,
+                "height": link.height
+            })
+        }).collect::<Vec<_>>()
+    });
+    
+    let metadata_json = serde_json::to_string_pretty(&metadata_manual)?;
+    let json_path = output_path
+        .map(|p| format!("{}.json", &p[..p.rfind('.').unwrap_or(p.len())]))
+        .unwrap_or_else(|| "metadata.json".to_string());
+    
+    std::fs::write(&json_path, metadata_json)?;
+    println!("Metadata saved to: {}", json_path);
+    
+    // Clean up
+    chrome.close().await?;
+    
+    println!("Chrome extraction test completed successfully!");
     Ok(())
 }
