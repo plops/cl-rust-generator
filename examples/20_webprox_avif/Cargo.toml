@@ -4,7 +4,6 @@ members = [
     "core-utils",
     "cloud-render-srv",
     "macroquad-client",
-    "iced-client",
     "avif_poc",
 ]
 resolver = "2"
