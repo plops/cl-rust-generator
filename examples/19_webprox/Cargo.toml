@@ -9,7 +9,7 @@ resolver = "2"
 
 [profile.dev]
 debug = 1
-incremental = false
+incremental = true
 
 [profile.release]
 opt-level = "z"

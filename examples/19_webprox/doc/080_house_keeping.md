@@ -31,5 +31,21 @@ The hidden cache in `~/.cargo` also requires periodic maintenance:
 - **cargo clean gc**: Use this native subcommand to perform "garbage collection" on your global cargo home. It removes outdated downloaded crates and metadata that are no longer referenced by any project.
 
 ---
+
+## 5. Case Study: `19_webprox` Build Analysis
+Following the build of the two main components (`cloud-proxy-server` and `minimal-tui-client`), the `target/` folder reached **1.3 GB** in total size using the `debug = 1` and `incremental = true` profile:
+
+| Directory | Size | Description |
+| :--- | :--- | :--- |
+| `target/debug/deps` | **1.1 GB** | Intermediate compiled libraries and dependency objects. |
+| `target/debug/build` | **61 MB** | Build scripts and their generated outputs. |
+| `target/debug/.fingerprint` | **8.0 MB** | Incremental tracking data. |
+| **Total `target/`** | **1.3 GB** | Total for the initial development build. |
+
+### Binary Size Observations
+Using `debug = 1` (line tables only) instead of the default `debug = 2` results in significantly smaller but still debuggable binaries:
+- `cloud-proxy-server`: **118 MB**
+- `minimal-tui-client`: **34 MB**
+
 > [!TIP]
 > Periodically running `cargo clean gc` along with a tool like `cargo-sweep` can keep your total Rust disk usage within reasonable bounds without sacrificing development speed.
