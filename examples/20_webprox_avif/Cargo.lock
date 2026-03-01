@@ -1468,6 +1468,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-stream",
  "tonic",
  "yuv 0.1.10",
 ]
