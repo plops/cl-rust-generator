@@ -376,6 +376,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
+name = "av-data"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fca67ba5d317924c02180c576157afd54babe48a76ebc66ce6d34bb8ba08308e"
+dependencies = [
+ "byte-slice-cast",
+ "bytes",
+ "num-derive",
+ "num-rational",
+ "num-traits",
+]
+
+[[package]]
 name = "av-metrics"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -567,6 +580,12 @@ name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
+
+[[package]]
+name = "byte-slice-cast"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7575182f7272186991736b70173b0ea045398f984bf5ebbb3804736ce1330c9d"
 
 [[package]]
 name = "bytemuck"
@@ -2540,10 +2559,11 @@ dependencies = [
 [[package]]
 name = "rav1d"
 version = "1.1.0"
-source = "git+https://github.com/memorysafety/rav1d#ed159a3ebc3e2607cdc12f157ff7046c0b033f48"
+source = "git+https://github.com/leo030303/rav1d?branch=add-rust-api#3a50834ce3743bc580f340ba3bfbdbf6a46ab783"
 dependencies = [
  "assert_matches",
  "atomig",
+ "av-data",
  "bitflags 2.11.0",
  "cc",
  "cfg-if",

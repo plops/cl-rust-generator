@@ -1,9 +1,27 @@
 use chromiumoxide::Page;
-use proto_def::graphical_proxy::{SpatialMetadata, LinkBox};
 use serde_json::Value;
 use anyhow::Result;
 
-pub async fn extract_spatial_metadata(page: &Page) -> Result<SpatialMetadata> {
+#[derive(Debug, Clone)]
+pub struct ExtractedLink {
+    pub id: u32,
+    pub url: String,
+    pub label: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExtractedMetadata {
+    pub title: String,
+    pub document_width: u32,
+    pub document_height: u32,
+    pub links: Vec<ExtractedLink>,
+}
+
+pub async fn extract_spatial_metadata(page: &Page) -> Result<ExtractedMetadata> {
     let js_script = r#"
         (() => {
             const links = Array.from(document.querySelectorAll('a')).map((a, i) => {
@@ -36,7 +54,7 @@ pub async fn extract_spatial_metadata(page: &Page) -> Result<SpatialMetadata> {
     let mut links = Vec::new();
     if let Some(links_array) = result["links"].as_array() {
         for link_data in links_array {
-            let link_box = LinkBox {
+            let link_box = ExtractedLink {
                 id: link_data["id"].as_u64().unwrap_or(0) as u32,
                 url: link_data["url"].as_str().unwrap_or("").to_string(),
                 label: link_data["label"].as_str().unwrap_or("").to_string(),
@@ -49,7 +67,7 @@ pub async fn extract_spatial_metadata(page: &Page) -> Result<SpatialMetadata> {
         }
     }
     
-    Ok(SpatialMetadata {
+    Ok(ExtractedMetadata {
         title,
         document_width: doc_width,
         document_height: doc_height,

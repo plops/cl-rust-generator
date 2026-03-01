@@ -6,15 +6,15 @@ use clap::{Parser, Subcommand};
 
 use proto_def::graphical_proxy::{
     remote_browser_server::{RemoteBrowser, RemoteBrowserServer},
-    ClientEvent, ServerUpdate, VideoFrame,
+    ClientEvent, ServerUpdate, VideoFrame, SpatialMetadata,
 };
 
 use rav1e::prelude::*;
-use image::{RgbaImage, Rgba};
+use image::DynamicImage;
 use std::time::Duration;
 
 mod browser;
-use browser::{ChromeRunner, CdpStream, extract_spatial_metadata};
+use browser::{ChromeRunner, CdpStream, extract_spatial_metadata, ExtractedMetadata};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "AV1 Remote Browser Server")]
@@ -46,20 +46,13 @@ impl RemoteBrowser for RemoteBrowserImpl {
         &self,
         request: Request<tonic::Streaming<ClientEvent>>,
     ) -> Result<Response<Self::StreamSessionStream>, Status> {
-        let mut client_stream = request.into_inner();
+        let client_stream = request.into_inner();
         let (tx, rx) = mpsc::channel(128);
 
-        // Background task to read client events
+        // Background task to handle client events and run browser session
         tokio::spawn(async move {
-            while let Some(Ok(event)) = client_stream.next().await {
-                println!("Received client event: {:?}", event);
-            }
-        });
-
-        // Background task to send mock AV1 frames
-        tokio::spawn(async move {
-            if let Err(e) = run_mock_encoder(tx).await {
-                eprintln!("Mock encoder error: {:?}", e);
+            if let Err(e) = run_browser_session(tx, client_stream).await {
+                eprintln!("Browser session error: {:?}", e);
             }
         });
 
@@ -68,11 +61,31 @@ impl RemoteBrowser for RemoteBrowserImpl {
     }
 }
 
-async fn run_mock_encoder(tx: mpsc::Sender<Result<ServerUpdate, Status>>) -> Result<(), Box<dyn std::error::Error>> {
-    let width = 1280;
-    let height = 720;
+async fn run_browser_session(
+    tx: mpsc::Sender<Result<ServerUpdate, Status>>,
+    mut client_stream: tonic::Streaming<ClientEvent>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut width = 1280;
+    let mut height = 720;
     
-    // Configure rav1e
+    // Initialize Chrome browser
+    let chrome = ChromeRunner::new(true).await?;
+    let page = chrome.new_page().await?;
+    
+    // Navigate to a default page
+    CdpStream::navigate_to(&page, "https://en.wikipedia.org/wiki/Rust_(programming_language)").await?;
+    
+    // Wait for page to load
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    
+    // Capture first screenshot to get actual dimensions
+    let first_screenshot = CdpStream::capture_screenshot(&page).await?;
+    width = first_screenshot.width() as usize;
+    height = first_screenshot.height() as usize;
+    
+    println!("Actual screenshot dimensions: {}x{}", width, height);
+    
+    // Configure rav1e encoder with actual dimensions
     let mut enc = EncoderConfig::default();
     enc.width = width;
     enc.height = height;
@@ -83,24 +96,82 @@ async fn run_mock_encoder(tx: mpsc::Sender<Result<ServerUpdate, Status>>) -> Res
     let cfg = Config::new().with_encoder_config(enc).with_threads(2);
     let mut ctx: Context<u8> = cfg.new_context().map_err(|e| format!("Encoder error: {:?}", e))?;
     
+    // Send initial spatial metadata
+    let metadata = extract_spatial_metadata(&page).await?;
+    let spatial_update = ServerUpdate {
+        update: Some(proto_def::graphical_proxy::server_update::Update::SpatialData(SpatialMetadata {
+            title: metadata.title,
+            document_width: metadata.document_width,
+            document_height: metadata.document_height,
+            links: metadata.links.into_iter().map(|link| proto_def::graphical_proxy::LinkBox {
+                id: link.id,
+                url: link.url,
+                label: link.label,
+                x: link.x,
+                y: link.y,
+                width: link.width,
+                height: link.height,
+            }).collect(),
+        })),
+    };
+    
+    if tx.send(Ok(spatial_update)).await.is_err() {
+        return Ok(()); // Client disconnected
+    }
+    
     let mut frame_count = 0;
+    let mut current_viewport_y = 0i32;
+    
     loop {
-        // Generate mock frame (rotating rectangle)
-        let mut img = RgbaImage::new(width as u32, height as u32);
-        let angle = (frame_count as f32 * 0.1) % (2.0 * std::f32::consts::PI);
-        let rect_x = (width as f32 / 2.0 + 200.0 * angle.cos()) as u32;
-        let rect_y = (height as f32 / 2.0 + 200.0 * angle.sin()) as u32;
-
-        for x in 0..100 {
-            for y in 0..100 {
-                if rect_x + x < width as u32 && rect_y + y < height as u32 {
-                    img.put_pixel(rect_x + x, rect_y + y, Rgba([255, 0, 0, 255]));
+        // Handle client events
+        if let Some(Ok(event)) = client_stream.next().await {
+            if let Some(client_event) = event.event {
+                match client_event {
+                    proto_def::graphical_proxy::client_event::Event::Navigate(navigate) => {
+                        println!("Navigating to: {}", navigate.url);
+                        CdpStream::navigate_to(&page, &navigate.url).await?;
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        
+                        // Send updated metadata
+                        let metadata = extract_spatial_metadata(&page).await?;
+                        let spatial_update = ServerUpdate {
+                            update: Some(proto_def::graphical_proxy::server_update::Update::SpatialData(SpatialMetadata {
+                                title: metadata.title,
+                                document_width: metadata.document_width,
+                                document_height: metadata.document_height,
+                                links: metadata.links.into_iter().map(|link| proto_def::graphical_proxy::LinkBox {
+                                    id: link.id,
+                                    url: link.url,
+                                    label: link.label,
+                                    x: link.x,
+                                    y: link.y,
+                                    width: link.width,
+                                    height: link.height,
+                                }).collect(),
+                            })),
+                        };
+                        
+                        if tx.send(Ok(spatial_update)).await.is_err() {
+                            return Ok(());
+                        }
+                    }
+                    proto_def::graphical_proxy::client_event::Event::Scroll(scroll) => {
+                        current_viewport_y = (current_viewport_y + scroll.delta_y).max(0);
+                        // Execute scroll in browser
+                        let scroll_script = format!("window.scrollTo(0, {});", current_viewport_y);
+                        let _ = page.evaluate(scroll_script.as_str()).await?;
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                    _ => {}
                 }
             }
         }
-
+        
+        // Capture screenshot from browser
+        let screenshot = CdpStream::capture_screenshot(&page).await?;
+        
         // Convert RGBA to YUV using core-utils
-        let yuv_image = core_utils::rgba_to_yuv420(&img, width as u32, height as u32)
+        let yuv_image = core_utils::rgba_to_yuv420(&screenshot, width as u32, height as u32)
             .map_err(|e| format!("YUV conversion error: {:?}", e))?;
 
         let mut frame = ctx.new_frame();
@@ -110,13 +181,14 @@ async fn run_mock_encoder(tx: mpsc::Sender<Result<ServerUpdate, Status>>) -> Res
         
         ctx.send_frame(frame).map_err(|e| format!("Send frame error: {:?}", e))?;
         
+        // Receive encoded packets
         while let Ok(packet) = ctx.receive_packet() {
             let update = ServerUpdate {
                 update: Some(proto_def::graphical_proxy::server_update::Update::Frame(VideoFrame {
                     av1_data: packet.data,
-                    is_keyframe: packet.frame_type == FrameType::KEY,
+                    is_keyframe: packet.frame_type == FrameType::KEY || frame_count % 30 == 0,
                     viewport_x: 0,
-                    viewport_y: 0,
+                    viewport_y: current_viewport_y,
                 })),
             };
             if tx.send(Ok(update)).await.is_err() {
@@ -191,7 +263,7 @@ async fn test_chrome_extraction(url: &str, output_path: Option<&str>) -> Result<
         println!("  ... and {} more links", metadata.links.len() - 10);
     }
     
-    // Save metadata as JSON (manual serialization since protobuf types don't have serde derive)
+    // Save metadata as JSON
     let metadata_manual = serde_json::json!({
         "title": metadata.title,
         "document_width": metadata.document_width,

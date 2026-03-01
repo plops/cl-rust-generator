@@ -9,7 +9,7 @@ miniquad = "0.4"
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync", "time"] }
 tonic = { version = "0.12" }
 prost = "0.13"
-rav1d = { git = "https://github.com/memorysafety/rav1d" } # Or published crate if available
+rav1d = { git = "https://github.com/leo030303/rav1d", branch = "add-rust-api" }
 tokio-stream = { version = "0.1", features = ["sync"] }
 core-utils = { path = "../core-utils" }
 proto-def = { path = "../proto-def" }
