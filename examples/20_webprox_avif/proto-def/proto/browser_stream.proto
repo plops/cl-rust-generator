@@ -1,0 +1,67 @@
+syntax = "proto3";
+package graphical_proxy;
+
+service RemoteBrowser {
+  rpc StreamSession(stream ClientEvent) returns (stream ServerUpdate);
+}
+
+message ClientEvent {
+  oneof event {
+    NavigateRequest navigate = 1;
+    ScrollInput scroll = 2;
+    SearchRequest search = 3;
+    // MouseInput, KeyboardInput etc. if needed later
+    StreamConfig config = 4;
+  }
+}
+
+message StreamConfig {
+  bool enable_video = 1;
+  bool enable_spatial_links = 2;
+}
+
+message NavigateRequest { string url = 1; }
+message ScrollInput { int32 absolute_y = 1; }
+message SearchRequest { string query = 1; }
+
+message ServerUpdate {
+  oneof update {
+    VideoFrame frame = 1;
+    SpatialMetadata metadata = 2;
+    SearchResults search_results = 3;
+    SystemStatus status = 4;
+  }
+}
+
+message VideoFrame {
+  bytes av1_data = 1;
+  bool is_keyframe = 2;
+  int32 viewport_x = 3;
+  int32 viewport_y = 4;
+}
+
+message SpatialMetadata {
+  string title = 1;
+  uint32 document_width = 2;
+  uint32 document_height = 3;
+  repeated LinkBox links = 4;
+}
+
+message LinkBox {
+  uint32 id = 1; string url = 2; string label = 3;
+  int32 x = 4; int32 y = 5; int32 width = 6; int32 height = 7;
+}
+
+message SearchResults {
+  string query = 1;
+  repeated SearchMatch matches = 2;
+}
+
+message SearchMatch {
+  int32 absolute_y = 1;
+  string context_snippet = 2;
+}
+
+message SystemStatus {
+  string message = 1;
+}
