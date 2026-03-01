@@ -1,6 +1,6 @@
-Ähnlich wie ../19_webprox Soll dieses Projekt ein Cloud Server verwenden, der einen Browser laufen lässt und Webseiten dort rendert, auf einen Clienten, der eine sehr langsame Internetanbindung hat, die Webseite anzuzeigen.
+Ähnlich wie ../19_webprox soll dieses Projekt ein Cloud Server verwenden, der einen Browser laufen lässt und Webseiten dort rendert, auf einen Clienten, der eine sehr langsame Internetanbindung hat, die Webseite anzuzeigen.
 
-Aber dieses Projekt hier soll von grafischer Natur sein. Es soll die geränderte Webseite als hochkomprimiertes Bild übertragen. 
+Aber dieses Projekt hier soll von grafischer Natur sein. Es soll die gerenderte Webseite als hochkomprimiertes Bild übertragen. 
 
 Die Idee ist dabei, den effizienten AV1 Encoder RAV1E zu verwenden. 
 https://github.com/xiph/rav1e
@@ -21,7 +21,7 @@ https://crates.io/crates/yuv
 Nutze bei der Planung das DeepWiki MCP oder die dokumentation vom deepwiki https://deepwiki.com/not-fl3/macroquad (die verzeichnisstruktur ist equivalent zu github) m erkundungen ueber die Bibliotheken zu machen und um die beste Loesung zu finden.
 
   
-Bei dieser kann man wahrscheinlich aber sehr viele Features abschalten, die Dependencies gering zu halten. Denn eines meiner Ziele ist bloat zu vermeiden. Ein anderes ist cross-platform zu sein und CI builds mit github actions zu ermoeglichen.
+Bei dieser kann man wahrscheinlich aber sehr viele Features abschalten, um die Dependencies gering zu halten. Denn eines meiner Ziele ist bloat zu vermeiden. Ein anderes ist cross-platform zu sein und CI builds mit github actions zu ermoeglichen.
 Fuer die ersten iterationen beschraenken wir uns jedoch auf linux fuer server und client.
 
 Wie beim ../19_webprox Projekt soll auch hier der Server mittels gRPC angebunden sein. Die Datenkommunikation soll optional über Zertifikate verschlüsselt werden.
@@ -35,11 +35,11 @@ Damit sollte es recht einfach möglich sein, Integrationstests umzusetzen, die d
 Ein fortgeschrittener Test-Ansatz soll vorsehen, Screenshots direkt vom X-Window-System des Clients zu beziehen und diese mit dem vom Server gesendeten Originalbild zu vergleichen, um die Korrektheit der Rendering-Pipeline (inkl. Scrolling und Framebuffer) zu validieren.
 
 Vielleicht nicht im ersten Implementierungsschritt, aber vorgesehen sollte es schon sein, ist die Volltextsuche. Es sollte die vom Browser übernommen werden. 
-textsuche soll serverseitig stattfinden aber die suchergebnisse mit umliegenden textzeilen sollen in den metadaten fuer die gesamte seite unabhaengig vom aktuell sichtbaren bildschirmanteil an den clienten gesendet werden
+Textsuche soll serverseitig stattfinden, aber die Suchergebnisse mit umliegenden Textzeilen sollen in den Metadaten für die gesamte Seite unabhängig vom aktuell sichtbaren Bildschirmanteil an den Clienten gesendet werden.
 
-In ähnlichen Zusammenhang sollten die Bilddaten mit Metadaten erweitert werden. Wir haben ja wahrscheinlich die Titelseite, aber die Position von Links und die Links selbst sollten auch mit angezeigt werden. Während die Bildwarten nur einen beschränkten Ausschnitt der Webseite anzeigen, könnten die Links alle beim ersten Mal schon gesendet werden, sodass die GUI beim Scrollen zumindest die Links anzeigt, bevor das Bild kommt. Aber diese Zusatzdaten sollten alle vom GAPC-P Protokoll im Klienten ein- oder ausgeschalten werden können. 
+In ähnlichen Zusammenhang sollten die Bilddaten mit Metadaten erweitert werden. Wir haben ja wahrscheinlich die Titelseite, aber die Position von Links und die Links selbst sollten auch mit angezeigt werden. Während die Bilddaten nur einen beschränkten Ausschnitt der Webseite anzeigen, könnten die Links alle beim ersten Mal schon gesendet werden, sodass die GUI beim Scrollen zumindest die Links anzeigt, bevor das Bild kommt. Aber diese Zusatzdaten sollten alle vom GAPC-P Protokoll im Klienten ein- oder ausgeschaltet werden können. 
 
-Der Bildstream von Chrome sollte im Server so roh wie moeglich gelesen werden (z.B. PNG und nicht JPEG). Die vom Server gesendeten Buildupdates sollen in den Metadaten die ursprünglichen X und Y-Positionen enthalten, und natürlich breite und Höhe. Und der Client soll diese in einen größeren Framebuffer eintragen. Das heißt, wenn der Nutzer scrollt, baut sich beim Klienten eine Kopie der Webseite auf. Und beim schnellen Handherscrollen kann er eine alte Version sehen. Aber eine kurze Zeit später, nachdem der Server über die Scrollbewegung informiert wurde, wird der entsprechende Bildausschnitt wieder mit einem neuen Bild überschrieben, was aktuell ist. 
+Der Bildstream von Chrome sollte im Server so roh wie moeglich gelesen werden (z.B. PNG und nicht JPEG). Die vom Server gesendeten Buildupdates sollen in den Metadaten die ursprünglichen X und Y-Positionen enthalten, und natürlich breite und Höhe. Und der Client soll diese in einen größeren Framebuffer eintragen. Das heißt, wenn der Nutzer scrollt, baut sich beim Klienten eine Kopie der Webseite auf. Und beim schnellen Hin- und Herscrollen kann er eine alte Version sehen. Aber eine kurze Zeit später, nachdem der Server über die Scrollbewegung informiert wurde, wird der entsprechende Bildausschnitt wieder mit einem neuen Bild überschrieben, was aktuell ist. 
 
 cd  /home/kiel/stage/cl-rust-generator/examples/20_webprox_avif/
 
