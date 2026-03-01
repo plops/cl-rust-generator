@@ -122,3 +122,144 @@ Der Agent kann nach Code-Änderungen das Kommando ausführen. Er prüft den Exit
 
 ### Nächste Schritte
 Soll ich als Erstes das Cargo-Workspace Setup und die detaillierte `proto`-Datei generieren, oder wollen wir uns direkt das Setup des `macroquad` Clients mit entkoppeltem Netzwerk-Task ansehen?
+
+
+
+
+Das ist ein hervorragender architektonischer Einwurf. Als Systemarchitekt schätze ich solche Weitsicht. Gehen wir die Punkte systematisch durch, denn sie verfeinern unseren Plan maßgeblich.
+
+### 1. Dekoder: `rav1d` statt C-Bindings
+Die Wahl von `rav1d` (dem reinen Rust-Port von dav1d) ist ein massiver Gewinn für unsere CI/CD-Pipeline und Cross-Platform-Ziele. Wir umgehen damit das berüchtigte "C-Toolchain-Hell" (kein Meson, kein Ninja, kein clang notwendig). Ein reines Rust-Ökosystem (`rav1e` auf dem Server, `rav1d` auf dem Client) bedeutet, dass wir per GitHub Actions mühelos für Linux, Windows und macOS kompilieren können. Das passt perfekt zur "Anti-Bloat"-Philosophie.
+
+### 2. Die Video-Pipeline: PNG als saubere Quelle
+Dein Gedankengang zur Bildqualität ist absolut korrekt (Vermeidung von *Generation Loss*). Wenn Chrome JPEG liefert, enthält das Bild bereits Kompressionsartefakte. Der AV1-Encoder (`rav1e`) würde dann Bandbreite verschwenden, um diese JPEG-Artefakte exakt nachzubilden. 
+
+Die optimierte Server-Pipeline sieht daher wie folgt aus:
+1.  **Screencast-Config:** Wir weisen Chrome über CDP an: `Page.startScreencast { format: "png" }`.
+2.  **Base64 Decode:** Wir dekodieren den String (sehr billig per `base64` Crate).
+3.  **PNG Decode:** Wir nutzen z.B. das `image` oder `png` Crate (strikt ohne Default-Features, nur PNG-Support kompiliert), um an die unkomprimierten RGBA-Pixel zu kommen.
+4.  **Farbraum-Konvertierung:** AV1 arbeitet effizientesten im YUV-Farbraum (meist YUV420p). Wir konvertieren das RGBA-Array in YUV.
+5.  **AV1 Encoding:** Übergabe an `rav1e`.
+6.  **Transport:** Ab in den gRPC Stream.
+
+### 3. Volltextsuche (Architectural Design)
+Da wir im Kern einen *visuellen* Proxy bauen, gibt es für die Suche zwei elegante Architekturebenen, die wir im Protokoll vorsehen sollten:
+
+*   **Ebene 1: Visuelle Suche (Server-Side):** Der Client sendet einen `SearchRequest` mit dem Suchbegriff. Der Server instruiert Chrome (via CDP `Input.dispatchKeyEvent` mit `Ctrl+F` oder der nativen CDP-Such-API). Chrome markiert die Treffer gelb auf der Webseite. Da wir den Bildschirm streamen, sieht der Nutzer das Highlighting sofort nativ im Videostream, inklusive automatischem Scrollen zum Treffer!
+*   **Ebene 2: Semantischer Text (Client-Side Overlay):** Wir erweitern das gRPC-Protokoll um eine Metadaten-Nachricht. Der Server kann per CDP (`Runtime.evaluate("document.body.innerText")`) blitzschnell den sichtbaren Text extrahieren und an den Client senden. Der Client kann diesen Text im Hintergrund halten. Wenn der Nutzer lokal sucht, weiß der Client zumindest sofort, *ob* das Wort existiert und wie oft.
+
+---
+
+### Der aktualisierte Masterplan: Workspace & gRPC-Protokoll
+
+Um das Fundament richtig zu gießen, schlage ich vor, wir definieren zuerst den Workspace und den gRPC-Vertrag (`browser_stream.proto`). Das ist die Schnittstelle, die unsere Teams (oder KI-Agenten) strikt entkoppelt arbeiten lässt.
+
+#### 1. Die Workspace Struktur (`Cargo.toml` im Root)
+```toml
+[workspace]
+members =[
+    "proto-def",        # Das gRPC Schema (Kompiliert mit tonic-build)
+    "cloud-render-srv", # Der Server (chromiumoxide + rav1e)
+    "macroquad-client", # Die GUI (macroquad + rav1d)
+]
+resolver = "2"
+
+[profile.release]
+opt-level = "z"     # Optimierung auf Dateigröße (Anti-Bloat)
+lto = true          # Link Time Optimization (Entfernt ungenutzten Code)
+codegen-units = 1
+panic = "abort"
+strip = true        # Entfernt Debug-Symbole aus der Release-Binary
+```
+
+#### 2. Der gRPC-Vertrag (`proto-def/proto/browser_stream.proto`)
+Dieses Protokoll spiegelt nun auch deine Anforderungen für Suche und Text-Metadaten wider:
+
+```protobuf
+syntax = "proto3";
+package graphical_proxy;
+
+// Der Haupt-Service für den Remote-Browser
+service RemoteBrowser {
+  // Bidirektionaler Stream für Low-Latency Interaktion
+  rpc StreamSession(stream ClientEvent) returns (stream ServerUpdate);
+}
+
+// --- Nachrichten vom CLIENT zum SERVER ---
+message ClientEvent {
+  oneof event {
+    NavigateRequest navigate = 1;
+    MouseInput mouse = 2;
+    KeyboardInput keyboard = 3;
+    ScrollInput scroll = 4;
+    ViewportResize resize = 5;
+    SearchRequest search = 6;      // NEU: Triggert die Suche im Server-Browser
+    RequestTextData request_text = 7; // NEU: Fordert den reinen Seitentext an
+  }
+}
+
+message NavigateRequest { string url = 1; }
+message MouseInput { 
+  int32 x = 1; 
+  int32 y = 2; 
+  bool is_click = 3; 
+  string button = 4; // "left", "right", "middle"
+}
+message KeyboardInput { 
+  string key_code = 1; 
+  bool is_pressed = 2; 
+}
+message ScrollInput { int32 delta_x = 1; int32 delta_y = 2; }
+message ViewportResize { int32 width = 1; int32 height = 2; }
+message SearchRequest { string query = 1; bool next = 2; }
+message RequestTextData {}
+
+// --- Nachrichten vom SERVER zum CLIENT ---
+message ServerUpdate {
+  oneof update {
+    VideoFrame frame = 1;          // Der encodierte AV1 Frame
+    PageMetadata metadata = 2;     // Meta-Infos (Titel, URL)
+    TextContent text_content = 3;  // NEU: Extrahierter Text für lokale Indexierung
+    SystemStatus status = 4;       // Fehler, Ladezustände
+  }
+}
+
+message VideoFrame {
+  bytes data = 1;             // rav1e Output (AV1 Bitstream)
+  bool is_keyframe = 2;       // Wichtig für den rav1d Decoder
+  uint64 timestamp_ms = 3;
+}
+
+message PageMetadata {
+  string current_url = 1;
+  string title = 2;
+}
+
+message TextContent {
+  string inner_text = 1; // Der sichtbare Text der Seite
+}
+
+message SystemStatus {
+  string message = 1;
+  enum Level { INFO = 0; WARNING = 1; ERROR = 2; }
+  Level level = 2;
+}
+```
+
+### Wie wir die KI-Agenten-Testbarkeit hiermit maximieren
+
+Da die Logik durch gRPC komplett vom UI entkoppelt ist, können wir im `macroquad-client` Crate ein Modul `agent_tester.rs` anlegen.
+
+Wenn der Client mit `--test-mode --url "https://news.ycombinator.com"` gestartet wird, passiert Folgendes:
+1. Das UI (macroquad) startet gar nicht erst (spart Ressourcen im CI-Container).
+2. Der gRPC-Task verbindet sich mit dem Server.
+3. Er sendet `NavigateRequest`.
+4. Er wartet auf das erste `VideoFrame`, wo `is_keyframe == true`.
+5. Er wirft die Bytes in `rav1d`, bekommt ein YUV-Bild, wandelt es in RGB.
+6. Er speichert es per `image` Crate als `test_output.png` und beendet sich mit Exit Code 0.
+
+Der KI-Agent (oder ein automatisiertes Skript) kann dann den Server starten, diesen Client-Befehl absetzen und verifizieren, dass `test_output.png` generiert wurde und korrekten Inhalt hat.
+
+### Nächster Schritt
+
+Sollen wir als Nächstes die Implementierungs-Architektur des **Servers** (das Zusammenspiel von `chromiumoxide` Screencast $\rightarrow$ PNG Decode $\rightarrow$ `rav1e` Encoder $\rightarrow$ gRPC Stream) im Detail skizzieren, oder bevorzugst du, dass wir mit dem Minimal-Setup des **Clients** (`macroquad` + `rav1d` + gRPC) beginnen?
