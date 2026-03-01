@@ -23,6 +23,14 @@ pub struct ClientCli {
     /// Path to save comparison result JSON
     #[arg(long)]
     pub output_result: Option<PathBuf>,
+    
+    /// Manual Y offset adjustment for debugging coordinate alignment (in pixels)
+    #[arg(long, default_value = "0")]
+    pub y_offset: i32,
+    
+    /// Enable verbose coordinate logging
+    #[arg(long)]
+    pub verbose_coords: bool,
 }
 
 #[derive(Args, Debug)]

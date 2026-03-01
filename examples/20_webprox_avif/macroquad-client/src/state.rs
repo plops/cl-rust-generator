@@ -42,5 +42,7 @@ pub struct ClientState {
     pub server_viewport_y: i32,
     pub local_scroll_y: i32,
     
-    // Client event sender (removed - will be handled by MPSC channel)
+    // Debug parameters
+    pub debug_y_offset: i32,
+    pub verbose_coords: bool,
 }

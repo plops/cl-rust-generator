@@ -14,7 +14,22 @@ mod video;
 mod integration_test;
 
 #[cfg(feature = "integration-test")]
-use integration_test::parse_integration_test_args;
+use integration_test::{ClientCli, parse_integration_test_args};
+#[cfg(not(feature = "integration-test"))]
+use clap::Parser;
+
+#[cfg(not(feature = "integration-test"))]
+#[derive(Parser, Debug)]
+#[command(author, version, about = "AV1 Remote Browser Client")]
+struct ClientCli {
+    /// Manual Y offset adjustment for debugging coordinate alignment (in pixels)
+    #[arg(long, default_value = "0")]
+    pub y_offset: i32,
+    
+    /// Enable verbose coordinate logging
+    #[arg(long)]
+    pub verbose_coords: bool,
+}
 
 use state::ClientState;
 use network::grpc_client;
@@ -30,13 +45,14 @@ fn init_logging() {
 async fn main() {
     init_logging();
     
+    // Parse CLI arguments
+    let cli = ClientCli::parse();
+    info!("Starting with y_offset: {}, verbose_coords: {}", cli.y_offset, cli.verbose_coords);
+    
     #[cfg(feature = "integration-test")]
     {
-        // Parse CLI arguments for integration test mode
-        let cli = clap::Parser::parse();
-        
         // Check for integration test mode
-        if let Some(test_args) = parse_integration_test_args(cli) {
+        if let Some(test_args) = parse_integration_test_args(cli.clone()) {
             info!("Running in integration test mode");
             
             // Run integration test directly with tokio runtime
@@ -60,6 +76,8 @@ async fn main() {
         frame_height: 600,
         server_viewport_y: 0,
         local_scroll_y: 0,
+        debug_y_offset: 50,  // Test: shift image up by 50px
+        verbose_coords: true,
         ..Default::default()
     }));
     

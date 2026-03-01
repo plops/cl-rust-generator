@@ -8,6 +8,6 @@ echo "=================================================="
 cd "$(dirname "$0")"
 
 # Run the macroquad-client in development mode
-cargo run --bin macroquad-client
+cargo run --bin macroquad-client -- "$@"
 
 echo "Client stopped."

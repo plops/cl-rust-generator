@@ -117,9 +117,10 @@ async fn run_browser_session(
     let page = chrome.new_page().await?;
     info!("Chrome browser initialized successfully");
     
-    // Navigate to a default page
-    info!("Navigating to Wikipedia page...");
-    CdpStream::navigate_to(&page, "https://en.wikipedia.org/wiki/Rust_(programming_language)").await?;
+    // Navigate to calibration page
+    info!("Navigating to calibration page...");
+    let calibration_path = format!("file://{}/calibration.html", std::env::current_dir()?.display());
+    CdpStream::navigate_to(&page, &calibration_path).await?;
     
     // Wait for page to load
     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -229,11 +230,16 @@ async fn run_browser_session(
                         }
                     }
                     proto_def::graphical_proxy::client_event::Event::Scroll(scroll) => {
+                        let old_viewport_y = current_viewport_y;
                         current_viewport_y = (current_viewport_y + scroll.delta_y).max(0);
+                        info!("[Server] Scroll event: delta_y={}, old_viewport={}, new_viewport={}", 
+                            scroll.delta_y, old_viewport_y, current_viewport_y);
                         // Execute scroll in browser
                         let scroll_script = format!("window.scrollTo(0, {});", current_viewport_y);
+                        debug!("[Server] Executing scroll script: {}", scroll_script);
                         let _ = page.evaluate(scroll_script.as_str()).await?;
                         tokio::time::sleep(Duration::from_millis(100)).await;
+                        info!("[Server] Browser scroll completed, viewport now at: {}", current_viewport_y);
                     }
                     _ => {}
                 }
@@ -292,6 +298,7 @@ async fn run_browser_session(
                     viewport_y: current_viewport_y,
                 })),
             };
+            info!("[Server] Sending frame {} with viewport_y={}", packet_count, current_viewport_y);
             if tx.send(Ok(update)).await.is_err() {
                 println!("[Server] Client disconnected");
                 return Ok(()); // Client disconnected

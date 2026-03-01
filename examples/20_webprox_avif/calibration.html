@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coordinate Calibration Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #f0f0f0;
+        }
+        
+        .grid-container {
+            position: relative;
+            width: 100%;
+            height: 2000px;
+            background-image: 
+                linear-gradient(rgba(255,0,0,0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,0,0,0.1) 1px, transparent 1px);
+            background-size: 50px 50px;
+        }
+        
+        .calibration-box {
+            position: absolute;
+            background: rgba(0, 100, 255, 0.3);
+            border: 2px solid #0066ff;
+            padding: 10px;
+            text-decoration: none;
+            color: #000;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+        
+        .box-1 { top: 100px; left: 50px; width: 150px; height: 60px; }
+        .box-2 { top: 100px; left: 250px; width: 120px; height: 80px; }
+        .box-3 { top: 100px; left: 420px; width: 100px; height: 50px; }
+        
+        .box-4 { top: 300px; left: 50px; width: 180px; height: 70px; }
+        .box-5 { top: 300px; left: 280px; width: 130px; height: 90px; }
+        .box-6 { top: 300px; left: 470px; width: 110px; height: 55px; }
+        
+        .box-7 { top: 600px; left: 100px; width: 160px; height: 65px; }
+        .box-8 { top: 600px; left: 320px; width: 140px; height: 75px; }
+        .box-9 { top: 600px; left: 520px; width: 120px; height: 60px; }
+        
+        .box-10 { top: 900px; left: 80px; width: 170px; height: 68px; }
+        .box-11 { top: 900px; left: 310px; width: 125px; height: 82px; }
+        .box-12 { top: 900px; left: 500px; width: 115px; height: 58px; }
+        
+        .box-13 { top: 1200px; left: 60px; width: 155px; height: 72px; }
+        .box-14 { top: 1200px; left: 290px; width: 135px; height: 78px; }
+        .box-15 { top: 1200px; left: 480px; width: 105px; height: 62px; }
+        
+        .coordinate-label {
+            position: absolute;
+            background: rgba(255, 255, 0, 0.8);
+            padding: 2px 5px;
+            font-size: 10px;
+            font-family: monospace;
+            border: 1px solid #000;
+        }
+        
+        .section-marker {
+            position: absolute;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: red;
+            font-size: 12px;
+            color: red;
+        }
+        
+        .marker-100 { top: 100px; }
+        .marker-300 { top: 300px; }
+        .marker-600 { top: 600px; }
+        .marker-900 { top: 900px; }
+        .marker-1200 { top: 1200px; }
+        .marker-1500 { top: 1500px; }
+        
+        .info-panel {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border: 1px solid #000;
+            font-size: 12px;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div class="info-panel">
+        <strong>Coordinate Calibration Test</strong><br>
+        Scroll to test alignment<br>
+        Blue boxes should match highlights<br>
+        Grid: 50x50px
+    </div>
+    
+    <div class="grid-container">
+        <!-- Section markers -->
+        <div class="section-marker marker-100">Y: 100px</div>
+        <div class="section-marker marker-300">Y: 300px</div>
+        <div class="section-marker marker-600">Y: 600px</div>
+        <div class="section-marker marker-900">Y: 900px</div>
+        <div class="section-marker marker-1200">Y: 1200px</div>
+        <div class="section-marker marker-1500">Y: 1500px</div>
+        
+        <!-- Calibration boxes at different positions -->
+        <a href="#box1" class="calibration-box box-1">Box 1 (50,100)</a>
+        <a href="#box2" class="calibration-box box-2">Box 2 (250,100)</a>
+        <a href="#box3" class="calibration-box box-3">Box 3 (420,100)</a>
+        
+        <a href="#box4" class="calibration-box box-4">Box 4 (50,300)</a>
+        <a href="#box5" class="calibration-box box-5">Box 5 (280,300)</a>
+        <a href="#box6" class="calibration-box box-6">Box 6 (470,300)</a>
+        
+        <a href="#box7" class="calibration-box box-7">Box 7 (100,600)</a>
+        <a href="#box8" class="calibration-box box-8">Box 8 (320,600)</a>
+        <a href="#box9" class="calibration-box box-9">Box 9 (520,600)</a>
+        
+        <a href="#box10" class="calibration-box box-10">Box 10 (80,900)</a>
+        <a href="#box11" class="calibration-box box-11">Box 11 (310,900)</a>
+        <a href="#box12" class="calibration-box box-12">Box 12 (500,900)</a>
+        
+        <a href="#box13" class="calibration-box box-13">Box 13 (60,1200)</a>
+        <a href="#box14" class="calibration-box box-14">Box 14 (290,1200)</a>
+        <a href="#box15" class="calibration-box box-15">Box 15 (480,1200)</a>
+        
+        <!-- Coordinate labels for reference -->
+        <div class="coordinate-label" style="top: 95px; left: 5px;">(0,100)</div>
+        <div class="coordinate-label" style="top: 295px; left: 5px;">(0,300)</div>
+        <div class="coordinate-label" style="top: 595px; left: 5px;">(0,600)</div>
+        <div class="coordinate-label" style="top: 895px; left: 5px;">(0,900)</div>
+        <div class="coordinate-label" style="top: 1195px; left: 5px;">(0,1200)</div>
+    </div>
+    
+    <script>
+        // Log coordinates for debugging
+        document.addEventListener('DOMContentLoaded', function() {
+            const boxes = document.querySelectorAll('.calibration-box');
+            console.log('Calibration boxes coordinates:');
+            boxes.forEach((box, index) => {
+                const rect = box.getBoundingClientRect();
+                const scrollY = window.scrollY;
+                console.log(`Box ${index + 1}: x=${Math.round(rect.left + scrollY)}, y=${Math.round(rect.top + scrollY)}, w=${Math.round(rect.width)}, h=${Math.round(rect.height)}`);
+            });
+        });
+        
+        // Track scroll position
+        window.addEventListener('scroll', function() {
+            console.log('Scroll position:', window.scrollY);
+        });
+    </script>
+</body>
+</html>

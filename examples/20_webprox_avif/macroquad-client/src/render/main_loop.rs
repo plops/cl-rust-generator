@@ -11,10 +11,15 @@ pub async fn run_render_loop(
     event_tx: tokio::sync::mpsc::UnboundedSender<ClientEvent>
 ) {
     let mut texture: Option<Texture2D> = None;
+    let mut last_mouse_wheel_y = 0.0;
+    let mut last_w_key_state = false;
+    let mut last_s_key_state = false;
+    let mut last_pageup_key_state = false;
+    let mut last_pagedown_key_state = false;
     
     loop {
         // 1. Process local input & send to event_tx
-        ui::handle_input_and_send_events(&event_tx);
+        ui::handle_input_and_send_events(&event_tx, &mut last_mouse_wheel_y, &mut last_w_key_state, &mut last_s_key_state, &mut last_pageup_key_state, &mut last_pagedown_key_state);
         
         // 2. Lock state to fetch latest texture / metadata
         {
