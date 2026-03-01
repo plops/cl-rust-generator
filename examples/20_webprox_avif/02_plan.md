@@ -263,3 +263,203 @@ Der KI-Agent (oder ein automatisiertes Skript) kann dann den Server starten, die
 ### Nächster Schritt
 
 Sollen wir als Nächstes die Implementierungs-Architektur des **Servers** (das Zusammenspiel von `chromiumoxide` Screencast $\rightarrow$ PNG Decode $\rightarrow$ `rav1e` Encoder $\rightarrow$ gRPC Stream) im Detail skizzieren, oder bevorzugst du, dass wir mit dem Minimal-Setup des **Clients** (`macroquad` + `rav1d` + gRPC) beginnen?
+
+
+
+
+
+Das ist eine brillante architektonische Erweiterung! Was du hier beschreibst, ist der Übergang von einem reinen "dummen" Video-Stream zu einem **hybriden Spatial-UI-Stream**. 
+
+Indem wir die Metadaten (Links, Bounding Boxes, Text) vom reinen Pixel-Stream trennen, lösen wir gleich zwei massive Probleme bei Verbindungen mit hoher Latenz/geringer Bandbreite:
+1. **Zero-Latency Hit-Testing:** Der Client weiß lokal, wo die Links sind. Klickt der Nutzer, können wir dem Nutzer sofort visuelles Feedback geben (z.B. den Kasten in `macroquad` aufleuchten lassen), noch bevor der Server den Klick verarbeitet hat.
+2. **Skeleton UI beim Scrollen:** Wenn das Video beim Scrollen laggt, kann der Client anhand seiner lokalen Scroll-Position bereits Rechtecke (`draw_rectangle_lines` in `macroquad`) und den Text der Links an der richtigen Stelle zeichnen. Der Nutzer "sieht" die Struktur der Seite, bevor die AV1-Frames eintreffen.
+
+Hier ist der Plan, wie wir diese Anforderungen (Volltextsuche, Spatial-Metadaten und dynamische Toggles) architektonisch sauber in unser System integrieren:
+
+---
+
+### 1. Das erweiterte gRPC-Protokoll (Toggles & Spatial Data)
+
+Wir erweitern das Protokoll so, dass der Client jederzeit entscheiden kann, wie "reichhaltig" der Datenstrom sein soll. Das ist extrem wichtig für das Bandbreiten-Management.
+
+```protobuf
+syntax = "proto3";
+package graphical_proxy;
+
+service RemoteBrowser {
+  rpc StreamSession(stream ClientEvent) returns (stream ServerUpdate);
+}
+
+// --- Nachrichten vom CLIENT zum SERVER ---
+message ClientEvent {
+  oneof event {
+    NavigateRequest navigate = 1;
+    MouseInput mouse = 2;
+    KeyboardInput keyboard = 3;
+    ScrollInput scroll = 4;
+    ViewportResize resize = 5;
+    
+    // NEU: Konfiguration des Datenstroms (kann jederzeit gesendet werden)
+    StreamConfig config = 6;
+  }
+}
+
+message StreamConfig {
+  bool enable_video = 1;         // AV1 Stream an/aus
+  bool enable_text_stream = 2;   // Rohen Seitentext senden?
+  bool enable_spatial_links = 3; // Link-Koordinaten senden?
+}
+
+// --- Nachrichten vom SERVER zum CLIENT ---
+message ServerUpdate {
+  oneof update {
+    VideoFrame frame = 1;
+    SpatialMetadata spatial_data = 2;  // NEU: Link-Positionen und Layout
+    TextContent text_content = 3;      // NEU: Für lokale Volltextsuche
+    SystemStatus status = 4;
+  }
+}
+
+// NEU: Repräsentiert die Struktur der Seite unabhängig vom Video
+message SpatialMetadata {
+  string title = 1;
+  uint32 document_width = 2;
+  uint32 document_height = 3;
+  repeated LinkBox links = 4;
+}
+
+message LinkBox {
+  uint32 id = 1;       // Eindeutige ID (hilft bei Updates)
+  string url = 2;      // Das Ziel
+  string label = 3;    // Der Text des Links
+  int32 x = 4;         // Absolute X-Position im Dokument
+  int32 y = 5;         // Absolute Y-Position im Dokument
+  int32 width = 6;
+  int32 height = 7;
+}
+
+message TextContent {
+  string full_inner_text = 1;
+}
+```
+
+---
+
+### 2. Server-Side: Extrahieren der Spatial Data (Ohne Bloat)
+
+Anstatt auf dem Server eine schwere HTML-Parsing-Bibliothek zu verwenden, nutzen wir die Tatsache, dass Chrome die Seite ohnehin rendert und das Layout berechnet. Wir lassen Chrome die Arbeit machen!
+
+Über das Chrome DevTools Protocol (CDP) evaluieren wir ein winziges, hochoptimiertes JavaScript-Snippet, sobald die Seite geladen ist (oder das Layout mutiert).
+
+```rust
+// Pseudocode für den Cloud-Server
+const EXTRACT_LINKS_JS: &str = r#"
+    Array.from(document.querySelectorAll('a')).map((a, index) => {
+        const rect = a.getBoundingClientRect();
+        return {
+            id: index,
+            url: a.href,
+            label: a.innerText.trim(),
+            // WICHTIG: window.scrollY addieren, um absolute Dokument-Koordinaten zu bekommen,
+            // nicht nur Viewport-Koordinaten!
+            x: Math.round(rect.left + window.scrollX),
+            y: Math.round(rect.top + window.scrollY),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height)
+        };
+    }).filter(link => link.width > 0 && link.height > 0) // Nur sichtbare Links
+"#;
+```
+
+Der Rust-Server parst dieses JSON-Ergebnis und verpackt es in die kompakte protobuf `SpatialMetadata` Nachricht. Wenn der Client `enable_spatial_links = true` gesetzt hat, wird diese über den gRPC-Stream gefeuert.
+
+---
+
+### 3. Client-Side: Macroquad UI & Such-Logik
+
+Im `macroquad`-Client entkoppeln wir nun den logischen State vom visuellen State.
+
+**Der State-Manager des Clients:**
+Der Client merkt sich:
+1. Den letzten dekodierten Video-Frame (Texture2D).
+2. Die absolute `scroll_y` Position des Nutzers.
+3. Den Baum der `LinkBox` Objekte.
+
+**Die Render-Schleife (60 FPS in Macroquad):**
+```rust
+// Macroquad Render Loop Pseudocode
+loop {
+    clear_background(BLACK);
+
+    // 1. Zeichne das Video verschoben um die lokale Scroll-Position
+    // Wenn das Video laggt, zeichnen wir es einfach dort, wo es hingehört.
+    draw_texture(video_texture, 0.0, -current_scroll_y, WHITE);
+
+    // 2. Zeichne die Metadaten (Skeleton UI / Overlay)
+    if show_link_debug_overlay {
+        for link in &page_state.links {
+            // Berechne Bildschirmposition relativ zum aktuellen Scroll
+            let screen_y = link.y as f32 - current_scroll_y;
+            
+            // Culling: Zeichne nur, was im Viewport ist
+            if screen_y > -link.height as f32 && screen_y < window_height {
+                draw_rectangle_lines(
+                    link.x as f32, screen_y, 
+                    link.width as f32, link.height as f32, 
+                    2.0, BLUE
+                );
+                
+                // Text-Fallback, falls der Videoframe noch nicht da ist
+                if is_scrolling_fast_and_video_lags {
+                    draw_text(&link.label, link.x as f32, screen_y + 15.0, 16.0, WHITE);
+                }
+            }
+        }
+    }
+    
+    // ... UI (Adressleiste, Suchleiste) ...
+    next_frame().await;
+}
+```
+
+**Lokale Volltextsuche:**
+Wenn der Nutzer im Client Strg+F drückt, poppt in `macroquad` eine kleine Eingabeleiste auf. 
+Da der Client per `enable_text_stream = true` den Text erhalten kann, kann der Client in Millisekunden prüfen, ob das Wort existiert. Alternativ senden wir die Suchanfrage via gRPC an den Server, der Chrome den Befehl gibt, zum Treffer zu scrollen und ihn gelb zu markieren (was dann sofort als AV1-Update reinkommt). Wir können das flexibel halten.
+
+---
+
+### 4. Integrationstests für den KI-Agenten
+
+Durch die Trennung in Konfigurations-Toggles wird das System fantastisch testbar. Ein KI-Agent kann den CLI-Client für verschiedene Aspekte testen, ohne überhaupt Bilder dekodieren zu müssen!
+
+*Beispiel 1: Metadaten-Test*
+```bash
+# Agent startet den Client im Headless-Mode, deaktiviert Video, fragt nur Links ab.
+macroquad-client --url "https://news.ycombinator.com" \
+                 --headless-test \
+                 --disable-video \
+                 --enable-links \
+                 --dump-metadata out.json
+```
+Der Agent liest `out.json` und prüft: *Sind die Links da? Stimmen die Koordinaten ungefähr?* Das ist ein rasend schneller Test (wenige Millisekunden), der verifiziert, dass Chrome läuft und CDP funktioniert.
+
+*Beispiel 2: Video-Test*
+```bash
+# Agent testet nur die Video-Kompression ohne Metadaten-Overhead
+macroquad-client --url "https://news.ycombinator.com" \
+                 --headless-test \
+                 --enable-video \
+                 --disable-links \
+                 --dump-frame frame01.png
+```
+
+### Fazit & Wie es weitergeht
+
+Dieser Ansatz (Video für das Aussehen, Spatial Data für die Struktur) ist der Goldstandard für Remote-Desktop und Remote-Browser Systeme (ähnlich wie es Stadia oder moderne RDP-Protokolle mit "Client-side prediction" machen). 
+
+Wir haben nun einen extrem robusten Plan für:
+1. **Das gRPC Protokoll** (entkoppelt, konfigurierbar).
+2. **Den Server** (Chromiumoxide, Screenshot -> PNG -> YUV -> rav1e + CDP JS Injection für Metadaten).
+3. **Den Client** (macroquad Renderloop + dav1d Decoder + Spatial State Management).
+
+Bist du mit diesem Architektur-Design einverstanden? Wenn ja, können wir als nächstes den **Skelett-Code (Boilerplate)** für den Cargo-Workspace und die Protobuf-Generierung (`build.rs`) definieren, um dem Agenten eine perfekte Startgrundlage für das Projekt zu geben.
