@@ -2,6 +2,8 @@
 *.json
 *.png
 *.avif
+*.log
+*.img
 
 # Rust build artifacts
 /target/

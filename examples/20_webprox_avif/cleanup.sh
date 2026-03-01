@@ -80,9 +80,9 @@ kill_processes "target/debug/macroquad-client" "Debug Client"
 printf "\n${BLUE}=== Cleaning Directories ===${NC}\n\n"
 
 # Clean up temporary directories
-cleanup_dir "/tmp/chromiumoxide-runner" "Chrome temporary directory"
-cleanup_dir "/tmp/.com.google.Chrome" "Chrome user data"
-cleanup_dir "/tmp/.chromium" "Chromium user data"
+cleanup_dir "/tmp/chromiumoxide-runner" "Chrome temporary directory /tmp/chromiumoxide-runner"
+cleanup_dir "/tmp/.com.google.Chrome" "Chrome user data /tmp/.com.google.Chrome"
+cleanup_dir "/tmp/.chromium" "Chromium user data /tmp/.chromium"
 
 printf "\n${BLUE}=== Checking for Remaining Processes ===${NC}\n\n"
 
