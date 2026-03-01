@@ -36,72 +36,46 @@ pkg-config --modversion libaom
 
 ## Quick Start
 
-### 1. Build All Components
+### Build & Run
 
+**Debug Mode (fast compilation):**
 ```bash
-cargo build --release
-```
+# Build
+cargo build
 
-### 2. Start the Server
-
-```bash
-cd cloud-render-srv
+# Server
 cargo run --bin cloud-render-srv -- serve
-```
 
-The server will start on `[::1]:50051` and navigate to a default Wikipedia page.
-
-### 3. Start the Client
-
-#### Option A: Macroquad Client (Original)
-```bash
-cd macroquad-client
+# Client (Macroquad)
 cargo run --bin macroquad-client
-```
-The client window will open and connect to server automatically.
 
-#### Option B: Iced Client (New - Recommended)
+# Client (Iced - Recommended)
+cd iced-client && cargo run --bin iced-server
+```
+
+**Release Mode (optimized):**
 ```bash
-cd iced-client
+# Build
+cargo build --release
+
+# Server
+./target/release/cloud-render-srv serve
+
+# Client (Macroquad)
+./target/release/macroquad-client
+
+# Client (Iced - Recommended)
+cd iced-client && cargo run --release --bin iced-server
 ```
 
-**Available Iced Client Versions:**
+**Convenience Scripts:**
+```bash
+./start_server.sh    # Start server
+./start_client.sh    # Start Macroquad client
+./cleanup.sh         # ⚠️ Kills ALL Chrome processes!
+```
 
-1. **Basic Client** - Simple UI demonstration:
-   ```bash
-   cargo run --bin iced-basic
-   ```
-
-2. **Server-Connected Client** - Full server integration:
-   ```bash
-   cargo run --bin iced-server
-   ```
-   - Click "Connect to Server" to simulate server connection
-   - Displays visual patterns from AV1 data
-   - Shows real-time connection status
-
-3. **Simple Client** - Simplified version:
-   ```bash
-   cargo run --bin iced-simple
-   ```
-
-4. **Working Client** - Advanced features:
-   ```bash
-   cargo run --bin iced-working
-   ```
-
-5. **Full Client** - Complete implementation:
-   ```bash
-   cargo run --bin iced-client
-   ```
-
-**Why Iced Client?**
-- **Threading Conflict Resolved**: Eliminates OpenGL/tokio incompatibility
-- **Native Tokio Integration**: Clean single-threaded event loop
-- **Modern UI**: Better performance and maintainability
-- **Type Safety**: Improved error handling and message passing
-
-**Recommended**: Use `iced-server` for the complete server integration experience.
+**⚠️ Cleanup Warning:** `./cleanup.sh` terminates all Chrome/Chromium processes and removes temporary data. Save work before running.
 
 ## Detailed Usage
 

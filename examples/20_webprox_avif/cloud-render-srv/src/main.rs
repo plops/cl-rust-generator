@@ -132,13 +132,20 @@ async fn run_browser_session(
     
     info!("Actual screenshot dimensions: {}x{}", width, height);
     
-    // Configure rav1e encoder with actual dimensions
+    // Configure rav1e encoder with actual dimensions and optimized settings
     let mut enc = EncoderConfig::default();
     enc.width = width;
     enc.height = height;
     enc.bit_depth = 8;
     enc.chroma_sampling = ChromaSampling::Cs420;
-    enc.speed_settings = SpeedSettings::from_preset(10);
+    
+    // Optimize for smaller file size
+    enc.quantizer = 150;  // Increased from default 100 to reduce file size
+    enc.min_quantizer = 80;  // Set minimum quality floor
+    enc.speed_settings = SpeedSettings::from_preset(8);  // Balanced speed/quality
+    // Use valid tile configuration (must be powers of 2 and reasonable limits)
+    enc.tile_cols = 1;  // Start with minimal tiling to avoid errors
+    enc.tile_rows = 1;
     
     // Force keyframe mode for client compatibility
     enc.min_key_frame_interval = 1;  // Every frame is a keyframe

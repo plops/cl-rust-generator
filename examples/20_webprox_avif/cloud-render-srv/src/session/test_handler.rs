@@ -31,13 +31,20 @@ pub async fn handle_raw_image_data(
     let yuv_image = core_utils::rgba_to_yuv420(&rgba_data, width, height)
         .map_err(|e| anyhow!("YUV conversion error: {:?}", e))?;
     
-    // Configure rav1e encoder for single frame
+    // Configure rav1e encoder for single frame with optimized settings
     let mut enc = EncoderConfig::default();
     enc.width = width as usize;
     enc.height = height as usize;
     enc.bit_depth = 8;
     enc.chroma_sampling = ChromaSampling::Cs420;
-    enc.speed_settings = SpeedSettings::from_preset(10);
+    
+    // Optimize for smaller file size
+    enc.quantizer = 150;  // Increased from default 100 to reduce file size
+    enc.min_quantizer = 80;  // Set minimum quality floor
+    enc.speed_settings = SpeedSettings::from_preset(8);  // Balanced speed/quality
+    // Use valid tile configuration (must be powers of 2 and reasonable limits)
+    enc.tile_cols = 1;  // Start with minimal tiling to avoid errors
+    enc.tile_rows = 1;
     
     let cfg = Config::new().with_encoder_config(enc).with_threads(1);
     let mut ctx: Context<u8> = cfg.new_context()
