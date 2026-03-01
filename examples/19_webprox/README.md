@@ -1,5 +1,7 @@
 # webprox — Remote Browser Proxy over gRPC
 
+Edit: This was a simple attempt to build a remote browser proxy with AI agents. I consider this failed because the conversion from Website to Markdown is cumbersome and brittle. Next I will attempt image streaming. 
+
 A cloud proxy server that runs headless Chromium, transcodes web pages to Markdown, and streams them over a bidirectional gRPC connection to a minimal TUI client. Designed for extremely low-bandwidth links (10 KB/s target).
 
 ```
