@@ -7,6 +7,10 @@ members = [
 ]
 resolver = "2"
 
+[profile.dev]
+debug = 1
+incremental = false
+
 [profile.release]
 opt-level = "z"
 lto = true
