@@ -86,15 +86,78 @@ pub async fn handle_raw_image_data(
         return Err(anyhow!("No encoded data received"));
     }
     
-    // Create simple AVIF container by adding necessary headers
-    let avif_data = create_simple_avif(&av1_data, width, height)
-        .map_err(|e| anyhow!("AVIF container creation failed: {:?}", e))?;
+    // Get AVIF-compatible sequence header from rav1e
+    let sequence_header = ctx.container_sequence_header();
     
-    println!("[Server] Created AVIF container: {} bytes", avif_data.len());
+    // Create minimal but correct AVIF container
+    let mut avif_data = Vec::new();
+    
+    // ftyp box - must be first and correctly formatted
+    avif_data.extend_from_slice(&(28u32).to_be_bytes()); // Size of ftyp box
+    avif_data.extend_from_slice(b"ftyp");
+    avif_data.extend_from_slice(b"avif"); // Major brand
+    avif_data.extend_from_slice(&(0u32).to_be_bytes()); // Minor version
+    avif_data.extend_from_slice(b"avif"); // Compatible brand
+    avif_data.extend_from_slice(b"mif1"); // Compatible brand
+    avif_data.extend_from_slice(b"miaf"); // Compatible brand
+    
+    // meta box - minimal required metadata for AVIF
+    let meta_start = avif_data.len();
+    avif_data.extend_from_slice(&[0u8; 4]); // Placeholder for size
+    avif_data.extend_from_slice(b"meta");
+    avif_data.extend_from_slice(&[0u8, 0u8, 0u8, 0u8]); // Version + flags
+    
+    // hdlr box - required handler
+    avif_data.extend_from_slice(&(25u32).to_be_bytes()); // hdlr size
+    avif_data.extend_from_slice(b"hdlr");
+    avif_data.extend_from_slice(&[0u8, 0u8, 0u8, 0u8]); // Version + flags
+    avif_data.extend_from_slice(b"pict"); // Handler type
+    avif_data.extend_from_slice(&[0u8; 12]); // Reserved
+    
+    // iinf box - item information
+    let iinf_start = avif_data.len();
+    avif_data.extend_from_slice(&[0u8; 4]); // Placeholder for size
+    avif_data.extend_from_slice(b"iinf");
+    avif_data.extend_from_slice(&[0u8, 0u8, 0u8, 0u8]); // Version + flags
+    avif_data.extend_from_slice(&(1u16).to_be_bytes()); // Entry count
+    
+    // infe box - item information entry for AV1 image (version 2)
+    avif_data.extend_from_slice(&(18u32).to_be_bytes()); // infe size
+    avif_data.extend_from_slice(b"infe");
+    avif_data.extend_from_slice(&[0x02, 0x10, 0x00]); // Version + flags
+    avif_data.extend_from_slice(&(1u16).to_be_bytes()); // Item_ID
+    avif_data.extend_from_slice(&(0u16).to_be_bytes()); // Item_type_index
+    avif_data.extend_from_slice(b"av01"); // Item_type (4 bytes)
+    
+    // Update iinf box size
+    let iinf_size = (avif_data.len() - iinf_start) as u32;
+    avif_data[iinf_start..iinf_start + 4].copy_from_slice(&iinf_size.to_be_bytes());
+    
+    // Update meta box size
+    let meta_size = (avif_data.len() - meta_start) as u32;
+    avif_data[meta_start..meta_start + 4].copy_from_slice(&meta_size.to_be_bytes());
+    
+    // mdat box - contain the AV1 data with sequence header
+    let mdat_content_size = sequence_header.len() + av1_data.len();
+    let mdat_size = 8 + mdat_content_size;
+    avif_data.extend_from_slice(&(mdat_size as u32).to_be_bytes());
+    avif_data.extend_from_slice(b"mdat");
+    avif_data.extend_from_slice(&sequence_header);
+    avif_data.extend_from_slice(&av1_data);
+    
+    println!("[Server] Created AVIF with meta: {} bytes (ftyp: 28 + meta: {} + mdat: {})", 
+             avif_data.len(), meta_size, mdat_size);
+    
+    // Save AVIF data to file for debugging
+    if let Err(e) = std::fs::write("debug_output.avif", &avif_data) {
+        println!("[Server] Failed to save debug AVIF: {:?}", e);
+    } else {
+        println!("[Server] Saved AVIF to debug_output.avif");
+    }
     
     // Send test frame result back to client
     let test_result = TestFrameResult {
-        av1_data,
+        av1_data: avif_data, // Send the complete AVIF container
         is_keyframe: true, // Force keyframe for simplified decoding
     };
     
@@ -148,50 +211,3 @@ pub async fn handle_test_image_event(
     }
 }
 
-/// Create a simple AVIF container with minimal headers
-fn create_simple_avif(av1_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
-    let mut avif = Vec::new();
-    
-    // ftyp box (file type box)
-    avif.extend_from_slice(b"ftyp");
-    let ftyp_size = 24 + 8; // Basic ftyp size
-    avif.extend_from_slice(&(ftyp_size as u32).to_be_bytes());
-    avif.extend_from_slice(b"avif"); // Major brand
-    avif.extend_from_slice(&(0u32).to_be_bytes()); // Minor version
-    avif.extend_from_slice(b"avif"); // Compatible brands
-    avif.extend_from_slice(b"mif1"); // Additional compatible brand
-    avif.extend_from_slice(b"miaf"); // Additional compatible brand
-    
-    // meta box (metadata box) - simplified
-    avif.extend_from_slice(b"meta");
-    let meta_size = 8 + 8 + 16 + 8 + 8 + 8 + av1_data.len() + 8; // Estimate
-    avif.extend_from_slice(&(meta_size as u32).to_be_bytes());
-    avif.extend_from_slice(&(0u32).to_be_bytes()); // Version + flags
-    avif.extend_from_slice(b"hdlr");
-    avif.extend_from_slice(&(25u32).to_be_bytes()); // hdlr size
-    avif.extend_from_slice(&(0u32).to_be_bytes()); // Version + flags
-    avif.extend_from_slice(b"pict"); // Handler type
-    avif.extend_from_slice(&[0u8; 12]); // Reserved
-    
-    // iinf box (item information)
-    avif.extend_from_slice(b"iinf");
-    avif.extend_from_slice(&(14u32).to_be_bytes()); // iinf size
-    avif.extend_from_slice(&(0u32).to_be_bytes()); // Version + flags
-    avif.extend_from_slice(&(1u16).to_be_bytes()); // Entry count
-    
-    // infe box (item information entry)
-    avif.extend_from_slice(b"infe");
-    avif.extend_from_slice(&(6u32).to_be_bytes()); // infe size
-    avif.extend_from_slice(&(0x02100u32).to_be_bytes()); // Version + flags
-    avif.extend_from_slice(&(1u16).to_be_bytes()); // Item_ID
-    avif.extend_from_slice(&(0u16).to_be_bytes()); // Item_type_index
-    avif.extend_from_slice(b"av01"); // Item_type
-    
-    // mdat box (media data box) - contains the AV1 data
-    avif.extend_from_slice(b"mdat");
-    let mdat_size = 8 + av1_data.len();
-    avif.extend_from_slice(&(mdat_size as u32).to_be_bytes());
-    avif.extend_from_slice(av1_data);
-    
-    Ok(avif)
-}

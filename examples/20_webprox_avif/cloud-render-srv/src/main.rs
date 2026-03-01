@@ -69,8 +69,32 @@ async fn run_browser_session(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut width = 1280;
     let mut height = 720;
+    let mut integration_test_mode = false;
     
-    // Initialize Chrome browser
+    // Check first for test image event to determine if we should skip browser initialization
+    if let Some(Ok(first_event)) = client_stream.next().await {
+        if let Some(proto_def::graphical_proxy::client_event::Event::TestImage(_)) = &first_event.event {
+            integration_test_mode = true;
+            println!("[Server] Integration test mode detected - skipping browser initialization");
+            
+            // Handle the test image event
+            let _ = session::handle_test_image_event(first_event, &tx).await;
+            
+            // Continue processing events in test mode
+            loop {
+                if let Some(Ok(event)) = client_stream.next().await {
+                    if let Some(proto_def::graphical_proxy::client_event::Event::TestImage(_)) = &event.event {
+                        let _ = session::handle_test_image_event(event, &tx).await;
+                    }
+                } else {
+                    break;
+                }
+            }
+            return Ok(());
+        }
+    }
+    
+    // Normal browser mode - initialize Chrome browser
     let chrome = ChromeRunner::new(true).await?;
     let page = chrome.new_page().await?;
     
