@@ -30,11 +30,12 @@ Erstelle einen Plan für die neue Implementierung dieser Idee. Gehe dabei bereit
 Auch die Testinfrastruktur soll im Plan bedacht werden. Da wir KI-Agenten für die Entwicklung benutzen, ist es nützlich, jedem der Programme ausreichende Kommandozeilenparameter zu geben. Der Client sollte zum Beispiel eine Anfrage absetzen und die empfangenen Informationen als Text oder Bild in eine Datei abspeichern, sodass der Agent die Resultate überprüfen kann.  
 Damit sollte es recht einfach möglich sein, Integrationstests umzusetzen, die der Agent selbstständig ausführt. Und die dann später vielleicht auch automatisiert werden können, ohne agenten Einsatz. 
 
-Vielleicht nicht im ersten Implementierungsschritt, aber vorgesehen sollte es schon sein, ist die Volltextsuche. Vielleicht sollte die vom Browser übernommen werden. Oder es sollte eine Möglichkeit geben, über das GRPC Protokoll den Text der Webseite zu übertragen. Wobei darin weder das Problem besteht, dass es nicht besonders einfach ist, eine Webseite in Text umzuwandeln. Für die Suche könnte es aber ausreichen. 
+Vielleicht nicht im ersten Implementierungsschritt, aber vorgesehen sollte es schon sein, ist die Volltextsuche. Es sollte die vom Browser übernommen werden. 
+textsuche soll serverseitig stattfinden aber die suchergebnisse mit umliegenden textzeilen sollen in den metadaten fuer die gesamte seite unabhaengig vom aktuell sichtbaren bildschirmanteil an den clienten gesendet werden
 
 In ähnlichen Zusammenhang sollten die Bilddaten mit Metadaten erweitert werden. Wir haben ja wahrscheinlich die Titelseite, aber die Position von Links und die Links selbst sollten auch mit angezeigt werden. Während die Bildwarten nur einen beschränkten Ausschnitt der Webseite anzeigen, könnten die Links alle beim ersten Mal schon gesendet werden, sodass die GUI beim Scrollen zumindest die Links anzeigt, bevor das Bild kommt. Aber diese Zusatzdaten sollten alle vom GAPC-P Protokoll im Klienten ein- oder ausgeschalten werden können. 
 
-Der Bildstream von Chrome sollte im Server so roh wie moeglich gelesen werden.
+Der Bildstream von Chrome sollte im Server so roh wie moeglich gelesen werden (z.B. PNG und nicht JPEG). Die vom Server gesendeten Buildupdates sollen in den Metadaten die ursprünglichen X und Y-Positionen enthalten, und natürlich breite und Höhe. Und der Client soll diese in einen größeren Framebuffer eintragen. Das heißt, wenn der Nutzer scrollt, baut sich beim Klienten eine Kopie der Webseite auf. Und beim schnellen Handherscrollen kann er eine alte Version sehen. Aber eine kurze Zeit später, nachdem der Server über die Scrollbewegung informiert wurde, wird der entsprechende Bildausschnitt wieder mit einem neuen Bild überschrieben, was aktuell ist. 
 
 cd  /home/kiel/stage/cl-rust-generator/examples/20_webprox_avif/
 

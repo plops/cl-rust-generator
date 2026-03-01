@@ -1,185 +1,42 @@
-### 1. Architektur-Philosophie & Entkopplung (Clean Architecture)
 
-Um die Wartbarkeit zu maximieren und das Projekt testbar zu machen, trennen wir strikt zwischen **Netzwerk**, **Logik** und **Darstellung**. Wir nutzen ein Cargo Workspace mit separaten Crates.
 
-#### Workspace-Struktur:
-*   `proto-definitions`: Beinhaltet die `browser_stream.proto` und generiert die Rust-Structs (`prost`/`tonic`).
-*   `cloud-render-server`: Der Server. Steuert Chrome, greift Frames ab, kodiert mit `rav1e` und streamt sie.
-*   `macroquad-client`: Der grafische TUI/GUI-Client.
-*   `core-logic`: Beinhaltet geteilte Logik wie das Event-Handling (Maus, Tastatur) und Bildpuffer-Verwaltung.
 
-**Entkopplung im Client:**
-Die Netzwerklogik (`tonic` gRPC) läuft in einem eigenen asynchronen `tokio`-Task. Die GUI (`macroquad`) läuft im Main-Thread (da viele Grafik-APIs Thread-gebunden sind). Beide kommunizieren über asynchrone Channels (`tokio::sync::mpsc`). Das bedeutet: Die GUI blockiert nie, wenn das Netzwerk laggt, und das Netzwerk ist unabhängig von der Framerate der GUI.
+Hier ist der vollständig überarbeitete und konsolidierte Architekturplan. Er integriert alle bisher besprochenen Konzepte – von der reinen Rust-AV1-Video-Pipeline über die Spatial-Metadaten (Skeleton-UI) bis hin zur neu definierten, serverseitigen Volltextsuche mit Kontext-Rückgabe.
 
 ---
 
-### 2. Technologie-Stack & Dependency-Minimierung (Anti-Bloat)
+# Architektur- & Implementierungsplan: Graphical Remote Browser Proxy (AV1/Rust)
 
-*   **Kommunikation:** `tonic` (gRPC über HTTP/2). Erlaubt Multiplexing und ist extrem bandbreiteneffizient. Optionale TLS-Unterstützung per Feature-Flag (`features = ["tls"]`).
-*   **Server-Browser:** `chromiumoxide` zur Steuerung eines Headless Chrome via CDP (Chrome DevTools Protocol).
-*   **Kompression (Server):** `rav1e` (reines Rust). Wir konfigurieren es auf hohe Geschwindigkeit (z.B. Speed-Level 8-10) und "Low Latency / Zero Latency", da wir Echtzeit-Interaktion brauchen.
-*   **GUI (Client):** `macroquad`. Um Bloat zu vermeiden, binden wir es strikt in der `Cargo.toml` so ein:
-    ```toml
-    [dependencies.macroquad]
-    version = "0.4"
-    default-features = false
-    # Keine Audio-Engines, keine schweren Extra-Features.
-    ```
-    Für die UI (Adressleiste, Status) nutzen wir Macroquads einfache `draw_text` und `draw_rectangle` Funktionen. Ein minimaler Font wird als Byte-Array in die Binary kompiliert (`include_bytes!`), um externe Abhängigkeiten zu vermeiden.
-*   **Dekompression (Client):** Da `rav1e` nur encodiert, brauchen wir clientseitig einen schnellen Decoder. Eine gute Wahl ist `dav1d` (via `dav1d-rs`), da er extrem performant und leichtgewichtig ist.
+**Stand:** März 2026
+**Architektur-Paradigma:** Clean Architecture, Low-Bandwidth (AV1), Anti-Bloat, AI-Agent Testable
+
+## 1. Executive Summary
+
+Dieses Projekt implementiert einen extrem bandbreiteneffizienten, grafischen Cloud-Browser-Proxy. Ein Headless-Browser (Chrome/Chromium) läuft auf einem Cloud-Server und rendert Webseiten. Das visuelle Resultat wird in Echtzeit als hochkomprimierter **AV1-Videostream** an einen minimalistischen, leichtgewichtigen Client übertragen. 
+
+Um die Latenz bei schlechten Verbindungen zu kaschieren, wird der visuelle Stream durch einen optionalen **Metadaten-Stream** (Spatial Data) ergänzt. Dieser liefert dem Client die exakten Positionen von Links sowie serverseitige Suchergebnisse (inklusive Textkontext), sodass die lokale GUI sofortiges Feedback (Skeleton-UI, Hit-Testing) geben kann, noch bevor der entsprechende Video-Frame eintrifft.
 
 ---
 
-### 3. Protokoll-Design (gRPC)
+## 2. Workspace-Struktur & Entkopplung
 
-Wir nutzen einen bidirektionalen Stream.
+Das Projekt wird als **Cargo Workspace** aufgesetzt. Dies garantiert eine saubere Trennung der Domänen und verhindert, dass UI-Abhängigkeiten in den Server oder Netzwerk-Logik in den Render-Thread leaken.
+
+*   `proto-def`: Beinhaltet die Protobuf-Definitionen (`browser_stream.proto`) und generiert den Rust-Code via `tonic-build` und `prost`.
+*   `core-logic`: Geteilte Konstanten, reine Datenstrukturen und Hilfsfunktionen (z. B. YUV $\leftrightarrow$ RGB Konvertierung).
+*   `cloud-render-srv`: Der Server. Nutzt `chromiumoxide` zur Browser-Steuerung, extrahiert PNG-Frames, kodiert diese mit `rav1e` (AV1) und sammelt Metadaten per injiziertem JavaScript.
+*   `macroquad-client`: Der GUI-Client. Nutzt `macroquad` für die hardwarebeschleunigte, plattformübergreifende Darstellung und `rav1d` (reiner Rust-Port von dav1d) für die rasante AV1-Dekodierung.
+
+---
+
+## 3. Das gRPC-Protokoll (Der System-Vertrag)
+
+Das Protokoll nutzt einen bidirektionalen gRPC-Stream. Es ist so designt, dass der Client per `StreamConfig` dynamisch anfordern kann, welche Daten (Video, Links, etc.) er benötigt – essenziell für intelligentes Bandbreiten-Management.
 
 ```protobuf
 syntax = "proto3";
 package graphical_proxy;
 
-service RemoteBrowser {
-  rpc StreamSession(stream ClientEvent) returns (stream ServerUpdate);
-}
-
-message ClientEvent {
-  oneof event {
-    Navigate navigate = 1;
-    MouseClick click = 2;
-    MouseMove move = 3;
-    ScrollEvent scroll = 4;
-    KeyPress key = 5;
-    ResizeViewport resize = 6;
-  }
-}
-
-message ServerUpdate {
-  oneof update {
-    Av1Frame av1_frame = 1;      // Ein AV1-kodierter Frame (Intra oder Inter/Delta)
-    StatusMessage status = 2;    // z.B. "Lädt..." oder "Verbindung getrennt"
-  }
-}
-```
-
----
-
-### 4. Implementierungsdetails: Inkrementelle Updates & Scrolling
-
-Der Schlüssel zur Effizienz ist die Chrome-API `Page.startScreencast`.
-1.  Der Server weist Chrome an, einen Screencast zu starten. Chrome sendet automatisch **nur dann** einen neuen Frame an unseren Rust-Server, wenn sich der DOM visuell ändert (Animationen, Scrolling).
-2.  Chrome liefert uns Dirty-Rectangles und den Bildinhalt.
-3.  Der Server pflegt einen internen Raw-Framebuffer (RGBA). Er updatet diesen Buffer mit den Chrome-Daten und pusht den Buffer in den `rav1e` Encoder.
-4.  `rav1e` ist auf Video-Encoding eingestellt. Wenn gescrollt wird, berechnet `rav1e` einen extrem kleinen Delta-Frame (Inter-Frame) dank Motion Estimation.
-5.  Der komprimierte Frame geht via gRPC an den Client, der ihn mit `dav1d` dekodiert und als `Texture2D` in `macroquad` auf den Bildschirm zeichnet (`draw_texture`).
-
----
-
-### 5. Testinfrastruktur & AI-Agent-Kompatibilität
-
-Da KI-Agenten das System mitentwickeln und testen sollen, ist "CLI-First" für die Testbarkeit entscheidend.
-
-**Server CLI (`clap`):**
-```bash
-cloud-render-server --listen 0.0.0.0:50051 \
-                    --headed false \           # True für Debugging (manuelles Zusehen)
-                    --tls-cert cert.pem \
-                    --tls-key key.pem
-```
-
-**Client CLI (`clap`) - Der Agenten-Traum:**
-Wir statten den Client mit einem "Headless Test Mode" aus. In diesem Modus initiiert der Client gar kein GUI-Fenster (`macroquad` bleibt inaktiv). Stattdessen nutzt er nur den Netzwerk-Core, verbindet sich, navigiert, empfängt den ersten dekodierten AV1-Frame und speichert ihn als PNG auf die Festplatte.
-
-```bash
-macroquad-client --url "https://news.ycombinator.com" \
-                 --headless-test \
-                 --output-file "test_result.png" \
-                 --timeout 5000  # Beenden nach 5 Sekunden
-```
-*Warum das für den KI-Agenten genial ist:*
-Der Agent kann nach Code-Änderungen das Kommando ausführen. Er prüft den Exit-Code (0 = Erfolg). Anschließend kann er mit seinem Vision-Modell (falls vorhanden) das `test_result.png` ansehen, oder einfach per Hash/Dateigröße verifizieren, dass das Bild korrekt empfangen und dekomprimiert wurde. Dies ermöglicht vollautomatisierte Integrationstests (`cargo test --test integration`), bei denen Server und Client lokal gestartet werden und die visuelle Pipeline verifiziert wird.
-
----
-
-### 6. Meilensteine & Roadmap für die Umsetzung
-
-1.  **Phase 1: Fundament & Protokoll (Mocking)**
-    *   Aufsetzen des Workspaces, `tonic` gRPC-Definitionen und `clap` CLI.
-    *   Erstellung des Clients im "Test-Modus", der einen Dummy-Frame empfängt.
-2.  **Phase 2: Server Browser-Integration**
-    *   `chromiumoxide` einbinden.
-    *   `Page.startScreencast` implementieren und rohe Bilddaten extrahieren.
-    *   *Headless/Headed* Modus-Toggle für lokales Debugging implementieren.
-3.  **Phase 3: Die AV1-Pipeline (Das Herzstück)**
-    *   Server: `rav1e` konfigurieren (Low Latency, Zero-Delay Tuning). RGB-Frames in YUV konvertieren (benötigt von AV1) und encodieren.
-    *   Client: `dav1d-rs` einbinden, AV1-Bitstream empfangen, in RGB decodieren.
-4.  **Phase 4: Client GUI & Interaktion**
-    *   `macroquad` initialisieren.
-    *   Dekodierten Buffer in eine `macroquad::texture::Texture2D` laden und zeichnen.
-    *   Mauskoordinaten, Klicks und Tastaturanschläge abfangen und via gRPC an den Server senden (wo sie via CDP `Input.dispatchMouseEvent` etc. in Chrome injiziert werden).
-5.  **Phase 5: Optimierung & Verschlüsselung**
-    *   Zertifikatsbasierte TLS-Verschlüsselung aktivieren.
-    *   Latenz-Feintuning (z.B. Debouncing von Mausbewegungen).
-
-### Nächste Schritte
-Soll ich als Erstes das Cargo-Workspace Setup und die detaillierte `proto`-Datei generieren, oder wollen wir uns direkt das Setup des `macroquad` Clients mit entkoppeltem Netzwerk-Task ansehen?
-
-
-
-
-Das ist ein hervorragender architektonischer Einwurf. Als Systemarchitekt schätze ich solche Weitsicht. Gehen wir die Punkte systematisch durch, denn sie verfeinern unseren Plan maßgeblich.
-
-### 1. Dekoder: `rav1d` statt C-Bindings
-Die Wahl von `rav1d` (dem reinen Rust-Port von dav1d) ist ein massiver Gewinn für unsere CI/CD-Pipeline und Cross-Platform-Ziele. Wir umgehen damit das berüchtigte "C-Toolchain-Hell" (kein Meson, kein Ninja, kein clang notwendig). Ein reines Rust-Ökosystem (`rav1e` auf dem Server, `rav1d` auf dem Client) bedeutet, dass wir per GitHub Actions mühelos für Linux, Windows und macOS kompilieren können. Das passt perfekt zur "Anti-Bloat"-Philosophie.
-
-### 2. Die Video-Pipeline: PNG als saubere Quelle
-Dein Gedankengang zur Bildqualität ist absolut korrekt (Vermeidung von *Generation Loss*). Wenn Chrome JPEG liefert, enthält das Bild bereits Kompressionsartefakte. Der AV1-Encoder (`rav1e`) würde dann Bandbreite verschwenden, um diese JPEG-Artefakte exakt nachzubilden. 
-
-Die optimierte Server-Pipeline sieht daher wie folgt aus:
-1.  **Screencast-Config:** Wir weisen Chrome über CDP an: `Page.startScreencast { format: "png" }`.
-2.  **Base64 Decode:** Wir dekodieren den String (sehr billig per `base64` Crate).
-3.  **PNG Decode:** Wir nutzen z.B. das `image` oder `png` Crate (strikt ohne Default-Features, nur PNG-Support kompiliert), um an die unkomprimierten RGBA-Pixel zu kommen.
-4.  **Farbraum-Konvertierung:** AV1 arbeitet effizientesten im YUV-Farbraum (meist YUV420p). Wir konvertieren das RGBA-Array in YUV.
-5.  **AV1 Encoding:** Übergabe an `rav1e`.
-6.  **Transport:** Ab in den gRPC Stream.
-
-### 3. Volltextsuche (Architectural Design)
-Da wir im Kern einen *visuellen* Proxy bauen, gibt es für die Suche zwei elegante Architekturebenen, die wir im Protokoll vorsehen sollten:
-
-*   **Ebene 1: Visuelle Suche (Server-Side):** Der Client sendet einen `SearchRequest` mit dem Suchbegriff. Der Server instruiert Chrome (via CDP `Input.dispatchKeyEvent` mit `Ctrl+F` oder der nativen CDP-Such-API). Chrome markiert die Treffer gelb auf der Webseite. Da wir den Bildschirm streamen, sieht der Nutzer das Highlighting sofort nativ im Videostream, inklusive automatischem Scrollen zum Treffer!
-*   **Ebene 2: Semantischer Text (Client-Side Overlay):** Wir erweitern das gRPC-Protokoll um eine Metadaten-Nachricht. Der Server kann per CDP (`Runtime.evaluate("document.body.innerText")`) blitzschnell den sichtbaren Text extrahieren und an den Client senden. Der Client kann diesen Text im Hintergrund halten. Wenn der Nutzer lokal sucht, weiß der Client zumindest sofort, *ob* das Wort existiert und wie oft.
-
----
-
-### Der aktualisierte Masterplan: Workspace & gRPC-Protokoll
-
-Um das Fundament richtig zu gießen, schlage ich vor, wir definieren zuerst den Workspace und den gRPC-Vertrag (`browser_stream.proto`). Das ist die Schnittstelle, die unsere Teams (oder KI-Agenten) strikt entkoppelt arbeiten lässt.
-
-#### 1. Die Workspace Struktur (`Cargo.toml` im Root)
-```toml
-[workspace]
-members =[
-    "proto-def",        # Das gRPC Schema (Kompiliert mit tonic-build)
-    "cloud-render-srv", # Der Server (chromiumoxide + rav1e)
-    "macroquad-client", # Die GUI (macroquad + rav1d)
-]
-resolver = "2"
-
-[profile.release]
-opt-level = "z"     # Optimierung auf Dateigröße (Anti-Bloat)
-lto = true          # Link Time Optimization (Entfernt ungenutzten Code)
-codegen-units = 1
-panic = "abort"
-strip = true        # Entfernt Debug-Symbole aus der Release-Binary
-```
-
-#### 2. Der gRPC-Vertrag (`proto-def/proto/browser_stream.proto`)
-Dieses Protokoll spiegelt nun auch deine Anforderungen für Suche und Text-Metadaten wider:
-
-```protobuf
-syntax = "proto3";
-package graphical_proxy;
-
-// Der Haupt-Service für den Remote-Browser
 service RemoteBrowser {
   // Bidirektionaler Stream für Low-Latency Interaktion
   rpc StreamSession(stream ClientEvent) returns (stream ServerUpdate);
@@ -193,50 +50,65 @@ message ClientEvent {
     KeyboardInput keyboard = 3;
     ScrollInput scroll = 4;
     ViewportResize resize = 5;
-    SearchRequest search = 6;      // NEU: Triggert die Suche im Server-Browser
-    RequestTextData request_text = 7; // NEU: Fordert den reinen Seitentext an
+    
+    // Konfiguration des Datenstroms (dynamisch umschaltbar)
+    StreamConfig config = 6;
+    
+    // Triggert die serverseitige Suche
+    SearchRequest search = 7;
   }
 }
 
+message StreamConfig {
+  bool enable_video = 1;
+  bool enable_spatial_links = 2;
+}
 message NavigateRequest { string url = 1; }
-message MouseInput { 
-  int32 x = 1; 
-  int32 y = 2; 
-  bool is_click = 3; 
-  string button = 4; // "left", "right", "middle"
-}
-message KeyboardInput { 
-  string key_code = 1; 
-  bool is_pressed = 2; 
-}
-message ScrollInput { int32 delta_x = 1; int32 delta_y = 2; }
+message MouseInput { int32 x = 1; int32 y = 2; bool is_click = 3; string button = 4; }
+message KeyboardInput { string key_code = 1; bool is_pressed = 2; }
+message ScrollInput { int32 delta_y = 1; }
 message ViewportResize { int32 width = 1; int32 height = 2; }
-message SearchRequest { string query = 1; bool next = 2; }
-message RequestTextData {}
+message SearchRequest { string query = 1; }
 
 // --- Nachrichten vom SERVER zum CLIENT ---
 message ServerUpdate {
   oneof update {
-    VideoFrame frame = 1;          // Der encodierte AV1 Frame
-    PageMetadata metadata = 2;     // Meta-Infos (Titel, URL)
-    TextContent text_content = 3;  // NEU: Extrahierter Text für lokale Indexierung
-    SystemStatus status = 4;       // Fehler, Ladezustände
+    VideoFrame frame = 1;
+    SpatialMetadata spatial_data = 2;
+    SearchResults search_results = 3; // Antwort auf SearchRequest
+    SystemStatus status = 4;
   }
 }
 
 message VideoFrame {
   bytes data = 1;             // rav1e Output (AV1 Bitstream)
-  bool is_keyframe = 2;       // Wichtig für den rav1d Decoder
-  uint64 timestamp_ms = 3;
+  bool is_keyframe = 2;
 }
 
-message PageMetadata {
-  string current_url = 1;
-  string title = 2;
+message SpatialMetadata {
+  string title = 1;
+  uint32 document_width = 2;
+  uint32 document_height = 3;
+  repeated LinkBox links = 4;
 }
 
-message TextContent {
-  string inner_text = 1; // Der sichtbare Text der Seite
+message LinkBox {
+  uint32 id = 1;
+  string url = 2;
+  string label = 3;
+  int32 x = 4; int32 y = 5; int32 width = 6; int32 height = 7; // Absolute Dokument-Koordinaten
+}
+
+// Serverseitige Suchergebnisse für die gesamte Seite
+message SearchResults {
+  string query = 1;
+  repeated SearchMatch matches = 2;
+}
+
+message SearchMatch {
+  int32 match_index = 1;
+  string context_snippet = 2; // Z.B. "...hier ist der [Suchbegriff] im Text..."
+  int32 absolute_y = 3;       // Y-Position im Dokument (für "Jump-to-Result")
 }
 
 message SystemStatus {
@@ -246,220 +118,199 @@ message SystemStatus {
 }
 ```
 
-### Wie wir die KI-Agenten-Testbarkeit hiermit maximieren
+---
 
-Da die Logik durch gRPC komplett vom UI entkoppelt ist, können wir im `macroquad-client` Crate ein Modul `agent_tester.rs` anlegen.
+## 4. Die Server-Architektur (`cloud-render-srv`)
 
-Wenn der Client mit `--test-mode --url "https://news.ycombinator.com"` gestartet wird, passiert Folgendes:
-1. Das UI (macroquad) startet gar nicht erst (spart Ressourcen im CI-Container).
-2. Der gRPC-Task verbindet sich mit dem Server.
-3. Er sendet `NavigateRequest`.
-4. Er wartet auf das erste `VideoFrame`, wo `is_keyframe == true`.
-5. Er wirft die Bytes in `rav1d`, bekommt ein YUV-Bild, wandelt es in RGB.
-6. Er speichert es per `image` Crate als `test_output.png` und beendet sich mit Exit Code 0.
+Der Server orchestriert den Headless-Browser und die Video-Pipeline.
 
-Der KI-Agent (oder ein automatisiertes Skript) kann dann den Server starten, diesen Client-Befehl absetzen und verifizieren, dass `test_output.png` generiert wurde und korrekten Inhalt hat.
+### 4.1. Die verlustfreie Bild-Pipeline (Anti-Generation-Loss)
+Um Bandbreite nicht für das Kodieren von JPEG-Artefakten zu verschwenden, erzwingen wir Rohdaten aus Chrome:
+1.  **CDP Screencast:** `Page.startScreencast { format: "png" }`.
+2.  **Dekodierung:** Der Base64-String wird dekodiert, das PNG wird (z. B. mit der `image` Crate ohne schwere Features) in ein unkomprimiertes RGBA-Array gewandelt.
+3.  **Farbraum-Transformation:** RGBA wird in YUV420p umgewandelt (Voraussetzung für effizientes Video-Encoding).
+4.  **AV1 Encoding:** Der YUV-Buffer geht in `rav1e` (konfiguriert auf "Speed Level 10", "Zero Latency", "Low Delay"). Bei Scroll-Events greift die *Motion Estimation* von AV1 und sendet extrem kleine Inter-Frames (Deltas).
 
-### Nächster Schritt
+### 4.2. Extrahieren von Spatial Metadata (Zero-Bloat DOM Parsing)
+Anstatt HTML aufwendig in Rust zu parsen, injiziert der Server bei jedem Layout-Change (oder nach dem Laden) ein winziges JavaScript via CDP in die Chrome-Instanz:
+*   Das Script iteriert über alle `<a>`-Tags, liest `getBoundingClientRect()` aus und addiert `window.scrollY`.
+*   Das Resultat wird als JSON an Rust zurückgegeben, in die `SpatialMetadata` Protobuf-Nachricht verpackt und an den Client gestreamt.
 
-Sollen wir als Nächstes die Implementierungs-Architektur des **Servers** (das Zusammenspiel von `chromiumoxide` Screencast $\rightarrow$ PNG Decode $\rightarrow$ `rav1e` Encoder $\rightarrow$ gRPC Stream) im Detail skizzieren, oder bevorzugst du, dass wir mit dem Minimal-Setup des **Clients** (`macroquad` + `rav1d` + gRPC) beginnen?
-
-
-
-
-
-Das ist eine brillante architektonische Erweiterung! Was du hier beschreibst, ist der Übergang von einem reinen "dummen" Video-Stream zu einem **hybriden Spatial-UI-Stream**. 
-
-Indem wir die Metadaten (Links, Bounding Boxes, Text) vom reinen Pixel-Stream trennen, lösen wir gleich zwei massive Probleme bei Verbindungen mit hoher Latenz/geringer Bandbreite:
-1. **Zero-Latency Hit-Testing:** Der Client weiß lokal, wo die Links sind. Klickt der Nutzer, können wir dem Nutzer sofort visuelles Feedback geben (z.B. den Kasten in `macroquad` aufleuchten lassen), noch bevor der Server den Klick verarbeitet hat.
-2. **Skeleton UI beim Scrollen:** Wenn das Video beim Scrollen laggt, kann der Client anhand seiner lokalen Scroll-Position bereits Rechtecke (`draw_rectangle_lines` in `macroquad`) und den Text der Links an der richtigen Stelle zeichnen. Der Nutzer "sieht" die Struktur der Seite, bevor die AV1-Frames eintreffen.
-
-Hier ist der Plan, wie wir diese Anforderungen (Volltextsuche, Spatial-Metadaten und dynamische Toggles) architektonisch sauber in unser System integrieren:
+### 4.3. Serverseitige Volltextsuche
+Wenn ein `SearchRequest` eingeht:
+1.  Der Server injiziert ein JS-Snippet, das den DOM nach dem Begriff durchsucht.
+2.  Für jeden Treffer wird der umliegende Text (z.B. 50 Zeichen davor und danach) sowie die absolute Y-Position (`offsetTop` der Node) extrahiert.
+3.  Die Ergebnisse werden als `SearchResults` gebündelt an den Client gesendet. Der Client kann diese Liste anzeigen, und bei einem Klick darauf ein `ScrollInput` an den Server senden, um dorthin zu navigieren.
 
 ---
 
-### 1. Das erweiterte gRPC-Protokoll (Toggles & Spatial Data)
+## 5. Die Client-Architektur (`macroquad-client`)
 
-Wir erweitern das Protokoll so, dass der Client jederzeit entscheiden kann, wie "reichhaltig" der Datenstrom sein soll. Das ist extrem wichtig für das Bandbreiten-Management.
+Der Client ist extrem leichtgewichtig und trennt strikt zwischen Netzwerk und Rendering.
+
+### 5.1. Thread-Entkopplung (Actor Model)
+*   **Netzwerk-Task (`tokio`):** Ein asynchroner Hintergrund-Thread hält die gRPC-Verbindung. Er empfängt `VideoFrame`- und `SpatialMetadata`-Updates und legt diese in einen thread-sicheren Zustandsspeicher (`tokio::sync::watch` oder `mpsc`). User-Inputs werden aus einem Channel gelesen und sofort an den Server gefeuert.
+*   **Main-Thread (`macroquad`):** Läuft mit 60 FPS. Blockiert niemals bei Netzwerk-Lags.
+
+### 5.2. Lokales State-Management & Skeleton-UI
+Der Client merkt sich die vom Server erhaltene `SpatialMetadata` und die *lokale* (prädizierte) Scroll-Position.
+Wenn der Benutzer am Mausrad dreht:
+1. Die lokale `scroll_y` Variable wird sofort aktualisiert.
+2. Der Hintergrund wird gezeichnet, das zuletzt erhaltene Video wird um `scroll_y` verschoben gezeichnet.
+3. **Skeleton-UI:** Die Bounding-Boxes (`LinkBox`) der Links werden relativ zur lokalen Scroll-Position gezeichnet.
+   * *Effekt:* Auch wenn das Video aufgrund schlechten Internets 500ms hängt, sieht der Nutzer bereits blaue Rahmen und den Link-Text an den neuen Positionen. Ein Klick auf diese Boxen führt sofort eine Navigation aus (Zero-Latency Hit-Testing).
+
+### 5.3. AV1 Dekodierung
+Im Netzwerk-Task eintreffende `VideoFrame` Bytes werden an `rav1d` übergeben. Das resultierende YUV-Bild wird in RGB konvertiert und im Main-Thread als `Texture2D` in den GPU-Speicher von Macroquad geladen.
+
+---
+
+## 6. Testinfrastruktur & AI-Agent Integration (CLI-First)
+
+Da KI-Agenten den Code mitentwickeln sollen, müssen alle Komponenten vollständig über Kommandozeilenparameter (`clap`) steuerbar und validierbar sein, ohne dass ein physischer Monitor benötigt wird.
+
+**Server-Aufruf für Integrationstests:**
+```bash
+cloud-render-srv --listen 127.0.0.1:50051 --headed false
+```
+
+**Client "Headless Test-Mode" (Für den AI Agenten):**
+Der Client erhält einen Modus, in dem `macroquad` (das Fenster) deaktiviert bleibt. Der Netzwerk-Core führt eine definierte Aktion aus und dumpt das Resultat auf die Festplatte zur Validierung durch den Agenten.
+
+*   **Test 1: Video Pipeline Validierung**
+    ```bash
+    macroquad-client --test-mode \
+                     --url "https://news.ycombinator.com" \
+                     --dump-first-frame "test_result.png"
+    ```
+    *Der Agent verifiziert, dass "test_result.png" existiert und valide Bilddaten enthält.*
+
+*   **Test 2: Metadaten & Such-Validierung (Kein Video-Overhead)**
+    ```bash
+    macroquad-client --test-mode \
+                     --url "https://news.ycombinator.com" \
+                     --disable-video \
+                     --search-query "Hacker News" \
+                     --dump-search-results "search.json"
+    ```
+    *Der Agent prüft die `search.json`, um sicherzustellen, dass die serverseitige Suchlogik samt Text-Snippets (`context_snippet`) und Y-Koordinaten korrekt funktioniert.*
+
+---
+
+## 7. Build-Optimierung (Anti-Bloat Strategie)
+
+Damit die Binaries winzig bleiben und CI/CD-Pipelines (z. B. GitHub Actions) rasend schnell kompilieren, gelten strikte Cargo-Regeln.
+
+*   `rav1e` und `rav1d` sind reine Rust-Crates, was das Kompilieren über verschiedene OS-Grenzen hinweg trivial macht.
+*   In der `Cargo.toml` des Workspaces wird konfiguriert:
+    ```toml
+    [profile.release]
+    opt-level = "z"       # Optimierung auf Dateigröße
+    lto = true            # Link-Time-Optimization
+    codegen-units = 1     # Maximale Optimierung über alle Crates hinweg
+    panic = "abort"       # Entfernt Unwinding-Bloat
+    strip = true          # Entfernt Debug-Symbole
+    ```
+*   Bibliotheken wie `macroquad` werden ohne Default-Features eingebunden (z.B. keine eingebauten Audio-Engines), falls nicht strikt benötigt.
+
+---
+
+## Fazit
+
+Dieser Architekturplan beschreibt ein hochmodernes, latenzresistentes Remote-Browser-System. Durch den Einsatz von AV1 (`rav1e`/`rav1d`) minimieren wir die Bandbreite. Durch die Trennung von Videodaten und Spatial-Metadaten (Links, Suchergebnisse) ermöglichen wir eine reaktionsschnelle, lokale UI-Darstellung (Skeleton-Rendering), die das Gefühl eines nativen Browsers vermittelt, selbst wenn das Video-Streaming über stark gedrosselte Leitungen läuft. Die CLI-First-Architektur garantiert eine exzellente Testbarkeit durch KI-Agenten.
+
+
+fehlt in spatial metadata nicht die x und y position des zur zeit uebermittelten fensters?
+
+
+Das ist eine exzellente und architektonisch messerscharfe Beobachtung! Du hast absolut recht, da habe ich eine entscheidende Brücke im Protokoll übersehen.
+
+Wenn wir über das Skeleton-UI und "Client-Side Prediction" (das lokale Weiterscrollen, während das Netzwerk laggt) sprechen, **muss** der Client zwingend wissen, welchem absoluten Dokumentenausschnitt der aktuell empfangene Video-Frame entspricht. 
+
+Ein 1920x1080 AV1-Frame ist ja nur ein "Guckloch" (Viewport) in das womöglich 10.000 Pixel hohe HTML-Dokument. Ohne die `x`- und `y`-Koordinate dieses Gucklochs kann der Client die Pixel nicht mit den absoluten Link-Koordinaten der `SpatialMetadata` in Deckung bringen.
+
+Hier ist die Korrektur und wie sie unser lokales Rendering unglaublich elegant macht:
+
+### 1. Das korrigierte Protobuf-Schema
+
+Wir müssen die Viewport-Koordinaten zwingend an den `VideoFrame` binden. Warum genau an den Frame? Weil die Bilddaten und die Scroll-Position exakt synchron sein müssen. Wenn wir sie separat senden würden, gäbe es *Tearing* (das Bild zeigt noch den alten Ausschnitt, aber die Koordinaten sagen schon, wir sind weiter unten).
 
 ```protobuf
-syntax = "proto3";
-package graphical_proxy;
-
-service RemoteBrowser {
-  rpc StreamSession(stream ClientEvent) returns (stream ServerUpdate);
+message VideoFrame {
+  bytes data = 1;             
+  bool is_keyframe = 2;
+  
+  // NEU: Die exakte absolute Position dieses Frames im Gesamtdokument
+  int32 viewport_x = 3;       
+  int32 viewport_y = 4;       
 }
 
-// --- Nachrichten vom CLIENT zum SERVER ---
-message ClientEvent {
-  oneof event {
-    NavigateRequest navigate = 1;
-    MouseInput mouse = 2;
-    KeyboardInput keyboard = 3;
-    ScrollInput scroll = 4;
-    ViewportResize resize = 5;
-    
-    // NEU: Konfiguration des Datenstroms (kann jederzeit gesendet werden)
-    StreamConfig config = 6;
-  }
-}
-
-message StreamConfig {
-  bool enable_video = 1;         // AV1 Stream an/aus
-  bool enable_text_stream = 2;   // Rohen Seitentext senden?
-  bool enable_spatial_links = 3; // Link-Koordinaten senden?
-}
-
-// --- Nachrichten vom SERVER zum CLIENT ---
-message ServerUpdate {
-  oneof update {
-    VideoFrame frame = 1;
-    SpatialMetadata spatial_data = 2;  // NEU: Link-Positionen und Layout
-    TextContent text_content = 3;      // NEU: Für lokale Volltextsuche
-    SystemStatus status = 4;
-  }
-}
-
-// NEU: Repräsentiert die Struktur der Seite unabhängig vom Video
 message SpatialMetadata {
   string title = 1;
   uint32 document_width = 2;
   uint32 document_height = 3;
-  repeated LinkBox links = 4;
-}
-
-message LinkBox {
-  uint32 id = 1;       // Eindeutige ID (hilft bei Updates)
-  string url = 2;      // Das Ziel
-  string label = 3;    // Der Text des Links
-  int32 x = 4;         // Absolute X-Position im Dokument
-  int32 y = 5;         // Absolute Y-Position im Dokument
-  int32 width = 6;
-  int32 height = 7;
-}
-
-message TextContent {
-  string full_inner_text = 1;
+  // Der Initiale Viewport beim Senden der Metadaten (hilfreich, wenn Video aus ist)
+  int32 initial_viewport_x = 4;
+  int32 initial_viewport_y = 5;
+  repeated LinkBox links = 6;
 }
 ```
 
----
+### 2. Warum das die Client-Logik genial macht (Zero-Latency Scrolling)
 
-### 2. Server-Side: Extrahieren der Spatial Data (Ohne Bloat)
+Durch diese zwei neuen Felder im `VideoFrame` wird die Render-Schleife im `macroquad`-Client mathematisch extrem sauber. Wir haben nun zwei Y-Koordinaten:
+1.  **`server_frame_y`**: Wo das aktuell angezeigte Bild auf dem Server *wirklich* aufgenommen wurde.
+2.  **`local_scroll_y`**: Wo der Benutzer *jetzt gerade* hingescrollt hat (Client-Side Prediction).
 
-Anstatt auf dem Server eine schwere HTML-Parsing-Bibliothek zu verwenden, nutzen wir die Tatsache, dass Chrome die Seite ohnehin rendert und das Layout berechnet. Wir lassen Chrome die Arbeit machen!
+Die Render-Logik im Client sieht dann so aus:
 
-Über das Chrome DevTools Protocol (CDP) evaluieren wir ein winziges, hochoptimiertes JavaScript-Snippet, sobald die Seite geladen ist (oder das Layout mutiert).
-
-```rust
-// Pseudocode für den Cloud-Server
-const EXTRACT_LINKS_JS: &str = r#"
-    Array.from(document.querySelectorAll('a')).map((a, index) => {
-        const rect = a.getBoundingClientRect();
-        return {
-            id: index,
-            url: a.href,
-            label: a.innerText.trim(),
-            // WICHTIG: window.scrollY addieren, um absolute Dokument-Koordinaten zu bekommen,
-            // nicht nur Viewport-Koordinaten!
-            x: Math.round(rect.left + window.scrollX),
-            y: Math.round(rect.top + window.scrollY),
-            width: Math.round(rect.width),
-            height: Math.round(rect.height)
-        };
-    }).filter(link => link.width > 0 && link.height > 0) // Nur sichtbare Links
-"#;
-```
-
-Der Rust-Server parst dieses JSON-Ergebnis und verpackt es in die kompakte protobuf `SpatialMetadata` Nachricht. Wenn der Client `enable_spatial_links = true` gesetzt hat, wird diese über den gRPC-Stream gefeuert.
-
----
-
-### 3. Client-Side: Macroquad UI & Such-Logik
-
-Im `macroquad`-Client entkoppeln wir nun den logischen State vom visuellen State.
-
-**Der State-Manager des Clients:**
-Der Client merkt sich:
-1. Den letzten dekodierten Video-Frame (Texture2D).
-2. Die absolute `scroll_y` Position des Nutzers.
-3. Den Baum der `LinkBox` Objekte.
-
-**Die Render-Schleife (60 FPS in Macroquad):**
 ```rust
 // Macroquad Render Loop Pseudocode
+
 loop {
     clear_background(BLACK);
 
-    // 1. Zeichne das Video verschoben um die lokale Scroll-Position
-    // Wenn das Video laggt, zeichnen wir es einfach dort, wo es hingehört.
-    draw_texture(video_texture, 0.0, -current_scroll_y, WHITE);
+    // 1. Berechne den Delta-Offset zwischen lokaler Vorhersage und Server-Realität
+    // Wenn der Nutzer scrollt, wird dieser Wert negativ, das Bild schiebt sich nach oben!
+    let render_offset_y = server_frame_y as f32 - local_scroll_y;
+    let render_offset_x = server_frame_x as f32 - local_scroll_x;
 
-    // 2. Zeichne die Metadaten (Skeleton UI / Overlay)
-    if show_link_debug_overlay {
+    // 2. Zeichne den zuletzt erhaltenen Video-Frame an der versetzten Position
+    draw_texture(video_texture, render_offset_x, render_offset_y, WHITE);
+
+    // 3. Zeichne das Skeleton-UI (Metadaten) absolut zum lokalen Scroll!
+    if show_metadata_overlay {
         for link in &page_state.links {
-            // Berechne Bildschirmposition relativ zum aktuellen Scroll
-            let screen_y = link.y as f32 - current_scroll_y;
+            let screen_y = link.y as f32 - local_scroll_y;
+            let screen_x = link.x as f32 - local_scroll_x;
             
-            // Culling: Zeichne nur, was im Viewport ist
+            // Befindet sich der Link aktuell im sichtbaren Bereich?
             if screen_y > -link.height as f32 && screen_y < window_height {
-                draw_rectangle_lines(
-                    link.x as f32, screen_y, 
-                    link.width as f32, link.height as f32, 
-                    2.0, BLUE
-                );
                 
-                // Text-Fallback, falls der Videoframe noch nicht da ist
-                if is_scrolling_fast_and_video_lags {
-                    draw_text(&link.label, link.x as f32, screen_y + 15.0, 16.0, WHITE);
-                }
+                // Falls der Video-Frame diesen Bereich aktuell NICHT abdeckt 
+                // (weil das Netzwerk laggt und der User schnell gescrollt hat), 
+                // sehen wir hier den "nackten" blauen Rahmen und Text als Platzhalter!
+                draw_rectangle_lines(screen_x, screen_y, link.width, link.height, 2.0, BLUE);
+                
+                // Optional: Fallback-Text zeichnen
+                draw_text(&link.label, screen_x, screen_y + 15.0, 16.0, WHITE);
             }
         }
     }
     
-    // ... UI (Adressleiste, Suchleiste) ...
     next_frame().await;
 }
 ```
 
-**Lokale Volltextsuche:**
-Wenn der Nutzer im Client Strg+F drückt, poppt in `macroquad` eine kleine Eingabeleiste auf. 
-Da der Client per `enable_text_stream = true` den Text erhalten kann, kann der Client in Millisekunden prüfen, ob das Wort existiert. Alternativ senden wir die Suchanfrage via gRPC an den Server, der Chrome den Befehl gibt, zum Treffer zu scrollen und ihn gelb zu markieren (was dann sofort als AV1-Update reinkommt). Wir können das flexibel halten.
+### Der Effekt für den Nutzer
 
----
+Das ist genau die Magie, die Systeme wie Cloud-Gaming (Stadia/GeForce Now) oder hochoptimierte Remote-Desktops nutzen. 
 
-### 4. Integrationstests für den KI-Agenten
+Wenn die Verbindung einbricht (Bandbreite droppt auf 10 KB/s) und der Nutzer das Mausrad dreht:
+1. Das aktuell angezeigte Videobild gleitet weich nach oben weg (`render_offset_y`).
+2. Unten entsteht eine schwarze Lücke (da der Server noch keinen neuen AV1-Frame für diesen neuen Bereich geliefert hat).
+3. **Aber:** In dieser schwarzen Lücke erscheinen sofort fehlerfrei die blauen Rahmen und Texte der Links (`SpatialMetadata`), da diese absolut zur `local_scroll_y` berechnet werden!
+4. Der Nutzer kann sofort auf so einen Rahmen klicken.
+5. Bruchteile einer Sekunde später trifft der AV1-Delta-Frame vom Server ein, `server_frame_y` aktualisiert sich auf den neuen Wert, der `render_offset_y` wird wieder `0`, und das hochauflösende Bild "rastet" exakt in die blauen Rahmen ein.
 
-Durch die Trennung in Konfigurations-Toggles wird das System fantastisch testbar. Ein KI-Agent kann den CLI-Client für verschiedene Aspekte testen, ohne überhaupt Bilder dekodieren zu müssen!
-
-*Beispiel 1: Metadaten-Test*
-```bash
-# Agent startet den Client im Headless-Mode, deaktiviert Video, fragt nur Links ab.
-macroquad-client --url "https://news.ycombinator.com" \
-                 --headless-test \
-                 --disable-video \
-                 --enable-links \
-                 --dump-metadata out.json
-```
-Der Agent liest `out.json` und prüft: *Sind die Links da? Stimmen die Koordinaten ungefähr?* Das ist ein rasend schneller Test (wenige Millisekunden), der verifiziert, dass Chrome läuft und CDP funktioniert.
-
-*Beispiel 2: Video-Test*
-```bash
-# Agent testet nur die Video-Kompression ohne Metadaten-Overhead
-macroquad-client --url "https://news.ycombinator.com" \
-                 --headless-test \
-                 --enable-video \
-                 --disable-links \
-                 --dump-frame frame01.png
-```
-
-### Fazit & Wie es weitergeht
-
-Dieser Ansatz (Video für das Aussehen, Spatial Data für die Struktur) ist der Goldstandard für Remote-Desktop und Remote-Browser Systeme (ähnlich wie es Stadia oder moderne RDP-Protokolle mit "Client-side prediction" machen). 
-
-Wir haben nun einen extrem robusten Plan für:
-1. **Das gRPC Protokoll** (entkoppelt, konfigurierbar).
-2. **Den Server** (Chromiumoxide, Screenshot -> PNG -> YUV -> rav1e + CDP JS Injection für Metadaten).
-3. **Den Client** (macroquad Renderloop + dav1d Decoder + Spatial State Management).
-
-Bist du mit diesem Architektur-Design einverstanden? Wenn ja, können wir als nächstes den **Skelett-Code (Boilerplate)** für den Cargo-Workspace und die Protobuf-Generierung (`build.rs`) definieren, um dem Agenten eine perfekte Startgrundlage für das Projekt zu geben.
+Danke für diesen Hinweis! Genau solche Details unterscheiden ein hakeliges Hobby-Projekt von einer robusten, professionellen Low-Bandwidth-Architektur. Das wird sofort so in den Masterplan für den KI-Agenten und die Implementation übernommen.
