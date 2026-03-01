@@ -140,6 +140,10 @@ async fn run_browser_session(
     enc.chroma_sampling = ChromaSampling::Cs420;
     enc.speed_settings = SpeedSettings::from_preset(10);
     
+    // Force keyframe mode for client compatibility
+    enc.min_key_frame_interval = 1;  // Every frame is a keyframe
+    enc.max_key_frame_interval = 1;  // Force all frames to be keyframes
+    
     let cfg = Config::new().with_encoder_config(enc).with_threads(2);
     let mut ctx: Context<u8> = cfg.new_context().map_err(|e| format!("Encoder error: {:?}", e))?;
     
