@@ -19,8 +19,8 @@ impl Av1Decoder {
         println!("[Client] Received {} bytes of AV1 data", av1_data.len());
         
         // For now, create a simple test pattern to verify data flow
-        let w = 1280;
-        let h = 720;
+        let w = 800;
+        let h = 600;
         let mut rgba_data = vec![128u8; w as usize * h as usize * 4];
         
         // Create test pattern based on AV1 data

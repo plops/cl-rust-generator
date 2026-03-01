@@ -56,8 +56,8 @@ async fn main() {
     // Normal GUI mode - use proper threading model
     info!("Starting normal GUI mode");
     let shared_state = Arc::new(Mutex::new(ClientState {
-        frame_width: 1280,
-        frame_height: 720,
+        frame_width: 800,
+        frame_height: 600,
         server_viewport_y: 0,
         local_scroll_y: 0,
         ..Default::default()

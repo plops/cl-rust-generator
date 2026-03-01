@@ -171,8 +171,12 @@ async fn run_browser_session(
     let mut force_keyframes = true; // Default to simplified mode
     
     loop {
-        // Handle client events
-        if let Some(Ok(event)) = client_stream.next().await {
+        info!("[Server] Starting frame {} iteration", frame_count);
+        
+        // Handle client events (non-blocking with timeout)
+        info!("[Server] Checking for client events...");
+        match tokio::time::timeout(Duration::from_millis(10), client_stream.next()).await {
+            Ok(Some(Ok(event))) => {
             // Check for test image event first to avoid borrow issues
             if let Some(proto_def::graphical_proxy::client_event::Event::TestImage(_)) = &event.event {
                 let _ = session::handle_test_image_event(event, &tx).await;
@@ -224,6 +228,20 @@ async fn run_browser_session(
                 }
             }
         }
+        Ok(Some(Err(e))) => {
+            warn!("[Server] Client event error: {:?}", e);
+        }
+        Ok(None) => {
+            info!("[Server] Client disconnected");
+            return Ok(());
+        }
+        Err(_) => {
+            // Timeout - no event available, continue with frame capture
+            info!("[Server] No client event available, continuing with frame capture");
+        }
+        }
+        
+        info!("[Server] Proceeding with frame capture...");
         
         // Capture screenshot from browser
         println!("[Server] Capturing screenshot...");
@@ -236,6 +254,7 @@ async fn run_browser_session(
             .map_err(|e| format!("YUV conversion error: {:?}", e))?;
         println!("[Server] YUV conversion complete");
 
+        info!("[Server] Creating AV1 frame...");
         let mut frame = ctx.new_frame();
         frame.planes[0].copy_from_raw_u8(&yuv_image.y, yuv_image.y_stride as usize, 1);
         frame.planes[1].copy_from_raw_u8(&yuv_image.u, yuv_image.u_stride as usize, 1);
@@ -245,9 +264,14 @@ async fn run_browser_session(
         ctx.send_frame(frame).map_err(|e| format!("Send frame error: {:?}", e))?;
         println!("[Server] Frame sent to encoder");
         
+        info!("[Server] Receiving encoded packets...");
         // Receive encoded packets
         let mut packet_count = 0;
+        let mut found_packet = false;
+        
+        // Try to receive packets with a timeout
         while let Ok(packet) = ctx.receive_packet() {
+            found_packet = true;
             println!("[Server] Sending packet {} with {} bytes", packet_count, packet.data.len());
             let update = ServerUpdate {
                 update: Some(proto_def::graphical_proxy::server_update::Update::Frame(VideoFrame {
@@ -263,8 +287,15 @@ async fn run_browser_session(
             }
             packet_count += 1;
         }
+        
+        if !found_packet {
+            warn!("[Server] No packets received from encoder - this may be normal for early frames");
+        }
+        
+        info!("[Server] No more packets, frame {} complete. Sent {} packets", frame_count, packet_count);
 
         frame_count += 1;
+        info!("[Server] Sleeping for 33ms (30 FPS)...");
         tokio::time::sleep(Duration::from_millis(33)).await; // 30 FPS
     }
 }

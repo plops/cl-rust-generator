@@ -10,13 +10,13 @@ pub async fn run_render_loop(
     state: Arc<Mutex<ClientState>>,
     event_tx: tokio::sync::mpsc::UnboundedSender<ClientEvent>
 ) {
+    let mut texture: Option<Texture2D> = None;
+    
     loop {
         // 1. Process local input & send to event_tx
         ui::handle_input_and_send_events(&event_tx);
         
         // 2. Lock state to fetch latest texture / metadata
-        let mut texture: Option<Texture2D> = None;
-        
         {
             let mut lock = match state.lock() {
                 Ok(guard) => guard,
