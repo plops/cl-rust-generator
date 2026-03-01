@@ -4,6 +4,8 @@ Aber dieses Projekt hier soll von grafischer Natur sein. Es soll die geränderte
 
 Die Idee ist dabei, den effizienten AV1 Encoder RAV1E zu verwenden. 
 https://github.com/xiph/rav1e
+als decoder
+https://github.com/memorysafety/rav1d
 
 Auch inkrementelle Updates und Scrolling der Webseite sollen darüber abgewickelt werden. 
 
@@ -27,6 +29,8 @@ Erstelle einen Plan für die neue Implementierung dieser Idee. Gehe dabei bereit
 
 Auch die Testinfrastruktur soll im Plan bedacht werden. Da wir KI-Agenten für die Entwicklung benutzen, ist es nützlich, jedem der Programme ausreichende Kommandozeilenparameter zu geben. Der Client sollte zum Beispiel eine Anfrage absetzen und die empfangenen Informationen als Text oder Bild in eine Datei abspeichern, sodass der Agent die Resultate überprüfen kann.  
 Damit sollte es recht einfach möglich sein, Integrationstests umzusetzen, die der Agent selbstständig ausführt. Und die dann später vielleicht auch automatisiert werden können, ohne agenten Einsatz. 
+
+Vielleicht nicht im ersten Implementierungsschritt, aber vorgesehen sollte es schon sein, ist die Volltextsuche. Vielleicht sollte die vom Browser übernommen werden. Oder es sollte eine Möglichkeit geben, über das GRPC-P Protokoll den Text der Webseite zu übertragen. Wobei darin weder das Problem besteht, dass es nicht besonders einfach ist, eine Webseite in Text umzuwandeln. Für die Suche könnte es aber ausreichen. 
 
 cd  /home/kiel/stage/cl-rust-generator/examples/20_webprox_avif/
 
