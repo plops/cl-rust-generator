@@ -1,6 +1,7 @@
 use macroquad::prelude::*;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
+use log::{info, warn, error, debug};
 
 // Import modules
 mod state;
@@ -19,8 +20,16 @@ use state::ClientState;
 use network::grpc_client;
 use render::main_loop;
 
+// Initialize logging at startup
+fn init_logging() {
+    core_utils::logging::init_logging("macroquad-client")
+        .expect("Failed to initialize logging");
+}
+
 #[macroquad::main("AV1 Remote Browser")]
 async fn main() {
+    init_logging();
+    
     #[cfg(feature = "integration-test")]
     {
         // Parse CLI arguments for integration test mode
@@ -28,7 +37,7 @@ async fn main() {
         
         // Check for integration test mode
         if let Some(test_args) = parse_integration_test_args(cli) {
-            println!("[Client] Running in integration test mode");
+            info!("Running in integration test mode");
             
             // Run integration test directly with tokio runtime
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -45,6 +54,7 @@ async fn main() {
     }
     
     // Normal GUI mode - use proper threading model
+    info!("Starting normal GUI mode");
     let shared_state = Arc::new(Mutex::new(ClientState {
         frame_width: 1280,
         frame_height: 720,
@@ -58,6 +68,7 @@ async fn main() {
     let state_clone = shared_state.clone();
     
     // Spawn network completely independent of macroquad's executor
+    info!("Spawning network thread");
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
@@ -66,6 +77,7 @@ async fn main() {
     });
 
     // Main thread is now correctly owned by Macroquad
+    info!("Starting render loop");
     main_loop::run_render_loop(shared_state, tx_events).await;
 }
 

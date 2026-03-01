@@ -2,10 +2,11 @@ use std::sync::{Arc, Mutex};
 use futures::StreamExt;
 use tonic::Request;
 use tokio::sync::mpsc;
+use log::{info, warn, error, debug};
 
 use proto_def::graphical_proxy::{
     remote_browser_client::RemoteBrowserClient,
-    ClientEvent, server_update, client_event,
+    ClientEvent, server_update,
 };
 
 use crate::state::{ClientState, ClientImage};
@@ -15,11 +16,14 @@ pub async fn start_grpc_client(
     state: Arc<Mutex<ClientState>>,
     mut rx_events: tokio::sync::mpsc::UnboundedReceiver<ClientEvent>
 ) {
-    println!("[Client] Connecting to server...");
+    info!("Connecting to server...");
     let mut client = match RemoteBrowserClient::connect("http://[::1]:50051").await {
-        Ok(c) => c,
+        Ok(c) => {
+            info!("Successfully connected to server");
+            c
+        }
         Err(e) => {
-            eprintln!("[Client] Connection failed: {:?}", e);
+            error!("Connection failed: {:?}", e);
             return;
         }
     };
@@ -28,6 +32,7 @@ pub async fn start_grpc_client(
     let (tx_events, mut rx_events_internal) = mpsc::channel(10);
     
     // Send initial stream configuration
+    info!("Sending initial stream configuration");
     let config_event = ClientEvent {
         event: Some(proto_def::graphical_proxy::client_event::Event::Config(
             proto_def::graphical_proxy::StreamConfig {
@@ -41,24 +46,29 @@ pub async fn start_grpc_client(
     
     // Bridge UI events to internal channel
     tokio::spawn(async move {
+        info!("Starting UI event bridge");
         while let Some(event) = rx_events.recv().await {
+            debug!("Forwarding UI event to server: {:?}", event.event);
             if let Err(e) = tx_events.send(event).await {
-                eprintln!("[Client] Failed to forward UI event: {:?}", e);
+                error!("Failed to forward UI event: {:?}", e);
                 break;
             }
         }
+        info!("UI event bridge ended");
     });
     
     let request = Request::new(tokio_stream::wrappers::ReceiverStream::new(rx_events_internal));
     let mut stream = client.stream_session(request).await.expect("Stream session failed").into_inner();
     
-    println!("[Client] Stream established. Waiting for packets...");
+    info!("Stream established. Waiting for packets...");
     
     while let Some(item) = stream.next().await {
         match item {
             Ok(update) => {
+                debug!("Received server update");
                 match update.update {
                     Some(server_update::Update::Frame(frame)) => {
+                        info!("Received video frame: {} bytes, keyframe: {}", frame.av1_data.len(), frame.is_keyframe);
                         let mut lock = match state.lock() {
                             Ok(guard) => guard,
                             Err(poisoned) => poisoned.into_inner(),
@@ -74,12 +84,14 @@ pub async fn start_grpc_client(
                         
                         // Initialize decoder if needed
                         if lock.decoder.is_none() {
+                            info!("Initializing AV1 decoder");
                             match Av1Decoder::new() {
                                 Ok(decoder) => {
                                     lock.decoder = Some(decoder);
+                                    info!("AV1 decoder initialized successfully");
                                 }
                                 Err(e) => {
-                                    eprintln!("[Client] Failed to initialize AV1 decoder: {}", e);
+                                    error!("Failed to initialize AV1 decoder: {}", e);
                                     // Fall back to visualization
                                     continue;
                                 }
@@ -93,8 +105,8 @@ pub async fn start_grpc_client(
                                     let (width, height) = image_buffer.dimensions();
                                     let rgba_data = image_buffer.into_raw();
                                     
-                                    println!("[Client] Successfully decoded AV1 frame: {}x{}, {} bytes, keyframe: {}", 
-                                            width, height, frame.av1_data.len(), frame.is_keyframe);
+                                    info!("Successfully decoded AV1 frame: {}x{}, {} bytes", 
+                                            width, height, frame.av1_data.len());
                                     
                                     lock.latest_frame = Some(ClientImage {
                                         width: width as u16,
@@ -105,11 +117,11 @@ pub async fn start_grpc_client(
                                     continue;
                                 }
                                 Ok(None) => {
-                                    // No frame ready yet, try again next time
+                                    debug!("No frame ready yet, try again next time");
                                     continue;
                                 }
                                 Err(e) => {
-                                    eprintln!("[Client] AV1 decode failed: {}, using visualization", e);
+                                    warn!("AV1 decode failed: {}, using visualization", e);
                                     
                                     // Fallback to visualization
                                     let w = lock.frame_width;
@@ -168,6 +180,7 @@ pub async fn start_grpc_client(
                         }
                     }
                     Some(server_update::Update::SpatialData(metadata)) => {
+                        info!("Received spatial metadata: {} links, title: '{}'", metadata.links.len(), metadata.title);
                         let mut lock = match state.lock() {
                             Ok(guard) => guard,
                             Err(poisoned) => poisoned.into_inner(),
@@ -176,18 +189,21 @@ pub async fn start_grpc_client(
                         lock.doc_width = metadata.document_width;
                         lock.doc_height = metadata.document_height;
                         lock.links = metadata.links;
-                        println!("[Client] Received spatial metadata: {} links", lock.links.len());
                     }
                     Some(server_update::Update::Status(status)) => {
-                        println!("[Client] Status: {}", status.message);
+                        info!("Status: {}", status.message);
                     }
-                    _ => {}
+                    _ => {
+                        debug!("Received unknown update type");
+                    }
                 }
             }
             Err(e) => {
-                eprintln!("[Client] Stream error: {:?}", e);
+                error!("Stream error: {:?}", e);
                 break;
             }
         }
     }
+    
+    info!("Stream ended, client disconnecting");
 }

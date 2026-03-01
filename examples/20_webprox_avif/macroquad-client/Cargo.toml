@@ -27,5 +27,5 @@ chrono = { version = "0.4", features = ["serde"] }
 yuv = "0.1"
 imgref = "1.10"
 rgb = "0.8"
-
-# Remove [workspace]
+log = { workspace = true }
+env_logger = { workspace = true }

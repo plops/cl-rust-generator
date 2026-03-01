@@ -3,6 +3,7 @@ use tokio::sync::mpsc;
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tonic::{transport::Server, Request, Response, Status};
 use clap::{Parser, Subcommand};
+use log::{info, warn, error, debug};
 
 use proto_def::graphical_proxy::{
     remote_browser_server::{RemoteBrowser, RemoteBrowserServer},
@@ -17,6 +18,12 @@ mod browser;
 use browser::{ChromeRunner, CdpStream, extract_spatial_metadata, ExtractedMetadata};
 
 mod session;
+
+// Initialize logging at startup
+fn init_logging() {
+    core_utils::logging::init_logging("cloud-render-srv")
+        .expect("Failed to initialize logging");
+}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "AV1 Remote Browser Server")]
@@ -48,17 +55,21 @@ impl RemoteBrowser for RemoteBrowserImpl {
         &self,
         request: Request<tonic::Streaming<ClientEvent>>,
     ) -> Result<Response<Self::StreamSessionStream>, Status> {
+        info!("New client connection received");
         let client_stream = request.into_inner();
         let (tx, rx) = mpsc::channel(128);
 
         // Background task to handle client events and run browser session
         tokio::spawn(async move {
+            info!("Spawning browser session task");
             if let Err(e) = run_browser_session(tx, client_stream).await {
-                eprintln!("Browser session error: {:?}", e);
+                error!("Browser session error: {:?}", e);
             }
+            info!("Browser session task ended");
         });
 
         let output_stream = ReceiverStream::new(rx);
+        info!("Stream session established, returning response");
         Ok(Response::new(Box::pin(output_stream)))
     }
 }
@@ -67,15 +78,18 @@ async fn run_browser_session(
     tx: mpsc::Sender<Result<ServerUpdate, Status>>,
     mut client_stream: tonic::Streaming<ClientEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    info!("Starting browser session");
     let mut width = 1280;
     let mut height = 720;
     let mut integration_test_mode = false;
     
     // Check first for test image event to determine if we should skip browser initialization
+    info!("Waiting for first client event...");
     if let Some(Ok(first_event)) = client_stream.next().await {
+        debug!("Received first event: {:?}", first_event.event);
         if let Some(proto_def::graphical_proxy::client_event::Event::TestImage(_)) = &first_event.event {
             integration_test_mode = true;
-            println!("[Server] Integration test mode detected - skipping browser initialization");
+            info!("Integration test mode detected - skipping browser initialization");
             
             // Handle the test image event
             let _ = session::handle_test_image_event(first_event, &tx).await;
@@ -92,24 +106,31 @@ async fn run_browser_session(
             }
             return Ok(());
         }
+    } else {
+        warn!("No first event received, client may have disconnected");
+        return Ok(());
     }
     
     // Normal browser mode - initialize Chrome browser
+    info!("Initializing Chrome browser...");
     let chrome = ChromeRunner::new(true).await?;
     let page = chrome.new_page().await?;
+    info!("Chrome browser initialized successfully");
     
     // Navigate to a default page
+    info!("Navigating to Wikipedia page...");
     CdpStream::navigate_to(&page, "https://en.wikipedia.org/wiki/Rust_(programming_language)").await?;
     
     // Wait for page to load
     tokio::time::sleep(Duration::from_secs(3)).await;
     
     // Capture first screenshot to get actual dimensions
+    info!("Capturing initial screenshot...");
     let first_screenshot = CdpStream::capture_screenshot(&page).await?;
     width = first_screenshot.width() as usize;
     height = first_screenshot.height() as usize;
     
-    println!("Actual screenshot dimensions: {}x{}", width, height);
+    info!("Actual screenshot dimensions: {}x{}", width, height);
     
     // Configure rav1e encoder with actual dimensions
     let mut enc = EncoderConfig::default();
@@ -205,21 +226,29 @@ async fn run_browser_session(
         }
         
         // Capture screenshot from browser
+        println!("[Server] Capturing screenshot...");
         let screenshot = CdpStream::capture_screenshot(&page).await?;
+        println!("[Server] Screenshot captured: {}x{}", screenshot.width(), screenshot.height());
         
         // Convert RGBA to YUV using core-utils
+        println!("[Server] Converting to YUV...");
         let yuv_image = core_utils::rgba_to_yuv420(&screenshot, width as u32, height as u32)
             .map_err(|e| format!("YUV conversion error: {:?}", e))?;
+        println!("[Server] YUV conversion complete");
 
         let mut frame = ctx.new_frame();
         frame.planes[0].copy_from_raw_u8(&yuv_image.y, yuv_image.y_stride as usize, 1);
         frame.planes[1].copy_from_raw_u8(&yuv_image.u, yuv_image.u_stride as usize, 1);
         frame.planes[2].copy_from_raw_u8(&yuv_image.v, yuv_image.v_stride as usize, 1);
         
+        println!("[Server] Sending frame to encoder...");
         ctx.send_frame(frame).map_err(|e| format!("Send frame error: {:?}", e))?;
+        println!("[Server] Frame sent to encoder");
         
         // Receive encoded packets
+        let mut packet_count = 0;
         while let Ok(packet) = ctx.receive_packet() {
+            println!("[Server] Sending packet {} with {} bytes", packet_count, packet.data.len());
             let update = ServerUpdate {
                 update: Some(proto_def::graphical_proxy::server_update::Update::Frame(VideoFrame {
                     av1_data: packet.data,
@@ -229,8 +258,10 @@ async fn run_browser_session(
                 })),
             };
             if tx.send(Ok(update)).await.is_err() {
+                println!("[Server] Client disconnected");
                 return Ok(()); // Client disconnected
             }
+            packet_count += 1;
         }
 
         frame_count += 1;
@@ -240,18 +271,20 @@ async fn run_browser_session(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    init_logging();
+    
     let cli = Cli::parse();
     
     match cli.command {
         Some(Commands::TestScreencast { url, output }) => {
-            println!("Testing Chrome extraction for URL: {}", url);
+            info!("Testing Chrome extraction for URL: {}", url);
             test_chrome_extraction(&url, output.as_deref()).await?;
         }
         Some(Commands::Serve) | None => {
             let addr = "[::1]:50051".parse()?;
             let browser_service = RemoteBrowserImpl {};
 
-            println!("Starting gRPC server at {}", addr);
+            info!("Starting gRPC server at {}", addr);
 
             Server::builder()
                 .add_service(RemoteBrowserServer::new(browser_service))
