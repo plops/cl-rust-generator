@@ -10,10 +10,10 @@ LOG_FILE="benchmark_fast.log"
 # Fast settings: high speed preset, higher quantizer
 ./start_server_release.sh \
     --log-level debug \
-    --quantizer 200 \
-    --min-quantizer 150 \
+    --quantizer 230 \
+    --min-quantizer 190 \
     --speed-preset 10 \
-    --threads 4 \
+    --threads 12 \
     --tile-cols 2 \
     --tile-rows 1 > "$LOG_FILE" 2>&1 &
 
