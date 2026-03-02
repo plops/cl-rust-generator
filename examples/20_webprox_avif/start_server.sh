@@ -8,6 +8,6 @@ echo "=================================================="
 cd "$(dirname "$0")"
 
 # Run the cloud-render-srv server in development mode
-cargo run --bin cloud-render-srv
+cargo run --bin cloud-render-srv -- $*
 
 echo "Server stopped."
