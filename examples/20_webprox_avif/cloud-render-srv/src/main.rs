@@ -273,9 +273,11 @@ async fn run_browser_session(
                     }
                     proto_def::graphical_proxy::client_event::Event::Scroll(scroll) => {
                         let old_viewport_y = current_viewport_y;
-                        current_viewport_y = (current_viewport_y + scroll.delta_y).max(0);
-                        info!("[Server] Scroll event: delta_y={}, old_viewport={}, new_viewport={}", 
-                            scroll.delta_y, old_viewport_y, current_viewport_y);
+                        
+                        // Always use absolute positioning
+                        current_viewport_y = scroll.absolute_y.max(0);
+                        info!("[Server] Scroll event: absolute_y={}, old_viewport={}, new_viewport={}", 
+                            scroll.absolute_y, old_viewport_y, current_viewport_y);
                         
                         // Execute instant scroll in browser and return actual clamped scroll position
                         let scroll_script = format!(

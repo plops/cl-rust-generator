@@ -2,7 +2,7 @@
 /// --- CLIENT -> SERVER ---
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ClientEvent {
-    #[prost(oneof = "client_event::Event", tags = "1, 2, 3, 4, 5, 6, 7")]
+    #[prost(oneof = "client_event::Event", tags = "1, 2, 3, 4, 5, 6, 7, 8")]
     pub event: ::core::option::Option<client_event::Event>,
 }
 /// Nested message and enum types in `ClientEvent`.
@@ -23,6 +23,8 @@ pub mod client_event {
         Config(super::StreamConfig),
         #[prost(message, tag = "7")]
         Search(super::SearchRequest),
+        #[prost(message, tag = "8")]
+        TestImage(super::RawImageData),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -47,7 +49,7 @@ pub struct KeyboardInput {
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct ScrollInput {
     #[prost(int32, tag = "1")]
-    pub delta_y: i32,
+    pub absolute_y: i32,
 }
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct ViewportResize {
@@ -62,16 +64,28 @@ pub struct StreamConfig {
     pub enable_video: bool,
     #[prost(bool, tag = "2")]
     pub enable_spatial_links: bool,
+    #[prost(bool, tag = "3")]
+    pub force_keyframes: bool,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SearchRequest {
     #[prost(string, tag = "1")]
     pub query: ::prost::alloc::string::String,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RawImageData {
+    #[prost(uint32, tag = "1")]
+    pub width: u32,
+    #[prost(uint32, tag = "2")]
+    pub height: u32,
+    /// RGB8 format (3 bytes per pixel)
+    #[prost(bytes = "vec", tag = "3")]
+    pub rgb_data: ::prost::alloc::vec::Vec<u8>,
+}
 /// --- SERVER -> CLIENT ---
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ServerUpdate {
-    #[prost(oneof = "server_update::Update", tags = "1, 2, 3, 4")]
+    #[prost(oneof = "server_update::Update", tags = "1, 2, 3, 4, 5")]
     pub update: ::core::option::Option<server_update::Update>,
 }
 /// Nested message and enum types in `ServerUpdate`.
@@ -86,6 +100,8 @@ pub mod server_update {
         SearchResults(super::SearchResults),
         #[prost(message, tag = "4")]
         Status(super::SystemStatus),
+        #[prost(message, tag = "5")]
+        TestFrame(super::TestFrameResult),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -150,6 +166,13 @@ pub struct SearchMatch {
 pub struct SystemStatus {
     #[prost(string, tag = "1")]
     pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TestFrameResult {
+    #[prost(bytes = "vec", tag = "1")]
+    pub av1_data: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bool, tag = "2")]
+    pub is_keyframe: bool,
 }
 /// Generated client implementations.
 pub mod remote_browser_client {

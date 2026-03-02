@@ -22,7 +22,9 @@ message ClientEvent {
 message NavigateRequest { string url = 1; }
 message MouseInput { int32 x = 1; int32 y = 2; uint32 button = 3; }
 message KeyboardInput { string key = 1; }
-message ScrollInput { int32 delta_y = 1; }
+message ScrollInput { 
+  int32 absolute_y = 1;
+}
 message ViewportResize { uint32 width = 1; uint32 height = 2; }
 message StreamConfig {
   bool enable_video = 1;

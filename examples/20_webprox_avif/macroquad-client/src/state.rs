@@ -28,6 +28,7 @@ pub struct ClientState {
     pub dirty: bool,
     pub packet_count: u64,
     pub last_packet_size: usize,
+    pub first_frame_received: bool,
     
     // AV1 decoder
     pub decoder: Option<crate::video::decoder::Av1Decoder>,

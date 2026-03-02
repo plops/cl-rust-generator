@@ -10,14 +10,6 @@ pub fn draw_ui_and_frame(state: &Arc<Mutex<ClientState>>, texture: Option<&Textu
             Err(poisoned) => poisoned.into_inner(),
         };
         
-        // Handle local scrolling (mouse wheel)
-        let (_, mouse_wheel_y) = mouse_wheel();
-        if mouse_wheel_y != 0.0 {
-            lock.local_scroll_y -= mouse_wheel_y as i32 * 30; // 30px per tick
-            lock.local_scroll_y = lock.local_scroll_y.clamp(0, lock.doc_height as i32);
-            debug!("[Client] Scroll to: {}", lock.local_scroll_y);
-        }
-        
         // Mark dirty flag check
         let was_dirty = lock.dirty;
         if was_dirty {
@@ -106,8 +98,8 @@ pub fn draw_ui_and_frame(state: &Arc<Mutex<ClientState>>, texture: Option<&Textu
         draw_text(&format!("Viewport: Server={} Local={}", server_y, local_y), 20.0, 85.0, 16.0, YELLOW);
         draw_text(&format!("Document: {}x{} | Links: {}", doc_width, doc_height, links.len()), 20.0, 110.0, 16.0, ORANGE);
         
-        // Add keyboard controls help
-        draw_text("Controls: Mouse Wheel=Local Scroll | W/PageUp=Server Up | S/PageDown=Server Down", 20.0, 135.0, 14.0, GREEN);
+        // Add controls help
+        draw_text("Controls: Mouse Wheel=Request Viewport", 20.0, 135.0, 14.0, GREEN);
         
         // Draw scrollbar
         if doc_height > 0 {
@@ -123,21 +115,43 @@ pub fn draw_ui_and_frame(state: &Arc<Mutex<ClientState>>, texture: Option<&Textu
 }
 
 pub fn handle_input_and_send_events(
+    state: &Arc<Mutex<ClientState>>,
     event_tx: &tokio::sync::mpsc::UnboundedSender<proto_def::graphical_proxy::ClientEvent>, 
     last_mouse_wheel_y: &mut f32,
-    last_w_key_state: &mut bool,
-    last_s_key_state: &mut bool,
-    last_pageup_key_state: &mut bool,
-    last_pagedown_key_state: &mut bool
 ) {
     let (_, mouse_wheel_y) = mouse_wheel();
-    if mouse_wheel_y != 0.0 && mouse_wheel_y != *last_mouse_wheel_y {
-        *last_mouse_wheel_y = mouse_wheel_y;
-        debug!("[Client] Mouse Wheel: Local scroll ({}px)", -(mouse_wheel_y as i32 * 30));
+    debug!("[Client] Mouse wheel raw: wheel_y={}, last_wheel_y={}", mouse_wheel_y, *last_mouse_wheel_y);
+    
+    // Also check keyboard keys as fallback for testing
+    let up_key = is_key_pressed(KeyCode::Up);
+    let down_key = is_key_pressed(KeyCode::Down);
+    
+    // Use mouse wheel or keyboard as scroll input
+    let scroll_input = if mouse_wheel_y != 0.0 { mouse_wheel_y } else if up_key { -1.0 } else if down_key { 1.0 } else { 0.0 };
+    
+    // Handle scroll input
+    if scroll_input != 0.0 {
+        debug!("[Client] Scroll triggered: input={}, source={}", scroll_input, 
+                if mouse_wheel_y != 0.0 { "mouse" } else { "keyboard" });
+        *last_mouse_wheel_y = scroll_input;
+        
+        // Handle local scroll first for immediate feedback
+        let current_local_scroll_y = {
+            let mut lock = match state.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            lock.local_scroll_y -= scroll_input as i32 * 30; // 30px per tick
+            lock.local_scroll_y = lock.local_scroll_y.clamp(0, lock.doc_height as i32);
+            debug!("[Client] Scroll to: {}", lock.local_scroll_y);
+            lock.local_scroll_y
+        };
+        
+        debug!("[Client] Mouse Wheel: Requesting server viewport at absolute position {}", current_local_scroll_y);
         let scroll_event = proto_def::graphical_proxy::ClientEvent {
             event: Some(proto_def::graphical_proxy::client_event::Event::Scroll(
                 proto_def::graphical_proxy::ScrollInput {
-                    delta_y: -(mouse_wheel_y as i32 * 30),
+                    absolute_y: current_local_scroll_y,    // Send absolute position
                 }
             )),
         };
@@ -146,55 +160,7 @@ pub fn handle_input_and_send_events(
         if let Err(e) = event_tx.send(scroll_event) {
             eprintln!("[Client] Failed to send scroll event: {:?}", e);
         } else {
-            trace!("[Client] ✓ Local scroll event sent");
+            trace!("[Client] ✓ Absolute scroll event sent to position {}", current_local_scroll_y);
         }
     }
-    
-    // Handle keyboard input for independent server viewport control
-    let current_w_key_state = is_key_pressed(KeyCode::W);
-    let current_s_key_state = is_key_pressed(KeyCode::S);
-    let current_pageup_key_state = is_key_pressed(KeyCode::PageUp);
-    let current_pagedown_key_state = is_key_pressed(KeyCode::PageDown);
-    
-    // W or PageUp - just pressed (was false, now true)
-    if (!*last_w_key_state && current_w_key_state) || (!*last_pageup_key_state && current_pageup_key_state) {
-        debug!("[Client] Keyboard: Server scroll UP (-50px)");
-        let server_scroll_event = proto_def::graphical_proxy::ClientEvent {
-            event: Some(proto_def::graphical_proxy::client_event::Event::Scroll(
-                proto_def::graphical_proxy::ScrollInput {
-                    delta_y: -50, // Scroll server up by 50px
-                }
-            )),
-        };
-        
-        if let Err(e) = event_tx.send(server_scroll_event) {
-            eprintln!("[Client] Failed to send server scroll event: {:?}", e);
-        } else {
-            trace!("[Client] ✓ Server scroll UP event sent");
-        }
-    }
-    
-    // S or PageDown - just pressed (was false, now true)
-    if (!*last_s_key_state && current_s_key_state) || (!*last_pagedown_key_state && current_pagedown_key_state) {
-        debug!("[Client] Keyboard: Server scroll DOWN (+50px)");
-        let server_scroll_event = proto_def::graphical_proxy::ClientEvent {
-            event: Some(proto_def::graphical_proxy::client_event::Event::Scroll(
-                proto_def::graphical_proxy::ScrollInput {
-                    delta_y: 50, // Scroll server down by 50px
-                }
-            )),
-        };
-        
-        if let Err(e) = event_tx.send(server_scroll_event) {
-            eprintln!("[Client] Failed to send server scroll event: {:?}", e);
-        } else {
-            trace!("[Client] ✓ Server scroll DOWN event sent");
-        }
-    }
-    
-    // Update key states for next frame
-    *last_w_key_state = current_w_key_state;
-    *last_s_key_state = current_s_key_state;
-    *last_pageup_key_state = current_pageup_key_state;
-    *last_pagedown_key_state = current_pagedown_key_state;
 }

@@ -105,6 +105,13 @@ pub async fn start_grpc_client(
                                     let (width, height) = image_buffer.dimensions();
                                     let rgba_data = image_buffer.into_raw();
                                     
+                                    // Check if this is the first successful AV1 frame
+                                    debug!("First frame check: first_frame_received={}", lock.first_frame_received);
+                                    if !lock.first_frame_received {
+                                        info!("🎉 FIRST FRAME RECEIVED! Client is now ready for scrolling testing");
+                                        lock.first_frame_received = true;
+                                    }
+                                    
                                     info!("Successfully decoded AV1 frame: {}x{}, {} bytes", 
                                             width, height, frame.av1_data.len());
                                     
