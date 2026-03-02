@@ -284,7 +284,8 @@
                 // Update timestamp
                 const date = new Date();
                 const timeStr = date.toTimeString().split(' ')[0] + '.' + date.getMilliseconds().toString().padStart(3, '0');
-                this.timestamp.textContent = `Time: ${timeStr}`;
+                const unixTimestamp = Date.now();
+                this.timestamp.textContent = `Time: ${timeStr} __TIMESTAMP_START__${unixTimestamp}__TIMESTAMP_END__`;
                 
                 // Update scroll position
                 this.scrollPos.textContent = `Scroll: ${window.scrollY}px`;
