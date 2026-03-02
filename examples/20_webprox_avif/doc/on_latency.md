@@ -133,6 +133,42 @@ Run these commands to gather detailed timing data:
 
 This will provide the granular timing data needed to pinpoint exact bottlenecks in the rendering pipeline.
 
+## Rav1e Encoder Parameter Guide
+
+The AV1 encoder supports several key parameters that significantly impact performance and quality:
+
+### **Quantizer (0-255)**
+- **Range**: 0 (highest quality, largest files) to 255 (lowest quality, smallest files)
+- **Impact**: Primary quality/size trade-off control
+- **Recommended**: 150-200 for real-time, 50-100 for high quality
+- **Fast config uses**: 200 (prioritizes speed and size)
+
+### **Speed Preset (0-10)**
+- **Range**: 0 (slowest, highest quality) to 10 (fastest, lowest quality)
+- **Impact**: Controls encoding algorithms and complexity
+- **Recommended**: 8-10 for real-time, 4-6 for quality encoding
+- **Fast config uses**: 10 (maximum speed)
+
+### **Threads (0-N)**
+- **Range**: 0 (auto-detect CPU count) to N threads
+- **Impact**: Parallel processing capability
+- **Recommended**: 0 for auto, or match CPU cores (2-8 typical)
+- **Fast config uses**: 4 (good parallelization without overhead)
+
+### **Tile Columns/Rows (1-64)**
+- **Range**: Power of 2 values only (1, 2, 4, 8, 16, 32, 64)
+- **Impact**: Frame partitioning for parallel encoding
+- **Recommended**: 1-2 for most content, higher for 4K+
+- **Fast config uses**: 2x1 tiles for parallel processing
+
+### **Performance Impact Summary**
+- **Speed preset 10**: 5-13x faster than presets 6-8
+- **Quantizer 200**: 20-30% smaller files with minimal quality loss
+- **Multi-threading**: Near-linear scaling up to CPU cores
+- **Tiling**: Enables parallel frame region processing
+
+The fast configuration (speed 10, quantizer 200, 4 threads, 2x1 tiles) represents the optimal balance for real-time 30 FPS streaming while maintaining good compression efficiency.
+
 ## Benchmark Results
 
 ### Encoder Performance Comparison

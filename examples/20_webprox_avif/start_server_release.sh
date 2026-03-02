@@ -48,7 +48,11 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--log-level trace|debug|info|warn|error] [--quantizer N] [--min-quantizer N] [--speed-preset N] [--threads N] [--tile-cols N] [--tile-rows N]"
+            echo "Usage: $0 [--log-level trace|debug|info|warn|error] [--quantizer 0-255] [--min-quantizer 0-255] [--speed-preset 0-10] [--threads 0-N] [--tile-cols 1-64] [--tile-rows 1-64]"
+            echo "  quantizer: 0=highest quality, 255=lowest quality/smallest size"
+            echo "  speed-preset: 0=slowest/highest quality, 10=fastest/lowest quality"
+            echo "  threads: 0=auto-detect CPUs, or specify number"
+            echo "  tile-cols/rows: must be power of 2 (1,2,4,8,16,32,64)"
             exit 1
             ;;
     esac
