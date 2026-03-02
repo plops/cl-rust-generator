@@ -223,6 +223,7 @@ async fn run_browser_session(
     let mut current_viewport_y = 0i32;
     let mut force_keyframes = true; // Default to simplified mode
     let mut viewport_y_queue = std::collections::VecDeque::new(); // Tracks exact Y for buffered frames
+    let mut last_scroll_time = std::time::Instant::now(); // Track when last scroll was processed
     
     loop {
         info!("[Server] Starting frame {} iteration", frame_count);
@@ -272,11 +273,12 @@ async fn run_browser_session(
                         }
                     }
                     proto_def::graphical_proxy::client_event::Event::Scroll(scroll) => {
+                        let scroll_start_time = std::time::Instant::now();
                         let old_viewport_y = current_viewport_y;
                         
                         // Always use absolute positioning
                         current_viewport_y = scroll.absolute_y.max(0);
-                        info!("[Server] Scroll event: absolute_y={}, old_viewport={}, new_viewport={}", 
+                        info!("[Server] Scroll event received: absolute_y={}, old_viewport={}, new_viewport={}", 
                             scroll.absolute_y, old_viewport_y, current_viewport_y);
                         
                         // Execute instant scroll in browser and return actual clamped scroll position
@@ -285,13 +287,28 @@ async fn run_browser_session(
                             current_viewport_y
                         );
                         debug!("[Server] Executing scroll script: {}", scroll_script);
+                        
+                        let browser_scroll_start = std::time::Instant::now();
                         if let Ok(res) = page.evaluate(scroll_script.as_str()).await {
                             if let Ok(actual_y) = res.into_value::<f64>() {
                                 current_viewport_y = actual_y as i32;
                             }
                         }
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        let browser_scroll_time = browser_scroll_start.elapsed();
+                        info!("[Server] Browser scroll execution took: {:?}", browser_scroll_time);
+                        
+                        // Question the 100ms delay - TESTING: Set to 0ms to measure impact
+                        let delay_start = std::time::Instant::now();
+                        tokio::time::sleep(Duration::from_millis(0)).await;
+                        let delay_time = delay_start.elapsed();
+                        info!("[Server] Fixed 0ms delay completed: {:?}", delay_time);
+                        
+                        let total_scroll_time = scroll_start_time.elapsed();
+                        info!("[Server] Total scroll processing time: {:?}", total_scroll_time);
                         info!("[Server] Browser scroll completed, viewport now at: {}", current_viewport_y);
+                        
+                        // Update last scroll time for correlation with frame captures
+                        last_scroll_time = std::time::Instant::now();
                     }
                     _ => {}
                 }
@@ -317,7 +334,13 @@ async fn run_browser_session(
         debug!("[Server] Capturing screenshot...");
         let screenshot = CdpStream::capture_screenshot(&page).await?;
         let screenshot_time = screenshot_start.elapsed();
-        debug!("[Server] Screenshot captured: {}x{} in {:?}", screenshot.width(), screenshot.height(), screenshot_time);
+        info!("[Server] Screenshot captured: {}x{} in {:?}", screenshot.width(), screenshot.height(), screenshot_time);
+        
+        // Track if this frame was triggered by a recent scroll event
+        let time_since_last_scroll = screenshot_start.duration_since(last_scroll_time);
+        if time_since_last_scroll < Duration::from_millis(500) {
+            info!("[Server] This screenshot appears to be scroll-related (captured {:?} after scroll processing)", time_since_last_scroll);
+        }
         
         // Convert RGBA to YUV using core-utils
         let yuv_start = std::time::Instant::now();

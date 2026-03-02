@@ -89,8 +89,45 @@
             background: rgba(255, 255, 255, 0.9);
             padding: 10px;
             border: 1px solid #000;
-            font-size: 12px;
+            font-size: 14px;
             z-index: 1000;
+            min-width: 250px;
+        }
+        
+        .counter-display {
+            margin-top: 10px;
+            padding: 8px;
+            background: rgba(0, 255, 0, 0.1);
+            border: 1px solid #0a0;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        
+        .counter-display.slow {
+            background: rgba(255, 255, 0, 0.2);
+            border-color: #aa0;
+        }
+        
+        .counter-display.stalled {
+            background: rgba(255, 0, 0, 0.2);
+            border-color: #a00;
+        }
+        
+        .counter-value {
+            font-weight: bold;
+            font-size: 18px;
+            color: #006600;
+        }
+        
+        .timestamp {
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .update-rate {
+            font-size: 13px;
+            margin-top: 4px;
         }
     </style>
 </head>
@@ -100,6 +137,14 @@
         Scroll to test alignment<br>
         Blue boxes should match highlights<br>
         Grid: 50x50px
+        
+        <div class="counter-display" id="counterDisplay">
+            <div>Frame: <span class="counter-value" id="frameCounter">0</span></div>
+            <div class="timestamp" id="timestamp">Time: --:--:--.---</div>
+            <div class="timestamp" id="scrollPos">Scroll: 0px</div>
+            <div class="timestamp" id="lastUpdate">Last: --ms ago</div>
+            <div class="update-rate" id="updateRate">Rate: -- fps</div>
+        </div>
     </div>
     
     <div class="grid-container">
@@ -141,8 +186,141 @@
     </div>
     
     <script>
-        // Log coordinates for debugging
+        // Frame counter and update tracking system
+        class UpdateTracker {
+            constructor() {
+                this.frameCount = 0;
+                this.lastUpdateTime = performance.now();
+                this.updateTimes = [];
+                this.lastScrollY = 0;
+                this.scrollVelocity = 0;
+                this.maxUpdateTimes = 30; // Keep last 30 updates for rate calculation
+                
+                // DOM elements
+                this.frameCounter = document.getElementById('frameCounter');
+                this.timestamp = document.getElementById('timestamp');
+                this.scrollPos = document.getElementById('scrollPos');
+                this.lastUpdate = document.getElementById('lastUpdate');
+                this.updateRate = document.getElementById('updateRate');
+                this.counterDisplay = document.getElementById('counterDisplay');
+                
+                // Start tracking
+                this.startTracking();
+            }
+            
+            startTracking() {
+                // RequestAnimationFrame loop for continuous tracking
+                const trackFrame = () => {
+                    this.incrementCounter();
+                    requestAnimationFrame(trackFrame);
+                };
+                requestAnimationFrame(trackFrame);
+                
+                // Enhanced scroll tracking
+                this.setupScrollTracking();
+                
+                // MutationObserver for DOM changes
+                this.setupMutationObserver();
+                
+                // Update display every 100ms
+                setInterval(() => this.updateDisplay(), 100);
+            }
+            
+            incrementCounter() {
+                const now = performance.now();
+                this.frameCount++;
+                this.lastUpdateTime = now;
+                
+                // Track update times for rate calculation
+                this.updateTimes.push(now);
+                if (this.updateTimes.length > this.maxUpdateTimes) {
+                    this.updateTimes.shift();
+                }
+                
+                // Update frame counter immediately
+                this.frameCounter.textContent = this.frameCount;
+            }
+            
+            setupScrollTracking() {
+                let lastScrollTime = performance.now();
+                
+                window.addEventListener('scroll', () => {
+                    const now = performance.now();
+                    const currentScrollY = window.scrollY;
+                    const timeDelta = now - lastScrollTime;
+                    
+                    if (timeDelta > 0) {
+                        this.scrollVelocity = Math.abs(currentScrollY - this.lastScrollY) / timeDelta * 1000; // px/sec
+                    }
+                    
+                    this.lastScrollY = currentScrollY;
+                    lastScrollTime = now;
+                    
+                    console.log(`Scroll: ${currentScrollY}px, velocity: ${this.scrollVelocity.toFixed(1)}px/s`);
+                });
+            }
+            
+            setupMutationObserver() {
+                const observer = new MutationObserver((mutations) => {
+                    mutations.forEach((mutation) => {
+                        if (mutation.type === 'childList' || mutation.type === 'attributes') {
+                            console.log('DOM mutation detected - potential update');
+                        }
+                    });
+                });
+                
+                observer.observe(document.body, {
+                    childList: true,
+                    attributes: true,
+                    subtree: true,
+                    attributeFilter: ['style', 'class']
+                });
+            }
+            
+            updateDisplay() {
+                const now = performance.now();
+                const timeSinceLastUpdate = now - this.lastUpdateTime;
+                
+                // Update timestamp
+                const date = new Date();
+                const timeStr = date.toTimeString().split(' ')[0] + '.' + date.getMilliseconds().toString().padStart(3, '0');
+                this.timestamp.textContent = `Time: ${timeStr}`;
+                
+                // Update scroll position
+                this.scrollPos.textContent = `Scroll: ${window.scrollY}px`;
+                
+                // Update time since last update
+                this.lastUpdate.textContent = `Last: ${timeSinceLastUpdate.toFixed(0)}ms ago`;
+                
+                // Calculate and update rate
+                if (this.updateTimes.length >= 2) {
+                    const timeSpan = this.updateTimes[this.updateTimes.length - 1] - this.updateTimes[0];
+                    const updateCount = this.updateTimes.length - 1;
+                    const fps = (updateCount / timeSpan) * 1000;
+                    this.updateRate.textContent = `Rate: ${fps.toFixed(1)} fps`;
+                }
+                
+                // Update status color based on update frequency
+                this.updateStatusColor(timeSinceLastUpdate);
+            }
+            
+            updateStatusColor(timeSinceLastUpdate) {
+                this.counterDisplay.classList.remove('slow', 'stalled');
+                
+                if (timeSinceLastUpdate > 200) {
+                    this.counterDisplay.classList.add('stalled');
+                } else if (timeSinceLastUpdate > 100) {
+                    this.counterDisplay.classList.add('slow');
+                }
+            }
+        }
+        
+        // Initialize tracking when page loads
         document.addEventListener('DOMContentLoaded', function() {
+            // Initialize the update tracker
+            const tracker = new UpdateTracker();
+            
+            // Log coordinates for debugging (existing functionality)
             const boxes = document.querySelectorAll('.calibration-box');
             console.log('Calibration boxes coordinates:');
             boxes.forEach((box, index) => {
@@ -150,11 +328,8 @@
                 const scrollY = window.scrollY;
                 console.log(`Box ${index + 1}: x=${Math.round(rect.left + scrollY)}, y=${Math.round(rect.top + scrollY)}, w=${Math.round(rect.width)}, h=${Math.round(rect.height)}`);
             });
-        });
-        
-        // Track scroll position
-        window.addEventListener('scroll', function() {
-            console.log('Scroll position:', window.scrollY);
+            
+            console.log('Update tracking initialized - watching for frame updates and scroll latency');
         });
     </script>
 </body>
