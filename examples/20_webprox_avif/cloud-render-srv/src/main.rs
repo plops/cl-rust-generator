@@ -32,24 +32,24 @@ struct Cli {
     #[arg(long, default_value = "info")]
     log_level: String,
     
-    /// Rav1e quantizer (0-255, higher=lower quality/smaller size, default: 150)
-    #[arg(long, default_value = "150")]
+    /// Rav1e quantizer (0-255, higher=lower quality/smaller size, default: 230)
+    #[arg(long, default_value = "230")]
     quantizer: u8,
     
-    /// Rav1e minimum quantizer (0-255, default: 80)
-    #[arg(long, default_value = "80")]
+    /// Rav1e minimum quantizer (0-255, default: 190)
+    #[arg(long, default_value = "190")]
     min_quantizer: u8,
     
-    /// Rav1e speed preset (0-10, higher=faster/lower quality, default: 8)
-    #[arg(long, default_value = "8")]
+    /// Rav1e speed preset (0-10, higher=faster/lower quality, default: 10)
+    #[arg(long, default_value = "10")]
     speed_preset: usize,
     
-    /// Number of encoder threads (0=auto CPUs, default: 2)
-    #[arg(long, default_value = "2")]
+    /// Number of encoder threads (0=auto CPUs, default: 12)
+    #[arg(long, default_value = "12")]
     threads: usize,
     
-    /// Tile columns (power of 2, max 64, default: 1)
-    #[arg(long, default_value = "1")]
+    /// Tile columns (power of 2, max 64, default: 2)
+    #[arg(long, default_value = "2")]
     tile_cols: usize,
     
     /// Tile rows (power of 2, max 64, default: 1)
