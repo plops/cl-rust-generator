@@ -14,7 +14,8 @@ use crate::video::decoder::Av1Decoder;
 
 pub async fn start_grpc_client(
     state: Arc<Mutex<ClientState>>,
-    mut rx_events: tokio::sync::mpsc::UnboundedReceiver<ClientEvent>
+    mut rx_events: tokio::sync::mpsc::UnboundedReceiver<ClientEvent>,
+    cli: &crate::ClientCli
 ) {
     info!("Connecting to server...");
     let mut client = match RemoteBrowserClient::connect("http://[::1]:50051").await {
@@ -39,6 +40,8 @@ pub async fn start_grpc_client(
                 enable_video: true,
                 enable_spatial_links: true,
                 force_keyframes: true, // Simplified mode for single-frame AVIF decoder
+                full_page: cli.full_page,
+                raw_rgb: cli.raw_rgb,
             }
         ))
     };
@@ -68,7 +71,22 @@ pub async fn start_grpc_client(
                 debug!("Received server update");
                 match update.update {
                     Some(server_update::Update::Frame(frame)) => {
-                        info!("Received video frame: {} bytes, keyframe: {}", frame.av1_data.len(), frame.is_keyframe);
+                        info!("Received video frame: {} bytes AV1, {} bytes RGB, keyframe: {}, viewport: ({},{})", 
+                            frame.av1_data.len(), frame.raw_rgb_data.len(), frame.is_keyframe, frame.viewport_x, frame.viewport_y);
+                        
+                        // Handle timestamp for latency measurement
+                        if !frame.timestamp_text.is_empty() {
+                            if let Ok(timestamp_ms) = frame.timestamp_text.parse::<u64>() {
+                                let current_time_ms = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_millis() as u64;
+                                let latency_ms = current_time_ms.saturating_sub(timestamp_ms);
+                                info!("🕒 LATENCY: {}ms (timestamp: {}, current: {})", 
+                                    latency_ms, timestamp_ms, current_time_ms);
+                            }
+                        }
+                        
                         let mut lock = match state.lock() {
                             Ok(guard) => guard,
                             Err(poisoned) => poisoned.into_inner(),
@@ -78,7 +96,38 @@ pub async fn start_grpc_client(
                         lock.last_packet_size = frame.av1_data.len();
                         lock.server_viewport_y = frame.viewport_y;
                         
-                        // Decode AV1 frame to actual image using aom-decode
+                        // Handle raw RGB mode or AV1 decoding
+                        if !frame.raw_rgb_data.is_empty() {
+                            info!("Processing raw RGB frame: {}x{}, {} bytes", 
+                                frame.frame_width, frame.frame_height, frame.raw_rgb_data.len());
+                            
+                            // Convert RGB to RGBA by adding alpha channel
+                            let mut rgba_data = Vec::with_capacity(frame.raw_rgb_data.len() / 3 * 4);
+                            for chunk in frame.raw_rgb_data.chunks_exact(3) {
+                                rgba_data.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]); // R, G, B, A
+                            }
+                            
+                            lock.latest_frame = Some(ClientImage {
+                                width: frame.frame_width as u16,
+                                height: frame.frame_height as u16,
+                                bytes: rgba_data,
+                            });
+                            lock.dirty = true;
+                            
+                            // Update frame dimensions
+                            lock.frame_width = frame.frame_width as u16;
+                            lock.frame_height = frame.frame_height as u16;
+                            
+                            // Check if this is the first successful frame
+                            if !lock.first_frame_received {
+                                info!("🎉 FIRST FRAME RECEIVED! Client is now ready for scrolling testing");
+                                lock.first_frame_received = true;
+                            }
+                            
+                            continue;
+                        }
+                        
+                        // Original AV1 decoding path
                         let _w = lock.frame_width;
                         let _h = lock.frame_height;
                         

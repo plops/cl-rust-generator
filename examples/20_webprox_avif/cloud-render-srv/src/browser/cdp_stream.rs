@@ -6,10 +6,17 @@ use anyhow::Result;
 pub struct CdpStream;
 
 impl CdpStream {
-    pub async fn capture_screenshot(page: &Page) -> Result<RgbaImage> {
+    pub async fn capture_screenshot(page: &Page, full_page: bool) -> Result<RgbaImage> {
+        // Build screenshot parameters with optional full page
+        let params = if full_page {
+            ScreenshotParams::builder().full_page(true).build()
+        } else {
+            ScreenshotParams::default()
+        };
+        
         // Capture screenshot as PNG bytes
         let png_bytes: Vec<u8> = page
-            .screenshot(ScreenshotParams::default())
+            .screenshot(params)
             .await?;
         
         // Load PNG as image

@@ -1,7 +1,7 @@
 use clap::{Args, Parser};
 use std::path::PathBuf;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(author, version, about = "AV1 Remote Browser Client")]
 pub struct ClientCli {
     /// Enable integration test mode
@@ -31,6 +31,14 @@ pub struct ClientCli {
     /// Enable verbose coordinate logging
     #[arg(long)]
     pub verbose_coords: bool,
+    
+    /// Enable full-page screenshots mode
+    #[arg(long)]
+    pub full_page: bool,
+    
+    /// Use raw RGB transmission instead of AV1 decoding
+    #[arg(long)]
+    pub raw_rgb: bool,
 }
 
 #[derive(Args, Debug)]

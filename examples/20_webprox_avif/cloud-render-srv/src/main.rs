@@ -56,6 +56,18 @@ struct Cli {
     #[arg(long, default_value = "1")]
     tile_rows: usize,
     
+    /// Enable full-page screenshots (captures entire document instead of viewport)
+    #[arg(long)]
+    full_page: bool,
+    
+    /// Use raw RGB transmission instead of AV1 encoding (bypasses encoder for lower latency)
+    #[arg(long)]
+    raw_rgb: bool,
+    
+    /// Stream loop delay in milliseconds (default: 2500 for 0.4 FPS)
+    #[arg(long, default_value = "2500")]
+    loop_delay: u64,
+    
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -165,7 +177,7 @@ async fn run_browser_session(
     
     // Capture first screenshot to get actual dimensions
     info!("Capturing initial screenshot...");
-    let first_screenshot = CdpStream::capture_screenshot(&page).await?;
+    let first_screenshot = CdpStream::capture_screenshot(&page, cli.full_page).await?;
     width = first_screenshot.width() as usize;
     height = first_screenshot.height() as usize;
     
@@ -230,6 +242,8 @@ async fn run_browser_session(
     let mut frame_count = 0;
     let mut current_viewport_y = 0i32;
     let mut force_keyframes = true; // Default to simplified mode
+    let mut full_page_mode = cli.full_page; // Get from CLI
+    let mut raw_rgb_mode = cli.raw_rgb; // Get from CLI
     let mut viewport_y_queue = std::collections::VecDeque::new(); // Tracks exact Y for buffered frames
     let mut last_scroll_time = std::time::Instant::now(); // Track when last scroll was processed
     
@@ -250,7 +264,10 @@ async fn run_browser_session(
                 match client_event {
                     proto_def::graphical_proxy::client_event::Event::Config(config) => {
                         force_keyframes = config.force_keyframes;
-                        println!("Client updated stream config - force_keyframes: {}", force_keyframes);
+                        full_page_mode = config.full_page;
+                        raw_rgb_mode = config.raw_rgb;
+                        println!("Client updated stream config - force_keyframes: {}, full_page: {}, raw_rgb: {}", 
+                            force_keyframes, full_page_mode, raw_rgb_mode);
                     }
                     proto_def::graphical_proxy::client_event::Event::Navigate(navigate) => {
                         println!("Navigating to: {}", navigate.url);
@@ -337,10 +354,34 @@ async fn run_browser_session(
         
         info!("[Server] Proceeding with frame capture...");
         
+        // Extract timestamp before screenshot for latency measurement
+        let timestamp_text = if let Ok(result) = page.evaluate("document.getElementById('timestamp').textContent").await {
+            if let Ok(full_text) = result.into_value::<String>() {
+                // Extract Unix timestamp between delimiters
+                if let Some(start) = full_text.find("__TIMESTAMP_START__") {
+                    if let Some(end) = full_text.find("__TIMESTAMP_END__") {
+                        let timestamp_part = &full_text[start + 19..end]; // 19 = len("__TIMESTAMP_START__")
+                        info!("[Server] Extracted timestamp: {}", timestamp_part);
+                        Some(timestamp_part.to_string())
+                    } else {
+                        info!("[Server] Extracted timestamp: {}", full_text);
+                        Some(full_text)
+                    }
+                } else {
+                    info!("[Server] Extracted timestamp: {}", full_text);
+                    Some(full_text)
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
         // Capture screenshot from browser
         let screenshot_start = std::time::Instant::now();
         debug!("[Server] Capturing screenshot...");
-        let screenshot = CdpStream::capture_screenshot(&page).await?;
+        let screenshot = CdpStream::capture_screenshot(&page, full_page_mode).await?;
         let screenshot_time = screenshot_start.elapsed();
         info!("[Server] Screenshot captured: {}x{} in {:?}", screenshot.width(), screenshot.height(), screenshot_time);
         
@@ -350,7 +391,43 @@ async fn run_browser_session(
             info!("[Server] This screenshot appears to be scroll-related (captured {:?} after scroll processing)", time_since_last_scroll);
         }
         
-        // Convert RGBA to YUV using core-utils
+        // Handle raw RGB mode or AV1 encoding
+        if raw_rgb_mode {
+            info!("[Server] Using raw RGB transmission mode");
+            
+            // Convert RGBA to RGB (strip alpha channel)
+            let rgb_start = std::time::Instant::now();
+            let mut rgb_data = Vec::with_capacity(screenshot.width() as usize * screenshot.height() as usize * 3);
+            for pixel in screenshot.as_raw().chunks_exact(4) {
+                rgb_data.extend_from_slice(&[pixel[0], pixel[1], pixel[2]]); // R, G, B only
+            }
+            let rgb_time = rgb_start.elapsed();
+            info!("[Server] RGB conversion completed in {:?}", rgb_time);
+            
+            // Send raw RGB frame
+            let update = ServerUpdate {
+                update: Some(proto_def::graphical_proxy::server_update::Update::Frame(VideoFrame {
+                    av1_data: Vec::new(), // Empty when using raw RGB
+                    is_keyframe: true, // Always keyframe in raw mode
+                    viewport_x: if full_page_mode { 0 } else { 0 },
+                    viewport_y: if full_page_mode { 0 } else { current_viewport_y },
+                    raw_rgb_data: rgb_data,
+                    frame_width: screenshot.width(),
+                    frame_height: screenshot.height(),
+                    timestamp_text: timestamp_text.unwrap_or_default(),
+                })),
+            };
+            
+            if tx.send(Ok(update)).await.is_err() {
+                error!("[Server] Failed to send raw RGB frame to client");
+                return Ok(());
+            }
+            info!("[Server] Raw RGB frame sent successfully");
+        } else {
+            // Original AV1 encoding path
+            info!("[Server] Using AV1 encoding mode");
+            
+            // Convert RGBA to YUV using core-utils
         let yuv_start = std::time::Instant::now();
         debug!("[Server] Converting to YUV...");
         let yuv_image = core_utils::rgba_to_yuv420(&screenshot, width as u32, height as u32)
@@ -408,8 +485,12 @@ async fn run_browser_session(
                         update: Some(proto_def::graphical_proxy::server_update::Update::Frame(VideoFrame {
                             av1_data: packet.data,
                             is_keyframe: force_keyframes || packet.frame_type == FrameType::KEY,
-                            viewport_x: 0,
-                            viewport_y: packet_viewport_y,
+                            viewport_x: if full_page_mode { 0 } else { 0 },
+                            viewport_y: if full_page_mode { 0 } else { packet_viewport_y },
+                            raw_rgb_data: Vec::new(), // Empty in AV1 mode
+                            frame_width: width as u32,
+                            frame_height: height as u32,
+                            timestamp_text: timestamp_text.clone().unwrap_or_default(),
                         })),
                     };
                     trace!("[Server] Sending frame {} with viewport_y={}", packet_count, packet_viewport_y);
@@ -446,10 +527,11 @@ async fn run_browser_session(
         }
         
         info!("[Server] No more packets, frame {} complete. Sent {} packets", frame_count, packet_count);
+        } // End of AV1 encoding else block
 
         frame_count += 1;
-        info!("[Server] Sleeping for 2500ms (0.4 FPS) - matching actual encoding speed");
-        tokio::time::sleep(Duration::from_millis(2500)).await; // 0.4 FPS to match 2.5s encoding time
+        info!("[Server] Sleeping for {}ms (configured loop delay)", cli.loop_delay);
+        tokio::time::sleep(Duration::from_millis(cli.loop_delay)).await;
     }
 }
 
@@ -490,7 +572,7 @@ async fn test_chrome_extraction(url: &str, output_path: Option<&str>) -> Result<
     CdpStream::navigate_to(&page, url).await?;
     
     println!("Capturing screenshot...");
-    let screenshot = CdpStream::capture_screenshot(&page).await?;
+    let screenshot = CdpStream::capture_screenshot(&page, false).await?;
     
     // Save screenshot if output path provided
     if let Some(output) = output_path {

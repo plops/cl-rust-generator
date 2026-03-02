@@ -30,6 +30,8 @@ message StreamConfig {
   bool enable_video = 1;
   bool enable_spatial_links = 2;
   bool force_keyframes = 3;
+  bool full_page = 4;
+  bool raw_rgb = 5;
 }
 message SearchRequest { string query = 1; }
 
@@ -55,6 +57,10 @@ message VideoFrame {
   bool is_keyframe = 2;
   int32 viewport_x = 3;       // X-Position des aktuellen Bildausschnitts im Gesamtdokument
   int32 viewport_y = 4;       // Y-Position des aktuellen Bildausschnitts im Gesamtdokument
+  bytes raw_rgb_data = 5;      // Raw RGB data (when raw_rgb mode is enabled)
+  uint32 frame_width = 6;     // Frame width for raw RGB data
+  uint32 frame_height = 7;    // Frame height for raw RGB data
+  string timestamp_text = 8;  // Extracted timestamp text for latency measurement
 }
 
 message SpatialMetadata {

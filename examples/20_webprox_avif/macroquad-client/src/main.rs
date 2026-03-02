@@ -2,6 +2,7 @@ use macroquad::prelude::*;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use log::{info, warn, error, debug};
+use clap::Parser;
 
 // Import modules
 mod state;
@@ -13,15 +14,10 @@ mod video;
 #[cfg(feature = "integration-test")]
 mod integration_test;
 
-#[cfg(feature = "integration-test")]
-use integration_test::{ClientCli, parse_integration_test_args};
-#[cfg(not(feature = "integration-test"))]
-use clap::Parser;
-
-#[cfg(not(feature = "integration-test"))]
-#[derive(Parser, Debug)]
+// Shared CLI structure
+#[derive(Parser, Debug, Clone)]
 #[command(author, version, about = "AV1 Remote Browser Client")]
-struct ClientCli {
+pub struct ClientCli {
     /// Log level (trace, debug, info, warn, error)
     #[arg(long, default_value = "info")]
     pub log_level: String,
@@ -33,7 +29,43 @@ struct ClientCli {
     /// Enable verbose coordinate logging
     #[arg(long)]
     pub verbose_coords: bool,
+    
+    /// Enable full-page screenshots mode
+    #[arg(long)]
+    pub full_page: bool,
+    
+    /// Use raw RGB transmission instead of AV1 decoding
+    #[arg(long)]
+    pub raw_rgb: bool,
+    
+    /// Enable integration test mode
+    #[cfg(feature = "integration-test")]
+    #[arg(long)]
+    pub integration_test: bool,
+    
+    /// Path to test PNG image
+    #[cfg(feature = "integration-test")]
+    #[arg(long)]
+    pub test_image: Option<std::path::PathBuf>,
+    
+    /// Server address (default: [::1]:50051)
+    #[cfg(feature = "integration-test")]
+    #[arg(long, default_value = "[::1]:50051")]
+    pub server_addr: String,
+    
+    /// Pixel comparison tolerance (0.0 = exact match)
+    #[cfg(feature = "integration-test")]
+    #[arg(long, default_value = "0.0")]
+    pub tolerance: f32,
+    
+    /// Path to save comparison result JSON
+    #[cfg(feature = "integration-test")]
+    #[arg(long)]
+    pub output_result: Option<std::path::PathBuf>,
 }
+
+#[cfg(feature = "integration-test")]
+use integration_test::{parse_integration_test_args};
 
 use state::ClientState;
 use network::grpc_client;
@@ -88,13 +120,14 @@ async fn main() {
     let (tx_events, rx_events) = tokio::sync::mpsc::unbounded_channel();
     
     let state_clone = shared_state.clone();
+    let cli_clone = cli.clone();
     
     // Spawn network completely independent of macroquad's executor
     info!("Spawning network thread");
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            grpc_client::start_grpc_client(state_clone, rx_events).await;
+            grpc_client::start_grpc_client(state_clone, rx_events, &cli_clone).await;
         });
     });
 
