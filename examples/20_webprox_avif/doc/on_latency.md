@@ -41,4 +41,96 @@
 - **Impact**: No visual feedback for first ~400ms after Chrome loads
 - **Root Cause**: Encoder needs warm-up period before producing output
 
+## Enhanced Logging Implementation
+
+### Server-side Timing Improvements
+
+**Added detailed timing measurements for each pipeline stage**:
+- Screenshot capture timing
+- YUV conversion timing  
+- Frame send-to-encoder timing
+- Encoding latency (receive packet timing)
+- Network transfer timing
+
+**Log Level Organization**:
+- `info`: Critical events (connection, frame sending, encoding latency)
+- `debug`: Detailed pipeline operations (screenshot, YUV conversion, encoder operations)
+- `trace`: Fine-grained operations (individual frame sends, viewport updates)
+
+### Client-side Logging Improvements
+
+**Verbose Link Logging**: Moved to `trace` level to reduce noise
+- Default: No link coordinate spam
+- Use `--log-level trace --verbose-coords` for detailed debugging
+
+**Log Level Organization**:
+- `info`: Important events (connection, link clicks, navigation)
+- `debug`: User interactions (scrolling, keyboard input)
+- `trace`: Verbose details (link coordinates, event confirmations)
+
+### Command-line Interface Updates
+
+**Server Script** (`start_server_release.sh`):
+```bash
+./start_server_release.sh [--log-level trace|debug|info|warn|error]
+```
+
+**Client Script** (`start_client_release.sh`):
+```bash
+./start_client_release.sh [--log-level trace|debug|info|warn|error] [--y-offset N] [--verbose-coords]
+```
+
+**Usage Examples**:
+```bash
+# Production - minimal logging
+./start_server_release.sh --log-level info
+./start_client_release.sh --log-level info
+
+# Debug - detailed pipeline timing
+./start_server_release.sh --log-level debug
+./start_client_release.sh --log-level debug
+
+# Deep analysis - everything including link coordinates
+./start_server_release.sh --log-level trace
+./start_client_release.sh --log-level trace --verbose-coords
+```
+
+## Next Steps for Investigation
+
+### 1. **AV1 Encoder Optimization**
+- Test different Rav1e speed/quality presets
+- Consider lower resolution or bitrate for real-time performance
+- Benchmark encoder configuration impact on latency
+
+### 2. **Chrome Startup Optimization**  
+- Pre-warm Chrome instances
+- Optimize initial page load
+- Consider headless Chrome optimizations
+
+### 3. **Pipeline Buffering Analysis**
+- Investigate encoder warm-up patterns
+- Consider pre-buffering strategies
+- Analyze if early frames can be skipped or accelerated
+
+### 4. **Network and Client Optimizations**
+- Client decoding is already efficient (17-27ms)
+- Network transfer is negligible (0-1ms)
+- Focus should remain on encoder optimization
+
+## Testing with Enhanced Logging
+
+Run these commands to gather detailed timing data:
+
+```bash
+# Baseline with detailed timing
+./start_server_release.sh --log-level debug > server_debug.log 2>&1 &
+./start_client_release.sh --log-level debug > client_debug.log 2>&1 &
+
+# Full analysis with link coordinates
+./start_server_release.sh --log-level trace > server_trace.log 2>&1 &
+./start_client_release.sh --log-level trace --verbose-coords > client_trace.log 2>&1 &
+```
+
+This will provide the granular timing data needed to pinpoint exact bottlenecks in the rendering pipeline.
+
 

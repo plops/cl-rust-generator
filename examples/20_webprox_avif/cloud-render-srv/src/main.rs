@@ -20,14 +20,18 @@ use browser::{ChromeRunner, CdpStream, extract_spatial_metadata, ExtractedMetada
 mod session;
 
 // Initialize logging at startup
-fn init_logging() {
-    core_utils::logging::init_logging("cloud-render-srv")
+fn init_logging(level: &str) {
+    core_utils::logging::init_logging_with_level("cloud-render-srv", level)
         .expect("Failed to initialize logging");
 }
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "AV1 Remote Browser Server")]
 struct Cli {
+    /// Log level (trace, debug, info, warn, error)
+    #[arg(long, default_value = "info")]
+    log_level: String,
+    
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -271,15 +275,19 @@ async fn run_browser_session(
         info!("[Server] Proceeding with frame capture...");
         
         // Capture screenshot from browser
-        println!("[Server] Capturing screenshot...");
+        let screenshot_start = std::time::Instant::now();
+        debug!("[Server] Capturing screenshot...");
         let screenshot = CdpStream::capture_screenshot(&page).await?;
-        println!("[Server] Screenshot captured: {}x{}", screenshot.width(), screenshot.height());
+        let screenshot_time = screenshot_start.elapsed();
+        debug!("[Server] Screenshot captured: {}x{} in {:?}", screenshot.width(), screenshot.height(), screenshot_time);
         
         // Convert RGBA to YUV using core-utils
-        println!("[Server] Converting to YUV...");
+        let yuv_start = std::time::Instant::now();
+        debug!("[Server] Converting to YUV...");
         let yuv_image = core_utils::rgba_to_yuv420(&screenshot, width as u32, height as u32)
             .map_err(|e| format!("YUV conversion error: {:?}", e))?;
-        println!("[Server] YUV conversion complete");
+        let yuv_time = yuv_start.elapsed();
+        debug!("[Server] YUV conversion complete in {:?}", yuv_time);
 
         info!("[Server] Creating AV1 frame...");
         let mut frame = ctx.new_frame();
@@ -287,10 +295,12 @@ async fn run_browser_session(
         frame.planes[1].copy_from_raw_u8(&yuv_image.u, yuv_image.u_stride as usize, 1);
         frame.planes[2].copy_from_raw_u8(&yuv_image.v, yuv_image.v_stride as usize, 1);
         
-        println!("[Server] Sending frame to encoder...");
+        debug!("[Server] Sending frame to encoder...");
+        let encode_start = std::time::Instant::now();
         match ctx.send_frame(frame) {
             Ok(_) => {
-                println!("[Server] Frame sent to encoder");
+                let send_time = encode_start.elapsed();
+                trace!("[Server] Frame sent to encoder in {:?}", send_time);
                 // Store the current state to guarantee metadata perfectly aligns with the encoded image
                 viewport_y_queue.push_back(current_viewport_y);
             },
@@ -300,6 +310,7 @@ async fn run_browser_session(
         }
         
         info!("[Server] Receiving encoded packets...");
+        let receive_start = std::time::Instant::now();
         // Receive encoded packets
         let mut packet_count = 0;
         let mut found_packet = false;
@@ -307,10 +318,12 @@ async fn run_browser_session(
         // Try to receive packets
         while let Ok(packet) = ctx.receive_packet() {
             found_packet = true;
+            let receive_time = receive_start.elapsed();
             // Pop the viewport_y belonging exactly to the frame that finished encoding
             let packet_viewport_y = viewport_y_queue.pop_front().unwrap_or(current_viewport_y);
             
-            println!("[Server] Sending packet {} with {} bytes", packet_count, packet.data.len());
+            info!("[Server] Sending packet {} with {} bytes (encoding latency: {:?})", 
+                packet_count, packet.data.len(), receive_time);
             let update = ServerUpdate {
                 update: Some(proto_def::graphical_proxy::server_update::Update::Frame(VideoFrame {
                     av1_data: packet.data,
@@ -319,9 +332,9 @@ async fn run_browser_session(
                     viewport_y: packet_viewport_y,
                 })),
             };
-            info!("[Server] Sending frame {} with viewport_y={}", packet_count, packet_viewport_y);
+            trace!("[Server] Sending frame {} with viewport_y={}", packet_count, packet_viewport_y);
             if tx.send(Ok(update)).await.is_err() {
-                println!("[Server] Client disconnected");
+                warn!("[Server] Client disconnected");
                 return Ok(()); // Client disconnected
             }
             packet_count += 1;
@@ -341,9 +354,8 @@ async fn run_browser_session(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    init_logging();
-    
     let cli = Cli::parse();
+    init_logging(&cli.log_level);
     
     match cli.command {
         Some(Commands::TestScreencast { url, output }) => {

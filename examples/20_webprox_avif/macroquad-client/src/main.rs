@@ -22,6 +22,10 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(author, version, about = "AV1 Remote Browser Client")]
 struct ClientCli {
+    /// Log level (trace, debug, info, warn, error)
+    #[arg(long, default_value = "info")]
+    pub log_level: String,
+    
     /// Manual Y offset adjustment for debugging coordinate alignment (in pixels)
     #[arg(long, default_value = "0")]
     pub y_offset: i32,
@@ -36,17 +40,17 @@ use network::grpc_client;
 use render::main_loop;
 
 // Initialize logging at startup
-fn init_logging() {
-    core_utils::logging::init_logging("macroquad-client")
+fn init_logging(level: &str) {
+    core_utils::logging::init_logging_with_level("macroquad-client", level)
         .expect("Failed to initialize logging");
 }
 
 #[macroquad::main("AV1 Remote Browser")]
 async fn main() {
-    init_logging();
-    
-    // Parse CLI arguments
+    // Parse CLI arguments first to get log level
     let cli = ClientCli::parse();
+    init_logging(&cli.log_level);
+    
     info!("Starting with y_offset: {}, verbose_coords: {}", cli.y_offset, cli.verbose_coords);
     
     #[cfg(feature = "integration-test")]

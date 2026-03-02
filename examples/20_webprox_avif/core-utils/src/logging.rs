@@ -26,8 +26,25 @@ pub fn init_logging(component_name: &str) -> Result<(), SetLoggerError> {
     Ok(())
 }
 
-/// Initialize logging with custom log level
-pub fn init_logging_with_level(component_name: &str, level: LevelFilter) -> Result<(), SetLoggerError> {
+/// Initialize logging with custom log level (string)
+pub fn init_logging_with_level(component_name: &str, level_str: &str) -> Result<(), SetLoggerError> {
+    let level = match level_str.to_lowercase().as_str() {
+        "trace" => LevelFilter::Trace,
+        "debug" => LevelFilter::Debug,
+        "info" => LevelFilter::Info,
+        "warn" => LevelFilter::Warn,
+        "error" => LevelFilter::Error,
+        _ => {
+            eprintln!("Warning: Unknown log level '{}', defaulting to 'info'", level_str);
+            LevelFilter::Info
+        }
+    };
+    
+    init_logging_with_level_internal(component_name, level)
+}
+
+/// Initialize logging with custom log level (internal)
+fn init_logging_with_level_internal(component_name: &str, level: LevelFilter) -> Result<(), SetLoggerError> {
     let mut builder = Builder::from_default_env();
     
     builder

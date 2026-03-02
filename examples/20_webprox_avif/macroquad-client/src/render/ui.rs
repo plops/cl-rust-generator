@@ -1,5 +1,6 @@
 use macroquad::prelude::*;
 use std::sync::{Arc, Mutex};
+use log::{trace, debug, info, warn, error};
 use crate::state::ClientState;
 
 pub fn draw_ui_and_frame(state: &Arc<Mutex<ClientState>>, texture: Option<&Texture2D>) {
@@ -14,7 +15,7 @@ pub fn draw_ui_and_frame(state: &Arc<Mutex<ClientState>>, texture: Option<&Textu
         if mouse_wheel_y != 0.0 {
             lock.local_scroll_y -= mouse_wheel_y as i32 * 30; // 30px per tick
             lock.local_scroll_y = lock.local_scroll_y.clamp(0, lock.doc_height as i32);
-            println!("[Client] Scroll to: {}", lock.local_scroll_y);
+            debug!("[Client] Scroll to: {}", lock.local_scroll_y);
         }
         
         // Mark dirty flag check
@@ -51,7 +52,7 @@ pub fn draw_ui_and_frame(state: &Arc<Mutex<ClientState>>, texture: Option<&Textu
             let screen_x = link.x as f32;
 
             if verbose_coords {
-                println!("[Client] Link: id={}, link_y={}, local_y={}, screen_y={}, render_offset_y={}", 
+                trace!("[Client] Link: id={}, link_y={}, local_y={}, screen_y={}, render_offset_y={}", 
                     link.id, link.y, local_y, screen_y, render_offset_y);
             }
 
@@ -74,7 +75,7 @@ pub fn draw_ui_and_frame(state: &Arc<Mutex<ClientState>>, texture: Option<&Textu
                     let (mx, my) = mouse_position();
                     if mx >= screen_x && mx <= screen_x + link.width as f32 &&
                        my >= screen_y && my <= screen_y + link.height as f32 {
-                        println!("[Client] Link clicked: {}", link.url);
+                        info!("[Client] Link clicked: {}", link.url);
                         // TODO: Send navigate event to server via event_tx
                     }
                 }
@@ -132,7 +133,7 @@ pub fn handle_input_and_send_events(
     let (_, mouse_wheel_y) = mouse_wheel();
     if mouse_wheel_y != 0.0 && mouse_wheel_y != *last_mouse_wheel_y {
         *last_mouse_wheel_y = mouse_wheel_y;
-        println!("[Client] Mouse Wheel: Local scroll ({}px)", -(mouse_wheel_y as i32 * 30));
+        debug!("[Client] Mouse Wheel: Local scroll ({}px)", -(mouse_wheel_y as i32 * 30));
         let scroll_event = proto_def::graphical_proxy::ClientEvent {
             event: Some(proto_def::graphical_proxy::client_event::Event::Scroll(
                 proto_def::graphical_proxy::ScrollInput {
@@ -145,7 +146,7 @@ pub fn handle_input_and_send_events(
         if let Err(e) = event_tx.send(scroll_event) {
             eprintln!("[Client] Failed to send scroll event: {:?}", e);
         } else {
-            println!("[Client] ✓ Local scroll event sent");
+            trace!("[Client] ✓ Local scroll event sent");
         }
     }
     
@@ -157,7 +158,7 @@ pub fn handle_input_and_send_events(
     
     // W or PageUp - just pressed (was false, now true)
     if (!*last_w_key_state && current_w_key_state) || (!*last_pageup_key_state && current_pageup_key_state) {
-        println!("[Client] Keyboard: Server scroll UP (-50px)");
+        debug!("[Client] Keyboard: Server scroll UP (-50px)");
         let server_scroll_event = proto_def::graphical_proxy::ClientEvent {
             event: Some(proto_def::graphical_proxy::client_event::Event::Scroll(
                 proto_def::graphical_proxy::ScrollInput {
@@ -169,13 +170,13 @@ pub fn handle_input_and_send_events(
         if let Err(e) = event_tx.send(server_scroll_event) {
             eprintln!("[Client] Failed to send server scroll event: {:?}", e);
         } else {
-            println!("[Client] ✓ Server scroll UP event sent");
+            trace!("[Client] ✓ Server scroll UP event sent");
         }
     }
     
     // S or PageDown - just pressed (was false, now true)
     if (!*last_s_key_state && current_s_key_state) || (!*last_pagedown_key_state && current_pagedown_key_state) {
-        println!("[Client] Keyboard: Server scroll DOWN (+50px)");
+        debug!("[Client] Keyboard: Server scroll DOWN (+50px)");
         let server_scroll_event = proto_def::graphical_proxy::ClientEvent {
             event: Some(proto_def::graphical_proxy::client_event::Event::Scroll(
                 proto_def::graphical_proxy::ScrollInput {
@@ -187,7 +188,7 @@ pub fn handle_input_and_send_events(
         if let Err(e) = event_tx.send(server_scroll_event) {
             eprintln!("[Client] Failed to send server scroll event: {:?}", e);
         } else {
-            println!("[Client] ✓ Server scroll DOWN event sent");
+            trace!("[Client] ✓ Server scroll DOWN event sent");
         }
     }
     
