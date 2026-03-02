@@ -3,7 +3,7 @@ use tokio::sync::mpsc;
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tonic::{transport::Server, Request, Response, Status};
 use clap::{Parser, Subcommand};
-use log::{info, warn, error, debug};
+use log::{info, warn, error, debug, trace};
 
 use proto_def::graphical_proxy::{
     remote_browser_server::{RemoteBrowser, RemoteBrowserServer},
@@ -25,18 +25,42 @@ fn init_logging(level: &str) {
         .expect("Failed to initialize logging");
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(author, version, about = "AV1 Remote Browser Server")]
 struct Cli {
     /// Log level (trace, debug, info, warn, error)
     #[arg(long, default_value = "info")]
     log_level: String,
     
+    /// Rav1e quantizer (0-255, higher = lower quality, smaller size)
+    #[arg(long, default_value = "150")]
+    quantizer: u8,
+    
+    /// Rav1e minimum quantizer (0-255)
+    #[arg(long, default_value = "80")]
+    min_quantizer: u8,
+    
+    /// Rav1e speed preset (0-10, higher = faster, lower quality)
+    #[arg(long, default_value = "8")]
+    speed_preset: usize,
+    
+    /// Number of encoder threads
+    #[arg(long, default_value = "2")]
+    threads: usize,
+    
+    /// Tile columns (must be power of 2)
+    #[arg(long, default_value = "1")]
+    tile_cols: usize,
+    
+    /// Tile rows (must be power of 2)
+    #[arg(long, default_value = "1")]
+    tile_rows: usize,
+    
     #[command(subcommand)]
     command: Option<Commands>,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 enum Commands {
     /// Test Chrome extraction - capture screenshot and extract link metadata
     TestScreencast {
@@ -49,7 +73,15 @@ enum Commands {
     Serve,
 }
 
-pub struct RemoteBrowserImpl {}
+pub struct RemoteBrowserImpl {
+    cli: Cli,
+}
+
+impl RemoteBrowserImpl {
+    pub fn new(cli: Cli) -> Self {
+        Self { cli }
+    }
+}
 
 #[tonic::async_trait]
 impl RemoteBrowser for RemoteBrowserImpl {
@@ -64,9 +96,10 @@ impl RemoteBrowser for RemoteBrowserImpl {
         let (tx, rx) = mpsc::channel(128);
 
         // Background task to handle client events and run browser session
+        let cli_clone = self.cli.clone();
         tokio::spawn(async move {
             info!("Spawning browser session task");
-            if let Err(e) = run_browser_session(tx, client_stream).await {
+            if let Err(e) = run_browser_session(client_stream, tx, &cli_clone).await {
                 error!("Browser session error: {:?}", e);
             }
             info!("Browser session task ended");
@@ -79,8 +112,9 @@ impl RemoteBrowser for RemoteBrowserImpl {
 }
 
 async fn run_browser_session(
-    tx: mpsc::Sender<Result<ServerUpdate, Status>>,
     mut client_stream: tonic::Streaming<ClientEvent>,
+    tx: tokio::sync::mpsc::Sender<Result<ServerUpdate, Status>>,
+    cli: &Cli,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting browser session");
     let mut width = 1280;
@@ -137,27 +171,29 @@ async fn run_browser_session(
     
     info!("Actual screenshot dimensions: {}x{}", width, height);
     
-    // Configure rav1e encoder with actual dimensions and optimized settings
+    // Configure rav1e encoder with actual dimensions and CLI parameters
     let mut enc = EncoderConfig::default();
     enc.width = width;
     enc.height = height;
     enc.bit_depth = 8;
     enc.chroma_sampling = ChromaSampling::Cs420;
     
-    // Optimize for smaller file size
-    enc.quantizer = 150;  // Increased from default 100 to reduce file size
-    enc.min_quantizer = 80;  // Set minimum quality floor
-    enc.speed_settings = SpeedSettings::from_preset(8);  // Balanced speed/quality
-    // Use valid tile configuration (must be powers of 2 and reasonable limits)
-    enc.tile_cols = 1;  // Start with minimal tiling to avoid errors
-    enc.tile_rows = 1;
+    // Use CLI parameters for encoder configuration
+    enc.quantizer = cli.quantizer as usize;
+    enc.min_quantizer = cli.min_quantizer;
+    enc.speed_settings = SpeedSettings::from_preset(cli.speed_preset as u8);
+    enc.tile_cols = cli.tile_cols;
+    enc.tile_rows = cli.tile_rows;
+    
+    info!("Encoder config: quantizer={}, min_quantizer={}, speed_preset={}, tiles={}x{}, threads={}", 
+        cli.quantizer, cli.min_quantizer, cli.speed_preset, cli.tile_cols, cli.tile_rows, cli.threads);
     
     // Force keyframe mode for client compatibility
     enc.min_key_frame_interval = 1;  // Every frame is a keyframe
     enc.max_key_frame_interval = 1;  // Force all frames to be keyframes
     enc.low_latency = true;          // Crucial: disables frame reordering to minimize delay
     
-    let cfg = Config::new().with_encoder_config(enc).with_threads(2);
+    let cfg = Config::new().with_encoder_config(enc).with_threads(cli.threads);
     let mut ctx: Context<u8> = cfg.new_context().map_err(|e| format!("Encoder error: {:?}", e))?;
     
     // Send initial spatial metadata
@@ -322,8 +358,15 @@ async fn run_browser_session(
             // Pop the viewport_y belonging exactly to the frame that finished encoding
             let packet_viewport_y = viewport_y_queue.pop_front().unwrap_or(current_viewport_y);
             
-            info!("[Server] Sending packet {} with {} bytes (encoding latency: {:?})", 
-                packet_count, packet.data.len(), receive_time);
+            // Calculate compression metrics
+            let original_size = width * height * 3; // YUV420 approx 3 bytes per pixel
+            let compressed_size = packet.data.len();
+            let compression_ratio = original_size as f64 / compressed_size as f64;
+            let size_reduction_percent = (1.0 - (compressed_size as f64 / original_size as f64)) * 100.0;
+            
+            info!("[Server] Sending packet {} with {} bytes (encoding latency: {:?}, compression: {:.1}x, {:.1}% size reduction)", 
+                packet_count, compressed_size, receive_time, compression_ratio, size_reduction_percent);
+            
             let update = ServerUpdate {
                 update: Some(proto_def::graphical_proxy::server_update::Update::Frame(VideoFrame {
                     av1_data: packet.data,
@@ -364,7 +407,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::Serve) | None => {
             let addr = "[::1]:50051".parse()?;
-            let browser_service = RemoteBrowserImpl {};
+            let browser_service = RemoteBrowserImpl::new(cli.clone());
 
             info!("Starting gRPC server at {}", addr);
 

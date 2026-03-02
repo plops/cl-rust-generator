@@ -29,7 +29,7 @@ pub async fn start_grpc_client(
     };
     
     // Use a channel to keep the client-to-server stream open
-    let (tx_events, mut rx_events_internal) = mpsc::channel(10);
+    let (tx_events, rx_events_internal) = mpsc::channel(10);
     
     // Send initial stream configuration
     info!("Sending initial stream configuration");
@@ -79,8 +79,8 @@ pub async fn start_grpc_client(
                         lock.server_viewport_y = frame.viewport_y;
                         
                         // Decode AV1 frame to actual image using aom-decode
-                        let w = lock.frame_width;
-                        let h = lock.frame_height;
+                        let _w = lock.frame_width;
+                        let _h = lock.frame_height;
                         
                         // Initialize decoder if needed
                         if lock.decoder.is_none() {

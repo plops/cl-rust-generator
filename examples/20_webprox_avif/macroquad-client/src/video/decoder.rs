@@ -94,7 +94,7 @@ impl Av1Decoder {
         
         let range = frame.range();
         let rgba_image = match frame.rows_iter()? {
-            RowsIters::YuvPlanes8 {y, u, v, chroma_sampling} => {
+            RowsIters::YuvPlanes8 {y, u, v, chroma_sampling: _} => {
                 println!("[Client] Converting YUV420 to RGBA");
                 let mc = frame.matrix_coefficients().unwrap_or(color::MatrixCoefficients::BT709);
                 let conv = RGBConvert::<u8>::new(range, mc)?;

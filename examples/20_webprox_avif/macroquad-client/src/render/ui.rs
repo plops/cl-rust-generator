@@ -1,6 +1,6 @@
 use macroquad::prelude::*;
 use std::sync::{Arc, Mutex};
-use log::{trace, debug, info, warn, error};
+use log::{trace, debug, info};
 use crate::state::ClientState;
 
 pub fn draw_ui_and_frame(state: &Arc<Mutex<ClientState>>, texture: Option<&Texture2D>) {
