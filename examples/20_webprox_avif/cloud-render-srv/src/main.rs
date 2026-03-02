@@ -186,12 +186,20 @@ async fn run_browser_session(
     enc.tile_rows = cli.tile_rows;
     
     info!("Encoder config: quantizer={}, min_quantizer={}, speed_preset={}, tiles={}x{}, threads={}", 
-        cli.quantizer, cli.min_quantizer, cli.speed_preset, cli.tile_cols, cli.tile_rows, cli.threads);
+        enc.quantizer, enc.min_quantizer, cli.speed_preset, enc.tile_cols, enc.tile_rows, cli.threads);
     
     // Force keyframe mode for client compatibility
     enc.min_key_frame_interval = 1;  // Every frame is a keyframe
     enc.max_key_frame_interval = 1;  // Force all frames to be keyframes
     enc.low_latency = true;          // Crucial: disables frame reordering to minimize delay
+    
+    // Real-time streaming settings - disable lookahead for immediate packet output
+    enc.speed_settings.rdo_lookahead_frames = 1;  // Minimal lookahead for real-time
+    enc.speed_settings.scene_detection_mode = rav1e::prelude::SceneDetectionSpeed::None;  // Disable scene detection
+    
+    // Additional speed optimizations for real-time
+    enc.width = 640;  // Reduce resolution from 800x600 to 640x480 for faster encoding
+    enc.height = 480;
     
     let cfg = Config::new().with_encoder_config(enc).with_threads(cli.threads);
     let mut ctx: Context<u8> = cfg.new_context().map_err(|e| format!("Encoder error: {:?}", e))?;
@@ -373,50 +381,75 @@ async fn run_browser_session(
         info!("[Server] Receiving encoded packets...");
         let receive_start = std::time::Instant::now();
         // Receive encoded packets
+        // NOTE: With low_latency=true and minimal lookahead, rav1e should output packets immediately
+        // If no packets are received, it indicates a configuration issue
         let mut packet_count = 0;
         let mut found_packet = false;
         
-        // Try to receive packets
-        while let Ok(packet) = ctx.receive_packet() {
-            found_packet = true;
-            let receive_time = receive_start.elapsed();
-            // Pop the viewport_y belonging exactly to the frame that finished encoding
-            let packet_viewport_y = viewport_y_queue.pop_front().unwrap_or(current_viewport_y);
-            
-            // Calculate compression metrics
-            let original_size = width * height * 3; // YUV420 approx 3 bytes per pixel
-            let compressed_size = packet.data.len();
-            let compression_ratio = original_size as f64 / compressed_size as f64;
-            let size_reduction_percent = (1.0 - (compressed_size as f64 / original_size as f64)) * 100.0;
-            
-            info!("[Server] Sending packet {} with {} bytes (encoding latency: {:?}, compression: {:.1}x, {:.1}% size reduction)", 
-                packet_count, compressed_size, receive_time, compression_ratio, size_reduction_percent);
-            
-            let update = ServerUpdate {
-                update: Some(proto_def::graphical_proxy::server_update::Update::Frame(VideoFrame {
-                    av1_data: packet.data,
-                    is_keyframe: force_keyframes || packet.frame_type == FrameType::KEY,
-                    viewport_x: 0,
-                    viewport_y: packet_viewport_y,
-                })),
-            };
-            trace!("[Server] Sending frame {} with viewport_y={}", packet_count, packet_viewport_y);
-            if tx.send(Ok(update)).await.is_err() {
-                warn!("[Server] Client disconnected");
-                return Ok(()); // Client disconnected
+        // Try to receive packets with proper EncoderStatus handling
+        loop {
+            match ctx.receive_packet() {
+                Ok(packet) => {
+                    found_packet = true;
+                    let receive_time = receive_start.elapsed();
+                    // Pop the viewport_y belonging exactly to the frame that finished encoding
+                    let packet_viewport_y = viewport_y_queue.pop_front().unwrap_or(current_viewport_y);
+                    
+                    // Calculate compression metrics
+                    let original_size = width * height * 3; // YUV420 approx 3 bytes per pixel
+                    let compressed_size = packet.data.len();
+                    let compression_ratio = original_size as f64 / compressed_size as f64;
+                    let size_reduction_percent = (1.0 - (compressed_size as f64 / original_size as f64)) * 100.0;
+                    
+                    info!("[Server] Sending packet {} with {} bytes (encoding latency: {:?}, compression: {:.1}x, {:.1}% size reduction)", 
+                        packet_count, compressed_size, receive_time, compression_ratio, size_reduction_percent);
+                    
+                    let update = ServerUpdate {
+                        update: Some(proto_def::graphical_proxy::server_update::Update::Frame(VideoFrame {
+                            av1_data: packet.data,
+                            is_keyframe: force_keyframes || packet.frame_type == FrameType::KEY,
+                            viewport_x: 0,
+                            viewport_y: packet_viewport_y,
+                        })),
+                    };
+                    trace!("[Server] Sending frame {} with viewport_y={}", packet_count, packet_viewport_y);
+                    if tx.send(Ok(update)).await.is_err() {
+                        error!("[Server] Failed to send frame {} to client", packet_count);
+                        break;
+                    }
+                    packet_count += 1;
+                }
+                Err(rav1e::EncoderStatus::NeedMoreData) => {
+                    // This is normal - encoder needs more frames before producing output
+                    debug!("[Server] Encoder needs more data - this is normal for early frames");
+                    break;
+                }
+                Err(rav1e::EncoderStatus::Encoded) => {
+                    // Frame was encoded but no packet output - continue trying
+                    debug!("[Server] Frame encoded but no packet output - continuing");
+                    continue;
+                }
+                Err(rav1e::EncoderStatus::LimitReached) => {
+                    // No more packets available
+                    debug!("[Server] Encoder limit reached - no more packets");
+                    break;
+                }
+                Err(status) => {
+                    warn!("[Server] Unexpected encoder status: {:?}", status);
+                    break;
+                }
             }
-            packet_count += 1;
         }
         
         if !found_packet {
-            warn!("[Server] No packets received from encoder - this may be normal for early frames");
+            warn!("[Server] No packets received from encoder - check low_latency configuration!");
         }
         
         info!("[Server] No more packets, frame {} complete. Sent {} packets", frame_count, packet_count);
 
         frame_count += 1;
-        info!("[Server] Sleeping for 33ms (30 FPS)...");
-        tokio::time::sleep(Duration::from_millis(33)).await; // 30 FPS
+        info!("[Server] Sleeping for 2500ms (0.4 FPS) - matching actual encoding speed");
+        tokio::time::sleep(Duration::from_millis(2500)).await; // 0.4 FPS to match 2.5s encoding time
     }
 }
 
