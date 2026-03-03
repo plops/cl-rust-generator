@@ -15,9 +15,9 @@ The evaluated configurations explore the trade-offs between bandwidth efficiency
 
 | Metric | Measured Latency (ms) |
 | --- | --- |
-| Minimum | |
-| Average | |
-| Maximum | |
+| Minimum | 252 |
+| Average | 299.2 |
+| Maximum | 352 |
 
 ### 2. Still Picture profile (Lowest Latency AV1)
 **Configuration**: *(Default Settings)*
@@ -25,9 +25,11 @@ The evaluated configurations explore the trade-offs between bandwidth efficiency
 
 | Metric | Measured Latency (ms) |
 | --- | --- |
-| Minimum | |
-| Average | |
-| Maximum | |
+| Minimum | *No data - encoder issue* |
+| Average | *No data - encoder issue* |
+| Maximum | *No data - encoder issue* |
+
+*Note: AV1 encoder configuration issue prevented frame output. Server captured frames but rav1e encoder produced no packets.*
 
 ### 3. Low Latency Video Profile
 **Configuration**: `--disable-still-picture`
@@ -35,9 +37,9 @@ The evaluated configurations explore the trade-offs between bandwidth efficiency
 
 | Metric | Measured Latency (ms) |
 | --- | --- |
-| Minimum | |
-| Average | |
-| Maximum | |
+| Minimum | 1622 |
+| Average | 1622 |
+| Maximum | 1622 |
 
 ### 4. Max Efficiency Video Profile
 **Configuration**: `--disable-still-picture --disable-low-latency --rdo-lookahead-frames 20`
@@ -45,9 +47,9 @@ The evaluated configurations explore the trade-offs between bandwidth efficiency
 
 | Metric | Measured Latency (ms) |
 | --- | --- |
-| Minimum | |
-| Average | |
-| Maximum | |
+| Minimum | *No data - encoder issue* |
+| Average | *No data - encoder issue* |
+| Maximum | *No data - encoder issue* |
 
 ### 5. High Network Payload (Large Frame Size)
 **Configuration**: `--quantizer 50`
@@ -55,9 +57,9 @@ The evaluated configurations explore the trade-offs between bandwidth efficiency
 
 | Metric | Measured Latency (ms) |
 | --- | --- |
-| Minimum | |
-| Average | |
-| Maximum | |
+| Minimum | *No data - encoder issue* |
+| Average | *No data - encoder issue* |
+| Maximum | *No data - encoder issue* |
 
 ### 6. High CPU Load (Slow Encoding Preset)
 **Configuration**: `--speed-preset 5`
@@ -65,6 +67,27 @@ The evaluated configurations explore the trade-offs between bandwidth efficiency
 
 | Metric | Measured Latency (ms) |
 | --- | --- |
-| Minimum | |
-| Average | |
-| Maximum | |
+| Minimum | *No data - encoder issue* |
+| Average | *No data - encoder issue* |
+| Maximum | *No data - encoder issue* |
+
+## Test Results Summary
+
+**Successful Tests:**
+- ✅ **RAW RGB**: 252-352ms (baseline latency without encoding)
+- ⚠️ **Low Latency Video**: 1622ms (single data point, high latency due to encoder initialization)
+
+**Failed Tests:**
+- ❌ **Still Picture, Max Efficiency, High Network, High CPU**: AV1 encoder configuration issue prevented packet output
+
+**Key Findings:**
+1. RAW RGB provides the lowest latency (252-352ms) as expected
+2. AV1 encoding configurations have issues preventing consistent frame output
+3. The rav1e encoder may need additional configuration or more frames to initialize properly
+4. Low latency video showed much higher latency (1622ms) but this may be due to encoder initialization overhead
+
+**Recommendations:**
+1. Investigate rav1e encoder configuration to fix packet output issues
+2. Test with higher frame counts to allow encoder initialization
+3. Consider encoder warm-up period before measuring latency
+4. Verify timestamp synchronization between server and client

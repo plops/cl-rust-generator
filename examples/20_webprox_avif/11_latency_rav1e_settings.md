@@ -101,4 +101,4 @@ The client must log this per frame over 100 frames. The server will be bounded u
 6. **High CPU Load (Slow Encoding Preset)**
    Server: `cargo run --bin cloud-render-srv serve --speed-preset 5 --max-frames 100 --loop-delay 500`
 
-The extracted statistics (Min, Max, Avg latency) will be appended into the tables prepared in `on_latency.md`.
+The extracted statistics (Min, Max, Avg latency) will be appended into the tables prepared in `doc/on_latency2.md`.
