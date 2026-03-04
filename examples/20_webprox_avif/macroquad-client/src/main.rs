@@ -1,7 +1,5 @@
 use macroquad::prelude::*;
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
-use log::{info, warn, error, debug};
 use clap::Parser;
 
 // Import modules

@@ -94,7 +94,7 @@ pub async fn handle_raw_image_data(
     }
     
     // Get AVIF-compatible sequence header from rav1e
-    let sequence_header = ctx.container_sequence_header();
+    let _sequence_header = ctx.container_sequence_header();
     
     // Send raw AV1 frame data directly - let the client handle both AVIF and raw AV1
     println!("[Server] Sending raw AV1 frame data: {} bytes", av1_data.len());

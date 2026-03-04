@@ -1,4 +1,3 @@
-use std::sync::{Arc, Mutex};
 use proto_def::graphical_proxy::LinkBox;
 
 // Client image struct to avoid naming conflicts

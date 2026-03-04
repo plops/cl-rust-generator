@@ -11,11 +11,10 @@ use proto_def::graphical_proxy::{
 };
 
 use rav1e::prelude::*;
-use image::DynamicImage;
 use std::time::Duration;
 
 mod browser;
-use browser::{ChromeRunner, CdpStream, extract_spatial_metadata, ExtractedMetadata};
+use browser::{ChromeRunner, CdpStream, extract_spatial_metadata};
 
 mod session;
 
@@ -133,7 +132,7 @@ enum Commands {
 }
 
 #[derive(Debug, Clone)]
-struct ServerConfig {
+pub struct ServerConfig {
     log_level: String,
     quantizer: u8,
     min_quantizer: u8,
@@ -227,16 +226,16 @@ async fn run_browser_session(
     config: &ServerConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting browser session");
-    let mut width = 1280;
-    let mut height = 720;
-    let mut integration_test_mode = false;
+    let mut _width = 1280;
+    let mut _height = 720;
+    let mut _integration_test_mode = false;
     
     // Check first for test image event to determine if we should skip browser initialization
     info!("Waiting for first client event...");
     if let Some(Ok(first_event)) = client_stream.next().await {
         debug!("Received first event: {:?}", first_event.event);
         if let Some(proto_def::graphical_proxy::client_event::Event::TestImage(_)) = &first_event.event {
-            integration_test_mode = true;
+            _integration_test_mode = true;
             info!("Integration test mode detected - skipping browser initialization");
             
             // Handle the test image event
@@ -276,8 +275,8 @@ async fn run_browser_session(
     // Capture first screenshot to get actual dimensions
     info!("Capturing initial screenshot...");
     let first_screenshot = CdpStream::capture_screenshot(&page, config.full_page).await?;
-    width = first_screenshot.width() as usize;
-    height = first_screenshot.height() as usize;
+    let width = first_screenshot.width() as usize;
+    let height = first_screenshot.height() as usize;
     
     info!("Actual screenshot dimensions: {}x{}", width, height);
     

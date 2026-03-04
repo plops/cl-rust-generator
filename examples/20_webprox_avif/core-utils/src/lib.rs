@@ -26,8 +26,8 @@ pub fn rgba_to_yuv420(rgba: &[u8], width: u32, height: u32) -> Result<YuvPlanarI
     let uv_size = (width * height / 4) as usize;
     
     let mut y_data = vec![128u8; y_size];
-    let mut u_data = vec![128u8; uv_size];
-    let mut v_data = vec![128u8; uv_size];
+    let u_data = vec![128u8; uv_size];
+    let v_data = vec![128u8; uv_size];
     
     // Simple conversion: extract Y from RGB
     for i in 0..y_size {

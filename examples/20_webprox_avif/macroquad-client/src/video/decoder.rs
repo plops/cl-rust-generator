@@ -1,10 +1,9 @@
 // Import aom-decode for AVIF decoding
-use aom_decode::{avif::{Avif, Image}, Config, Decoder, FrameTempRef, RowsIters};
+use aom_decode::{avif::{Avif, Image}, Config, Decoder, RowsIters};
 use aom_decode::color;
 use yuv::convert::RGBConvert;
 use yuv::YUV;
 use image::{ImageBuffer, Rgba};
-use crate::state::ClientImage;
 
 // AV1 Decoder wrapper for proper AVIF decoding
 pub struct Av1Decoder {
@@ -73,7 +72,7 @@ impl Av1Decoder {
                         return Ok(ImageBuffer::from_raw(self.width, self.height, rgba_data)
                             .ok_or("Failed to create RGBA image")?);
                     }
-                    other => {
+                    _other => {
                         return Err("Unsupported image format".into());
                     }
                 }

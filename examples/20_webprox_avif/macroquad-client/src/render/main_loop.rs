@@ -1,8 +1,7 @@
 use macroquad::prelude::*;
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
 
-use crate::state::{ClientState, ClientImage};
+use crate::state::ClientState;
 use crate::render::ui;
 use proto_def::graphical_proxy::ClientEvent;
 
