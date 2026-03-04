@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::state::ClientState;
 use crate::render::ui;
+use crate::render::input;
 use proto_def::graphical_proxy::ClientEvent;
 
 pub async fn run_render_loop(
@@ -14,7 +15,7 @@ pub async fn run_render_loop(
     
     loop {
         // 1. Process local input & send to event_tx
-        ui::handle_input_and_send_events(&state, &event_tx, &mut last_mouse_wheel_y);
+        input::handle_input_and_send_events(&state, &event_tx, &mut last_mouse_wheel_y);
         
         // 2. Lock state to fetch latest texture / metadata
         {

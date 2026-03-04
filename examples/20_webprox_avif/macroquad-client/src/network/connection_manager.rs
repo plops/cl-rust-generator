@@ -28,9 +28,9 @@ impl ConnectionManager {
         Ok(Self { client })
     }
     
-    pub fn create_stream(
+    pub async fn create_stream(
         &mut self,
-        rx_events: tokio::sync::mpsc::UnboundedReceiver<ClientEvent>,
+        mut rx_events: tokio::sync::mpsc::UnboundedReceiver<ClientEvent>,
         cli: &crate::ClientCli
     ) -> Result<tonic::Streaming<proto_def::graphical_proxy::ServerUpdate>, Box<dyn std::error::Error>> {
         // Use a channel to keep the client-to-server stream open

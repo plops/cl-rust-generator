@@ -214,7 +214,7 @@ impl StreamHandler {
     }
     
     pub fn handle_status_message(
-        status: &proto_def::graphical_proxy::StatusMessage,
+        status: &proto_def::graphical_proxy::SystemStatus,
         _state: &Arc<Mutex<ClientState>>
     ) -> Result<(), Box<dyn std::error::Error>> {
         info!("Status: {}", status.message);
