@@ -33,3 +33,8 @@ Ensure all rust files conform to standard guidelines.
 While the Cargo.toml looks clean and structured as a workspace, we should ensure there are no duplicate or conflicting versions between sub-crates once the refactoring separates out the modules.
 
 **Action**: Verify `Cargo.toml` dependencies for `cloud-render-srv` and `macroquad-client` after the folder split.
+
+## 5. Git Hooks
+To ensure consistent formatting in the future, we should add a `pre-commit` git hook that automatically runs `cargo fmt`. 
+
+**Action**: Create a `pre-commit` git hook script (e.g., in `.git/hooks/` or a tracked `scripts/` folder that gets linked) which executes `cargo fmt`. If `cargo fmt` is not present, it should print a warning but exit successfully (not abort the commit).
