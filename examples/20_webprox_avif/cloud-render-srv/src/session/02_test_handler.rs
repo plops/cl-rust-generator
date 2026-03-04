@@ -1,10 +1,12 @@
 use anyhow::{Result, anyhow};
-use rav1e::prelude::*;
 use tokio::sync::mpsc;
 
 use proto_def::graphical_proxy::{
     ClientEvent, ServerUpdate, TestFrameResult,
 };
+
+use crate::encoder::rav1e_enc::Rav1eEncoder;
+use crate::ServerConfig;
 
 /// Handle RawImageData client events for integration testing
 pub async fn handle_raw_image_data(
@@ -27,77 +29,47 @@ pub async fn handle_raw_image_data(
         rgba_data.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]); // Add alpha = 255
     }
     
-    // Convert to YUV using core-utils (expects raw bytes)
-    let yuv_image = core_utils::rgba_to_yuv420(&rgba_data, width, height)
-        .map_err(|e| anyhow!("YUV conversion error: {:?}", e))?;
+    // Create RGBA image from the data
+    let image = image::RgbaImage::from_raw(width, height, rgba_data)
+        .ok_or_else(|| anyhow!("Failed to create RGBA image from data"))?;
     
-    // Configure rav1e encoder for single frame with optimized settings
-    let mut enc = EncoderConfig::default();
-    enc.width = width as usize;
-    enc.height = height as usize;
-    enc.bit_depth = 8;
-    enc.chroma_sampling = ChromaSampling::Cs420;
+    // Create test-specific encoder configuration
+    let mut test_config = ServerConfig::default();
+    test_config.quantizer = 150;  // Increased from default 100 to reduce file size
+    test_config.min_quantizer = 80;  // Set minimum quality floor
+    test_config.speed_preset = 8;  // Balanced speed/quality
+    test_config.tile_cols = 1;  // Minimal tiling to avoid errors
+    test_config.tile_rows = 1;
+    test_config.threads = 1;
+    test_config.disable_low_latency = false;
+    test_config.disable_still_picture = false;  // Enable still picture mode for test frames
     
-    // Optimize for smaller file size
-    enc.quantizer = 150;  // Increased from default 100 to reduce file size
-    enc.min_quantizer = 80;  // Set minimum quality floor
-    enc.speed_settings = SpeedSettings::from_preset(8);  // Balanced speed/quality
-    // Use valid tile configuration (must be powers of 2 and reasonable limits)
-    enc.tile_cols = 1;  // Start with minimal tiling to avoid errors
-    enc.tile_rows = 1;
+    // Create encoder for test frame
+    let mut encoder = Rav1eEncoder::new(width as usize, height as usize, &test_config)
+        .map_err(|e| anyhow!("Failed to create test encoder: {:?}", e))?;
     
-    let cfg = Config::new().with_encoder_config(enc).with_threads(1);
-    let mut ctx: Context<u8> = cfg.new_context()
-        .map_err(|e| anyhow!("Encoder context creation failed: {:?}", e))?;
+    // Encode the test frame
+    let frame_result = encoder.encode_frame(
+        &image,
+        0,  // viewport_y (not relevant for test frames)
+        false,  // full_page_mode (not relevant for test frames)
+        true,   // force_keyframes (always keyframe for test frames)
+        "test_frame".to_string(),  // timestamp_text
+    ).await.map_err(|e| anyhow!("Test frame encoding failed: {:?}", e))?;
     
-    // Create frame and send to encoder
-    let mut frame = ctx.new_frame();
-    frame.planes[0].copy_from_raw_u8(&yuv_image.y, yuv_image.y_stride as usize, 1);
-    frame.planes[1].copy_from_raw_u8(&yuv_image.u, yuv_image.u_stride as usize, 1);
-    frame.planes[2].copy_from_raw_u8(&yuv_image.v, yuv_image.v_stride as usize, 1);
-    
-    ctx.send_frame(frame)
-        .map_err(|e| anyhow!("Send frame error: {:?}", e))?;
-    
-    // Flush the encoder to get the packet
-    ctx.flush();
-    
-    // Receive encoded packet
-    let mut av1_data = Vec::new();
-    let mut packet_count = 0;
-    
-    // Keep receiving packets until we get data
-    while packet_count < 10 { // Limit attempts to avoid infinite loop
-        match ctx.receive_packet() {
-            Ok(packet) => {
-                if !packet.data.is_empty() {
-                    av1_data = packet.data;
-                    println!("[Server] Successfully encoded packet: {} bytes", av1_data.len());
-                    break;
-                }
-                packet_count += 1;
-            }
-            Err(e) => {
-                println!("[Server] Encoder packet receive error: {:?}", e);
-                // Try flushing again
-                ctx.flush();
-                packet_count += 1;
-                if packet_count >= 5 {
-                    break;
-                }
-            }
-        }
+    // Extract the AV1 data from the frame result
+    if frame_result.updates.is_empty() {
+        return Err(anyhow!("No encoded data received from test encoder"));
     }
     
-    if av1_data.is_empty() {
-        return Err(anyhow!("No encoded data received"));
-    }
+    let av1_data = if let Some(proto_def::graphical_proxy::server_update::Update::Frame(video_frame)) = 
+        &frame_result.updates[0].update {
+        video_frame.av1_data.clone()
+    } else {
+        return Err(anyhow!("Expected Frame update but got different type"));
+    };
     
-    // Get AVIF-compatible sequence header from rav1e
-    let _sequence_header = ctx.container_sequence_header();
-    
-    // Send raw AV1 frame data directly - let the client handle both AVIF and raw AV1
-    println!("[Server] Sending raw AV1 frame data: {} bytes", av1_data.len());
+    println!("[Server] Successfully encoded test frame: {} bytes", av1_data.len());
     
     // Save AVIF data to file for debugging
     if let Err(e) = std::fs::write("debug_output.avif", &av1_data) {
@@ -108,7 +80,7 @@ pub async fn handle_raw_image_data(
     
     // Send test frame result back to client
     let test_result = TestFrameResult {
-        av1_data: av1_data, // Send just the raw AV1 frame data
+        av1_data: av1_data,
         is_keyframe: true, // Force keyframe for simplified decoding
     };
     
@@ -161,4 +133,3 @@ pub async fn handle_test_image_event(
         Ok(false) // Not a test image event
     }
 }
-
