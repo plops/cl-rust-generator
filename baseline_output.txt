@@ -1,0 +1,22 @@
+To load "cl-rust-generator":
+  Load 1 ASDF system:
+    cl-rust-generator
+; Loading "cl-rust-generator"
+[package cl-rust-generator]......To load "alexandria":
+  Load 1 ASDF system:
+    alexandria
+; Loading "alexandria"
+
+
+--- TEST 1 ---
+fn calculate_max (a: i32, b: i32) -> i32{
+        if  >(a, b)  {
+                return a
+} else {
+                return b
+}
+}
+--- TEST 2 ---
+let x: i32  = (1+((2)*(3)));
+let y: f32  = (f32) x;
+return y;

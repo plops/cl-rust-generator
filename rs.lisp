@@ -270,7 +270,7 @@ entry return-values contains a list of return values"
 					 (let* ((p (remove-ampersand rp))
 						(decl-m (lookup-type p :env env))
 						(declaration (when decl-m (type-definition-declaration decl-m)))
-						(m (when decl-m (type-definition-immutable decl-m)))
+						(m (when decl-m (type-definition-mutable decl-m)))
 						(ref (when decl-m (type-definition-reference decl-m))))
 					   #+nil (format t "~a" `(:p ,p :decl-imm ,decl-imm :decl ,declaration :imm ,imm :env
 								     ,(loop for key being the hash-keys using (hash-value v) of env collect `(,key ,v))))
