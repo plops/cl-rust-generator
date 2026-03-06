@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# This modification will go into feature/port-to-coalton
+
+cd /home/kiel/stage/cl-rust-generator
+
+{
+declare -a FILES=(
+./package.lisp
+./cl-rust-generator.asd
+./rs.lisp
+./README.org
+./examples/13_vulkano/gen00.lisp
+./examples/13_vulkano/code/src/main.rs
+/home/kiel/stage/cl-cpp-generator2/README.md
+)
+for i in "${FILES[@]}"; do
+        echo "// start of $i"
+        cat "$i"
+        echo "// end of $i"
+done
+
+cat << 'EOF'
+
+--- PROMPT ---
+
+Review the cl-rust-generator codebase for porting to Coalton language for superior type checking abilities.
+The project is a Common Lisp to Rust transpiler that would benefit from Coalton's strong static type system.
+
+### Context and Goals:
+1. **Source and Reference:** I've included the core generator code, an extensive example (`13_vulkano`), and the `README.md` from `cl-cpp-generator2`. 
+2. **Coalton Migration:** Coalton provides Haskell-like type checking within Common Lisp, which would catch many transpiler bugs at compile time rather than runtime.
+3. **Type Safety Benefits:** The complex AST transformations and code generation logic in `rs.lisp` would be much safer with Coalton's type system preventing invalid state transitions and malformed output.
+4. **Moving Examples Out of the Tree:** Implement the same approach as `cl-cpp-generator2` for managing examples as independent projects.
+
+### Coalton Porting Tasks:
+Please provide a detailed plan to port the ~1100 lines of `rs.lisp` to Coalton:
+1. **Type System Design:** Define Coalton types for AST nodes, Rust code constructs, and transpiler state. Identify areas where type safety would prevent common bugs.
+2. **Gradual Migration Strategy:** Suggest which parts of the codebase to port first (likely the core AST types and transformation functions) and how to interoperate with remaining Common Lisp code.
+3. **Coalton-Specific Refactoring:** How to leverage Coalton's pattern matching, type classes, and algebraic data types to replace the massive `case` statement in `emit-rs`.
+4. **Infrastructure Updates:** Update `cl-rust-generator.asd` and `package.lisp` to include Coalton dependencies and setup.
+5. **Error Handling:** Design a type-safe error handling system using Coalton's `Either` or similar types instead of dynamic condition handling.
+6. **Performance Considerations:** Analyze any performance implications of the Coalton runtime and suggest optimizations.
+7. **Roadmap:** Provide a step-by-step migration plan that maintains functionality at each stage while gradually introducing type safety.
+
+### Key Coalton Advantages to Leverage:
+- Algebraic data types for AST representation
+- Pattern matching for code transformation rules
+- Type classes for extensible emitter registry
+- Compile-time guarantee of exhaustiveness in pattern matching
+- Strong typing for preventing invalid Rust code generation
+EOF
+} | xclip -selection clipboard
+
+echo "Codebase, reference materials, and Coalton porting prompt have been copied to the clipboard."
