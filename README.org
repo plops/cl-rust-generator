@@ -1,84 +1,180 @@
-* Goal
+# Improved README for cl-rust-generator
 
-Common Lisp package that converts S-expressions to source code of the Rust programming language.
+## Overview
 
+`cl-rust-generator` is a Common Lisp metaprogramming system that generates Rust source code from S-expressions. The system translates Lisp-based syntax trees into syntactically correct, type-safe Rust code, enabling developers to write Rust programs using Lisp's symbolic programming capabilities while maintaining Rust's type system, ownership model, and idiomatic patterns.  
 
-* Examples
+## Supported Lisp Expressions
 
-** 01_gcd (finished)
+The following table lists all supported Common Lisp expressions and their corresponding Rust translations:
 
-from book, minimal
+### Basic Operations
 
-** 02_webgcd (finished)
+| Lisp Expression | Rust Output | Example |
+|----------------|-------------|---------|
+| `(+ a b)` | `(a + b)` | `(emit-rs :code '(+ 1 2))` → `(1 + 2)`   |
+| `(- a b)` | `(a - b)` | `(emit-rs :code '(- 5 3))` → `(5 - 3)`   |
+| `(* a b)` | `(a * b)` | `(emit-rs :code '(* 2 3))` → `((2) * (3))`   |
+| `(/ a b)` | `(a / b)` | `(emit-rs :code '(/ 10 2))` → `((10) / (2))`   |
 
-from book
+### Comparison and Logical Operations
 
-** 03_glium (aborted)
+| Lisp Expression | Rust Output | Example |
+|----------------|-------------|---------|
+| `(= a b)` | `a=b` | `(emit-rs :code '(= x 5))` → `x=5`   |
+| `(!= a b)` | `(a)!=(b)` | `(emit-rs :code '(!= x 5))` → `(x)!=(5)`   |
+| `(== a b)` | `(a)==(b)` | `(emit-rs :code '(== x 5))` → `(x)==(5)`   |
+| `(< a b)` | `a<b` | `(emit-rs :code '(< 3 5))` → `3<5`   |
+| `(and a b)` | `(a)&&(b)` | `(emit-rs :code '(and true false))` → `(true)&&(false)`   |
+| `(or a b)` | `(a)||(b)` | `(emit-rs :code '(or true false))` → `(true)||(false)`   |
 
-opengl binding. apparantly, original developer seems to have abandoned
-the approach in 2016. people still seem to use it. i just want to just
-get up and running with an immediate mode gui. this looks too
-cumbersome.
+### Control Flow
 
-i tried this approach in cl-rust-adalm-pluto and couldn't figure out
-how to call glTexSubImage2D to update a waterfall diagram
-texture. then i wrote the 08_glfw example which seems to expose opengl
-the way i know it.
+| Lisp Expression | Rust Output | Example |
+|----------------|-------------|---------|
+| `(if condition true-branch false-branch)` | `if condition { true-branch } else { false-branch }` | `(emit-rs :code '(if (> x 0) (return x) (return 0)))`   |
+| `(when condition body...)` | `if condition { body... }` | `(emit-rs :code '(when (> x 0) (return x)))`   |
+| `(unless condition body...)` | `if (!condition) { body... }` | `(emit-rs :code '(unless (> x 0) (return 0)))`   |
+| `(while condition body...)` | `while (condition) { body... }` | `(emit-rs :code '(while (> i 0) (decf i)))`   |
+| `(for (item collection) body...)` | `for item in collection { body... }` | `(emit-rs :code '(for (x vec) (print x)))`   |
+| `(case keyform (key body...) (t default-body...))` | `match keyform { key => { body... }, _ => { default-body... } }` | `(emit-rs :code '(case x (1 (print "one")) (t (print "other"))))`   |
 
-** 04_azul (aborted)
+### Variable Declarations and Bindings
 
-- perhaps this is easier to use for a 2d gui
-- too many dependencies
+| Lisp Expression | Rust Output | Example |
+|----------------|-------------|---------|
+| `(let ((var value)) body...)` | `let var = value; body...` | `(emit-rs :code '(let ((x 5)) (print x)))`   |
+| `(let* ((var value)) body...)` | `let mut var = value; body...` | `(emit-rs :code '(let* ((x 5)) (setf x 10)))`   |
+| `(setf var value)` | `var = value;` | `(emit-rs :code '(setf x 10))`   |
 
-** 05_imgui (aborted)
+### Function Definitions
 
-- shows imgui window
-- to cumbersome without learning more glium
+| Lisp Expression | Rust Output | Example |
+|----------------|-------------|---------|
+| `(defun name (args) (declare (type type arg)) (declare (values return-type)) body...)` | `fn name(arg: type) -> return_type { body... }` | `(emit-rs :code '(defun gcd (n m) (declare (type u64 n m) (values u64)) (return n)))`   |
+| `(lambda (args) body...)` | `|args| { body... }` | `(emit-rs :code '(lambda (x) (* x 2)))`   |
 
-** 06_parallel_text (finished)
+### Data Structures
 
-- example from book
-- shows how to generate a multi file projects
-- also contains a minimal firefox webextension to download a bunch of text file links
+| Lisp Expression | Rust Output | Example |
+|----------------|-------------|---------|
+| `(defstruct0 name (slot1 type1) (slot2 type2))` | `struct name { slot1: type1, slot2: type2, }` | `(emit-rs :code '(defstruct0 Point (x f64) (y f64)))`   |
+| `(make-instance Point :x 1.0 :y 2.0)` | `Point { x: 1.0, y: 2.0 }` | `(emit-rs :code '(make-instance Point :x 1.0 :y 2.0))`   |
+| `(aref array index)` | `array[index]` | `(emit-rs :code '(aref arr 0))`   |
 
-** 07_glutin_gl (aborted)
+### Special Forms and Modules
 
-- i'm not sure if i want to use glutin or glfw
-- glutin isn't well documented compared to glfw
-- many glutin examples seem to show a different interface (e.g. EventsLoop)
-- i will use glfw for now
-- pulls in a lot of crates
+| Lisp Expression | Rust Output | Example |
+|----------------|-------------|---------|
+| `(use ((std io)))` | `use std::io;` | `(emit-rs :code '(use ((std io))))`   |
+| `(mod module1 module2)` | `mod module1; mod module2;` | `(emit-rs :code '(mod utils main))`   |
+| `(unsafe body...)` | `unsafe { body... }` | `(emit-rs :code '(unsafe (setf x 5)))`   |
+| `(extern body...)` | `extern { body... }` | `(emit-rs :code '(extern (defun printf (s string))))`   |
 
-** 08_glfw (finished)
+### String and Character Operations
 
-- this still pulls in a lot of crates (~70) but it seems to work well enough and is close to glfw docs
-- i also managed to compile it in windows (that needed microsoft builder tools, rust and cmake, though)
+| Lisp Expression | Rust Output | Example |
+|----------------|-------------|---------|
+| `(string "hello")` | `"hello"` | `(emit-rs :code '(string "hello"))`   |
+| `(char 'a')` | `'a'` | `(emit-rs :code '(char 'a'))`   |
+| `(hex 255)` | `0xff` | `(emit-rs :code '(hex 255))`   |
 
+## Examples
 
+### Basic Function Example
 
-** 09_wasm
-Simple wasm example
-** 10_wasm_webgl
-Wasm webgl example (only draws a triangle, no animation or event handling)
-** 11_cuda 
-Add two arrays with rustacuda
-** 12_imgui_wgpu (api has not stabilized)
-webgpu is suppossed to replace webgl in browser.
-apparently, firefox only supports compute right now. the api is not stable yet. 
+```lisp
+(defun gcd (n m)
+  (declare (type u64 n m)
+           (values u64))
+  (if (= m 0)
+      (return n)
+      (gcd m (% n m))))
+```
 
+Generates:
+```rust
+fn gcd(n: u64, m: u64) -> u64 {
+    if m == 0 {
+        return n;
+    }
+    gcd(m, (n % m))
+}
+```
 
-* Emacs config
+### Struct Example
 
-for viewing the generated code
+```lisp
+(defstruct0 Point
+  (x f64)
+  (y f64))
 
-- Install rust-mode and eglot with Melpa
-- rustup component add rls --toolchain stable-x86_64-unknown-linux-gnu
-- start company-mode, rust-mode and eglot-mode
+(defun distance (p1 p2)
+  (declare (type Point p1 p2)
+           (values f64))
+  (let ((dx (- (dot p1 x) (dot p2 x)))
+        (dy (- (dot p1 y) (dot p2 y))))
+    (declare (type f64 dx dy))
+    (return (sqrt (+ (* dx dx) (* dy dy))))))
+```
 
-FIXME: completion not working
+Generates:
+```rust
+struct Point {
+    x: f64,
+    y: f64,
+}
 
-* Notes
+fn distance(p1: Point, p2: Point) -> f64 {
+    let dx = (p1.x - p2.x);
+    let dy = (p1.y - p2.y);
+    return sqrt(((dx * dx) + (dy * dy)));
+}
+```
 
-- when calling C/C++ unwinding is undefined behaviour, use catch_unwind
-- -C panic=abort reduces file size because unwinding code is not needed
-- align https://doc.rust-lang.org/edition-guide/rust-2018/data-types/choosing-alignment-with-the-repr-attribute.html
+## Installation and Usage
+
+1. Install the ASDF system:
+   ```lisp
+   (ql:quickload :cl-rust-generator)
+   ```
+
+2. Use the `emit-rs` function to generate Rust code:
+   ```lisp
+   (emit-rs :code '(defun main () (declare (values i32)) (return 0)))
+   ```
+
+3. Write generated code to files:
+   ```lisp
+   (write-source "src/main.rs" 
+     (emit-rs :code '(defun main () (declare (values i32)) (return 0))))
+   ```
+
+## Project Structure
+
+The system consists of:
+- `rs.lisp` - Core translation engine with `emit-rs` function  
+- `cl-rust-generator.asd` - ASDF system definition
+- `examples/` - Collection of example projects demonstrating various patterns
+
+## Example Projects
+
+| Example | Description | Status |
+|---------|-------------|--------|
+| `01_gcd` | Basic GCD function with tests | Finished   |
+| `02_webgcd` | Web server with GCD calculation | Finished   |
+| `06_parallel_text` | Multi-file project with threading | Finished   |
+| `08_glfw` | GLFW windowing with ImGui | Finished   |
+| `09_wasm` | WebAssembly example | Basic   |
+| `11_cuda` | CUDA GPU computing | Basic   |
+
+## Notes
+
+- The system uses hash-based change detection to avoid unnecessary file rewrites  
+- Generated code is automatically formatted using `rustfmt`  
+- Type declarations are processed through `consume-declare` function for type safety  
+- The readtable case is inverted to preserve Rust naming conventions  
+
+Wiki pages you might want to explore:
+- [Overview (plops/cl-rust-generator)](/wiki/plops/cl-rust-generator#1)
+
