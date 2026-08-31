@@ -1,11 +1,13 @@
-#-nil
-(progn (ql:quickload "alexandria")
-       (defpackage :cl-rust-generator
-	 (:use :cl
-	       :alexandria)
-	 (:export
-	  #:write-source
-	  #:emit-rs)))
+;; When rs.lisp is loaded through cl-rust-generator.asd, package.lisp has
+;; already created the package and ASDF has already pulled in alexandria.  The
+;; block below only fires when somebody loads this file directly from a REPL.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (unless (find-package :cl-rust-generator)
+    (uiop:symbol-call :ql :quickload "alexandria")
+    (eval (read-from-string
+	   "(defpackage :cl-rust-generator
+              (:use :cl :alexandria)
+              (:export #:write-source #:emit-rs #:*rustfmt-program* #:*rustfmt-arguments*))"))))
 
 
 (declaim (optimize (speed 0)
@@ -17,30 +19,61 @@
 
 (setf (readtable-case *readtable*) :invert)
 
-(defparameter *file-hashes* (make-hash-table))
+(defparameter *file-hashes* (make-hash-table :test #'equal))
+
+(defparameter *rustfmt-program* "rustfmt"
+  "Name (or absolute path) of the program used to format the generated Rust
+code.  It is looked up in PATH.  Set to NIL to disable formatting.")
+
+(defparameter *rustfmt-arguments* nil
+  "Extra command line arguments handed to *RUSTFMT-PROGRAM*, e.g.
+'(\"--edition\" \"2018\").  rustfmt defaults to edition 2015.")
+
+(defun run-rustfmt (filename)
+  "Format FILENAME in place with *RUSTFMT-PROGRAM*.  Missing or failing rustfmt
+is reported as a warning; it never aborts code generation.  Returns the exit
+code, or NIL when rustfmt could not be started."
+  (when *rustfmt-program*
+    (handler-case
+	(multiple-value-bind (out err code)
+	    (uiop:run-program (append (list *rustfmt-program*)
+				      *rustfmt-arguments*
+				      (list (namestring filename)))
+			      :output nil
+			      :error-output :string
+			      :ignore-error-status t)
+	  (declare (ignorable out))
+	  (unless (eql 0 code)
+	    (warn "~a failed on ~a (exit ~a): ~a" *rustfmt-program* filename code err))
+	  code)
+      (error (e)
+	(warn "could not run ~a: ~a" *rustfmt-program* e)
+	nil))))
 
 (defun write-source (name code &optional (dir (user-homedir-pathname))
 				 ignore-hash)
+  "Emit CODE as Rust and write it to NAME (relative to DIR).  The file is only
+touched when the generated text actually changed, then it is run through
+rustfmt.  Returns the pathname that was written, or NIL when nothing changed."
   (let* ((fn (merge-pathnames (format nil "~a" name)
 			      dir))
-	(code-str (emit-rs :code code))
-	(fn-hash (sxhash fn))
+	 (code-str (emit-rs :code code))
+	 (fn-key (namestring fn))
 	 (code-hash (sxhash code-str)))
-    (multiple-value-bind (old-code-hash exists) (gethash fn-hash *file-hashes*)
+    (multiple-value-bind (old-code-hash exists) (gethash fn-key *file-hashes*)
       (when (or (not exists) ignore-hash (/= code-hash old-code-hash)
 		(not (probe-file fn)))
-	;; store the sxhash of the c source in the hash table
-	;; *file-hashes* with the key formed by the sxhash of the full
-	;; pathname
-	(setf (gethash fn-hash *file-hashes*) code-hash)
+	;; store the sxhash of the rust source in the hash table
+	;; *file-hashes* with the full pathname as key
+	(setf (gethash fn-key *file-hashes*) code-hash)
+	(ensure-directories-exist fn)
 	(with-open-file (s fn
 			   :direction :output
 			   :if-exists :supersede
 			   :if-does-not-exist :create)
 	  (write-sequence code-str s))
-
-	(sb-ext:run-program "/home/martin/.cargo/bin/rustfmt"
-			    (list (namestring fn)))))))
+	(run-rustfmt fn)
+	fn))))
 
 ;; http://clhs.lisp.se/Body/s_declar.htm
 ;; http://clhs.lisp.se/Body/d_type.htm
@@ -160,7 +193,7 @@ entry return-values contains a list of return values"
 				      (unless (eq #\& (aref (format nil "~a" type) 0))
 					(push type types)))
 				 (setf (gethash 'return-values env) (reverse types)))))
-			    (t (break "unknown declaration: ~a" declaration))))
+			    (t (error "unknown declaration: ~a" declaration))))
 		     (progn
 		       (push e new-body)
 		       (setf looking-p nil)))
@@ -171,16 +204,19 @@ entry return-values contains a list of return values"
     (values (reverse new-body) env)))
 
 (defun remove-ampersand (rname)
-  (let* ((sname (if (listp rname)
-		    rname
-		    (format nil "~a" rname)) ;(format nil "~a" rname)
-	   )
-	 (name sname ;(remove #\& sname)
-	   )
-	 ;(ref  (< 0 (count #\& sname)))
-	 )
-    (values name nil ;ref
-	    )))
+  "Split a leading & off a variable or parameter name.  Returns (values NAME
+REFERENCE-P) where NAME is a string without any & and REFERENCE-P tells whether
+the original name asked for a Rust reference.  Lists (array type specifiers) are
+passed through unchanged.
+
+  (remove-ampersand '&x) => \"x\", T
+  (remove-ampersand 'x)  => \"x\", NIL"
+  (if (listp rname)
+      (values rname nil)
+      (let* ((sname (format nil "~a" rname))
+	     (ref (< 0 (count #\& sname)))
+	     (name (remove #\& sname)))
+	(values name ref))))
 
 (defun lookup-type (rname &key env)
   "get the type of a variable from an environment"
@@ -192,6 +228,16 @@ entry return-values contains a list of return values"
     el))
 
 
+(defun rust-array-type (element-type dims emit)
+  "Render a (possibly multi dimensional) Rust array type.
+  (rust-array-type 'i32 '(4) emit)   => \"[i32; 4]\"
+  (rust-array-type 'i32 '(2 3) emit) => \"[[i32; 3]; 2]\""
+  (if (null dims)
+      (funcall emit element-type)
+      (format nil "[~a; ~a]"
+	      (rust-array-type element-type (cdr dims) emit)
+	      (funcall emit (car dims)))))
+
 (defun variable-declaration (&key name env emit mutable-default)
   (let* ((name (remove-ampersand name))
 	 (decl-m (lookup-type name :env env))
@@ -200,24 +246,46 @@ entry return-values contains a list of return values"
 	 (m (if decl-m
 		(type-definition-mutable decl-m)
 		mutable-default)))
-    ;(format t "~a" (list decl-imm type imm))
     (with-output-to-string (s)
       (when m
 	(format s "mut "))
       (if (listp type)
 	  (if (null type)
 	      (format s "~a" (funcall emit name))
-	      (progn
-	       ;; array
-	       (destructuring-bind (array_ element-type &rest dims) type
-		 (assert (eq array_ 'array))
-		 (format s "~a : [~a ; ~a]"
-			 (funcall emit name)
-			 element-type
-			 (mapcar emit dims)))))
+	      ;; array
+	      (destructuring-bind (array_ element-type &rest dims) type
+		(assert (eq array_ 'array))
+		(format s "~a: ~a"
+			(funcall emit name)
+			(rust-array-type element-type dims emit))))
 	 (format s "~a~@[: ~a~]"
 		 (funcall emit name)
 		 (funcall emit type))))))
+
+(defun render-parameter (rp env emit)
+  "Render one entry of a DEFUN/LAMBDA lambda list as a Rust parameter.  When no
+type declaration is known the entry is emitted verbatim, which is the escape
+hatch used all over the examples for things like \"&mut self\" or
+\"text: &str\".
+
+Mutability is placed the way Rust wants it: a mutable binding of an owned value
+is `mut x: T', a mutable reference is `x: &mut T'."
+  (multiple-value-bind (p) (remove-ampersand rp)
+    (let ((decl-m (lookup-type p :env env)))
+      (if decl-m
+	  (let ((declaration (type-definition-declaration decl-m))
+		(m (type-definition-mutable decl-m))
+		(ref (type-definition-reference decl-m)))
+	    (with-output-to-string (s)
+	      (when (and m (not ref))
+		(format s "mut "))
+	      (format s "~a: " (funcall emit p))
+	      (when ref
+		(format s "&"))
+	      (when (and m ref)
+		(format s "mut "))
+	      (format s "~a" (funcall emit declaration))))
+	  (funcall emit rp)))))
 
 
 (defun parse-let (code emit &key (mutable-default nil))
@@ -229,132 +297,86 @@ entry return-values contains a list of return values"
 		(funcall emit
 			`(do0
 			  ,@(loop for decl in decls collect
-				  (destructuring-bind (name &optional value) decl
-				    (format nil "let ~a ~@[ = ~a~];"
-					    (let ((l (variable-declaration :name name :env env :emit emit
-									   :mutable-default mutable-default)))
-					      (if (listp l)
-						  (funcall #'emit l)
-						  l))
-					       (when value
-						   (funcall emit value))))
-				 #+nil
-				 (if (listp decl) ;; split into name and initform
-				     (destructuring-bind (name &optional value) decl
-				       (format nil "let ~a ~@[ = ~a~];"
-					       (variable-declaration :name name :env env :emit emit)
-					       (when value
-						   (funcall emit value))))
-				     (format nil "~a;"
-					     (variable-declaration :name decl :env env :emit emit))))
+				  (destructuring-bind (name &optional value)
+				      (if (listp decl) decl (list decl))
+				    (format nil "let ~a~@[ = ~a~];"
+					    (variable-declaration
+					     :name name :env env :emit emit
+					     :mutable-default mutable-default)
+					    (when value
+					      (funcall emit value)))))
 			  ,@body)))))))
 
 (defun parse-defun (code emit &key header-only)
   ;; defun function-name lambda-list [declaration*] form*
   (destructuring-bind (name lambda-list &rest body) (cdr code)
-    (multiple-value-bind (body env) (consume-declare body) ;; py
-      ;(format t "parse-defun:env = ~a~%" `(:env ,env :hash ,(loop for key being the hash-keys using (hash-value v) of env collect `(,key ,v))))
+    (multiple-value-bind (body env) (consume-declare body)
       (let ((req-param lambda-list))
-	;multiple-value-bind
-	#+nil(req-param opt-param res-param
-		   key-param other-key-p
-		   aux-param key-exist-p)
-	#+nil(parse-ordinary-lambda-list lambda-list)
-	(declare (ignorable req-param opt-param res-param
-			    key-param other-key-p aux-param key-exist-p))
 	(with-output-to-string (s)
-	  (format s "fn ~a ~a~@[ -> ~a~]"
+	  (format s "fn ~a~a~@[ -> ~a~]"
 		  (funcall emit name)
 		  (funcall emit `(paren
 				  ,@(loop for rp in req-param collect
-					 (let* ((p (remove-ampersand rp))
-						(decl-m (lookup-type p :env env))
-						(declaration (when decl-m (type-definition-declaration decl-m)))
-						(m (when decl-m (type-definition-immutable decl-m)))
-						(ref (when decl-m (type-definition-reference decl-m))))
-					   #+nil (format t "~a" `(:p ,p :decl-imm ,decl-imm :decl ,declaration :imm ,imm :env
-								     ,(loop for key being the hash-keys using (hash-value v) of env collect `(,key ,v))))
-					   (if decl-m
-					       (with-output-to-string (s)
-						 (format s "~a: " p)
-						 (when ref
-						   (format s "&" ))
-						 (when m
-						   (format s "mut "))
-						 (format s "~a" declaration)
-						 )
-					       rp)))))
+					  (render-parameter rp env emit))))
 		  (let ((r (gethash 'return-values env)))
 		    (if (< 1 (length r))
 			(funcall emit `(paren ,@r))
 			(when (car r)
 			 (funcall emit (car r))))))
-	  #+nil (format s "~a ~a ~a~:[~;;~]"
-			(let ((r (gethash 'return-values env)))
-			  (if (< 1 (length r))
-					;(funcall emit `(paren ,@r))
-			      (break "multiple return values unsupported: ~a"
-				     r)
-			      (if (car r)
-				  (car r)
-				  "void")))
-			name
-			(funcall emit `(paren
-					,@(loop for p in req-param collect
-					       (format nil "~a ~a"
-						       (let ((type (gethash p env)))
-							 (if type
-							     type
-							     (break "can't find type for ~a in defun"
-								    p)))
-						       p))))
-			header-only)
 	  (unless header-only
-	    (format s "~a" (funcall emit `(progn ,@body)))))))))
+	    (format s " ~a" (funcall emit `(progn ,@body)))))))))
 
 (defun parse-lambda (code emit)
   ;;  lambda lambda-list [declaration*] form*
   ;; no return value:
   ;;  |a, b| {body}
-  ;; with (declaration (values float)):
-  ;;  [] (int a, float b) -> float { body }
-  ;; currently no support for captures (which would be placed into the first set of brackets)
+  ;; with (declare (values f32)):
+  ;;  |a: i32, b: f32| -> f32 { body }
+  ;; captures are not modelled; use the `move' escape hatch by writing the
+  ;; whole closure head as a string if you need it.
   (destructuring-bind (lambda-list &rest body) (cdr code)
     (multiple-value-bind (body env) (consume-declare body)
       (let ((req-param lambda-list))
-	;multiple-value-bind
-	#+nil (req-param opt-param res-param
-		   key-param other-key-p
-		   aux-param key-exist-p)
-	;(parse-ordinary-lambda-list lambda-list)
-	(declare (ignorable req-param opt-param res-param
-			    key-param other-key-p aux-param key-exist-p))
 	(with-output-to-string (s)
-	  (format s "|~a|~@[-> ~a ~]"
+	  (format s "|~a|~@[ -> ~a~]"
 		  (funcall emit `(comma
-				  ,@(loop for p in req-param collect
-					 (format nil "~a ~a"
-						 (let ((type (gethash p env)))
-						   (if type
-						       type
-						       "" #+nil
-						       (break "can't find type for ~a in lambda"
-							      p)))
-						 p
-						 ))))
+				  ,@(loop for rp in req-param collect
+					  (render-parameter rp env emit))))
 		  (let ((r (gethash 'return-values env)))
 		    (if (< 1 (length r))
 			(funcall emit `(paren ,@r))
-			(car r))))
-	  (format s "~a" (funcall emit `(progn ,@body))))))))
+			(when (car r)
+			  (funcall emit (car r))))))
+	  (format s " ~a" (funcall emit `(progn ,@body))))))))
 
 
+
+
+
+(defun clean-float-string (s)
+  "Turn the output of ~G into something the Rust lexer accepts.  ~G pads its
+result with blanks and happily produces \"0.\" or \".5\", none of which belongs
+into generated source."
+  (let ((s (string-trim '(#\Space #\Tab #\Newline) s)))
+    (cond
+      ;; "1." -> "1.0"
+      ((and (< 0 (length s))
+	    (char= #\. (aref s (1- (length s)))))
+       (concatenate 'string s "0"))
+      ;; "1.e+10" -> "1.0e+10"
+      ((search ".e" s)
+       (let ((p (search ".e" s)))
+	 (concatenate 'string (subseq s 0 (1+ p)) "0" (subseq s (1+ p)))))
+      ;; ".5" -> "0.5"
+      ((and (< 0 (length s)) (char= #\. (aref s 0)))
+       (concatenate 'string "0" s))
+      ;; "1e10" (no dot at all) -> keep, Rust accepts 1e10
+      (t s))))
 
 (defun print-sufficient-digits-f32 (f)
   "print a single floating point number as a string with a given nr. of
   digits. parse it again and increase nr. of digits until the same bit
   pattern."
-  
   (let* ((a f)
 	 (digits 1)
 	 (b (- a 1)))
@@ -363,19 +385,9 @@ entry return-values contains a list of return values"
 		     (/ (abs (- a b))
 		       (abs a))
 		     ) do
-	  ;(format t "f32 ~a~%" (list f digits b))
 	  (setf b (read-from-string (format nil "~,vG" digits a)))
 	  (incf digits)))
-    (format nil "~,vG" digits a))
-  #+nil
-  (let* ((ff (coerce f 'single-float))
-         (s (format nil "~,6F" ff)))
-    #+nil   (assert (= 0s0 (- ff
-                              (read-from-string s))))
-    (assert (< (abs (- ff
-                       (read-from-string s)))
-               1d-4))
-   (format nil "~a" s)))
+    (clean-float-string (format nil "~,vG" digits a))))
 
 
 
@@ -395,29 +407,61 @@ entry return-values contains a list of return values"
 		     ) do
 	   (let ((str (format nil "~20,vG"  digits a))
 		 (*read-default-float-format* 'double-float))
-	     ;(format t "f64 ~a~%" (list f digits b str))
 	     (setf b (read-from-string str)))
-					;(format t "~a" b)
 	   (incf digits)))
-    (format nil "~,v,,,,,'eG" digits a))
+    (clean-float-string (format nil "~,v,,,,,'eG" digits a))))
 
-  #+nil
-  (let* ((ff (coerce f 'double-float))
-	 (s (format nil "~,12F" ff)))
-    #+nil (assert (= 0d0 (- ff
-			    (read-from-string s))))
-    (assert (< (abs (- ff
-		       (read-from-string s)))
-	       1d-12))
-    (substitute #\e #\d s)))
 			  
+(defun top-level-comma-p (s)
+  "True when S contains a comma at paren/bracket/brace depth 0.  Used to protect
+tuple and argument lists from STRIP-OUTER-PARENS."
+  (let ((depth 0))
+    (loop for c across s
+	  do (case c
+	       ((#\( #\[ #\{) (incf depth))
+	       ((#\) #\] #\}) (decf depth))
+	       (#\, (when (<= depth 0) (return t))))
+	  finally (return nil))))
+
+(defun strip-outer-parens (s)
+  "Remove one layer of enclosing parentheses from S if (and only if) the first
+character is an opening paren that matches the last character and the content is
+not a comma separated list.  Used where rustc's unused_parens lint would
+otherwise complain about the parentheses that the operator forms add around
+their result: if/while conditions, match subjects, for iterators, return values
+and the right hand side of an assignment.
+
+The scan is deliberately conservative: a paren inside a string literal makes the
+depth count bail out early and S is returned unchanged.  A top level comma keeps
+tuples such as (a, b) intact."
+  (if (and (< 1 (length s))
+	   (char= #\( (aref s 0))
+	   (char= #\) (aref s (1- (length s))))
+	   (let ((depth 0))
+	     (loop for i below (length s)
+		   do (case (aref s i)
+			(#\( (incf depth))
+			(#\) (decf depth)))
+		   when (and (<= depth 0) (< i (1- (length s))))
+		     do (return nil)
+		   finally (return (= depth 0))))
+	   (not (top-level-comma-p (subseq s 1 (1- (length s))))))
+      (subseq s 1 (1- (length s)))
+      s))
+
 (progn
-  (defparameter *keywords-without-semicolon* `(defun if for include
-						     dotimes while case do0 do0-no-final-semicolon progn case
-						     space defstruct0 impl use mod
-						     extern unsafe macroexpand space let let*))
+  (defparameter *keywords-without-semicolon*
+    `(;; forms that expand into a Rust item or a block expression used as a
+      ;; statement.  Rust does not want (and clippy complains about) a
+      ;; semicolon after those.
+      defun defstruct0 deftrait impl use mod
+      if when unless case for dotimes while loop
+      progn do0 do0-no-final-semicolon
+      extern unsafe macroexpand space let let*)
+    "Heads of forms that must not get a semicolon appended by DO0.")
   (defun emit-rs (&key code (str nil)  (level 0) (hook-defun nil))
     "evaluate s-expressions in code, emit a string. if hook-defun is not nil, hook-defun will be called with every function definition. this functionality is intended to collect function declarations."
+    (declare (ignorable str))
     (flet ((emit (code &optional (dl 0))
 	     "change the indentation level. this is used in do"
 	     (emit-rs :code code :level (+ dl level) :hook-defun hook-defun)))
@@ -491,10 +535,6 @@ entry return-values contains a list of return values"
 						    (format nil "~a"
 							    (emit (elt params i)))
 						    (incf i)))))))))))
-		  (new
-		   ;; new arg
-		   (let ((arg (cadr code)))
-		     (format nil "new ~a" (emit arg))))
 		  (indent
 		   ;; indent form
 		   (format nil "~{~a~}~a"
@@ -583,59 +623,48 @@ entry return-values contains a list of return values"
 								   *keywords-without-semicolon*))
 						      (= count (- (length args) 1)))
 						  "" 
-						  (format nil "; // ~a" count))))
+						  ";")))
 				     (incf count)))
 			       args)))))
-		  (include (let ((args (cdr code)))
-			     ;; include {name}*
-			     ;; (include <stdio.h>)   => #include <stdio.h>
-			     ;; (include interface.h) => #include "interface.h"
-			     (with-output-to-string (s)
-			       (loop for e in args do
-				  ;; emit string if first character is not <
-				    (format s "~&#include ~a"
-					    (emit (if (eq #\< (aref (format nil "~a" e) 0))
-						      e
-						      `(string ,e))))))))
 		  (progn (with-output-to-string (s)
 			   ;; progn {form}*
 			   ;; like do but surrounds forms with braces.
 			   ;; don't place semicolon after last statement (implicit return in rust)
-			   (format s "{~{~&~a~}~&}" (mapcar #'(lambda (x) (emit `(indent (do0-no-final-semicolon ,x)) 1)) (cdr code)))))
+			   ;; NOTE: all forms must go through ONE
+			   ;; do0-no-final-semicolon.  Wrapping every form
+			   ;; separately (as an earlier version did) makes every
+			   ;; form the "last" one and drops all semicolons.
+			   (format s "{~&~a~&}"
+				   (emit `(do0-no-final-semicolon ,@(cdr code)) 1))))
 		  (block (with-output-to-string (s)
-			   ;; progn {form}*
-			   ;; like do but surrounds forms with braces.
-			   ;; like progn but semicolon after last statement
-			   ;; equivalent to (progn (bla) "()")
+			   ;; block {form}*
+			   ;; like progn but with a semicolon after the last
+			   ;; statement, i.e. the block evaluates to ().
 			   ;; https://doc.rust-lang.org/reference/expressions/block-expr.html
-			   (format s "{~{~&~a~}~&}" (mapcar #'(lambda (x) (emit `(indent (do0 ,x)) 1)) (cdr code)))))
+			   (format s "{~&~a~&}"
+				   (emit `(do0 ,@(cdr code)) 1))))
 		  (do (with-output-to-string (s)
 			;; do {form}*
 			;; print each form on a new line with one more indentation.
-			(format s "~{~&~a~}" (mapcar #'(lambda (x) (emit `(indent (do0 ,x)) 1)) (cdr code)))))
-		  (defclass
-			;; defclass class-name ({superclass-name}*) ({slot-specifier}*) [[class-option]]
-			;; class TA : public Faculty, public Student { ... } 
-			(destructuring-bind (name parents &rest body) (cdr code)
-			  (format nil "class ~a ~@[: ~a~] ~a"
-				  (emit name)
-				  (when parents
-				    (emit `(comma ,parents)))
-				  (emit `(progn ,@body))
-				  )))
-		  (protected (format nil "protected ~a" (emit (cadr code))))
-		  (public (format nil "public ~a" (emit (cadr code))))
+			(format s "~a" (emit `(do0 ,@(cdr code)) 1))))
 		  (defun
 		      (prog1
 			  (parse-defun code #'emit)
 			(when hook-defun
 			  (funcall hook-defun (parse-defun code #'emit :header-only t)))))
-		  (return (format nil "return ~a" (emit (car (cdr code)))))
-		  (throw (format nil "throw ~a" (emit (car (cdr code)))))
-		  (cast (destructuring-bind (type value) (cdr code)
-			  (format nil "(~a) ~a"
-				  (emit type)
-				  (emit value))))
+		  (return (format nil "return ~a"
+				  (strip-outer-parens (emit (car (cdr code))))))
+		  (break
+		   ;; break [value]
+		   (let ((args (cdr code)))
+		     (format nil "break~@[ ~a~]" (when args (emit (car args))))))
+		  (continue "continue")
+		  (cast
+		   ;; cast value type  ->  (value as type)
+		   ;; deprecated alias of COERCE; the C-style (cast type value)
+		   ;; that this used to emit is not valid Rust.
+		   (destructuring-bind (value type) (cdr code)
+		     (format nil "(~a as ~a)" (emit value) (emit type))))
 		  (slice (let ((args (cdr code)))
 			       (format nil "(~{~a~^..~})" (mapcar #'emit args))))
 		  (let (parse-let code #'emit :mutable-default nil))
@@ -650,9 +679,13 @@ entry return-values contains a list of return values"
 				       (let ((a (elt args i))
 					     (b (elt args (+ 1 i))))
 					 `(= ,a ,b))))))))
-		  (not (format nil "!(~a)" (emit (car (cdr code)))))
-		  (deref (format nil "*(~a)" (emit (car (cdr code)))))
-		  (ref (format nil "&(~a)" (emit (car (cdr code)))))
+		  ;; NOTE: the unary prefix operators wrap the WHOLE expression in
+		  ;; parentheses, not just their operand.  `*(p).x' parses as
+		  ;; `*((p).x)' in Rust, which is not what (dot (deref p) x) means.
+		  (not (format nil "(!~a)" (emit (car (cdr code)))))
+		  (deref (format nil "(*~a)" (emit (car (cdr code)))))
+		  (ref (format nil "(&~a)" (emit (car (cdr code)))))
+		  (ref-mut (format nil "(&mut ~a)" (emit (car (cdr code)))))
 		  (+ (let ((args (cdr code)))
 		       ;; + {summands}*
 		       (format nil "(~{~a~^+~})" (mapcar #'emit args))))
@@ -683,64 +716,83 @@ entry return-values contains a list of return values"
 			 (format nil "(~{(~a)~^&&~})" (mapcar #'emit args))))
 		  (= (destructuring-bind (a b) (cdr code)
 		       ;; = pair
-		       (format nil "~a=~a" (emit a) (emit b))))
+		       (format nil "~a=~a" (emit a)
+			       (strip-outer-parens (emit b)))))
 		  (/= (destructuring-bind (a b) (cdr code)
+			;; NOTE: this is division-assignment (a /= b), NOT the
+			;; Common Lisp "not equal".  Use != for a comparison.
 			(format nil "~a/=(~a)" (emit a) (emit b))))
 		  (*= (destructuring-bind (a b) (cdr code)
 			(format nil "~a*=(~a)" (emit a) (emit b))))
 		  (^= (destructuring-bind (a b) (cdr code)
 			(format nil "(~a)^=(~a)" (emit a) (emit b))))
+		  ;; NOTE: binary operators parenthesise their RESULT as well as
+		  ;; their operands.  Without the outer pair
+		  ;;   (dot (% a b) c) -> (a)%(b).c
+		  ;; which Rust parses as (a)%((b).c), because `.' binds tighter
+		  ;; than any binary operator.  The redundant parentheses in
+		  ;; if/while conditions are removed again by STRIP-OUTER-PARENS.
 		  (<= (destructuring-bind (a b) (cdr code)
-			(format nil "(~a)<=(~a)" (emit a) (emit b))))
+			(format nil "((~a)<=(~a))" (emit a) (emit b))))
+		  (>= (destructuring-bind (a b) (cdr code)
+			(format nil "((~a)>=(~a))" (emit a) (emit b))))
 		  (!= (destructuring-bind (a b) (cdr code)
-			(format nil "(~a)!=(~a)" (emit a) (emit b))))
+			(format nil "((~a)!=(~a))" (emit a) (emit b))))
 		  (== (destructuring-bind (a b) (cdr code)
-			(format nil "(~a)==(~a)" (emit a) (emit b))))
+			(format nil "((~a)==(~a))" (emit a) (emit b))))
 		  (< (destructuring-bind (a b) (cdr code)
-		       (format nil "~a<~a" (emit a) (emit b))))
+		       (format nil "((~a)<(~a))" (emit a) (emit b))))
+		  (> (destructuring-bind (a b) (cdr code)
+		       (format nil "((~a)>(~a))" (emit a) (emit b))))
 		  (% (destructuring-bind (a b) (cdr code)
-		       (format nil "~a%~a" (emit a) (emit b))))
+		       (format nil "((~a)%(~a))" (emit a) (emit b))))
 		  (<< (destructuring-bind (a &rest rest) (cdr code)
-			(format nil "(~a)~{<<(~a)~}" (emit a) (mapcar #'emit rest))))
+			(format nil "((~a)~{<<(~a)~})" (emit a) (mapcar #'emit rest))))
 		  (>> (destructuring-bind (a &rest rest) (cdr code)
-			(format nil "(~a)~{>>(~a)~}" (emit a) (mapcar #'emit rest))))
+			(format nil "((~a)~{>>(~a)~})" (emit a) (mapcar #'emit rest))))
 		  #+nil (>> (destructuring-bind (a b) (cdr code)
 			      (format nil "(~a)>>~a" (emit a) (emit b))))
 		  (incf (destructuring-bind (a &optional (b 1)) (cdr code) ;; py
-			  (format nil "~a += ~a " (emit a) (emit b))
+			  (format nil "~a += ~a" (emit a) (emit b))
 			  ))
 		  (decf (destructuring-bind (a &optional (b 1)) (cdr code)
 			  (format nil "~a -= ~a" (emit a) (emit b))
 			  ))
 		  (byte  (format nil "b'~a'" (cadr code)))
 		  (string (format nil "\"~a\"" (cadr code)))
-		  (string-b (format nil "b\"~a\"" (cadr code))) 
-		  (string# (let* ((str (cadr code))
-				   (n-of-hash (count #\# str))
-				   (list-of-hash (loop for i upto n-of-hash collect "#")))
-			      (format nil "r~{~a~}\"~a\"~{~a~}"
-				      list-of-hash
-				      str
-				      list-of-hash)))
+		  (string-b (format nil "b\"~a\"" (cadr code)))
+		  ;; string# / string-r  ->  raw string literal r#"..."#
+		  ;; enough hashes are added so that the payload may itself
+		  ;; contain quote-hash sequences.
+		  ((string# string-r)
+		   (let* ((str (cadr code))
+			  (n-of-hash (count #\# str))
+			  (list-of-hash (loop for i upto n-of-hash collect "#")))
+		     (format nil "r~{~a~}\"~a\"~{~a~}"
+			     list-of-hash
+			     str
+			     list-of-hash)))
 		  (char (format nil "'~a'" (cadr code)))
 		  (hex (destructuring-bind (number) (cdr code)
 			 (format nil "0x~x" number)))
 		  (if (destructuring-bind (condition true-statement &optional false-statement) (cdr code)
 			(with-output-to-string (s)
-			  (format s "if  ~a  ~a"
-				  (emit condition)
+			  (format s "if ~a ~a"
+				  (strip-outer-parens (emit condition))
 				  (emit `(progn ,true-statement)))
 			  (when false-statement
 			    (format s " else ~a"
 				    (emit `(progn ,false-statement)))))))
 		  (when (destructuring-bind (condition &rest forms) (cdr code)
-			  (emit `(if ,condition
-				     (do0
-				      ,@forms)))))
+			  ;; like IF but with an implicit body block, so several
+			  ;; forms can be given
+			  (format nil "if ~a ~a"
+				  (strip-outer-parens (emit condition))
+				  (emit `(progn ,@forms)))))
 		  (unless (destructuring-bind (condition &rest forms) (cdr code)
-			    (emit `(if (not ,condition)
-				       (do0
-					,@forms)))))
+			    (format nil "if ~a ~a"
+				    (strip-outer-parens (emit `(not ,condition)))
+				    (emit `(progn ,@forms)))))
 		  (coerce (let ((args (cdr code)))
 			(destructuring-bind (name type) args
 			    (format nil "(~a as ~a)" (emit name) (emit type)))))
@@ -751,9 +803,6 @@ entry return-values contains a list of return values"
 		  (aref (destructuring-bind (name &rest indices) (cdr code)
 			  ;(format t "aref: ~a ~a~%" (emit name) (mapcar #'emit indices))
 			  (format nil "~a[~{~a~^,~}]" (emit name) (mapcar #'emit indices))))
-		  
-		  (-> (let ((args (cdr code)))
-			(format nil "~{~a~^->~}" (mapcar #'emit args))))
 		  
 		  (lambda (parse-lambda code #'emit))
 		  #+nil (unsafe (let ((args (cdr code)))
@@ -768,148 +817,95 @@ entry return-values contains a list of return values"
 					    ,@args)))))
 		  (case
 		      ;; case keyform {normal-clause}* [otherwise-clause]
-		      ;; normal-clause::= (keys form*) 
-		      ;; otherwise-clause::= (t form*) 
-		      
+		      ;; normal-clause::= (key form*)
+		      ;; otherwise-clause::= (t form*)
+		      ;; key may be a symbol (None), a list that emits a pattern
+		      ;; ((Some x) ...) or a string for anything else.
 		      (destructuring-bind (keyform &rest clauses)
 			  (cdr code)
 			(format
 			 nil "match ~a ~a"
-			 (emit keyform)
+			 (strip-outer-parens (emit keyform))
 			 (emit
 			  `(progn
 			     ,@(loop for c in clauses collect
 				    (destructuring-bind (key &rest forms) c
-				      (let ((code (if (listp forms)
-						      `(progn
-							 ,@(mapcar #'emit
-								   forms))
-						      (emit forms))))
-				       (if (eq key t)
-					   (format nil "_ => ~a,"
-						   (emit code))
-					   (format nil "~a => ~a,"
-						   (emit key)
-						   (emit code)))))))))))
-		  #+nil (for (destructuring-bind ((start end iter) &rest body) (cdr code)
-			 (format nil "for (~@[~a~];~@[~a~];~@[~a~]) ~a"
-				 (emit start)
-				 (emit end)
-				 (emit iter)
-				 (emit `(progn ,@body)))))
-		  (dotimes (destructuring-bind ((i n &optional (step 1)) &rest body) (cdr code)
-			     (emit `(for (,(format nil "int ~a = 0" (emit i))
-					   (< ,(emit i) ,(emit n))
-					   (incf ,(emit i) ,(emit step)))
-					 ,@body))))
+				      ;; NOTE: pass FORMS on unevaluated, do not
+				      ;; pre-emit them.  Emitting twice turned
+				      ;; every arm body into a string, which
+				      ;; suppressed all statement semicolons.
+				      (format nil "~a => ~a,"
+					      (if (eq key t)
+						  "_"
+						  (emit key))
+					      (emit `(progn ,@forms))))))))))
+		  (dotimes
+		      ;; dotimes (var count [step]) {form}*
+		      ;;   -> for var in 0..count { }
+		      ;;   -> for var in (0..count).step_by(step) { }
+		      (destructuring-bind ((i n &optional (step 1)) &rest body) (cdr code)
+			(format nil "for ~a in ~a ~a"
+				(emit i)
+				(if (eql step 1)
+				    (format nil "0..~a" (emit n))
+				    (format nil "(0..~a).step_by(~a)"
+					    (emit n) (emit step)))
+				(emit `(progn ,@body)))))
 		  (loop (let ((args (cdr code)))
 			  (format nil "loop ~a"
 				  (emit `(progn ,@args)))))
 		  (for (destructuring-bind ((item collection) &rest body) (cdr code)
-			     (format nil "for  ~a in ~a ~a"
+			     (format nil "for ~a in ~a ~a"
 				     (emit item)
-				     (emit collection)
+				     (strip-outer-parens (emit collection))
 				     (emit `(progn ,@body)))))
-		  #+generic-c
-		  (foreach
-		   (destructuring-bind ((item collection) &rest body) (cdr code)
-		     (let ((itemidx (format nil "~a_idx" (emit item))))
-		       (format nil
-			       "~a"
-			       (emit
-				`(dotimes (,itemidx (/ (sizeof ,collection)
-						       (sizeof (deref ,collection))))
-				   (let ((,item (aref ,collection ,itemidx)))
-				     (progn ,@body))))))))
 		  (while  ;; while condition {forms}*
 		      (destructuring-bind (condition &rest body) (cdr code)
-			(format nil "while (~a) ~a"
-				(emit condition)
+			;; no parentheses around the condition, rustc's
+			;; unused_parens lint complains about them
+			(format nil "while ~a ~a"
+				(strip-outer-parens (emit condition))
 				(emit `(progn ,@body)))))
 		  (deftype
 		      ;; deftype name lambda-list {form}*
 		      ;; only the first form of the body is used, lambda list is ignored
+		      ;; (deftype my-u () u64) -> type my_u = u64
 		      (destructuring-bind (name lambda-list &rest body) (cdr code)
 			(declare (ignore lambda-list))
-			(format nil "typedef ~a ~a" (emit (car body)) name)))
+			(format nil "type ~a = ~a" (emit name) (emit (car body)))))
 		  (struct (format nil "struct ~a" (emit (car (cdr code)))))
 		  (defstruct0
-		   ;; defstruct without init-form
-		   ;; defstruct name {slot-description}*
-		   ;; slot-description::= slot-name | (slot-name [slot-type])
-		   
-		   ;; a slot-name without type can be used to create a
-		   ;; composed type with a struct embedding
-		   
-		   ;; i think i should use this pattern that works in C
-		   ;; and in C++. Typedef isn't strictly necessary in
-		   ;; C++, execept if you overload the struct name with
-		   ;; a function:
-		   
-		   ;; struct 
-		   ;; { 
-		   ;;    char name[50]; 
-		   ;;    char street[100]; 
-		   ;;    char city[50]; 
-		   ;;    char state[20]; 
-		   ;;    int pin; 
-		   ;; } Address;
-		   ;; typedef struct Address Address;
-		   ;; int Address(int b){ ...}
-		   
-		   ;; https://stackoverflow.com/questions/1675351/typedef-struct-vs-struct-definitions
+		   ;; defstruct0 name {slot-description}*
+		   ;; slot-description::= (slot-name slot-type)
+		   ;;
+		   ;; (defstruct0 Point (x f64) (y f64))
+		   ;;  -> struct Point { x: f64, y: f64, }
+		   ;;
+		   ;; Attributes such as "#[derive(Clone)]" are written as plain
+		   ;; strings in front of the form.
 		   (destructuring-bind (name &rest slot-descriptions) (cdr code)
-		     (format nil "~a"
-			     (emit `(do0
-				     ,(format nil "struct ~a ~a"
-					      name
-					      (emit
-					       `(progn
-						  ,@(loop for desc in slot-descriptions collect
-							 (destructuring-bind (slot-name &optional type value) desc
-							   (declare (ignorable value))
-							   (format nil "~a: ~a,"  (emit slot-name)(emit type))))))
-					      
-					      )
-				     ;(deftype ,name () (struct ,name))
-				     )))))
-		  (handler-case
-		      ;; handler-case expression [[{error-clause}*]]
-		    ;;; error-clause::= (typespec ([var]) declaration* form*) ;; note: declarations are currently unsupported
-		      ;; error-clause::= (typespec ([var]) form*)
-		      ;; if typespec is t, catch any kind of exception
-
-		      ;; (handler-case (progn forma formb)
-		      ;;   (typespec1 (var1) form1)
-		      ;;   (typespec2 (var2) form2))
-
-		      ;; a clause such as:
-		      ;; (typespec (var) (declare (ignore var)) form)
-		      ;; can be written as (typespec () form)
-		      
-
-		      
-		      ;; try {
-		      ;;   // code here
-		      ;; }
-		      ;; catch (int param) { cout << "int exception"; }
-		      ;; catch (char param) { cout << "char exception"; }
-		      ;; catch (...) { cout << "default exception"; }
-		      
-		      (destructuring-bind (expr &rest clauses) (cdr code)
-			(with-output-to-string (s)
-			  (format s "try ~a"
-				  (if (eq 'progn (car expr))
-				      (emit expr)
-				      (emit `(progn ,expr))))
-			  (loop for clause in clauses do
-			       (destructuring-bind (typespec (var) &rest forms) clause
-				 (format s "catch (~a) ~a"
-					 (if (and (eq 't typespec)
-						  (null var))
-					     (format nil "...")
-					     (format nil "~a ~a" typespec var))
-					 (emit `(progn ,@forms))))))))
+		     (format nil "struct ~a ~a"
+			     (emit name)
+			     (emit
+			      `(progn
+				 ,@(loop for desc in slot-descriptions collect
+					 (destructuring-bind (slot-name &optional type value) desc
+					   (declare (ignorable value))
+					   (format nil "~a: ~a," (emit slot-name) (emit type)))))))))
+		  ((handler-case throw include defclass protected public ->  new)
+		   ;; These forms are leftovers from the C/C++ generator this file
+		   ;; started out as.  Whatever they used to emit is not valid
+		   ;; Rust, so fail loudly instead of producing garbage.
+		   (error "cl-rust-generator: the form ~s is not supported.~%~a"
+			  (car code)
+			  (case (car code)
+			    (handler-case "Rust has no exceptions. Use (case expr ((Ok v) ...) ((Err e) ...)) or the ? operator.")
+			    (throw "Rust has no exceptions. Return (Err ...) or use panic!.")
+			    (include "Use (use (std io)) / (mod name) instead of #include.")
+			    (defclass "Use (defstruct0 ...) together with (impl ...).")
+			    ((protected public) "Write \"pub\" as a plain string in front of the item.")
+			    (-> "-> is only valid in a function signature; use (dot a b) for member access.")
+			    (new "Rust has no `new' keyword; call the associated function, e.g. (\"Vec::new\")."))))
 		  (t (destructuring-bind (name &rest args) code
 
 		       (if (listp name)
@@ -946,19 +942,18 @@ entry return-values contains a list of return values"
 		((numberp code) ;; print constants
 		 (cond ((integerp code)
 			(if (< code 0)
-			    (format str "(~a)" code)
-			    (format str "~a" code)))
+			    (format nil "(~a)" code)
+			    (format nil "~a" code)))
 		       ((floatp code)
 			(typecase code
 			  (single-float (let ((v (print-sufficient-digits-f32 code)))
 					  (if (< code 0)
-					      (format str "(~a)" v)
-					      (format str "~a" v))))
+					      (format nil "(~a)" v)
+					      (format nil "~a" v))))
 			  (double-float (let ((v (print-sufficient-digits-f64 code)))
 					  (if (< code 0)
-					      (format str "(~a)" v)
-					      (format str "~a" v)))))
-			#+nil (format str "(~a)" (print-sufficient-digits-f64 code)))))))
+					      (format nil "(~a)" v)
+					      (format nil "~a" v))))))))))
 	  "")))
   #+nil (progn
    (defparameter *bla*

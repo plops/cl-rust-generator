@@ -1,0 +1,11 @@
+du befindest dich in einem docker container mit ubuntu 26 und solltest alle programme haben um die aufgabe zu loesen.
+falls programme fehlen, installiere sie im container.
+
+du arbeitest fuer wol pumba (wolpumba@gmail.com)
+
+schau dir ../../rs.lisp und /workspace/src/cl-py-generator/transpiler-tests.lisp an (und sonstige dateien die dir helfen).
+mache einen code review vom rust generator. update dokumentation oder quellcode, wo du verbesserungen feststellst.
+falls moeglich baue unit tests fuer den rust generator und mache einen ueberblick ueber alle unterstuetzten forms (schaue dir z.b. die beispiele an)
+
+speichere die resultate und unerwartete findings deiner untersuchung in diesem plan ordner als walkthrough.md ab
+commite die aenderungen

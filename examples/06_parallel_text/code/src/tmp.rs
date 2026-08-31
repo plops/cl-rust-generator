@@ -29,12 +29,13 @@ impl TmpDir {
             {
                 Ok(f) => return Ok((filename, BufWriter::new(f))),
                 Err(exc) => {
-                    if !((try_count < 999) && ((io::ErrorKind::AlreadyExists) == (exc.kind()))) {
+                    if !(((try_count) < (999)) && ((io::ErrorKind::AlreadyExists) == (exc.kind())))
+                    {
                         return Err(exc);
                     }
                 }
-            };
-            try_count += 1;
+            }
+            try_count += 1
         }
     }
 }

@@ -94,8 +94,7 @@ gl = \"*\"
 			  (lambda (symbol)
 			    (coerce (dot gl_window
 					 (get_proc_address symbol))
-				    *const)
-			    (return _)))
+				    "*const _")))
 		      )))))))))
 
 

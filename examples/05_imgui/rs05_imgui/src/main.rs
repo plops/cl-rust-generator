@@ -20,7 +20,7 @@ struct System {
 }
 fn init(title: &str) -> System {
     let title = match title.rfind("/") {
-        Some(idx) => title.split_at(idx + 1).1,
+        Some(idx) => title.split_at((idx + 1)).1,
         None => title,
     };
     let event_loop = EventLoop::new();
@@ -37,7 +37,7 @@ fn init(title: &str) -> System {
         let gl_window = display.gl_window();
         let window = gl_window.window();
         platform.attach_window(imgui.io_mut(), &window, HiDpiMode::Rounded);
-    };
+    }
     let renderer = Renderer::init(&mut imgui, &display).expect("failed to initialize renderer");
     return System {
         event_loop,
@@ -45,7 +45,7 @@ fn init(title: &str) -> System {
         imgui,
         platform,
         renderer,
-        font_size: 12.,
+        font_size: 12.0,
     };
 }
 impl System {
@@ -66,7 +66,7 @@ impl System {
             Event::MainEventsCleared => {
                 let gl_window = display.gl_window();
                 platform
-                    .prepare_frame(imgui.io_mut(), &(gl_window.window()))
+                    .prepare_frame(imgui.io_mut(), (&gl_window.window()))
                     .expect("failed to prepare frame");
                 gl_window.window().request_redraw();
             }
@@ -74,9 +74,9 @@ impl System {
                 let mut ui = imgui.frame();
                 let mut run = true;
                 run_ui(&mut run, &mut ui);
-                if !(run) {
+                if !run {
                     *control_flow = ControlFlow::Exit;
-                };
+                }
                 let gl_window = display.gl_window();
                 let mut target = display.draw();
                 target.clear_color_srgb(1.0, 1.0, 1.0, 1.0);
@@ -112,8 +112,6 @@ fn main() {
             });
         Window::new(im_str!("recv"))
             .size([2.00e+2, 1.00e+2], Condition::FirstUseEver)
-            .build(ui, || {
-                ui.text(im_str!("recv"));
-            });
+            .build(ui, || ui.text(im_str!("recv")))
     });
 }

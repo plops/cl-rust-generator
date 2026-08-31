@@ -35,7 +35,7 @@ impl IndexFileWriter {
         self.contents_buf
             .write_u32::<LittleEndian>((bytes.len() as u32))
             .unwrap();
-        self.contents_buf.extend(bytes);
+        self.contents_buf.extend(bytes)
     }
     pub fn finish(mut self) -> io::Result<()> {
         let contents_start = self.offset;
@@ -43,7 +43,7 @@ impl IndexFileWriter {
         println!(
             "{} bytes main, {} bytes total",
             contents_start,
-            contents_start + (self.contents_buf.len() as u64)
+            (contents_start + (self.contents_buf.len() as u64))
         );
         self.writer.seek(SeekFrom::Start(0))?;
         self.writer.write_u64::<LittleEndian>(contents_start)?;
@@ -54,17 +54,15 @@ pub fn write_index_to_tmp_file(index: InMemoryIndex, tmp_dir: &mut TmpDir) -> io
     let (filename, f) = tmp_dir.create()?;
     let mut writer = IndexFileWriter::new(f)?;
     let mut index_as_vec: Vec<_> = index.map.into_iter().collect();
-    index_as_vec.sort_by(|&(ref a, _), &(ref b, _)| {
-        return a.cmp(b);
-    });
+    index_as_vec.sort_by(|&(ref a, _), &(ref b, _)| return a.cmp(b));
     for (term, hits) in index_as_vec {
         let df = (hits.len() as u32);
         let start = writer.offset;
         for buffer in hits {
-            writer.write_main(&buffer)?;
+            writer.write_main(&buffer)?
         }
         let stop = writer.offset;
-        writer.write_contents_entry(term, df, start, stop - start);
+        writer.write_contents_entry(term, df, start, (stop - start));
     }
     writer.finish()?;
     println!("wrote file {:?}", filename);

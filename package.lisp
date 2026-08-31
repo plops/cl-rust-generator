@@ -3,4 +3,6 @@
 	:alexandria)
   (:export
    #:write-source
-   #:emit-rs))
+   #:emit-rs
+   #:*rustfmt-program*
+   #:*rustfmt-arguments*))

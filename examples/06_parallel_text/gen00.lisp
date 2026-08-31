@@ -426,7 +426,7 @@
 	       (space pub
 		      (defun add_file ("&mut self"
 				       "mut file: PathBuf")
-			(declare (values "io--Result<()>"))
+			(declare (values "io::Result<()>"))
 			(let* ((level 0))
 			  (loop
 			     (when (== level

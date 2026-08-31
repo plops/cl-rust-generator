@@ -41,6 +41,7 @@
 
 	   (defun gcd (n m)
 	     (declare (type u64 n m)
+		      (mutable n m)
 		      (values u64))
 	     (assert! (and (!= 0 n)
 			   (!= 0 m)))
@@ -61,7 +62,7 @@
 			 (* 3 11)))
 	   
 	   (defun main ()
-	     (let ((numbers ("Vec::new")))
+	     (let* ((numbers ("Vec::new")))
 	       (for (arg (dot ("std::env::args")
 			      (skip 1)))
 		    (numbers.push
@@ -72,12 +73,11 @@
 				(string "Usage: gcd NUMBER ..."))
 		      (unwrap))
 		 ("std::process::exit" 1))
-	       (let ((d (aref numbers 0)))
+	       (let* ((d (aref numbers 0)))
 		 (for (m (ref (aref numbers "1..")))
-		      (setf d (gcd d *m))))
-	       (println! (string "The greatest common divisor of {:?} is {}"
-				 )
-			 numbers d))))))
+		      (setf d (gcd d *m)))
+		 (println! (string "The greatest common divisor of {:?} is {}")
+			   numbers d)))))))
     
     
     (write-source *code-file*

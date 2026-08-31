@@ -18,5 +18,5 @@ fn get_form(_request: &Request) -> IronResult<Response> {
 }
 fn main() {
     println!("Serving on http://localhost:3000...");
-    Iron::new(get_form).http("localhost:3000").unwrap();
+    Iron::new(get_form).http("localhost:3000").unwrap()
 }

@@ -105,16 +105,16 @@ fn main() {
             vulkano::buffer::BufferUsage::all(),
             vec![
                 Vertex {
-                    position: [(-1.0), 1.0, 0.],
+                    position: [(-1.0), 1.0, 0.0],
                 },
                 Vertex {
-                    position: [1.0, 1.0, 0.],
+                    position: [1.0, 1.0, 0.0],
                 },
                 Vertex {
-                    position: [(-1.0), (-1.0), 0.],
+                    position: [(-1.0), (-1.0), 0.0],
                 },
                 Vertex {
-                    position: [1.0, (-1.0), 0.],
+                    position: [1.0, (-1.0), 0.0],
                 },
             ]
             .into_iter(),
@@ -125,22 +125,22 @@ fn main() {
             vulkano::buffer::BufferUsage::all(),
             vec![
                 Vertex {
-                    position: [0., 0., 0.250],
+                    position: [0.0, 0.0, 0.250],
                 },
                 Vertex {
-                    position: [0.14694631, 0., 0.20225425],
+                    position: [0.14694631, 0.0, 0.20225425],
                 },
                 Vertex {
-                    position: [0.2377641, 0., 7.725424e-2],
+                    position: [0.2377641, 0.0, 7.725424e-2],
                 },
                 Vertex {
-                    position: [0.2377641, 0., (-7.725427e-2)],
+                    position: [0.2377641, 0.0, (-7.725427e-2)],
                 },
                 Vertex {
-                    position: [0.14694631, 0., (-0.20225425)],
+                    position: [0.14694631, 0.0, (-0.20225425)],
                 },
                 Vertex {
-                    position: [0., 0., 0.250],
+                    position: [0.0, 0.0, 0.250],
                 },
                 Vertex {
                     position: [0.13011450, 6.828936e-2, 0.20225425],
@@ -155,7 +155,7 @@ fn main() {
                     position: [0.13011450, 6.828935e-2, (-0.20225425)],
                 },
                 Vertex {
-                    position: [0., 0., 0.250],
+                    position: [0.0, 0.0, 0.250],
                 },
                 Vertex {
                     position: [8.34750e-2, 0.12093445, 0.20225425],
@@ -170,7 +170,7 @@ fn main() {
                     position: [8.34750e-2, 0.12093444, (-0.20225425)],
                 },
                 Vertex {
-                    position: [0., 0., 0.250],
+                    position: [0.0, 0.0, 0.250],
                 },
                 Vertex {
                     position: [1.7712420e-2, 0.1458749, 0.20225425],
@@ -185,7 +185,7 @@ fn main() {
                     position: [1.7712417e-2, 0.1458749, (-0.20225425)],
                 },
                 Vertex {
-                    position: [-0., 0., 0.250],
+                    position: [-0.0, 0.0, 0.250],
                 },
                 Vertex {
                     position: [(-5.210789e-2), 0.13739718, 0.20225425],
@@ -200,7 +200,7 @@ fn main() {
                     position: [(-5.210789e-2), 0.13739718, (-0.20225425)],
                 },
                 Vertex {
-                    position: [-0., 0., 0.250],
+                    position: [-0.0, 0.0, 0.250],
                 },
                 Vertex {
                     position: [(-0.1099909), 9.744343e-2, 0.20225425],
@@ -215,7 +215,7 @@ fn main() {
                     position: [(-0.1099909), 9.744341e-2, (-0.20225425)],
                 },
                 Vertex {
-                    position: [-0., 0., 0.250],
+                    position: [-0.0, 0.0, 0.250],
                 },
                 Vertex {
                     position: [(-0.14267632), 3.5166556e-2, 0.20225425],
@@ -230,7 +230,7 @@ fn main() {
                     position: [(-0.14267631), 3.5166550e-2, (-0.20225425)],
                 },
                 Vertex {
-                    position: [-0., -0., 0.250],
+                    position: [-0.0, -0.0, 0.250],
                 },
                 Vertex {
                     position: [(-0.14267631), (-3.516658e-2), 0.20225425],
@@ -245,7 +245,7 @@ fn main() {
                     position: [(-0.14267631), (-3.516658e-2), (-0.20225425)],
                 },
                 Vertex {
-                    position: [-0., -0., 0.250],
+                    position: [-0.0, -0.0, 0.250],
                 },
                 Vertex {
                     position: [(-0.10999088), (-9.744345e-2), 0.20225425],
@@ -260,7 +260,7 @@ fn main() {
                     position: [(-0.10999087), (-9.744344e-2), (-0.20225425)],
                 },
                 Vertex {
-                    position: [-0., -0., 0.250],
+                    position: [-0.0, -0.0, 0.250],
                 },
                 Vertex {
                     position: [(-5.210786e-2), (-0.13739720), 0.20225425],
@@ -275,7 +275,7 @@ fn main() {
                     position: [(-5.210786e-2), (-0.13739718), (-0.20225425)],
                 },
                 Vertex {
-                    position: [0., -0., 0.250],
+                    position: [0.0, -0.0, 0.250],
                 },
                 Vertex {
                     position: [1.7712432e-2, (-0.1458749), 0.20225425],
@@ -290,7 +290,7 @@ fn main() {
                     position: [1.7712432e-2, (-0.1458749), (-0.20225425)],
                 },
                 Vertex {
-                    position: [0., -0., 0.250],
+                    position: [0.0, -0.0, 0.250],
                 },
                 Vertex {
                     position: [8.34750e-2, (-0.12093444), 0.20225425],
@@ -305,7 +305,7 @@ fn main() {
                     position: [8.34750e-2, (-0.12093443), (-0.20225425)],
                 },
                 Vertex {
-                    position: [0., -0., 0.250],
+                    position: [0.0, -0.0, 0.250],
                 },
                 Vertex {
                     position: [0.13011450, (-6.828935e-2), 0.20225425],
@@ -325,15 +325,15 @@ fn main() {
         .expect("failed to create buffer");
         let render_pass = std::sync::Arc::new(
             vulkano::single_pass_renderpass!(device.clone(), attachments: {
-                                    color: {
-                                            load: Clear,
-                                            store: Store,
-                                            format: swapchain.format(),
-                                            samples: 1,
+                        color: {
+                            load: Clear,
+                            store: Store,
+                            format: swapchain.format(),
+                            samples: 1,
             }
             }, pass: {
-                                    color: [color],
-                                    depth_stencil: {}
+                        color: [color],
+                        depth_stencil: {}
             })
             .unwrap(),
         );
@@ -341,7 +341,9 @@ fn main() {
         mod vs {
             vulkano_shaders::shader! {ty: "vertex", src: r##"#version 450
 layout(location = 0) in vec3 position;
-void main() { gl_Position = vec4(position, (1.0)); }"##}
+
+void main() { (gl_Position) = (vec4(position, 1.0F)); }
+"##}
         }
 
         mod fs {
@@ -356,71 +358,73 @@ layout(push_constant) uniform PushConstantData {
   uint mouse_y;
 }
 pc;
+
 float map(in vec3 pos) {
-  float d1 = ((length(pos)) - ((0.250)));
-  float d2 = ((pos.y) + ((0.250)));
+  float d1 = (length(pos)) - (0.250F);
+  float d2 = (pos.y) + (0.250F);
   return min(d1, d2);
 }
+
 vec3 calcNormal(in vec3 pos) {
-  vec2 e = vec2((1.00e-4), (0.));
-  return normalize(vec3(((map(((pos) + (e.xyy)))) - (map(((pos) - (e.xyy))))),
-                        ((map(((pos) + (e.yxy)))) - (map(((pos) - (e.yxy))))),
-                        ((map(((pos) + (e.yyx)))) - (map(((pos) - (e.yyx)))))));
+  vec2 e = vec2(1.00e-4F, 0.F);
+  return normalize(vec3((map((pos) + (e.xyy))) - (map((pos) - (e.xyy))),
+                        (map((pos) + (e.yxy))) - (map((pos) - (e.yxy))),
+                        (map((pos) + (e.yyx))) - (map((pos) - (e.yyx)))));
 }
+
 float castRay(in vec3 ro, vec3 rd) {
-  float tau = (0.);
-  for (int i = 0; i < 100; (i)++) {
-    vec3 pos = ((ro) + (((tau) * (rd))));
+  float tau = 0.F;
+  for ((int i) = (0); (i) < (100); (i)++) {
+    vec3 pos = (ro) + ((tau) * (rd));
     float h = map(pos);
-    if (h < (1.00e-3)) {
+    if ((h) < (1.00e-3F)) {
       break;
-    };
+    }
     (tau) += (h);
-    if ((20.) < tau) {
+    if ((20.F) < (tau)) {
       break;
-    };
-  };
-  if ((20.) < tau) {
-    tau = (-1.0);
-  };
+    }
+  }
+  if ((20.F) < (tau)) {
+    (tau) = (-1.0F);
+  }
   return tau;
 }
+
 void main() {
   ivec2 iResolution = ivec2(pc.window_w, pc.window_h);
-  vec2 p0 = (((((((2.0)) * (gl_FragCoord.xy))) - (iResolution.xy))) /
-             (iResolution.y));
-  vec2 p = vec2(p0.x, ((-1) * (p0.y)));
-  float an = (((((10.)) * (pc.mouse_x))) / (pc.window_w));
-  vec3 ro = vec3(sin(an), (((0.10)) * (sin((((1.00e-2)) * (pc.timestamp))))),
-                 cos(an));
-  vec3 ta = vec3((0.), (0.), (0.));
-  vec3 ww = normalize(((ta) - (ro)));
+  vec2 p0 = (((2.0F) * (gl_FragCoord.xy)) - (iResolution.xy)) / (iResolution.y);
+  vec2 p = vec2(p0.x, (-1) * (p0.y));
+  float an = ((10.F) * (pc.mouse_x)) / (pc.window_w);
+  vec3 ro =
+      vec3(sin(an), (0.10F) * (sin((1.00e-2F) * (pc.timestamp))), cos(an));
+  vec3 ta = vec3(0.F, 0.F, 0.F);
+  vec3 ww = normalize((ta) - (ro));
   vec3 uu = normalize(cross(ww, vec3(0, 1, 0)));
   vec3 vv = normalize(cross(uu, ww));
-  vec3 rd =
-      normalize(((((p.x) * (uu))) + (((p.y) * (vv))) + ((((1.50)) * (ww)))));
-  vec3 col = ((vec3((0.30), (0.50), (0.90))) - ((((0.50)) * (rd.y))));
+  vec3 rd = normalize(((p.x) * (uu)) + ((p.y) * (vv)) + ((1.50F) * (ww)));
+  vec3 col = (vec3(0.30F, 0.50F, 0.90F)) - ((0.50F) * (rd.y));
   float tau = castRay(ro, rd);
-  col = mix(col, vec3((0.70), (0.750), (0.80)), exp((((-10.)) * (rd.y))));
-  if (0 < tau) {
-    vec3 pos = ((ro) + (((tau) * (rd))));
+  (col) = (mix(col, vec3(0.70F, 0.750F, 0.80F), exp((-10.F) * (rd.y))));
+  if ((0) < (tau)) {
+    vec3 pos = (ro) + ((tau) * (rd));
     vec3 nor = calcNormal(pos);
-    vec3 mate = vec3((0.20), (0.20), (0.20));
-    vec3 sun_dir = normalize(vec3((0.80), (0.40), (0.20)));
-    float sun_dif = clamp(dot(nor, sun_dir), (0.), (1.0));
-    float sun_sha =
-        step(castRay(((pos) + ((((1.00e-3)) * (nor)))), sun_dir), (0.));
+    vec3 mate = vec3(0.20F, 0.20F, 0.20F);
+    vec3 sun_dir = normalize(vec3(0.80F, 0.40F, 0.20F));
+    float sun_dif = clamp(dot(nor, sun_dir), 0.F, 1.0F);
+    float sun_sha = step(castRay((pos) + ((1.00e-3F) * (nor)), sun_dir), 0.F);
     float sky_dif =
-        clamp((((0.50)) + (dot(nor, vec3((0.), (1.0), (0.))))), (0.), (1.0));
+        clamp((0.50F) + (dot(nor, vec3(0.F, 1.0F, 0.F))), 0.F, 1.0F);
     float bou_dif =
-        clamp((((0.50)) + (dot(nor, vec3((0.), (-1.0), (0.))))), (0.), (1.0));
-    col = ((mate) * (vec3((7.0), 5, 3)) * (sun_dif) * (sun_sha));
-    (col) += (((mate) * (vec3((0.50), (0.80), (0.90))) * (sky_dif)));
-    (col) += (((mate) * (vec3((0.70), (0.30), (0.20))) * (bou_dif)));
-  };
-  col = pow(col, vec3((0.45450)));
-  f_color = vec4(col, (0.40));
-}"##}
+        clamp((0.50F) + (dot(nor, vec3(0.F, -1.0F, 0.F))), 0.F, 1.0F);
+    (col) = ((mate) * (vec3(7.0F, 5, 3)) * (sun_dif) * (sun_sha));
+    (col) += ((mate) * (vec3(0.50F, 0.80F, 0.90F)) * (sky_dif));
+    (col) += ((mate) * (vec3(0.70F, 0.30F, 0.20F)) * (bou_dif));
+  }
+  (col) = (pow(col, vec3(0.45450F)));
+  (f_color) = (vec4(col, 0.40F));
+}
+"##}
         }
 
         mod fs2 {
@@ -434,7 +438,9 @@ layout(push_constant) uniform PushConstantData {
   uint mouse_y;
 }
 pc;
-void main() { f_color = vec4((1.0), (0.20), (0.20), (0.70)); }"##}
+
+void main() { (f_color) = (vec4(1.0F, 0.20F, 0.20F, 0.70F)); }
+"##}
         }
         let vs = vs::Shader::load(device.clone()).expect("failed to create shader");
         let fs = fs::Shader::load(device.clone()).expect("failed to create shader");
@@ -472,23 +478,23 @@ void main() { f_color = vec4((1.0), (0.20), (0.20), (0.70)); }"##}
         };
         let mut dynamic_state = vulkano::command_buffer::DynamicState {
             viewports: Some(vec![vulkano::pipeline::viewport::Viewport {
-                origin: [0., 0.],
+                origin: [0.0, 0.0],
                 dimensions: [(dimensions[0] as f32), (dimensions[1] as f32)],
-                depth_range: (0. ..1.0),
+                depth_range: (0.0..1.0),
             }]),
             ..vulkano::command_buffer::DynamicState::none()
         };
         let mut framebuffers = images
             .iter()
             .map(|image| {
-                return (std::sync::Arc::new(
+                return std::sync::Arc::new(
                     vulkano::framebuffer::Framebuffer::start(render_pass.clone())
                         .add(image.clone())
                         .unwrap()
                         .build()
                         .unwrap(),
                 )
-                    as Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send + Sync>);
+                    as Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send + Sync>;
             })
             .collect::<Vec<_>>();
         let mut recreate_swapchain = false;
@@ -530,7 +536,9 @@ void main() { f_color = vec4((1.0), (0.20), (0.20), (0.70)); }"##}
                         Err(vulkano::swapchain::SwapchainCreationError::UnsupportedDimensions) => {
                             return winit::ControlFlow::Continue
                         }
-                        Err(e) => panic!("{:?}", e),
+                        Err(e) => {
+                            panic!("{:?}", e)
+                        }
                     };
                 {
                     println!(
@@ -544,27 +552,27 @@ void main() { f_color = vec4((1.0), (0.20), (0.20), (0.70)); }"##}
                 swapchain = new_swapchain;
                 dynamic_state = vulkano::command_buffer::DynamicState {
                     viewports: Some(vec![vulkano::pipeline::viewport::Viewport {
-                        origin: [0., 0.],
+                        origin: [0.0, 0.0],
                         dimensions: [(dimensions[0] as f32), (dimensions[1] as f32)],
-                        depth_range: (0. ..1.0),
+                        depth_range: (0.0..1.0),
                     }]),
                     ..vulkano::command_buffer::DynamicState::none()
                 };
                 framebuffers = new_images
                     .iter()
                     .map(|image| {
-                        return (std::sync::Arc::new(
+                        return std::sync::Arc::new(
                             vulkano::framebuffer::Framebuffer::start(render_pass.clone())
                                 .add(image.clone())
                                 .unwrap()
                                 .build()
                                 .unwrap(),
                         )
-                            as Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send + Sync>);
+                            as Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send + Sync>;
                     })
                     .collect::<Vec<_>>();
                 recreate_swapchain = false;
-            };
+            }
             {
                 println!("{} {}:{} next image ", Utc::now(), file!(), line!())
             }
@@ -600,7 +608,7 @@ void main() { f_color = vec4((1.0), (0.20), (0.20), (0.70)); }"##}
                 .begin_render_pass(
                     framebuffers[image_num].clone(),
                     false,
-                    vec![[0., 0., 1.0, 1.0].into()],
+                    vec![[0.0, 0.0, 1.0, 1.0].into()],
                 )
                 .unwrap()
                 .draw(
@@ -678,8 +686,8 @@ void main() { f_color = vec4((1.0), (0.20), (0.20), (0.70)); }"##}
                         },
                     ..
                 } => {
-                    push_constants.mouse_x = (position.x as u32);
-                    push_constants.mouse_y = (position.y as u32);
+                    push_constants.mouse_x = position.x as u32;
+                    push_constants.mouse_y = position.y as u32;
                     return winit::ControlFlow::Continue;
                 }
                 _ => return winit::ControlFlow::Continue,

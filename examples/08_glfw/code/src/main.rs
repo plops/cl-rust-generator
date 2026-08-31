@@ -13,23 +13,19 @@ fn main() {
         .expect("failed to create glfw window");
     window.make_current();
     window.set_all_polling(true);
-    gl::load_with(|symbol| {
-        return window.get_proc_address(symbol);
-    });
+    gl::load_with(|symbol| return window.get_proc_address(symbol));
     unsafe {
         gl::Enable(gl::BLEND);
         gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
         gl::Enable(gl::DEPTH_TEST);
         gl::DepthFunc(gl::LESS);
-        gl::ClearColor(0.10, 0.10, 0.10, 1.0);
+        gl::ClearColor(0.10, 0.10, 0.10, 1.0)
     }
     let mut imgui = imgui::Context::create();
     let mut imgui_glfw = imgui_glfw_rs::ImguiGLFW::new(&mut imgui, &mut window);
     imgui.set_ini_filename(None);
-    while (!(window.should_close())) {
-        unsafe {
-            gl::Clear(((gl::COLOR_BUFFER_BIT) | (gl::DEPTH_BUFFER_BIT)));
-        }
+    while !window.should_close() {
+        unsafe { gl::Clear(((gl::COLOR_BUFFER_BIT) | (gl::DEPTH_BUFFER_BIT))) }
         let ui = imgui_glfw.frame(&mut window, &mut imgui);
         ui.show_demo_window(&mut true);
         imgui_glfw.draw(ui, &mut window);

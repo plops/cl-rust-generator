@@ -52,7 +52,7 @@
 	     (declare (type Request &_request)
 		      (immutable &_request)
 		      (values "IronResult<Response>"))
-	     (let ((response ("Response::new")))
+	     (let* ((response ("Response::new")))
 	       (response.set_mut "status::Ok")
 	       (response.set_mut "iron::mime::TEXT_HTML_UTF_8"
 				 #+nil (mime! "Text/Html; Charset=Utf8"))

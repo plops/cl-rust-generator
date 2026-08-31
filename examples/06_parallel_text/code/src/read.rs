@@ -79,12 +79,12 @@ impl IndexFileReader {
     pub fn move_entry_to(&mut self, out: &mut IndexFileWriter) -> io::Result<()> {
         {
             let e = self.next.as_ref().expect("no entry to move");
-            if (usize::max_value() as u64) < e.nbytes {
+            if (usize::max_value() as u64) < (e.nbytes) {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
                     "computer not big enough to hold index entry",
                 ));
-            };
+            }
             let mut buf = Vec::with_capacity((e.nbytes as usize));
             buf.resize((e.nbytes as usize), 0);
             self.main.read_exact(&mut buf)?;

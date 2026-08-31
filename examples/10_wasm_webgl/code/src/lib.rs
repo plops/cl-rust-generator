@@ -9,9 +9,9 @@ pub fn compile_shader(
     shader_type: u32,
     source: &str,
 ) -> Result<WebGlShader, String> {
-    let shader = context.create_shader(shader_type).ok_or_else(|| {
-        return String::from("unable to create shader object");
-    })?;
+    let shader = context
+        .create_shader(shader_type)
+        .ok_or_else(|| return String::from("unable to create shader object"))?;
     context.shader_source(&shader, source);
     context.compile_shader(&shader);
     if context
@@ -21,19 +21,19 @@ pub fn compile_shader(
     {
         return Ok(shader);
     } else {
-        return Err(context.get_shader_info_log(&shader).unwrap_or_else(|| {
-            return String::from("unknown error creating shader");
-        }));
-    };
+        return Err(context
+            .get_shader_info_log(&shader)
+            .unwrap_or_else(|| return String::from("unknown error creating shader")));
+    }
 }
 pub fn link_program(
     context: &WebGlRenderingContext,
     vert_shader: &WebGlShader,
     frag_shader: &WebGlShader,
 ) -> Result<WebGlProgram, String> {
-    let program = context.create_program().ok_or_else(|| {
-        return String::from("unable to create shader object");
-    })?;
+    let program = context
+        .create_program()
+        .ok_or_else(|| return String::from("unable to create shader object"))?;
     context.attach_shader(&program, vert_shader);
     context.attach_shader(&program, frag_shader);
     context.link_program(&program);
@@ -44,10 +44,10 @@ pub fn link_program(
     {
         return Ok(program);
     } else {
-        return Err(context.get_program_info_log(&program).unwrap_or_else(|| {
-            return String::from("unknown error creating program object");
-        }));
-    };
+        return Err(context
+            .get_program_info_log(&program)
+            .unwrap_or_else(|| return String::from("unknown error creating program object")));
+    }
 }
 #[wasm_bindgen]
 pub fn run() -> Result<(), JsValue> {
@@ -78,16 +78,16 @@ void main(){
     let vertices: [f32; 12] = [
         (-0.980),
         (-0.980),
-        0.,
+        0.0,
         0.980,
         (-0.980),
-        0.,
+        0.0,
         0.980,
         0.980,
-        0.,
+        0.0,
         (-0.980),
         0.980,
-        0.,
+        0.0,
     ];
     let buffer = context.create_buffer().ok_or("failed to create buffer")?;
     context.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&buffer));
@@ -102,7 +102,7 @@ void main(){
     }
     context.vertex_attrib_pointer_with_i32(0, 3, WebGlRenderingContext::FLOAT, false, 0, 0);
     context.enable_vertex_attrib_array(0);
-    context.clear_color(0., 0., 0., 1.0);
+    context.clear_color(0.0, 0.0, 0.0, 1.0);
     context.clear(WebGlRenderingContext::COLOR_BUFFER_BIT);
     context.draw_arrays(
         WebGlRenderingContext::TRIANGLE_FAN,

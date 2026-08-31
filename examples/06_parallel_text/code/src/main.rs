@@ -44,11 +44,11 @@ fn start_file_reader_thread(
                 let utf8reader = coder
                     .unwrap()
                     .decode(&reader, DecoderTrap::Ignore)
-                    .expect("could not convert to utf:8");
+                    .expect("could not convert to utf-8");
                 if sender.send(utf8reader).is_err() {
                     break;
-                };
-            };
+                }
+            }
         }
         return Ok(());
     });
@@ -63,7 +63,7 @@ fn start_file_indexing_thread(
             let index = InMemoryIndex::from_single_document(doc_id, text);
             if sender.send(index).is_err() {
                 break;
-            };
+            }
         }
     });
     return (receiver, handle);
@@ -79,13 +79,13 @@ fn start_in_memory_merge_thread(
             if accumulated_index.is_large() {
                 if sender.send(accumulated_index).is_err() {
                     return;
-                };
+                }
                 accumulated_index = InMemoryIndex::new();
-            };
+            }
         }
-        if !(accumulated_index.is_empty()) {
+        if !accumulated_index.is_empty() {
             let _ = sender.send(accumulated_index);
-        };
+        }
     });
     return (receiver, handle);
 }
@@ -100,7 +100,7 @@ fn start_index_writer_thread(
             let file = write_index_to_tmp_file(index, &mut tmp_dir)?;
             if sender.send(file).is_err() {
                 break;
-            };
+            }
         }
         return Ok(());
     });
@@ -116,15 +116,15 @@ fn merge_index_files(files: Receiver<PathBuf>, output_dir: &Path) -> io::Result<
                 file!(),
                 line!(),
                 file.display()
-            );
+            )
         }
-        merge.add_file(file)?;
+        merge.add_file(file)?
     }
     return merge.finish();
 }
 fn run_pipeline(documents: Vec<PathBuf>, output_dir: PathBuf) -> io::Result<()> {
     {
-        println!("{} {}:{} run_pipeline ", Utc::now(), file!(), line!());
+        println!("{} {}:{} run_pipeline ", Utc::now(), file!(), line!())
     }
     let (texts, h1) = start_file_reader_thread(documents);
     let (pints, h2) = start_file_indexing_thread(texts);
@@ -147,12 +147,12 @@ fn expand_filename_arguments(args: Vec<String>) -> io::Result<Vec<PathBuf>> {
             for entry in path.read_dir()? {
                 let entry = entry?;
                 if entry.file_type()?.is_file() {
-                    filenames.push(entry.path());
-                };
+                    filenames.push(entry.path())
+                }
             }
         } else {
-            filenames.push(path);
-        };
+            filenames.push(path)
+        }
     }
     return Ok(filenames);
 }
@@ -164,7 +164,7 @@ fn run(filenames: Vec<String>) -> io::Result<()> {
 fn main() {
     let mut filenames = vec![];
     {
-        println!("{} {}:{} start ", Utc::now(), file!(), line!());
+        println!("{} {}:{} start ", Utc::now(), file!(), line!())
     }
     {
         let mut ap = ArgumentParser::new();
@@ -175,6 +175,8 @@ fn main() {
     }
     match run(filenames) {
         Ok(()) => return {},
-        Err(err) => println!("error: {:?}", err.description()),
-    };
+        Err(err) => {
+            println!("error: {:?}", err.description())
+        }
+    }
 }

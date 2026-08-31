@@ -2,18 +2,18 @@
 use wgpu;
 fn main() {
     let adapter = wgpu::Adapter::request(
-        &(wgpu::RequestAdapterOptions {
+        (&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::Default,
             backends: wgpu::BackendBit::PRIMARY,
         }),
     )
     .unwrap();
     let (device, queue) = adapter.request_device(
-        &(wgpu::DeviceDescriptor {
+        (&wgpu::DeviceDescriptor {
             extensions: wgpu::Extensions {
                 anisotropic_filtering: false,
             },
             limits: wgpu::Limits::default(),
         }),
-    );w
+    );
 }
