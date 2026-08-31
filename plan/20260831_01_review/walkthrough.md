@@ -438,3 +438,60 @@ schlummern.
 4. **`hook-defun`** ist im Rust-Generator sinnlos (Rust braucht keine
    Vorwärtsdeklarationen) und wird von keinem Beispiel benutzt. Kandidat zum
    Entfernen.
+
+
+## Anhang: der pre-commit-Hook blockierte den Commit
+
+`.git/hooks/pre-commit` (aus Commit `9b36a5d`) prüft ein *anderes* Verzeichnis:
+
+```sh
+cd examples/20_webprox_avif || exit 1
+cargo fmt --all -- --check || exit 1
+cargo clippy --all-targets --all-features -- -D warnings || exit 1
+```
+
+Dort lag nicht eingecheckte Arbeit vom 2026-03-07, die den Hook scheitern ließ —
+also blockierte sie jeden Commit im ganzen Repo, auch die hier beschriebenen
+Generator-Fixes. Auf Wunsch habe ich den alten Code repariert statt den Hook zu
+überspringen. Dabei kam heraus: **das Workspace kompilierte überhaupt nicht.**
+
+* Sechs `use`-Statements standen *innerhalb* von `encode_frame` in
+  `cloud-render-srv/src/encoder/rav1e_enc.rs`, zwei davon doppelt. Damit waren
+  `Context`, `Config`, `ChromaSampling` und `SpeedSettings` auf Modulebene nicht
+  sichtbar, wo die Struct-Definition und `new()` sie brauchen. `manager.rs` hatte
+  dasselbe Problem mit `SpatialMetadata`/`VideoFrame`. Beide Stellen waren genau
+  die, die `cargo fmt` als „Formatierungsproblem“ meldete — der Formatter hätte
+  sie nur eingerückt und sortiert, das eigentliche Problem wäre geblieben.
+* `macroquad-client` definierte `ClientCli` **zweimal** (in `main.rs` und in
+  `integration_test/cli.rs`). `parse_integration_test_args` war damit von
+  `main.rs` aus nicht aufrufbar: zwei verschiedene Typen mit gleichem Namen.
+* Ein toter lokaler `EncoderConfig` in `rav1e_enc.rs` beschattete
+  `rav1e::prelude::EncoderConfig` (ein explizites Item gewinnt gegen einen
+  Glob-Import) — deshalb musste die rav1e-Variante dort mit vollem Pfad
+  angesprochen werden.
+* Fehlende Importe: `tokio_stream::StreamExt` (für `stream.next()`),
+  `warn` im `log`-Import von `stream_handler.rs`.
+
+Dazu 25 clippy-Warnungen (`-D warnings` lässt keine zu), u.a.
+`field_reassign_with_default`, `chunks_exact` mit konstanter Größe →
+`as_chunks::<N>()`, `while_let_loop`, `unwrap` nach `is_none`,
+`type_complexity`, ein weggeworfenes `Result` und `needless_return`. Bewusst
+konservativ: WIP-Gerüst, das der Autor offenbar noch braucht
+(`save_image_as_png`, `check_link_clicks`, `TestImageData::rgba_data`), ist mit
+`#[allow(dead_code)]` und einer Begründung markiert statt gelöscht.
+`clippy::result_large_err` stammt aus dem von tonic/prost *generierten* Code und
+ist deshalb nur für dieses Modul erlaubt.
+
+Zwei Umgebungsdinge waren nachzuinstallieren, sonst scheitern schon die
+Build-Skripte: `nasm`/`yasm` (native libaom in rav1e) und `protobuf-compiler`
+(`protoc` für prost-build).
+
+Danach: `cargo fmt --all -- --check`, `cargo clippy --all-targets
+--all-features -- -D warnings` und `cargo build --all-targets --all-features`
+laufen alle ohne eine einzige Warnung durch. Das steckt in einem eigenen Commit,
+weil es nichts mit dem Rust-Generator zu tun hat.
+
+Lehre für den Hook: er prüft ein einzelnes Beispiel-Unterverzeichnis, blockiert
+aber jeden Commit im Repository. Ein Filter auf die tatsächlich gestageten Pfade
+(`git diff --cached --name-only`) würde verhindern, dass unfertige Arbeit in
+`examples/20_webprox_avif` die Arbeit am Generator lahmlegt.
