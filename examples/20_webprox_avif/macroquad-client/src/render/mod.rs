@@ -7,6 +7,3 @@ pub mod ui;
 
 #[path = "03_input.rs"]
 pub mod input;
-
-// Re-export for backwards compatibility
-pub use main_loop::run_render_loop;

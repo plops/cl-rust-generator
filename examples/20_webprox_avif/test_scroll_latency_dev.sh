@@ -30,7 +30,6 @@ echo ""
 # Start server with current default settings
 echo "Starting server with default settings..."
 ./target/debug/cloud-render-srv serve \
-    --log-level debug \
     --quantizer 150 \
     --min-quantizer 100 \
     --speed-preset 8 \
@@ -52,7 +51,7 @@ fi
 echo "✅ Server running with default settings"
 echo ""
 echo "📋 Test Instructions:"
-echo "1. Start client: ./start_client.sh --log-level debug"
+echo "1. Start client: ./start_client.sh"
 echo "2. Scroll and observe latency"
 echo "3. Check for these key indicators:"
 echo "   - Frame counter increments (should be frequent)"
@@ -77,7 +76,6 @@ echo ""
 
 echo "Starting server with fast settings..."
 ./target/debug/cloud-render-srv serve \
-    --log-level debug \
     --quantizer 200 \
     --min-quantizer 150 \
     --speed-preset 10 \
@@ -131,7 +129,7 @@ if [[ $response == "y" || $response == "Y" ]]; then
     
     echo "Starting server with 0ms delay..."
     ./target/debug/cloud-render-srv serve \
-        --log-level debug \
+
         --quantizer 200 \
         --min-quantizer 150 \
         --speed-preset 10 \

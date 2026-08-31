@@ -1,6 +1,6 @@
+use anyhow::Result;
 use chromiumoxide::Page;
 use serde_json::Value;
-use anyhow::Result;
 
 #[derive(Debug, Clone)]
 pub struct ExtractedLink {
@@ -46,11 +46,11 @@ pub async fn extract_spatial_metadata(page: &Page) -> Result<ExtractedMetadata> 
     "#;
 
     let result: Value = page.evaluate(js_script).await?.into_value()?;
-    
+
     let title = result["title"].as_str().unwrap_or("").to_string();
     let doc_width = result["doc_width"].as_u64().unwrap_or(0) as u32;
     let doc_height = result["doc_height"].as_u64().unwrap_or(0) as u32;
-    
+
     let mut links = Vec::new();
     if let Some(links_array) = result["links"].as_array() {
         for link_data in links_array {
@@ -66,7 +66,7 @@ pub async fn extract_spatial_metadata(page: &Page) -> Result<ExtractedMetadata> 
             links.push(link_box);
         }
     }
-    
+
     Ok(ExtractedMetadata {
         title,
         document_width: doc_width,

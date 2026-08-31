@@ -1,17 +1,17 @@
-use std::sync::{Arc, Mutex};
 use futures::StreamExt;
-use log::{info, warn, error, debug};
+use log::{debug, error, info};
+use std::sync::{Arc, Mutex};
 
-use proto_def::graphical_proxy::{ClientEvent, server_update};
+use proto_def::graphical_proxy::{server_update, ClientEvent};
 
-use crate::state::ClientState;
 use super::ConnectionManager;
 use super::StreamHandler;
+use crate::state::ClientState;
 
 pub async fn start_grpc_client(
     state: Arc<Mutex<ClientState>>,
-    mut rx_events: tokio::sync::mpsc::UnboundedReceiver<ClientEvent>,
-    cli: &crate::ClientCli
+    rx_events: tokio::sync::mpsc::UnboundedReceiver<ClientEvent>,
+    cli: &crate::ClientCli,
 ) {
     // Establish connection using ConnectionManager
     let mut connection_manager = match ConnectionManager::connect().await {
@@ -21,7 +21,7 @@ pub async fn start_grpc_client(
             return;
         }
     };
-    
+
     // Create stream using ConnectionManager
     let mut stream = match connection_manager.create_stream(rx_events, cli).await {
         Ok(stream) => stream,
@@ -30,9 +30,9 @@ pub async fn start_grpc_client(
             return;
         }
     };
-    
+
     info!("Stream established. Waiting for packets...");
-    
+
     while let Some(item) = stream.next().await {
         match item {
             Ok(update) => {
@@ -64,6 +64,6 @@ pub async fn start_grpc_client(
             }
         }
     }
-    
+
     info!("Stream ended, client disconnecting");
 }

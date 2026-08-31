@@ -1,61 +1,26 @@
-use clap::{Args, Parser};
+use clap::Args;
 use std::path::PathBuf;
 
-#[derive(Parser, Debug, Clone)]
-#[command(author, version, about = "AV1 Remote Browser Client")]
-pub struct ClientCli {
-    /// Enable integration test mode
-    #[arg(long)]
-    pub integration_test: bool,
-    
-    /// Path to test PNG image
-    #[arg(long)]
-    pub test_image: Option<PathBuf>,
-    
-    /// Server address (default: [::1]:50051)
-    #[arg(long, default_value = "[::1]:50051")]
-    pub server_addr: String,
-    
-    /// Pixel comparison tolerance (0.0 = exact match)
-    #[arg(long, default_value = "0.0")]
-    pub tolerance: f32,
-    
-    /// Path to save comparison result JSON
-    #[arg(long)]
-    pub output_result: Option<PathBuf>,
-    
-    /// Manual Y offset adjustment for debugging coordinate alignment (in pixels)
-    #[arg(long, default_value = "0")]
-    pub y_offset: i32,
-    
-    /// Enable verbose coordinate logging
-    #[arg(long)]
-    pub verbose_coords: bool,
-    
-    /// Enable full-page screenshots mode
-    #[arg(long)]
-    pub full_page: bool,
-    
-    /// Use raw RGB transmission instead of AV1 decoding
-    #[arg(long)]
-    pub raw_rgb: bool,
-}
+// NOTE: the CLI is defined once, in main.rs.  This module used to carry a second
+// `ClientCli' struct, which made `parse_integration_test_args' unusable from
+// main.rs (two distinct types with the same name).
 
 #[derive(Args, Debug)]
 pub struct IntegrationTestArgs {
+    // fields here
     pub test_image: PathBuf,
     pub server_addr: String,
     pub tolerance: f32,
     pub output_result: Option<PathBuf>,
 }
 
-pub fn parse_integration_test_args(cli: ClientCli) -> Option<IntegrationTestArgs> {
+pub fn parse_integration_test_args(cli: crate::ClientCli) -> Option<IntegrationTestArgs> {
     if !cli.integration_test {
         return None;
     }
-    
+
     let test_image = cli.test_image?;
-    
+
     Some(IntegrationTestArgs {
         test_image,
         server_addr: cli.server_addr,

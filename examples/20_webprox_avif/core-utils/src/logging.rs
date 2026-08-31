@@ -1,11 +1,11 @@
-use log::{LevelFilter, SetLoggerError};
 use env_logger::{Builder, Target};
+use log::{LevelFilter, SetLoggerError};
 use std::io::Write;
 
 /// Initialize logging with consistent format for all components
 pub fn init_logging(component_name: &str) -> Result<(), SetLoggerError> {
     let mut builder = Builder::from_default_env();
-    
+
     builder
         .filter_level(LevelFilter::Debug)
         .format(|buf, record| {
@@ -21,13 +21,16 @@ pub fn init_logging(component_name: &str) -> Result<(), SetLoggerError> {
         })
         .target(Target::Stdout)
         .init();
-    
+
     log::info!("Logging initialized for component: {}", component_name);
     Ok(())
 }
 
 /// Initialize logging with custom log level (string)
-pub fn init_logging_with_level(component_name: &str, level_str: &str) -> Result<(), SetLoggerError> {
+pub fn init_logging_with_level(
+    component_name: &str,
+    level_str: &str,
+) -> Result<(), SetLoggerError> {
     let level = match level_str.to_lowercase().as_str() {
         "trace" => LevelFilter::Trace,
         "debug" => LevelFilter::Debug,
@@ -35,18 +38,24 @@ pub fn init_logging_with_level(component_name: &str, level_str: &str) -> Result<
         "warn" => LevelFilter::Warn,
         "error" => LevelFilter::Error,
         _ => {
-            eprintln!("Warning: Unknown log level '{}', defaulting to 'info'", level_str);
+            eprintln!(
+                "Warning: Unknown log level '{}', defaulting to 'info'",
+                level_str
+            );
             LevelFilter::Info
         }
     };
-    
+
     init_logging_with_level_internal(component_name, level)
 }
 
 /// Initialize logging with custom log level (internal)
-fn init_logging_with_level_internal(component_name: &str, level: LevelFilter) -> Result<(), SetLoggerError> {
+fn init_logging_with_level_internal(
+    component_name: &str,
+    level: LevelFilter,
+) -> Result<(), SetLoggerError> {
     let mut builder = Builder::from_default_env();
-    
+
     builder
         .filter_level(level)
         .format(|buf, record| {
@@ -62,7 +71,11 @@ fn init_logging_with_level_internal(component_name: &str, level: LevelFilter) ->
         })
         .target(Target::Stdout)
         .init();
-    
-    log::info!("Logging initialized for component: {} with level: {}", component_name, level);
+
+    log::info!(
+        "Logging initialized for component: {} with level: {}",
+        component_name,
+        level
+    );
     Ok(())
 }

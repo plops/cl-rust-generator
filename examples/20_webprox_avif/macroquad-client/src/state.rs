@@ -11,8 +11,8 @@ pub struct ClientImage {
 impl From<ClientImage> for macroquad::prelude::Image {
     fn from(img: ClientImage) -> Self {
         macroquad::prelude::Image {
-            width: img.width as u16,
-            height: img.height as u16,
+            width: img.width,
+            height: img.height,
             bytes: img.bytes,
         }
     }
@@ -28,20 +28,20 @@ pub struct ClientState {
     pub packet_count: u64,
     pub last_packet_size: usize,
     pub first_frame_received: bool,
-    
+
     // AV1 decoder
     pub decoder: Option<crate::video::decoder::Av1Decoder>,
-    
+
     // Spatial metadata
     pub links: Vec<LinkBox>,
     pub doc_width: u32,
     pub doc_height: u32,
     pub page_title: String,
-    
+
     // Virtual framebuffer
     pub server_viewport_y: i32,
     pub local_scroll_y: i32,
-    
+
     // Debug parameters
     pub debug_y_offset: i32,
     pub verbose_coords: bool,
