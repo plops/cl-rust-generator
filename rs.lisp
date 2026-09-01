@@ -483,8 +483,16 @@ tuples such as (a, b) intact."
 		   ;; space {args}*
 		   (let ((args (cdr code)))
 		     (format nil "~{~a~^ ~}" (mapcar #'emit args))))
+		  (angle
+		   ;; angle {args}*
+		   (let ((args (cdr code)))
+		     (format nil "<~{~a~^, ~}>" (mapcar #'emit args))))
 		  (paren
 		   ;; paren {args}*
+		   (let ((args (cdr code)))
+		     (format nil "(~{~a~^, ~})" (mapcar #'emit args))))
+		  (tuple
+		   ;; tuple {args}*, same as paren
 		   (let ((args (cdr code)))
 		     (format nil "(~{~a~^, ~})" (mapcar #'emit args))))
 		  (values
@@ -682,10 +690,13 @@ tuples such as (a, b) intact."
 		  ;; NOTE: the unary prefix operators wrap the WHOLE expression in
 		  ;; parentheses, not just their operand.  `*(p).x' parses as
 		  ;; `*((p).x)' in Rust, which is not what (dot (deref p) x) means.
+		  
 		  (not (format nil "(!~a)" (emit (car (cdr code)))))
 		  (deref (format nil "(*~a)" (emit (car (cdr code)))))
 		  (ref (format nil "(&~a)" (emit (car (cdr code)))))
 		  (ref-mut (format nil "(&mut ~a)" (emit (car (cdr code)))))
+		  (scope (let ((args (cdr code)))
+			   (format nil "~{~a~^::~}" (mapcar #'emit args))))
 		  (+ (let ((args (cdr code)))
 		       ;; + {summands}*
 		       (format nil "(~{~a~^+~})" (mapcar #'emit args))))

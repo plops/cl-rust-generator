@@ -1,0 +1,8 @@
+[package]
+name = "mandelbrot"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+image = { version = "0.25.10", features = ["webp"], default-features = false }
+num = "0.4.3"
