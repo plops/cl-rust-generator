@@ -2,3 +2,7 @@ target/
 *.tar
 *.tar.zst
 *~
+*.webp
+*.png
+*.jpg
+*#
