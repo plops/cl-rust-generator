@@ -66,11 +66,7 @@
 		(values (space Option (angle Complex (angle f64)))))
        (dot (parse_pair s (char ","))
 	    (map (lambda ((tuple  re im))
-		   (make-instance Complex re im))))
-       #+nil(case (parse_pair s (char ","))
-	 ((Some (tuple re im))
-	  (Some (make-instance Complex re im)))
-	 (None None)))
+		   (make-instance Complex re im)))))
 
      "#[test]"
      (defun test_parse_complex ()
@@ -180,8 +176,7 @@
 	       (std--thread--scope (lambda (spawner)
 				     (for ((tuple i band)
 					   (bands.enumerate))
-					  (let ((top (* rows_per_band i)
-						     )
+					  (let ((top (* rows_per_band i))
 						(height (/ (band.len)
 							   bounds.0))
 						(band_bounds (tuple bounds.0 height))
@@ -192,7 +187,7 @@
 						(band_lower_right (pixel_to_point bounds
 										  (tuple bounds.0 (+ top height))
 										  upper_left lower_right)))
-					    (do0
+					    (do0 ;; hack to force semicolon
 					     (spawner.spawn (space move (lambda ()
 									  (do0 (render band band_bounds
 										       band_upper_left band_lower_right)))))))))))
