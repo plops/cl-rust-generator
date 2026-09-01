@@ -154,6 +154,7 @@
 	     (eprintln! (string "Usage:   {program} FILE        PIXELS   LEFT,TOP RIGHT,BOTTOM"))
 	     (eprintln! (string "Example: {program} mandel.webp 1000x750 -1.2,.35 -1,.2"))
 	     (std--process--exit 1)))
+	 
 	 (let ((bounds (dot (parse_pair (aref &args 2)
 					(char "x"))
 			    (expect (string "error parsing image dimensions"))))
@@ -161,9 +162,37 @@
 				(expect (string "error parsing upper left corner point"))))
 	       (lower_right (dot (parse_complex (aref &args 4))
 				 (expect (string "error parsing lower right corner point")))))
+	   (declare (type ;(tuple usize usize)
+		     "(usize, usize)"
+		     bounds))
+	   
 	   (let* ((pixels (aref vec! (semicolon 0 (* bounds.0 bounds.1)))))
-	     (render (ref-mut pixels)
-		     bounds upper_left lower_right)
+	     #+nil (render (ref-mut pixels)
+			   bounds upper_left lower_right)
+	     (let ((threads (dot (std--thread--available_parallelism)
+				 (expect (string "error querying CPU count"))
+				 (get)))
+		   (rows_per_band (bounds.1.div_ceil threads))
+		   (bands (pixels.chunks_mut (* rows_per_band bounds.0))))
+	       (std--thread--scope (lambda (spawner)
+				     (for ((tuple i band)
+					   (bands.enumerate))
+					  (let ((top (* rows_per_band i)
+						     )
+						(height (/ (band.len)
+							   bounds.0))
+						(band_bounds (tuple bounds.0 height))
+						(band_upper_left (pixel_to_point bounds
+										 (tuple 0 top)
+										 upper_left
+										 lower_right))
+						(band_lower_right (pixel_to_point bounds
+										  (tuple bounds.0 (+ top height))
+										  upper_left lower_right)))
+					    (do0
+					     (spawner.spawn (space move (lambda ()
+									  (do0 (render band band_bounds
+										       band_upper_left band_lower_right)))))))))))
 	     (dot (write_image (aref &args 1)
 			       &pixels bounds)
 		  (expect (string "error writing PNG file"))))

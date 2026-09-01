@@ -210,7 +210,8 @@ the original name asked for a Rust reference.  Lists (array type specifiers) are
 passed through unchanged.
 
   (remove-ampersand '&x) => \"x\", T
-  (remove-ampersand 'x)  => \"x\", NIL"
+  (remove-ampersand 'x)  => \"x\", NIL
+  (remove-ampersand '(tuple a b)) => (tuple a b), NIL"
   (if (listp rname)
       (values rname nil)
       (let* ((sname (format nil "~a" rname))
