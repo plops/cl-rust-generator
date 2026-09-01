@@ -27,7 +27,8 @@
 ;; cargo test
 ;; cargo run
 ;; cargo clean
-;; cargo clippy 
+;; cargo clippy
+;; cargo clippy --fix --bin "rs01_gcd" -p rs01_gcd --tests
 (progn
   (defparameter *source-dir* #P"examples/01_gcd/rs01_gcd/src/")
   (defparameter *code-file* (asdf:system-relative-pathname 'cl-rust-generator (merge-pathnames #P"main.rs"
@@ -50,12 +51,12 @@
        n)
 
      "#[test]"
-     (defun test_gcd ()
+     (defun test_gcd () 
        (assert_eq! (gcd 14 15) 1)
        (assert_eq! (gcd (* 2 3 5 11 17)
 			(* 3 7 11 13 19))
 		   (* 3 11)))
-     
+      
      (defun main ()
        (let* ((numbers ("Vec::new")))
 	 (for (arg (dot ("std::env::args")
