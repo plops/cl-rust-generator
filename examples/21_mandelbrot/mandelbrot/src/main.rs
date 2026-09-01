@@ -89,3 +89,64 @@ fn test_pixel_to_point() {
         }
     )
 }
+fn render(
+    pixels: &mut [u8],
+    bounds: (usize, usize),
+    upper_left: Complex<f64>,
+    lower_right: Complex<f64>,
+) {
+    assert!(((pixels.len()) == ((bounds.0) * (bounds.1))));
+    for row in 0..bounds.1 {
+        for column in 0..bounds.0 {
+            {
+                let point = pixel_to_point(bounds, (column, row), upper_left, lower_right);
+                pixels[(((row) * (bounds.0)) + column)] = match escape_time(point, 255) {
+                    None => 0,
+                    Some(count) => (255 - (count as u8)),
+                };
+            }
+        }
+    }
+}
+use image::codecs::webp::WebPEncoder;
+use image::{ExtendedColorType, ImageEncoder, ImageError};
+use std::fs::File;
+fn write_image(filename: &str, pixels: &[u8], bounds: (usize, usize)) -> Result<(), ImageError> {
+    {
+        let output = File::create(filename)?;
+        let encoder = WebPEncoder::new_lossless(output);
+        encoder.write_image(
+            pixels,
+            (bounds.0 as u32),
+            (bounds.1 as u32),
+            ExtendedColorType::L8,
+        )?;
+        Ok(())
+    }
+}
+use std::env;
+fn main() {
+    {
+        let args: Vec<String> = env::args().collect();
+        if (5) != (args.len()) {
+            {
+                let program = &args[0];
+                eprintln!("Usage:   {program} FILE        PIXELS   LEFT,TOP RIGHT,BOTTOM");
+                eprintln!("Example: {program} mandel.webp 1000x750 -1.2,.35 -1,.2");
+                std::process::exit(1)
+            }
+        }
+        {
+            let bounds = parse_pair(&args[2], 'x').expect("error parsing image dimensions");
+            let upper_left =
+                parse_complex(&args[3]).expect("error parsing upper left corner point");
+            let lower_right =
+                parse_complex(&args[4]).expect("error parsing lower right corner point");
+            {
+                let mut pixels = vec![0; ((bounds.0) * (bounds.1))];
+                render((&mut pixels), bounds, upper_left, lower_right);
+                write_image(&args[1], &pixels, bounds).expect("error writing PNG file")
+            }
+        }
+    }
+}
