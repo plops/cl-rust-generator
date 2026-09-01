@@ -31,3 +31,20 @@ fn test_parse_pair() {
     assert_eq!((parse_pair::<f64>)("0.5x", 'x'), None);
     assert_eq!((parse_pair::<f64>)("0.5x1.5", 'x'), Some((0.50, 1.50)))
 }
+fn parse_complex(s: &str) -> Option<Complex<f64>> {
+    match parse_pair(s, ',') {
+        Some((re, im)) => Some(Complex { re, im }),
+        None => None,
+    }
+}
+#[test]
+fn test_parse_complex() {
+    assert_eq!(
+        parse_complex("1.25,-.0625"),
+        Some(Complex {
+            re: 1.250,
+            im: (-6.250e-2)
+        })
+    );
+    assert_eq!(parse_complex(",-.06"), None)
+}

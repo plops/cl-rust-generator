@@ -486,7 +486,7 @@ tuples such as (a, b) intact."
 		  (angle
 		   ;; angle {args}*
 		   (let ((args (cdr code)))
-		     (format nil "<~{~a~^, ~}>" (mapcar #'emit args))))
+		     (format nil "<~{~a~}>" (mapcar #'emit args))))
 		  (paren
 		   ;; paren {args}*
 		   (let ((args (cdr code)))

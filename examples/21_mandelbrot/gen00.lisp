@@ -60,22 +60,38 @@
 	       `(assert_eq! ((scope parse_pair (angle ,type)) (string ,s)
 					       (char ,sep))
 			    ,result)))
+
+     (defun parse_complex (s)
+       (declare (type &str s)
+		(values (space Option (angle Complex (angle f64)))))
+       (case (parse_pair s (char ","))
+	 ((Some (tuple re im))
+	  (Some (make-instance Complex re im)))
+	 (None None)))
+
+     "#[test]"
+     (defun test_parse_complex ()
+       (assert_eq! (parse_complex (string "1.25,-.0625"))
+		   (Some (make-instance Complex :re 1.25
+						:im -.0625)))
+       (assert_eq! (parse_complex (string ",-.06"))
+		   None))
      
      #+nil(defun main ()
-       (let* ((numbers ("Vec::new")))
-	 (for (arg (dot ("std::env::args")
-			(skip 1)))
-	      (numbers.push
-	       (dot ("u64::from_str" &arg)
-		    (expect (string "error parsing argument")))))
-	 (when (numbers.is_empty)
-	   (eprintln!
-	    (string "Usage: gcd NUMBER ..."))
+	    (let* ((numbers ("Vec::new")))
+	      (for (arg (dot ("std::env::args")
+			     (skip 1)))
+		   (numbers.push
+		    (dot ("u64::from_str" &arg)
+			 (expect (string "error parsing argument")))))
+	      (when (numbers.is_empty)
+		(eprintln!
+		 (string "Usage: gcd NUMBER ..."))
 	   
-	   ("std::process::exit" 1))
-	 (let* ((d (aref numbers 0)))
-	   (for (m (ref (aref numbers "1..")))
-		(setf d (gcd d *m)))
-	   (println! (string "The greatest common divisor of {:?} is {}")
-		     numbers d)))))))
+		("std::process::exit" 1))
+	      (let* ((d (aref numbers 0)))
+		(for (m (ref (aref numbers "1..")))
+		     (setf d (gcd d *m)))
+		(println! (string "The greatest common divisor of {:?} is {}")
+			  numbers d)))))))
 
