@@ -755,6 +755,9 @@ tuples such as (a, b) intact."
 		  (incf (destructuring-bind (a &optional (b 1)) (cdr code) ;; py
 			  (format nil "~a += ~a" (emit a) (emit b))
 			  ))
+		  (%= (destructuring-bind (a &optional (b 1)) (cdr code) 
+			  (format nil "~a %= ~a" (emit a) (emit b))
+			  ))
 		  (decf (destructuring-bind (a &optional (b 1)) (cdr code)
 			  (format nil "~a -= ~a" (emit a) (emit b))
 			  ))
