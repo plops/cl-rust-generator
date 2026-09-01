@@ -295,10 +295,12 @@ is `mut x: T', a mutable reference is `x: &mut T'."
       (with-output-to-string (s)
 	(format s "~a"
 		(funcall emit
-			`(do0
+			`(progn
 			  ,@(loop for decl in decls collect
 				  (destructuring-bind (name &optional value)
-				      (if (listp decl) decl (list decl))
+				      (if (listp decl)
+					  decl
+					  (list decl))
 				    (format nil "let ~a~@[ = ~a~];"
 					    (variable-declaration
 					     :name name :env env :emit emit

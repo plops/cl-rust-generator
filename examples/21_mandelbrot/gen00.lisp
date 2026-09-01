@@ -76,6 +76,35 @@
 						:im -.0625)))
        (assert_eq! (parse_complex (string ",-.06"))
 		   None))
+
+     "/// Given row and column of a pixel in image grid return corresponding point on the complex plane"
+     (defun pixel_to_point (bounds pixel upper_left lower_right)
+       (declare (values Complex<f64>)
+		(type (tuple usize usize) bounds pixel)
+		(type Complex<f64> upper_left lower_right))
+       (let (((tuple width height)
+	       (tuple (- lower_right.re
+			 upper_left.re)
+		      (- upper_left.im
+			 lower_right.im))))
+	 ;; pixel.1 increases as we go down, imaginary component increases as we go up
+	 (make-instance Complex
+			:re (+ upper_left.re (/
+					      (* (coerce pixel.0 f64)
+						 width)
+					      (coerce bounds.0 f64)))
+			:im (- upper_left.im (/
+					      (* (coerce pixel.1 f64)
+						 height)
+					      (coerce bounds.1 f64))))))
+
+     "#[test]"
+     (defun test_pixel_to_point ()
+       (assert_eq! (pixel_to_point (tuple 100 200)
+				   (tuple 25 175)
+				   (make-instance Complex :re -1.0 :im 1.0)
+				   (make-instance Complex :re 1.0 :im -1.0))
+		   (make-instance Complex :re -.5 :im -.75)))
      
      #+nil(defun main ()
 	    (let* ((numbers ("Vec::new")))
