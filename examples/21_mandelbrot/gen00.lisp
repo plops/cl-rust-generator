@@ -147,17 +147,28 @@
 		   (setf (aref pixels (+ (* row bounds.0)
 					 column))
 			 ,(let ((max-value 4095)
-				(alpha-value .017f0))
+				)
 			   `(case (escape_time point ,max-value)
 			     (None 0) ;; point belongs to mandelbrot set
 			     ((Some count)
-			      (coerce #+nil (/ (coerce count f32)
+			      (coerce #+nil (/ ;; linear
+					     (coerce count f32)
 					 ,(/ ,max-value 256f0))
-				      (/ (- (dot (* ,(/ alpha-value max-value)
-						    (coerce count f32))
-						 (exp)) 1f0)
-					 ,(/ (- (exp alpha-value) 1)
-					     255))
+				      #+nil ,(let (((alpha-value 1.2f0)))
+					      `(/ ;; exponential 
+					       (- (dot (* ,(/ alpha-value max-value)
+							  (coerce count f32))
+						       (exp)) 1f0)
+					       ,(/ (- (exp alpha-value) 1)
+						   255)))
+				      
+				      ,(let ((gamma-value .3f0))
+					 ;; gamma
+					 `(dot (/ (coerce count f32)
+						  ,(coerce (/ 4095d0
+							      (expt 255d0 (/ 1d0 gamma-value)))
+							   'single-float))
+					       (powf ,gamma-value)))
 				      u8)))))))))
 
      

@@ -99,9 +99,7 @@ fn render(
                 let point = pixel_to_point(bounds, (column, row), upper_left, lower_right);
                 pixels[(((row) * (bounds.0)) + column)] = match escape_time(point, 4095) {
                     None => 0,
-                    Some(count) => {
-                        (((((4.1514045e-6) * (count as f32)).exp() - 1.0) / (6.723638e-5)) as u8)
-                    }
+                    Some(count) => (((count as f32) / (3.894517e-5)).powf(0.30) as u8),
                 };
             }
         }
