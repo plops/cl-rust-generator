@@ -146,10 +146,19 @@
 					      lower_right)))
 		   (setf (aref pixels (+ (* row bounds.0)
 					 column))
-			 (case (escape_time point 255)
-			   (None 0) ;; point belongs to mandelbrot set
-			   ((Some count)
-			    (- 255 (coerce count u8)))))))))
+			 ,(let ((max-value 4095)
+				(alpha-value .017f0))
+			   `(case (escape_time point ,max-value)
+			     (None 0) ;; point belongs to mandelbrot set
+			     ((Some count)
+			      (coerce #+nil (/ (coerce count f32)
+					 ,(/ ,max-value 256f0))
+				      (/ (- (dot (* ,(/ alpha-value max-value)
+						    (coerce count f32))
+						 (exp)) 1f0)
+					 ,(/ (- (exp alpha-value) 1)
+					     255))
+				      u8)))))))))
 
      
      (use (image (curly ExtendedColorType ImageEncoder ImageError))

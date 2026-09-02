@@ -97,9 +97,11 @@ fn render(
         for column in 0..bounds.0 {
             {
                 let point = pixel_to_point(bounds, (column, row), upper_left, lower_right);
-                pixels[(((row) * (bounds.0)) + column)] = match escape_time(point, 255) {
+                pixels[(((row) * (bounds.0)) + column)] = match escape_time(point, 4095) {
                     None => 0,
-                    Some(count) => (255 - (count as u8)),
+                    Some(count) => {
+                        (((((4.1514045e-6) * (count as f32)).exp() - 1.0) / (6.723638e-5)) as u8)
+                    }
                 };
             }
         }
