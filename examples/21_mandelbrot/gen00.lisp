@@ -13,20 +13,7 @@
   (defparameter *source-dir* #P"examples/21_mandelbrot/mandelbrot/src/")
   (defparameter *code-file* (asdf:system-relative-pathname 'cl-rust-generator (merge-pathnames #P"main.rs"
 											       *source-dir*)))
-
-  #+nil (eprintln!
-      (string ,(format nil "~a~{~a~^ ~}"
-		       (if (string= msg "")
-			   ""
-			   (format nil "~a " msg))
-		       (loop for e in vars
-			     collect		     (format nil "~a={~a}" (emit-rs :code e) (emit-rs :code e)))))
-      )
-  (defun lprint (&key (msg "")
-		   (vars nil))
-  
-  
-    
+  (defun lprint (&key (msg "") (vars nil))
     `(eprintln!
       (string ,(format nil "~a~{~a~^ ~}"
 		       (if (string= msg "")
@@ -34,7 +21,7 @@
 			   (format nil "~a " msg))
 		       (loop for e in vars
 			     collect
-			     (format nil "~a={}" (emit-rs :code e)))))
+			     (format nil "~a={:?}" (emit-rs :code e)))))
        ,@(loop for e in vars
 	    collect
 	    (emit-rs :code e))
@@ -146,7 +133,7 @@
 					      lower_right)))
 		   (setf (aref pixels (+ (* row bounds.0)
 					 column))
-			 ,(let ((max-value 4095)
+			 ,(let ((max-value (- (expt 2 16) 1))
 				)
 			   `(case (escape_time point ,max-value)
 			     (None 0) ;; point belongs to mandelbrot set
@@ -220,7 +207,7 @@
 				 (get)))
 		   (rows_per_band (bounds.1.div_ceil threads))
 		   (bands (pixels.chunks_mut (* rows_per_band bounds.0))))
-	       ,(lprint :vars `(bounds.0 bounds.1
+	       ,(lprint :vars `(bounds
 					 upper_left lower_right
 					 threads
 					 rows_per_band))
@@ -238,7 +225,7 @@
 						(band_lower_right (pixel_to_point bounds
 										  (tuple bounds.0 (+ top height))
 										  upper_left lower_right)))
-					    ,(lprint :vars `(i top height band_bounds.0 band_bounds.1 band_upper_left band_lower_right))
+					    ,(lprint :vars `(i top height band_bounds band_upper_left band_lower_right))
 					    (do0 ;; hack to force semicolon
 					     (spawner.spawn (space move (lambda ()
 									  (do0 (render band band_bounds

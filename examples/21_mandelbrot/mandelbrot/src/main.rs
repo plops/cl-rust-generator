@@ -97,7 +97,7 @@ fn render(
         for column in 0..bounds.0 {
             {
                 let point = pixel_to_point(bounds, (column, row), upper_left, lower_right);
-                pixels[(((row) * (bounds.0)) + column)] = match escape_time(point, 4095) {
+                pixels[(((row) * (bounds.0)) + column)] = match escape_time(point, 65535) {
                     None => 0,
                     Some(count) => (((count as f32) / (3.894517e-5)).powf(0.30) as u8),
                 };
@@ -148,7 +148,7 @@ fn main() {
                         .get();
                     let rows_per_band = bounds.1.div_ceil(threads);
                     let bands = pixels.chunks_mut(((rows_per_band) * (bounds.0)));
-                    eprintln!("bounds.0={} bounds.1={} upper_left={} lower_right={} threads={} rows_per_band={}", bounds.0, bounds.1, upper_left, lower_right, threads, rows_per_band);
+                    eprintln!("bounds={:?} upper_left={:?} lower_right={:?} threads={:?} rows_per_band={:?}", bounds, upper_left, lower_right, threads, rows_per_band);
                     std::thread::scope(|spawner| {
                         for (i, band) in bands.enumerate() {
                             {
@@ -163,7 +163,7 @@ fn main() {
                                     upper_left,
                                     lower_right,
                                 );
-                                eprintln!("i={} top={} height={} band_bounds.0={} band_bounds.1={} band_upper_left={} band_lower_right={}", i, top, height, band_bounds.0, band_bounds.1, band_upper_left, band_lower_right);
+                                eprintln!("i={:?} top={:?} height={:?} band_bounds={:?} band_upper_left={:?} band_lower_right={:?}", i, top, height, band_bounds, band_upper_left, band_lower_right);
                                 spawner.spawn(move || {
                                     render(band, band_bounds, band_upper_left, band_lower_right);
                                 });
