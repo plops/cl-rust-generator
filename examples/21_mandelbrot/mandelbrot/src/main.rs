@@ -17,7 +17,7 @@ use std::str::FromStr;
 fn parse_pair<T: FromStr>(s: &str, separator: char) -> Option<(T, T)> {
     match s.find(separator) {
         None => None,
-        Some(index) => match (T::from_str(&s[..index] ), T::from_str(&s[index + 1.. ] )) {
+        Some(index) => match (T::from_str((&s[..index])), T::from_str((&s[(index + 1..)]))) {
             (Ok(l), Ok(r)) => Some((l, r)),
             _ => None,
         },
@@ -97,9 +97,9 @@ fn render(
         for column in 0..bounds.0 {
             {
                 let point = pixel_to_point(bounds, (column, row), upper_left, lower_right);
-                pixels[((row) * (bounds.0)) + column ] = match escape_time(point, 255) {
+                pixels[(((row) * (bounds.0)) + column)] = match escape_time(point, 255) {
                     None => 0,
-                    Some(count) => 255 - (count as u8) ,
+                    Some(count) => (255 - (count as u8)),
                 };
             }
         }
@@ -114,8 +114,8 @@ fn write_image(filename: &str, pixels: &[u8], bounds: (usize, usize)) -> Result<
         let encoder = WebPEncoder::new_lossless(output);
         encoder.write_image(
             pixels,
-            bounds.0 as u32 ,
-            bounds.1 as u32 ,
+            (bounds.0 as u32),
+            (bounds.1 as u32),
             ExtendedColorType::L8,
         )?;
         Ok(())
@@ -141,18 +141,19 @@ fn main() {
             let lower_right =
                 parse_complex(&args[4]).expect("error parsing lower right corner point");
             {
-                let mut pixels = vec![0; (bounds.0) * (bounds.1) ];
+                let mut pixels = vec![0; ((bounds.0) * (bounds.1))];
                 {
                     let threads = std::thread::available_parallelism()
                         .expect("error querying CPU count")
                         .get();
                     let rows_per_band = bounds.1.div_ceil(threads);
-                    let bands = pixels.chunks_mut((rows_per_band) * (bounds.0) );
+                    let bands = pixels.chunks_mut(((rows_per_band) * (bounds.0)));
+                    eprintln!("bounds.0={} bounds.1={} upper_left={} lower_right={} threads={} rows_per_band={}", bounds.0, bounds.1, upper_left, lower_right, threads, rows_per_band);
                     std::thread::scope(|spawner| {
                         for (i, band) in bands.enumerate() {
                             {
-                                let top = (rows_per_band) * (i) ;
-                                let height = (band.len()) / (bounds.0) ;
+                                let top = ((rows_per_band) * (i));
+                                let height = ((band.len()) / (bounds.0));
                                 let band_bounds = (bounds.0, height);
                                 let band_upper_left =
                                     pixel_to_point(bounds, (0, top), upper_left, lower_right);
@@ -162,6 +163,7 @@ fn main() {
                                     upper_left,
                                     lower_right,
                                 );
+                                eprintln!("i={} top={} height={} band_bounds.0={} band_bounds.1={} band_upper_left={} band_lower_right={}", i, top, height, band_bounds.0, band_bounds.1, band_upper_left, band_lower_right);
                                 spawner.spawn(move || {
                                     render(band, band_bounds, band_upper_left, band_lower_right);
                                 });

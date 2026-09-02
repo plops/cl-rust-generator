@@ -13,6 +13,32 @@
   (defparameter *source-dir* #P"examples/21_mandelbrot/mandelbrot/src/")
   (defparameter *code-file* (asdf:system-relative-pathname 'cl-rust-generator (merge-pathnames #P"main.rs"
 											       *source-dir*)))
+
+  #+nil (eprintln!
+      (string ,(format nil "~a~{~a~^ ~}"
+		       (if (string= msg "")
+			   ""
+			   (format nil "~a " msg))
+		       (loop for e in vars
+			     collect		     (format nil "~a={~a}" (emit-rs :code e) (emit-rs :code e)))))
+      )
+  (defun lprint (&key (msg "")
+		   (vars nil))
+  
+  
+    
+    `(eprintln!
+      (string ,(format nil "~a~{~a~^ ~}"
+		       (if (string= msg "")
+			   ""
+			   (format nil "~a " msg))
+		       (loop for e in vars
+			     collect
+			     (format nil "~a={}" (emit-rs :code e)))))
+       ,@(loop for e in vars
+	    collect
+	    (emit-rs :code e))
+      ))
   (write-source
    *code-file*
    `(do0
@@ -55,10 +81,10 @@
 					    (i32 "10,20xy" "," None)
 					    (f64 "0.5x" "x" None)
 					    (f64 "0.5x1.5" "x" (Some (tuple .5 1.5)))
-				    )
+					    )
 	       collect
 	       `(assert_eq! ((scope parse_pair (angle ,type)) (string ,s)
-					       (char ,sep))
+			     (char ,sep))
 			    ,result)))
 
      (defun parse_complex (s)
@@ -138,9 +164,9 @@
        (let ((output (? (File--create filename)))
 	     (encoder (WebPEncoder--new_lossless output)))
 	 (? (encoder.write_image pixels
-			       (coerce bounds.0 u32)
-			       (coerce bounds.1 u32)
-			       ExtendedColorType--L8))
+				 (coerce bounds.0 u32)
+				 (coerce bounds.1 u32)
+				 ExtendedColorType--L8))
 	 (Ok "()")))
 
      (use (std env))
@@ -161,9 +187,10 @@
 				(expect (string "error parsing upper left corner point"))))
 	       (lower_right (dot (parse_complex (aref &args 4))
 				 (expect (string "error parsing lower right corner point")))))
-	   (declare (type ;(tuple usize usize)
+	   (declare (type		;(tuple usize usize)
 		     "(usize, usize)"
 		     bounds))
+	   
 	   
 	   (let* ((pixels (aref vec! (semicolon 0 (* bounds.0 bounds.1)))))
 	     #+nil (render (ref-mut pixels)
@@ -173,6 +200,10 @@
 				 (get)))
 		   (rows_per_band (bounds.1.div_ceil threads))
 		   (bands (pixels.chunks_mut (* rows_per_band bounds.0))))
+	       ,(lprint :vars `(bounds.0 bounds.1
+					 upper_left lower_right
+					 threads
+					 rows_per_band))
 	       (std--thread--scope (lambda (spawner)
 				     (for ((tuple i band)
 					   (bands.enumerate))
@@ -187,6 +218,7 @@
 						(band_lower_right (pixel_to_point bounds
 										  (tuple bounds.0 (+ top height))
 										  upper_left lower_right)))
+					    ,(lprint :vars `(i top height band_bounds.0 band_bounds.1 band_upper_left band_lower_right))
 					    (do0 ;; hack to force semicolon
 					     (spawner.spawn (space move (lambda ()
 									  (do0 (render band band_bounds
