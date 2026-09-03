@@ -148,7 +148,7 @@ fn main() {
                         .get();
                     let rows_per_band = bounds.1.div_ceil(threads);
                     let bands = pixels.chunks_mut(((rows_per_band) * (bounds.0)));
-                    eprintln!("bounds={:?} upper_left={:?} lower_right={:?} threads={:?} rows_per_band={:?}", bounds, upper_left, lower_right, threads, rows_per_band);
+                    eprintln!("bounds={:?} upper_left={:?} lower_right={:?} threads={:?} rows_per_band={:?}", (&bounds), (&upper_left), (&lower_right), (&threads), (&rows_per_band));
                     std::thread::scope(|spawner| {
                         for (i, band) in bands.enumerate() {
                             {
@@ -163,7 +163,7 @@ fn main() {
                                     upper_left,
                                     lower_right,
                                 );
-                                eprintln!("i={:?} top={:?} height={:?} band_bounds={:?} band_upper_left={:?} band_lower_right={:?}", i, top, height, band_bounds, band_upper_left, band_lower_right);
+                                eprintln!("i={:?} top={:?} height={:?} band_bounds={:?} band_upper_left={:?} band_lower_right={:?}", (&i), (&top), (&height), (&band_bounds), (&band_upper_left), (&band_lower_right));
                                 spawner.spawn(move || {
                                     render(band, band_bounds, band_upper_left, band_lower_right);
                                 });

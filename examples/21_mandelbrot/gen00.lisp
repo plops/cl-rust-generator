@@ -24,7 +24,7 @@
 			     (format nil "~a={:?}" (emit-rs :code e)))))
        ,@(loop for e in vars
 	    collect
-	    (emit-rs :code e))
+	    (emit-rs :code `(ref ,e)))
       ))
   (write-source
    *code-file*

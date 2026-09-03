@@ -51,3 +51,24 @@ in rust a move is always a byte for byte shallow copy
 
 
 you can leak memory if you create two Rc objects that point to each other
+std::rc::Weak can be used to resolve some of such cycles
+
+
+references
+
+have no effect on their referents' lifetimes
+actually must never outlive them
+
+
+&T  multiple readers
+&mut T single writer
+
+
+. operator dereferences its left operand when needed
+
+
+compare two reference addresses std::ptr::eq
+
+Option<&T> is just as efficient as a c pointer but safer
+
+slice and trait references are special (fat pointers)
