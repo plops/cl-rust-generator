@@ -230,3 +230,39 @@ geklammert wird bei verschiedenem Operator gleicher Stufe
 cd examples/01_gcd/rs01_gcd && cargo test --offline && cargo clippy --offline
 cd ../21_mandelbrot/mandelbrot && cargo check --offline  # nur unused_parens-Warnungen
 ```
+
+
+# Kosten
+
+│  MUSE CODE 1.0.3 / white-protostar                COMPLETED │
+│                                                             │
+│  MODEL          muse-spark-1.3-contributor · high           │
+│                 meta · native-basic                         │
+│                                                             │
+│  WORKSPACE      /workspace/src/cl-rust-generator/plan       │
+│                 trusted · not found                         │
+│  ACCESS         Unrestricted                                │
+│                 Meta account                                │
+│                                                             │
+│  USAGE          18,529,547 tokens · 123 turns · 0 subagents │
+│  CONTEXT        78% left · 221K used / 1008K · normal       │
+│                                                             │
+│  SESSION        01a07335-0140-7bd1-9258-474d897da86b        │
+│  ACTIVITY       no tasks                                    │
+│                 0 terminals · inbox clear                   │
+│                                                             │
+│  BILLING        Subscription · Muse Code Everyday Usage     │
+
+  Session usage
+
+    Input      18,457,259
+    Cached     17,843,463
+    Output         72,288
+    Total      18,529,547
+
+    Turns              123
+    Subagents         none
+
+  Subscription · Muse Code Everyday Usage
+    Current        26% used · Resets at 1:13 AM
+    Weekly         11% used · Resets Sep 7 at 12:00 AM
