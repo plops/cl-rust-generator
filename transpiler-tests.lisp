@@ -89,6 +89,12 @@ literal.  Enough hashes are added so that the payload may contain quote-hash."
      :rust "r#\"a\"b\"#"
      :tags (:literal))
 
+    (:name "raw-string-alias"
+     :description "(string-r x) is the hyphenated alias of string#."
+     :lisp (string-r "a\"b")
+     :rust "r#\"a\"b\"#"
+     :tags (:literal))
+
     (:name "byte-string-literal"
      :description "(string-b x) emits a byte string literal."
      :lisp (string-b "abc")
@@ -127,6 +133,19 @@ hatch for everything the generator has no form for."
      :lisp (do0 "#[derive(Clone)]" (defstruct0 Point (x f64)))
      :rust "#[derive(Clone)]
 struct Point { x: f64, }"
+     :tags (:core))
+
+    (:name "angle"
+     :description "(angle args*) emits turbofish brackets <...>."
+     :lisp (angle Vec T)
+     :rust "<VecT>"
+     :tags (:core))
+
+    (:name "scope-turbofish"
+     :description "(scope a b c) joins with ::, so (scope name (angle type))
+emits the turbofish call syntax name::<type>."
+     :lisp (scope parse_pair (angle i32))
+     :rust "parse_pair::<i32>"
      :tags (:core))
 
     ;; ---------------- arithmetic ----------------
@@ -178,6 +197,154 @@ parenthesised, otherwise (dot (% a b) c) would regroup into (a)%((b).c)."
 method call must keep its own parentheses."
      :lisp (dot (% a b) (to_string))
      :rust "((a)%(b)).to_string()"
+     :tags (:operator :precedence))
+
+    ;; ---------------- omit-parens ----------------
+    ;; Each case below is emitted with *OMIT-REDUNDANT-PARENS* bound (see
+    ;; :omit-parens).  The fully parenthesised output stays the default.
+    (:name "omit-add-mul"
+     :description "With elision * binds tighter than +, so no parentheses
+are needed."
+     :lisp (+ 1 (* 2 3))
+     :rust "1 + 2 * 3"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-mul-add"
+     :description "A looser operand keeps its parentheses."
+     :lisp (* (+ 1 2) 3)
+     :rust "(1 + 2) * 3"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-sub-left"
+     :description "Left-nested subtraction stays flat (left associative)."
+     :lisp (- (- a b) c)
+     :rust "a - b - c"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-sub-right"
+     :description "Right-nested subtraction is parenthesised: a-(b-c) is
+not (a-b)-c."
+     :lisp (- a (- b c))
+     :rust "a - (b - c)"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-div-right"
+     :description "Same-level mixed * and / never stay flat on the right:
+a*(b/c) is not (a*b)/c for integers."
+     :lisp (* a (/ b c))
+     :rust "a * (b / c)"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-compare-nested"
+     :description "Comparisons cannot be chained in Rust (a==b==c is a
+compile error), so a nested comparison is always parenthesised."
+     :lisp (== a (== b c))
+     :rust "a == (b == c)"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-bitand-compare"
+     :description "Unlike C, Rust's bitwise & binds tighter than ==, so no
+parentheses are needed here."
+     :lisp (== (logand x mask) 0)
+     :rust "x & mask == 0"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-and-or"
+     :description "&& binds tighter than ||, so this stays flat."
+     :lisp (or (and a b) c)
+     :rust "a && b || c"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-neg-sum"
+     :description "Unary minus keeps parentheses around a looser operand."
+     :lisp (- (+ a b))
+     :rust "-(a + b)"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-neg-neg"
+     :description "Minus inside minus would glue into the invalid --x."
+     :lisp (- (- x))
+     :rust "-(-x)"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-not-compare"
+     :description "The == operand binds looser than unary !, so it keeps
+its parentheses."
+     :lisp (not (== a b))
+     :rust "!(a == b)"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-dot-receiver"
+     :description "Method call binds tightest, so a binary receiver keeps
+its parentheses even with elision."
+     :lisp (dot (% a b) (to_string))
+     :rust "(a % b).to_string()"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-deref-dot"
+     :description "*(p).x parses as *((p).x), so the deref keeps its
+parentheses as a dot receiver."
+     :lisp (dot (deref p) x)
+     :rust "(*p).x"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-coerce-sum"
+     :description "`as' binds tighter than +, so the sum keeps its
+parentheses."
+     :lisp (coerce (+ a b) i64)
+     :rust "(a + b) as i64"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-ref-add"
+     :description "& binds tighter than +, but the operand is looser, so
+&(a+b) keeps its parentheses."
+     :lisp (ref (+ a b))
+     :rust "&(a + b)"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-shift-add"
+     :description "+ binds tighter than <<, so the sum needs no parentheses."
+     :lisp (<< (+ 1 1) 3)
+     :rust "1 + 1 << 3"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-shift-right-nested"
+     :description "Shifts are left associative but not flattenable, so a
+right-nested shift keeps its parentheses: 64>>(8>>1) is not (64>>8)>>1."
+     :lisp (>> 64 (>> 8 1))
+     :rust "64 >> (8 >> 1)"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-reciprocal"
+     :description "The single-argument / reciprocal keeps a tight operand
+bare."
+     :lisp (/ x)
+     :rust "1.0 / x"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-question"
+     :description "A call needs no parentheses under ?."
+     :lisp (? (dot f (read_to_string "&mut s")))
+     :rust "f.read_to_string(&mut s)?"
+     :omit-parens t
      :tags (:operator :precedence))
 
     ;; ---------------- bit operations ----------------
@@ -312,6 +479,12 @@ b=2;"
      :rust "(i)^=(2)"
      :tags (:assignment))
 
+    (:name "rem-assign"
+     :description "(%= place [delta]) emits remainder-assignment %=."
+     :lisp (%= i 2)
+     :rust "i %= 2"
+     :tags (:assignment))
+
     ;; ---------------- references / casts ----------------
     (:name "reference"
      :description "(ref x) takes a shared reference."
@@ -342,6 +515,13 @@ parentheses have to enclose the deref, not its operand."
      :description "(coerce value type) emits Rust's `as' cast.  (cast value
 type) is a deprecated alias."
      :lisp (coerce x u8)
+     :rust "(x as u8)"
+     :tags (:reference))
+
+    (:name "cast-alias"
+     :description "(cast value type) is the deprecated alias of coerce.
+Note the argument order: value first, unlike the old C-style cast."
+     :lisp (cast x u8)
      :rust "(x as u8)"
      :tags (:reference))
 
@@ -410,9 +590,53 @@ Index impl takes a tuple-like argument)."
      :tags (:indexing))
 
     (:name "slice"
-     :description "(slice a b) emits a Rust range."
+     :description "(slice a b) emits a Rust range.  Deprecated alias of
+(range a b); the old examples still use it."
      :lisp (slice 0 4)
      :rust "(0..4)"
+     :tags (:indexing))
+
+    (:name "range"
+     :description "(range a b) emits the end-exclusive Rust range a..b."
+     :lisp (range 0 n)
+     :rust "(0..n)"
+     :tags (:indexing))
+
+    (:name "range-inclusive"
+     :description "(range-inclusive a b) emits the end-inclusive range a..=b."
+     :lisp (range-inclusive 0 n)
+     :rust "(0..=n)"
+     :tags (:indexing))
+
+    (:name "range-from"
+     :description "(range-from a) emits the open-ended range a.. ."
+     :lisp (range-from 2)
+     :rust "(2..)"
+     :tags (:indexing))
+
+    (:name "range-to"
+     :description "(range-to b) emits the left-open range ..b."
+     :lisp (range-to 5)
+     :rust "(..5)"
+     :tags (:indexing))
+
+    (:name "range-to-inclusive"
+     :description "(range-to-inclusive b) emits ..=b."
+     :lisp (range-to-inclusive 5)
+     :rust "(..=5)"
+     :tags (:indexing))
+
+    (:name "range-full"
+     :description "(range-full) emits the full range .. ."
+     :lisp (range-full)
+     :rust "(..)"
+     :tags (:indexing))
+
+    (:name "range-in-for"
+     :description "A range used as a for collection loses its redundant
+parentheses like slice does."
+     :lisp (for (x (range 0 n)) (f x))
+     :rust "for x in 0..n { f(x) }"
      :tags (:indexing))
 
     (:name "dot"
@@ -447,6 +671,27 @@ several body forms."
      :description "(unless c form*) negates the condition."
      :lisp (unless x (f))
      :rust "if !x { f() }"
+     :tags (:control-flow))
+
+    (:name "if-let"
+     :description "(if-let (pattern scrutinee) then else) emits Rust's if
+let.  A list pattern such as (Some x) emits the tuple-struct pattern
+Some(x); None and _ work as written."
+     :lisp (if-let ((Some x) y) (return x) (return 0))
+     :rust "if let Some(x) = y { return x } else { return 0 }"
+     :tags (:control-flow))
+
+    (:name "if-let-no-else"
+     :description "Without an else form if-let emits a bare if let."
+     :lisp (if-let ((Some x) y) (return x))
+     :rust "if let Some(x) = y { return x }"
+     :tags (:control-flow))
+
+    (:name "while-let"
+     :description "(while-let (pattern scrutinee) form*) emits Rust's
+while let loop."
+     :lisp (while-let ((Some x) (dot it (next))) (f x))
+     :rust "while let Some(x) = it.next() { f(x) }"
      :tags (:control-flow))
 
     (:name "while"
@@ -591,11 +836,29 @@ so the block evaluates to ()."
      :rust "extern { fn puts(s: *const u8) -> i32; }"
      :tags (:block))
 
+    (:name "do"
+     :description "(do form*) sequences statements like do0 but indented one
+level deeper; it is what function and block bodies are built from."
+     :lisp (do (f) (g))
+     :rust "f(); g();"
+     :tags (:block))
+
+    (:name "stmt"
+     :description "(stmt form) forces statement termination with a semicolon.
+It is the explicit override for escape-hatch forms such as (space ...)
+in statement position, where the semicolon heuristic cannot know whether
+the expansion is a statement or an expression."
+     :lisp (do0 (stmt (space foo bar)) (g))
+     :rust "foo bar; g();"
+     :tags (:block))
+
     ;; ---------------- bindings ----------------
     (:name "let-immutable"
-     :description "(let ((x v)) ...) binds immutably by default."
+     :description "(let ((x v)) ...) binds immutably by default.  The whole
+form emits a Rust block, so the bindings stay scoped like in Common Lisp
+and the block evaluates to its last form (implicit return)."
      :lisp (let ((x 5)) (f x))
-     :rust "let x = 5; f(x);"
+     :rust "{ let x = 5; f(x) }"
      :tags (:binding))
 
     (:name "let-typed"
@@ -604,14 +867,14 @@ binding."
      :lisp (let ((x 5))
              (declare (type i32 x))
              (f x))
-     :rust "let x: i32 = 5; f(x);"
+     :rust "{ let x: i32 = 5; f(x) }"
      :tags (:binding))
 
     (:name "let-star-mutable"
      :description "let* makes every binding mutable by default; that is the only
 difference to let."
      :lisp (let* ((x 5)) (setf x 6))
-     :rust "let mut x = 5; x=6;"
+     :rust "{ let mut x = 5; x=6; }"
      :tags (:binding))
 
     (:name "let-declare-mutable"
@@ -621,7 +884,7 @@ let, (declare (immutable x)) does the opposite inside let*."
              (declare (type i32 x)
                       (mutable x))
              (setf x 6))
-     :rust "let mut x: i32 = 5; x=6;"
+     :rust "{ let mut x: i32 = 5; x=6; }"
      :tags (:binding))
 
     (:name "let-array-type"
@@ -630,7 +893,7 @@ Rust array type; several dimensions nest."
      :lisp (let ((a))
              (declare (type (array i32 4) a))
              (f a))
-     :rust "let a: [i32; 4]; f(a);"
+     :rust "{ let a: [i32; 4]; f(a) }"
      :tags (:binding))
 
     (:name "let-array-type-2d"
@@ -638,7 +901,15 @@ Rust array type; several dimensions nest."
      :lisp (let ((a))
              (declare (type (array i32 2 3) a))
              (f a))
-     :rust "let a: [[i32; 3]; 2]; f(a);"
+     :rust "{ let a: [[i32; 3]; 2]; f(a) }"
+     :tags (:binding))
+
+    (:name "let-statement-position"
+     :description "In statement position (do0, defun body, loop body) the let
+block needs no semicolon of its own; the following statement is unaffected
+and the binding does not leak out of the block."
+     :lisp (do0 (let ((x 5)) (f x)) (g))
+     :rust "{ let x = 5; f(x) } g();"
      :tags (:binding))
 
     ;; ---------------- functions ----------------
@@ -785,6 +1056,17 @@ mod write;"
      :description "(struct name) emits just the struct keyword and a name."
      :lisp (struct Point)
      :rust "struct Point"
+     :tags (:item))
+
+    (:name "deftrait"
+     :description "(deftrait name (defun method (args) declare*) ...) emits a
+Rust trait.  Only the signatures are emitted; write bounds into the name
+as a string, e.g. \"Shape: Debug\"."
+     :lisp (deftrait Shape
+             (defun area (&self)
+               (declare (values f64))))
+     :rust "trait Shape { fn area(&self) -> f64; }"
+     :item t
      :tags (:item))))
 
 ;;; ===================================================================
@@ -811,7 +1093,16 @@ mod write;"
     ("nested-compare"  (if (== (% 10 3) 1) 1 0)           1)
     ("coerce-of-sum"   (coerce (+ 1 2) i64)               3)
     ("neg-literal"     (+ (- 5) 7)                        2)
-    ("unary-div"       (coerce (/ 4.0d0) i64)             0)))
+    ("unary-div"       (coerce (/ 4.0d0) i64)             0)
+    ("sub-right-nested" (- 10 (- 4 3))                     9)
+    ("div-right-nested" (/ 100 (/ 10 2))                   20)
+    ("shift-right-nested" (>> 64 (>> 8 1))                 4)
+    ("bitand-compare"   (if (== (logand 6 3) 2) 1 0)       1)
+    ("or-and-mix"       (if (or (and (== 1 0) (== 1 0))
+                               (!= 2 3))
+                            1 0)                          1)
+    ("neg-of-neg"       (- (- 5))                          5)
+    ("coerce-shift"     (coerce (<< 1 4) i64)              16)))
 
 ;;; ===================================================================
 ;;; helpers
@@ -838,29 +1129,40 @@ Indentation is rustfmt's job, so the tests must not depend on it."
       (declare (ignorable out))
       (values (eql 0 code) err))))
 
-(defun run-value-tests (&key (tests *value-tests*) (verbose t))
+(defun run-value-tests (&key (tests *value-tests*) (verbose t)
+			 (omit-parens nil))
   "Emit one Rust program that evaluates every expression in TESTS and compares
-it against the expected value.  Returns the number of failures."
+it against the expected value.  Returns the number of failures.  With
+OMIT-PARENS the program is generated with *OMIT-REDUNDANT-PARENS* bound,
+so the same expectations differentially verify the elision: a dropped
+pair of parentheses changes the computed value, not just the text."
   (let* ((program
-	   (emit-rs
-	    :code `(do0
-		    (defun main ()
-		      (let* ((failed 0))
-			(declare (type i64 failed))
-			,@(loop for (name expr expected) in tests
-				append
-				`((let ((v ,expr))
-				    (declare (type i64 v))
-				    (when (!= v ,expected)
-				      (println! (string ,(format nil "FAIL ~a: {} != {}" name))
-						v ,expected)
-				      (incf failed)))))
-			(when (< 0 failed)
-			  ("std::process::exit" 1)))))))
+	  (let ((*omit-redundant-parens* omit-parens))
+	    (emit-rs
+	     :code `(do0
+		     (defun main ()
+		       (let* ((failed 0))
+			 (declare (type i64 failed))
+			 ,@(loop for (name expr expected) in tests
+				 append
+				 `((let ((v ,expr))
+				     (declare (type i64 v))
+				     (when (!= v ,expected)
+				       (println! (string ,(format nil "FAIL ~a: {} != {}" name))
+						 v ,expected)
+				       (incf failed)))))
+			 (when (< 0 failed)
+			   ("std::process::exit" 1))))))))
 	 (dir (uiop:ensure-directory-pathname
 	       (format nil "~a/cl-rust-generator-value-tests" (uiop:temporary-directory))))
-	 (src (merge-pathnames "value_tests.rs" dir))
-	 (bin (merge-pathnames "value_tests" dir)))
+	 (src (merge-pathnames (if omit-parens
+				   "value_tests_omit_parens.rs"
+				   "value_tests.rs")
+			       dir))
+	 (bin (merge-pathnames (if omit-parens
+				   "value_tests_omit_parens"
+				   "value_tests")
+			       dir)))
     (ensure-directories-exist dir)
     (with-open-file (s src :direction :output :if-exists :supersede
 			   :if-does-not-exist :create)
@@ -873,8 +1175,8 @@ it against the expected value.  Returns the number of failures."
 			  :ignore-error-status t)
       (declare (ignorable out))
       (unless (eql 0 code)
-	(format t "~&value tests: rustc failed~%~a~%--- generated source ---~%~a~%"
-		err program)
+	(format t "~&value tests~@[ (omit-parens)~]: rustc failed~%~a~%--- generated source ---~%~a~%"
+		omit-parens err program)
 	(return-from run-value-tests (length tests))))
     (multiple-value-bind (out err code)
 	(uiop:run-program (list (uiop:native-namestring bin))
@@ -882,16 +1184,18 @@ it against the expected value.  Returns the number of failures."
 			  :ignore-error-status t)
       (declare (ignorable err))
       (when verbose
-	(format t "~&Running ~D value tests via rustc... ~:[FAIL~;PASS~]~%"
-		(length tests) (eql 0 code))
+	(format t "~&Running ~D value tests~@[ (omit-parens)~] via rustc... ~:[FAIL~;PASS~]~%"
+		(length tests) omit-parens (eql 0 code))
 	(unless (eql 0 code)
 	  (format t "~a~%" out)))
       (if (eql 0 code) 0 1))))
 
 (defun run-transpiler-tests (&key (tests *test-cases*) (tags nil) (value-tests t))
   "Run the transpiler test suite.  Tier 1 compares the emitted Rust against a
-reference string (whitespace normalised), tier 2 hands complete items to rustfmt
-as a syntax check, tier 3 compiles and runs the value tests."
+reference string (whitespace normalised); cases with :OMIT-PARENS T are
+emitted with *OMIT-REDUNDANT-PARENS* bound.  Tier 2 hands complete items
+to rustfmt as a syntax check.  Tier 3 compiles and runs the value tests
+twice: fully parenthesised and with elision (differential oracle)."
   (let ((passed 0)
 	(failed 0)
 	(test-count 0)
@@ -905,7 +1209,9 @@ as a syntax check, tier 3 compiles and runs the value tests."
 	(let* ((name (getf tc :name))
 	       (lisp-code (getf tc :lisp))
 	       (expected (getf tc :rust))
-	       (actual (handler-case (emit-rs :code lisp-code)
+	       (actual (handler-case
+			   (let ((*omit-redundant-parens* (getf tc :omit-parens)))
+			     (emit-rs :code lisp-code))
 			 (error (e)
 			   (incf failed)
 			   (format t "~&[~D] ~A... ERROR ~A~%" test-count name e)
@@ -928,7 +1234,13 @@ as a syntax check, tier 3 compiles and runs the value tests."
 		    (progn (incf failed)
 			   (format t ", RUSTFMT [FAIL]~%~a~%" err))))
 	      (progn (incf passed) (format t "~%"))))))
-    (let ((value-failed (if value-tests (run-value-tests) 0)))
+    (let ((value-failed (if value-tests
+			      (+ (run-value-tests)
+				 ;; differential oracle for the elision: the
+				 ;; same expectations must hold with redundant
+				 ;; parentheses omitted.
+				 (run-value-tests :omit-parens t))
+			      0)))
       (incf failed value-failed)
       (format t "~2&--- Test Summary ---~%")
       (format t "Transpiler tests run: ~D~%" test-count)
@@ -965,6 +1277,9 @@ as a syntax check, tier 3 compiles and runs the value tests."
 		   (format s "~A~%~%" (getf tc :description))
 		   (format s "```lisp~%~S~%```~%~%" (getf tc :lisp))
 		   (format s "```rust~%~A~%```~%~%"
-			   (handler-case (emit-rs :code (getf tc :lisp))
+			   (handler-case
+			       (let ((*omit-redundant-parens*
+				       (getf tc :omit-parens)))
+				 (emit-rs :code (getf tc :lisp)))
 			     (error (e) (format nil "<error: ~a>" e))))))))
     output-file))

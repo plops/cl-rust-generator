@@ -125,12 +125,26 @@ i*=(2)
 (i)^=(2)
 ```
 
+### `(%= i 2)`
+
+(%= place [delta]) emits remainder-assignment %=.
+
+```lisp
+(%= i 2)
+```
+
+```rust
+i %= 2
+```
+
 ## binding Forms
 
 ### `(let ((x 5))
        (f x))`
 
-(let ((x v)) ...) binds immutably by default.
+(let ((x v)) ...) binds immutably by default.  The whole
+form emits a Rust block, so the bindings stay scoped like in Common Lisp
+and the block evaluates to its last form (implicit return).
 
 ```lisp
 (let ((x 5))
@@ -138,8 +152,10 @@ i*=(2)
 ```
 
 ```rust
-let x = 5;
-f(x);
+{
+    let x = 5;
+    f(x)
+}
 ```
 
 ### `(let ((x 5))
@@ -156,8 +172,10 @@ binding.
 ```
 
 ```rust
-let x: i32 = 5;
-f(x);
+{
+    let x: i32 = 5;
+    f(x)
+}
 ```
 
 ### `(let* ((x 5))
@@ -172,8 +190,10 @@ difference to let.
 ```
 
 ```rust
-let mut x = 5;
-x=6;
+{
+    let mut x = 5;
+        x=6;
+}
 ```
 
 ### `(let ((x 5))
@@ -192,8 +212,10 @@ let, (declare (immutable x)) does the opposite inside let*.
 ```
 
 ```rust
-let mut x: i32 = 5;
-x=6;
+{
+    let mut x: i32 = 5;
+        x=6;
+}
 ```
 
 ### `(let ((a))
@@ -210,8 +232,10 @@ Rust array type; several dimensions nest.
 ```
 
 ```rust
-let a: [i32; 4];
-f(a);
+{
+    let a: [i32; 4];
+    f(a)
+}
 ```
 
 ### `(let ((a))
@@ -227,8 +251,34 @@ Two dimensions nest as [[T; inner]; outer].
 ```
 
 ```rust
-let a: [[i32; 3]; 2];
-f(a);
+{
+    let a: [[i32; 3]; 2];
+    f(a)
+}
+```
+
+### `(do0
+      (let ((x 5))
+        (f x))
+      (g))`
+
+In statement position (do0, defun body, loop body) the let
+block needs no semicolon of its own; the following statement is unaffected
+and the binding does not leak out of the block.
+
+```lisp
+(do0
+ (let ((x 5))
+   (f x))
+ (g))
+```
+
+```rust
+{
+    let x = 5;
+    f(x)
+}
+g();
 ```
 
 ## block Forms
@@ -305,6 +355,36 @@ unsafe {
 extern {
     fn puts(s: *const u8) -> i32;
 }
+```
+
+### `(do (f) (g))`
+
+(do form*) sequences statements like do0 but indented one
+level deeper; it is what function and block bodies are built from.
+
+```lisp
+(do (f) (g))
+```
+
+```rust
+    f();
+    g();
+```
+
+### `(do0 (stmt (space foo bar)) (g))`
+
+(stmt form) forces statement termination with a semicolon.
+It is the explicit override for escape-hatch forms such as (space ...)
+in statement position, where the semicolon heuristic cannot know whether
+the expansion is a statement or an expression.
+
+```lisp
+(do0 (stmt (space foo bar)) (g))
+```
+
+```rust
+foo bar;
+g();
 ```
 
 ## collection Forms
@@ -464,6 +544,59 @@ if (x)<(0) {
 ```rust
 if !x {
     f()
+}
+```
+
+### `(if-let ((Some x) y)
+       (return x)
+       (return 0))`
+
+(if-let (pattern scrutinee) then else) emits Rust's if
+let.  A list pattern such as (Some x) emits the tuple-struct pattern
+Some(x); None and _ work as written.
+
+```lisp
+(if-let ((Some x) y)
+  (return x)
+  (return 0))
+```
+
+```rust
+if let Some(x) = y {
+    return x
+} else {
+    return 0
+}
+```
+
+### `(if-let ((Some x) y)
+       (return x))`
+
+Without an else form if-let emits a bare if let.
+
+```lisp
+(if-let ((Some x) y)
+  (return x))
+```
+
+```rust
+if let Some(x) = y {
+    return x
+}
+```
+
+### `(while-let ((Some x) (dot it (next))) (f x))`
+
+(while-let (pattern scrutinee) form*) emits Rust's
+while let loop.
+
+```lisp
+(while-let ((Some x) (dot it (next))) (f x))
+```
+
+```rust
+while let Some(x) = it.next() {
+    f(x)
 }
 ```
 
@@ -733,6 +866,31 @@ struct Point {
 }
 ```
 
+### `(angle Vec T)`
+
+(angle args*) emits turbofish brackets <...>.
+
+```lisp
+(angle Vec T)
+```
+
+```rust
+<VecT>
+```
+
+### `(scope parse_pair (angle i32))`
+
+(scope a b c) joins with ::, so (scope name (angle type))
+emits the turbofish call syntax name::<type>.
+
+```lisp
+(scope parse_pair (angle i32))
+```
+
+```rust
+parse_pair::<i32>
+```
+
 ## function Forms
 
 ### `(defun main () (println! (string "hi")))`
@@ -932,7 +1090,8 @@ arr[i,j]
 
 ### `(slice 0 4)`
 
-(slice a b) emits a Rust range.
+(slice a b) emits a Rust range.  Deprecated alias of
+(range a b); the old examples still use it.
 
 ```lisp
 (slice 0 4)
@@ -940,6 +1099,93 @@ arr[i,j]
 
 ```rust
 (0..4)
+```
+
+### `(range 0 n)`
+
+(range a b) emits the end-exclusive Rust range a..b.
+
+```lisp
+(range 0 n)
+```
+
+```rust
+(0..n)
+```
+
+### `(range-inclusive 0 n)`
+
+(range-inclusive a b) emits the end-inclusive range a..=b.
+
+```lisp
+(range-inclusive 0 n)
+```
+
+```rust
+(0..=n)
+```
+
+### `(range-from 2)`
+
+(range-from a) emits the open-ended range a.. .
+
+```lisp
+(range-from 2)
+```
+
+```rust
+(2..)
+```
+
+### `(range-to 5)`
+
+(range-to b) emits the left-open range ..b.
+
+```lisp
+(range-to 5)
+```
+
+```rust
+(..5)
+```
+
+### `(range-to-inclusive 5)`
+
+(range-to-inclusive b) emits ..=b.
+
+```lisp
+(range-to-inclusive 5)
+```
+
+```rust
+(..=5)
+```
+
+### `(range-full)`
+
+(range-full) emits the full range .. .
+
+```lisp
+(range-full)
+```
+
+```rust
+(..)
+```
+
+### `(for (x (range 0 n)) (f x))`
+
+A range used as a for collection loses its redundant
+parentheses like slice does.
+
+```lisp
+(for (x (range 0 n)) (f x))
+```
+
+```rust
+for x in 0..n {
+    f(x)
+}
 ```
 
 ## item Forms
@@ -1053,6 +1299,22 @@ mod write;
 struct Point
 ```
 
+### `(deftrait Shape (defun area (&self) (declare (values f64))))`
+
+(deftrait name (defun method (args) declare*) ...) emits a
+Rust trait.  Only the signatures are emitted; write bounds into the name
+as a string, e.g. "Shape: Debug".
+
+```lisp
+(deftrait Shape (defun area (&self) (declare (values f64))))
+```
+
+```rust
+trait Shape {
+    fn area(&self) -> f64;
+}
+```
+
 ## literal Forms
 
 ### `42`
@@ -1149,6 +1411,18 @@ literal.  Enough hashes are added so that the payload may contain quote-hash.
 
 ```lisp
 (|STRING#| "a\"b")
+```
+
+```rust
+r#"a"b"#
+```
+
+### `(string-r "a\"b")`
+
+(string-r x) is the hyphenated alias of string#.
+
+```lisp
+(string-r "a\"b")
 ```
 
 ```rust
@@ -1301,6 +1575,246 @@ method call must keep its own parentheses.
 
 ```rust
 ((a)%(b)).to_string()
+```
+
+### `(+ 1 (* 2 3))`
+
+With elision * binds tighter than +, so no parentheses
+are needed.
+
+```lisp
+(+ 1 (* 2 3))
+```
+
+```rust
+1 + 2 * 3
+```
+
+### `(* (+ 1 2) 3)`
+
+A looser operand keeps its parentheses.
+
+```lisp
+(* (+ 1 2) 3)
+```
+
+```rust
+(1 + 2) * 3
+```
+
+### `(- (- a b) c)`
+
+Left-nested subtraction stays flat (left associative).
+
+```lisp
+(- (- a b) c)
+```
+
+```rust
+a - b - c
+```
+
+### `(- a (- b c))`
+
+Right-nested subtraction is parenthesised: a-(b-c) is
+not (a-b)-c.
+
+```lisp
+(- a (- b c))
+```
+
+```rust
+a - (b - c)
+```
+
+### `(* a (/ b c))`
+
+Same-level mixed * and / never stay flat on the right:
+a*(b/c) is not (a*b)/c for integers.
+
+```lisp
+(* a (/ b c))
+```
+
+```rust
+a * (b / c)
+```
+
+### `(== a (== b c))`
+
+Comparisons cannot be chained in Rust (a==b==c is a
+compile error), so a nested comparison is always parenthesised.
+
+```lisp
+(== a (== b c))
+```
+
+```rust
+a == (b == c)
+```
+
+### `(== (logand x mask) 0)`
+
+Unlike C, Rust's bitwise & binds tighter than ==, so no
+parentheses are needed here.
+
+```lisp
+(== (logand x mask) 0)
+```
+
+```rust
+x & mask == 0
+```
+
+### `(or (and a b) c)`
+
+&& binds tighter than ||, so this stays flat.
+
+```lisp
+(or (and a b) c)
+```
+
+```rust
+a && b || c
+```
+
+### `(- (+ a b))`
+
+Unary minus keeps parentheses around a looser operand.
+
+```lisp
+(- (+ a b))
+```
+
+```rust
+-(a + b)
+```
+
+### `(- (- x))`
+
+Minus inside minus would glue into the invalid --x.
+
+```lisp
+(- (- x))
+```
+
+```rust
+-(-x)
+```
+
+### `(not (== a b))`
+
+The == operand binds looser than unary !, so it keeps
+its parentheses.
+
+```lisp
+(not (== a b))
+```
+
+```rust
+!(a == b)
+```
+
+### `(dot (% a b) (to_string))`
+
+Method call binds tightest, so a binary receiver keeps
+its parentheses even with elision.
+
+```lisp
+(dot (% a b) (to_string))
+```
+
+```rust
+(a % b).to_string()
+```
+
+### `(dot (deref p) x)`
+
+*(p).x parses as *((p).x), so the deref keeps its
+parentheses as a dot receiver.
+
+```lisp
+(dot (deref p) x)
+```
+
+```rust
+(*p).x
+```
+
+### `(coerce (+ a b) i64)`
+
+`as' binds tighter than +, so the sum keeps its
+parentheses.
+
+```lisp
+(coerce (+ a b) i64)
+```
+
+```rust
+(a + b) as i64
+```
+
+### `(ref (+ a b))`
+
+& binds tighter than +, but the operand is looser, so
+&(a+b) keeps its parentheses.
+
+```lisp
+(ref (+ a b))
+```
+
+```rust
+&(a + b)
+```
+
+### `(<< (+ 1 1) 3)`
+
++ binds tighter than <<, so the sum needs no parentheses.
+
+```lisp
+(<< (+ 1 1) 3)
+```
+
+```rust
+1 + 1 << 3
+```
+
+### `(>> 64 (>> 8 1))`
+
+Shifts are left associative but not flattenable, so a
+right-nested shift keeps its parentheses: 64>>(8>>1) is not (64>>8)>>1.
+
+```lisp
+(>> 64 (>> 8 1))
+```
+
+```rust
+64 >> (8 >> 1)
+```
+
+### `(/ x)`
+
+The single-argument / reciprocal keeps a tight operand
+bare.
+
+```lisp
+(/ x)
+```
+
+```rust
+1.0 / x
+```
+
+### `(? (dot f (read_to_string "&mut s")))`
+
+A call needs no parentheses under ?.
+
+```lisp
+(? (dot f (read_to_string "&mut s")))
+```
+
+```rust
+f.read_to_string(&mut s)?
 ```
 
 ### `(logand a b)`
@@ -1531,6 +2045,19 @@ type) is a deprecated alias.
 
 ```lisp
 (coerce x u8)
+```
+
+```rust
+(x as u8)
+```
+
+### `(cast x u8)`
+
+(cast value type) is the deprecated alias of coerce.
+Note the argument order: value first, unlike the old C-style cast.
+
+```lisp
+(cast x u8)
 ```
 
 ```rust

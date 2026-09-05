@@ -452,14 +452,175 @@ tuples such as (a, b) intact."
       (subseq s 1 (1- (length s)))
       s))
 
+(defun emission-ends-with-semicolon-p (s)
+  "True when the emitted string S already ends with a semicolon.
+Unlike a bare (AREF S (1- (LENGTH S))) this is safe on empty emissions
+\(e.g. (emit-rs :code nil) => \"\")."
+  (and (< 0 (length s))
+       (char= #\; (aref s (1- (length s))))))
+
+;; -------------------------------------------------------------------
+;; Operator precedence for *OMIT-REDUNDANT-PARENS*.
+;;
+;; Levels follow Table 5-1 of "Programming Rust" (see
+;; operator-precedence.md): higher binds tighter.  The table only covers
+;; operators the generator can emit; everything else is classified by
+;; RUST-EXPRESSION-OPERATOR as :PRIMARY (self-delimited: calls, literals,
+;; symbols, dot chains, ...) or :LOOSE (control flow, let, lambda, ...,
+;; always parenthesised in omit mode).
+;;
+;; Rust specifics that differ from C: bitwise & ^ | bind TIGHTER than
+;; comparisons, and comparisons and ranges cannot be chained at all
+;; (a==b==c is a compile error, not (a==b)==c), hence associativity NON.
+(defparameter *omit-redundant-parens* nil
+  "When true, operator forms omit parentheses that Rust's precedence rules
+make redundant: (+ (* a b) c) emits \"a * b + c\" instead of \"((a)*(b)+c)\".
+When NIL (the default) every operator parenthesises its operands and its
+result, so grouping is never ambiguous.  The fully parenthesised output is
+the oracle: the value tests run in both modes and must compute the same
+results.")
+
+(defparameter *rust-precedence*
+  '((-unary 15 left)
+    (not 15 left) (deref 15 left) (ref 15 left) (ref-mut 15 left)
+    (coerce 14 left) (cast 14 left)
+    (* 13 left) (/ 13 left) (% 13 left)
+    (+ 12 left) (- 12 left)
+    (<< 11 left) (>> 11 left)
+    (logand 10 left) (& 10 left)
+    (logxor 9 left) (^ 9 left)
+    (logior 8 left)
+    (== 7 non) (!= 7 non) (< 7 non) (<= 7 non) (> 7 non) (>= 7 non)
+    (and 6 left) (or 5 left)
+    (? 16 left))
+  "Operator head -> (level associativity).  See *OMIT-REDUNDANT-PARENS*.")
+
+(defparameter *rust-associative-ops* '(+ * logand logior logxor & ^ or and)
+  "Operators whose chains may stay flat on the right hand side: a+(b+c)
+means the same as (a+b)+c (up to floating point rounding, documented).")
+
+(defun rust-precedence-of (op)
+  "Look up OP in *RUST-PRECEDENCE*.  Returns (values LEVEL ASSOC)."
+  (let ((entry (assoc op *rust-precedence*)))
+    (assert entry nil "no Rust precedence for operator ~a" op)
+    (values (second entry) (third entry))))
+
+(defun rust-expression-operator (form)
+  "Classify FORM by the operator its emission binds with.  Returns one of:
+:PRIMARY -- self-delimited, never needs parentheses as an operand
+  (symbols, numbers, strings, calls, dot chains, aref, tuples, ranges,
+  literals, the ? postfix operator);
+:LOOSE -- control flow, bindings, lambdas and anything unknown: always
+  parenthesised in omit mode;
+or an operator head (a key of *RUST-PRECEDENCE*, or -UNARY for a
+single-argument -).  A single-argument + is transparent and classifies as
+its operand; a single-argument / (reciprocal) classifies as /."
+  (cond ((atom form) :primary)
+	((not (symbolp (car form))) :loose)
+	((and (eq (car form) '-) (= 1 (length (cdr form)))) '-unary)
+	((and (eq (car form) '+) (= 1 (length (cdr form))))
+	 (rust-expression-operator (cadr form)))
+	((and (eq (car form) '/) (= 1 (length (cdr form)))) '/)
+	((assoc (car form) *rust-precedence*) (car form))
+	((member (car form) '(dot aref paren tuple values bracket curly comma
+			      scope angle space
+			      range range-inclusive range-from range-to
+			      range-to-inclusive range-full slice
+			      string string# string-r string-b char byte hex))
+	 :primary)
+	(t :loose)))
+
+(defun rust-operator-level (form)
+  "Precedence level of FORM's own operator; :PRIMARY counts as top (16),
+:LOOSE as bottom (-1)."
+  (let ((op (rust-expression-operator form)))
+    (cond ((eq op :primary) 16)
+	  ((eq op :loose) -1)
+	  (t (rust-precedence-of op)))))
+
+(defun rust-operand-needs-parens-p (parent-op position form)
+  "True when FORM, used as an operand of PARENT-OP at POSITION (:LEFT for
+the first operand, :RIGHT for every other one), needs parentheses under
+Rust's precedence rules.  Same-level nesting stays flat only for the same
+left-associative operator on its preferred side (or a member of
+*RUST-ASSOCIATIVE-OPS* on the right); comparisons never chain."
+  (let ((child-op (rust-expression-operator form)))
+    (cond ((eq child-op :primary) nil)
+	  ((eq child-op :loose) t)
+	  (t (multiple-value-bind (plevel passoc)
+		 (rust-precedence-of parent-op)
+	       (let ((clevel (rust-operator-level form)))
+		 (cond ((< clevel plevel) t)
+		       ((> clevel plevel) nil)
+		       ((eq passoc 'non) t)
+		       ((not (eq child-op parent-op)) t)
+		       ((eq position :left) nil)
+		       (t (not (member parent-op
+				       *rust-associative-ops*))))))))))
+
+(defun rust-unary-operand-needs-parens-p (parent-op form)
+  "True when FORM needs parentheses under the unary operator PARENT-OP
+\(one of -UNARY NOT DEREF REF REF-MUT).  A nested unary minus would glue
+into the invalid --x, so minus inside minus is parenthesised; **p and !!x
+are valid Rust and stay flat."
+  (let ((child-op (rust-expression-operator form)))
+    (cond ((eq child-op :primary) nil)
+	  ((eq child-op :loose) t)
+	  ((< (rust-operator-level form) 15) t)
+	  ((> (rust-operator-level form) 15) nil)
+	  ;; nested unary: only minus-minus needs help.
+	  (t (or (eq parent-op '-unary) (eq child-op '-unary))))))
+
+(defun rust-tight-operand-needs-parens-p (form)
+  "True when FORM needs parentheses as the receiver of DOT, the object of
+AREF or the operand of ?.  Those bind tighter than any binary or unary
+operator: (dot (% a b) c) must stay ((a)%(b)).c, never a%b.c."
+  (let ((child-op (rust-expression-operator form)))
+    (cond ((eq child-op :primary) nil)
+	  ((eq child-op :loose) t)
+	  (t (< (rust-operator-level form) 16)))))
+
+(defun rust-emit-operand (parent-op position form emit)
+  "Emit FORM as an operand of PARENT-OP at POSITION, adding parentheses
+when RUST-OPERAND-NEEDS-PARENS-P says so.  With *OMIT-REDUNDANT-PARENS*
+NIL the form is emitted unchanged (callers add their full parentheses)."
+  (let ((s (funcall emit form)))
+    (if (and *omit-redundant-parens*
+	     (rust-operand-needs-parens-p parent-op position form))
+	(format nil "(~a)" s)
+	s)))
+
+(defun rust-emit-unary-operand (parent-op form emit)
+  "Emit FORM as the operand of the unary operator PARENT-OP."
+  (let ((s (funcall emit form)))
+    (if (and *omit-redundant-parens*
+	     (rust-unary-operand-needs-parens-p parent-op form))
+	(format nil "(~a)" s)
+	s)))
+
+(defun rust-emit-tight-operand (form emit)
+  "Emit FORM as a DOT receiver, AREF object or ? operand."
+  (let ((s (funcall emit form)))
+    (if (and *omit-redundant-parens*
+	     (rust-tight-operand-needs-parens-p form))
+	(format nil "(~a)" s)
+	s)))
+
+(defun rust-emit-operand-list (parent-op forms emit)
+  "Emit FORMS as the operand list of PARENT-OP: first form :LEFT, rest
+:RIGHT."
+  (loop for form in forms
+	for position = :left then :right
+	collect (rust-emit-operand parent-op position form emit)))
+
 (progn
   (defparameter *keywords-without-semicolon*
     `(;; forms that expand into a Rust item or a block expression used as a
       ;; statement.  Rust does not want (and clippy complains about) a
       ;; semicolon after those.
       defun defstruct0 deftrait impl use mod
-      if when unless case for dotimes while loop
-      progn do0 do0-no-final-semicolon
+      if when unless if-let while-let case for dotimes while loop
+      progn do do0 do0-no-final-semicolon stmt
       extern unsafe macroexpand space let let*)
     "Heads of forms that must not get a semicolon appended by DO0.")
   (defun emit-rs (&key code (str nil)  (level 0) (hook-defun nil))
@@ -558,7 +719,10 @@ tuples such as (a, b) intact."
 					(progn
 					  ,@body)))))
 		  (? (let ((args (cdr code)))
-		       (format nil "~a?" (emit (car args)))))
+		       (if *omit-redundant-parens*
+			   (format nil "~a?"
+				   (rust-emit-tight-operand (car args) #'emit))
+			   (format nil "~a?" (emit (car args))))))
 		  (use
 		   ;; use {(a b c)}*
 		   ;; (use ((a b c) (q r))) => use a::b::c; use q::r
@@ -584,7 +748,7 @@ tuples such as (a, b) intact."
 						;; don't add semicolon if there is already one
 						;; or if x contains a string
 						;; or if x is an s-expression with a c thing that doesn't end with semicolon
-						(if (or (eq #\; (aref b (- (length b) 1)))
+						(if (or (emission-ends-with-semicolon-p b)
 							(and (typep x 'string))
 							
 							(and (listp x)
@@ -627,7 +791,7 @@ tuples such as (a, b) intact."
 					      ;; don't add semicolon after last statement
 					      ;; or if x contains a string
 					      ;; or if x is an s-expression with a c thing that doesn't end with semicolon
-					      (if (or (eq #\; (aref b (- (length b) 1)))
+					      (if (or (emission-ends-with-semicolon-p b)
 						      (and (typep x 'string))
 						      (and (listp x)
 							   (member (car x)
@@ -658,6 +822,17 @@ tuples such as (a, b) intact."
 			;; do {form}*
 			;; print each form on a new line with one more indentation.
 			(format s "~a" (emit `(do0 ,@(cdr code)) 1))))
+		  (stmt
+		   ;; (stmt form) forces statement termination: emit FORM and
+		   ;; append a semicolon unless there already is one.  This is
+		   ;; the explicit override for escape-hatch forms such as
+		   ;; (space ...) in statement position, where the semicolon
+		   ;; heuristic (suffix check + head whitelist) cannot know
+		   ;; whether the expansion is a statement or an expression.
+		   (let ((s (emit (cadr code))))
+		     (if (emission-ends-with-semicolon-p s)
+			 s
+			 (format nil "~a;" s))))
 		  (defun
 		      (prog1
 			  (parse-defun code #'emit)
@@ -675,9 +850,35 @@ tuples such as (a, b) intact."
 		   ;; deprecated alias of COERCE; the C-style (cast type value)
 		   ;; that this used to emit is not valid Rust.
 		   (destructuring-bind (value type) (cdr code)
-		     (format nil "(~a as ~a)" (emit value) (emit type))))
+		     (if *omit-redundant-parens*
+			 (format nil "~a as ~a"
+				 (rust-emit-operand 'cast :left value #'emit)
+				 (emit type))
+			 (format nil "(~a as ~a)" (emit value) (emit type)))))
 		  (slice (let ((args (cdr code)))
-			       (format nil "(~{~a~^..~})" (mapcar #'emit args))))
+			   ;; deprecated alias of RANGE; the old examples
+			   ;; (vulkano depth_range, mandelbrot) still use it.
+			   (format nil "(~{~a~^..~})" (mapcar #'emit args))))
+		  (range (destructuring-bind (a b) (cdr code)
+			   ;; (range a b) -> (a..b), end-exclusive Rust range.
+			   (format nil "(~a..~a)" (emit a) (emit b))))
+		  (range-inclusive (destructuring-bind (a b) (cdr code)
+				     ;; (range-inclusive a b) -> (a..=b)
+				     (format nil "(~a..=~a)" (emit a) (emit b))))
+		  (range-from (destructuring-bind (a) (cdr code)
+				;; (range-from a) -> (a..)
+				(format nil "(~a..)" (emit a))))
+		  (range-to (destructuring-bind (b) (cdr code)
+			      ;; (range-to b) -> (..b)
+			      (format nil "(..~a)" (emit b))))
+		  (range-to-inclusive (destructuring-bind (b) (cdr code)
+					;; (range-to-inclusive b) -> (..=b)
+					(format nil "(..=~a)" (emit b))))
+		  (range-full
+		   ;; (range-full) -> (..), the full range.
+		   (assert (null (cdr code)) nil
+			   "range-full takes no arguments: ~a" code)
+		   "(..)")
 		  (let (parse-let code #'emit :mutable-default nil))
 		  (let* (parse-let code #'emit :mutable-default t))
 		  (setf 
@@ -694,40 +895,92 @@ tuples such as (a, b) intact."
 		  ;; parentheses, not just their operand.  `*(p).x' parses as
 		  ;; `*((p).x)' in Rust, which is not what (dot (deref p) x) means.
 		  
-		  (not (format nil "(!~a)" (emit (car (cdr code)))))
-		  (deref (format nil "(*~a)" (emit (car (cdr code)))))
-		  (ref (format nil "(&~a)" (emit (car (cdr code)))))
-		  (ref-mut (format nil "(&mut ~a)" (emit (car (cdr code)))))
+		  (not (if *omit-redundant-parens*
+			   (format nil "!~a"
+				   (rust-emit-unary-operand 'not (cadr code) #'emit))
+			   (format nil "(!~a)" (emit (car (cdr code))))))
+		  (deref (if *omit-redundant-parens*
+			     (format nil "*~a"
+				     (rust-emit-unary-operand 'deref (cadr code) #'emit))
+			     (format nil "(*~a)" (emit (car (cdr code))))))
+		  (ref (if *omit-redundant-parens*
+			   (format nil "&~a"
+				   (rust-emit-unary-operand 'ref (cadr code) #'emit))
+			   (format nil "(&~a)" (emit (car (cdr code))))))
+		  (ref-mut (if *omit-redundant-parens*
+			       (format nil "&mut ~a"
+				       (rust-emit-unary-operand 'ref-mut (cadr code) #'emit))
+			       (format nil "(&mut ~a)" (emit (car (cdr code))))))
 		  (scope (let ((args (cdr code)))
 			   (format nil "~{~a~^::~}" (mapcar #'emit args))))
 		  (+ (let ((args (cdr code)))
 		       ;; + {summands}*
-		       (format nil "(~{~a~^+~})" (mapcar #'emit args))))
+		       (if *omit-redundant-parens*
+			   (format nil "~{~a~^ + ~}"
+				   (rust-emit-operand-list '+ args #'emit))
+			   (format nil "(~{~a~^+~})" (mapcar #'emit args)))))
 		  (- (let ((args (cdr code)))
 		       (if (eq 1 (length args))
-			   (format nil "(-~a)" (emit (car args))) ;; py
-			   (format nil "(~{~a~^-~})" (mapcar #'emit args)))))
+			   (if *omit-redundant-parens*
+			       (format nil "-~a"
+				       (rust-emit-unary-operand
+					'-unary (car args) #'emit))
+			       (format nil "(-~a)" (emit (car args)))) ;; py
+			   (if *omit-redundant-parens*
+			       (format nil "~{~a~^ - ~}"
+				       (rust-emit-operand-list '- args #'emit))
+			       (format nil "(~{~a~^-~})" (mapcar #'emit args))))))
 		  (* (let ((args (cdr code)))
-		       (format nil "(~{(~a)~^*~})" (mapcar #'emit args))))
+		       (if *omit-redundant-parens*
+			   (format nil "~{~a~^ * ~}"
+				   (rust-emit-operand-list '* args #'emit))
+			   (format nil "(~{(~a)~^*~})" (mapcar #'emit args)))))
 		  (^ (let ((args (cdr code)))
-		       (format nil "(~{(~a)~^^~})" (mapcar #'emit args))))
+		       (if *omit-redundant-parens*
+			   (format nil "~{~a~^ ^ ~}"
+				   (rust-emit-operand-list '^ args #'emit))
+			   (format nil "(~{(~a)~^^~})" (mapcar #'emit args)))))
 		  (& (let ((args (cdr code)))
-		       (format nil "(~{(~a)~^&~})" (mapcar #'emit args))))
+		       (if *omit-redundant-parens*
+			   (format nil "~{~a~^ & ~}"
+				   (rust-emit-operand-list '& args #'emit))
+			   (format nil "(~{(~a)~^&~})" (mapcar #'emit args)))))
 		  (/ (let ((args (cdr code)))
 		       (if (eq 1 (length args))
-			   (format nil "(1.0/(~a))" (emit (car args))) ;; py
-			   (format nil "(~{(~a)~^/~})" (mapcar #'emit args)))))
+			   (if *omit-redundant-parens*
+			       (format nil "1.0 / ~a"
+				       (rust-emit-operand '/ :right (car args) #'emit))
+			       (format nil "(1.0/(~a))" (emit (car args)))) ;; py
+			   (if *omit-redundant-parens*
+			       (format nil "~{~a~^ / ~}"
+				       (rust-emit-operand-list '/ args #'emit))
+			       (format nil "(~{(~a)~^/~})" (mapcar #'emit args))))))
 		  
 		  (logior (let ((args (cdr code))) ;; py
-			    (format nil "(~{(~a)~^ | ~})" (mapcar #'emit args))))
+			    (if *omit-redundant-parens*
+				(format nil "~{~a~^ | ~}"
+					(rust-emit-operand-list 'logior args #'emit))
+				(format nil "(~{(~a)~^ | ~})" (mapcar #'emit args)))))
 		  (logand (let ((args (cdr code))) ;; py
-			    (format nil "(~{(~a)~^ & ~})" (mapcar #'emit args))))
+			    (if *omit-redundant-parens*
+				(format nil "~{~a~^ & ~}"
+					(rust-emit-operand-list 'logand args #'emit))
+				(format nil "(~{(~a)~^ & ~})" (mapcar #'emit args)))))
 		  (logxor (let ((args (cdr code))) ;; py
-			    (format nil "(~{(~a)~^ ^ ~})" (mapcar #'emit args))))
+			    (if *omit-redundant-parens*
+				(format nil "~{~a~^ ^ ~}"
+					(rust-emit-operand-list 'logxor args #'emit))
+				(format nil "(~{(~a)~^ ^ ~})" (mapcar #'emit args)))))
 		  (or (let ((args (cdr code)))
-			(format nil "(~{(~a)~^||~})" (mapcar #'emit args))))
+			(if *omit-redundant-parens*
+			    (format nil "~{~a~^ || ~}"
+				    (rust-emit-operand-list 'or args #'emit))
+			    (format nil "(~{(~a)~^||~})" (mapcar #'emit args)))))
 		  (and (let ((args (cdr code)))
-			 (format nil "(~{(~a)~^&&~})" (mapcar #'emit args))))
+			 (if *omit-redundant-parens*
+			     (format nil "~{~a~^ && ~}"
+				     (rust-emit-operand-list 'and args #'emit))
+			     (format nil "(~{(~a)~^&&~})" (mapcar #'emit args)))))
 		  (= (destructuring-bind (a b) (cdr code)
 		       ;; = pair
 		       (format nil "~a=~a" (emit a)
@@ -747,23 +1000,57 @@ tuples such as (a, b) intact."
 		  ;; than any binary operator.  The redundant parentheses in
 		  ;; if/while conditions are removed again by STRIP-OUTER-PARENS.
 		  (<= (destructuring-bind (a b) (cdr code)
-			(format nil "((~a)<=(~a))" (emit a) (emit b))))
+			(if *omit-redundant-parens*
+			    (format nil "~a <= ~a"
+				    (rust-emit-operand '<= :left a #'emit)
+				    (rust-emit-operand '<= :right b #'emit))
+			    (format nil "((~a)<=(~a))" (emit a) (emit b)))))
 		  (>= (destructuring-bind (a b) (cdr code)
-			(format nil "((~a)>=(~a))" (emit a) (emit b))))
+			(if *omit-redundant-parens*
+			    (format nil "~a >= ~a"
+				    (rust-emit-operand '>= :left a #'emit)
+				    (rust-emit-operand '>= :right b #'emit))
+			    (format nil "((~a)>=(~a))" (emit a) (emit b)))))
 		  (!= (destructuring-bind (a b) (cdr code)
-			(format nil "((~a)!=(~a))" (emit a) (emit b))))
+			(if *omit-redundant-parens*
+			    (format nil "~a != ~a"
+				    (rust-emit-operand '!= :left a #'emit)
+				    (rust-emit-operand '!= :right b #'emit))
+			    (format nil "((~a)!=(~a))" (emit a) (emit b)))))
 		  (== (destructuring-bind (a b) (cdr code)
-			(format nil "((~a)==(~a))" (emit a) (emit b))))
+			(if *omit-redundant-parens*
+			    (format nil "~a == ~a"
+				    (rust-emit-operand '== :left a #'emit)
+				    (rust-emit-operand '== :right b #'emit))
+			    (format nil "((~a)==(~a))" (emit a) (emit b)))))
 		  (< (destructuring-bind (a b) (cdr code)
-		       (format nil "((~a)<(~a))" (emit a) (emit b))))
+		       (if *omit-redundant-parens*
+			   (format nil "~a < ~a"
+				   (rust-emit-operand '< :left a #'emit)
+				   (rust-emit-operand '< :right b #'emit))
+			   (format nil "((~a)<(~a))" (emit a) (emit b)))))
 		  (> (destructuring-bind (a b) (cdr code)
-		       (format nil "((~a)>(~a))" (emit a) (emit b))))
+		       (if *omit-redundant-parens*
+			   (format nil "~a > ~a"
+				   (rust-emit-operand '> :left a #'emit)
+				   (rust-emit-operand '> :right b #'emit))
+			   (format nil "((~a)>(~a))" (emit a) (emit b)))))
 		  (% (destructuring-bind (a b) (cdr code)
-		       (format nil "((~a)%(~a))" (emit a) (emit b))))
+		       (if *omit-redundant-parens*
+			   (format nil "~a % ~a"
+				   (rust-emit-operand '% :left a #'emit)
+				   (rust-emit-operand '% :right b #'emit))
+			   (format nil "((~a)%(~a))" (emit a) (emit b)))))
 		  (<< (destructuring-bind (a &rest rest) (cdr code)
-			(format nil "((~a)~{<<(~a)~})" (emit a) (mapcar #'emit rest))))
+			(if *omit-redundant-parens*
+			    (format nil "~{~a~^ << ~}"
+				    (rust-emit-operand-list '<< (cons a rest) #'emit))
+			    (format nil "((~a)~{<<(~a)~})" (emit a) (mapcar #'emit rest)))))
 		  (>> (destructuring-bind (a &rest rest) (cdr code)
-			(format nil "((~a)~{>>(~a)~})" (emit a) (mapcar #'emit rest))))
+			(if *omit-redundant-parens*
+			    (format nil "~{~a~^ >> ~}"
+				    (rust-emit-operand-list '>> (cons a rest) #'emit))
+			    (format nil "((~a)~{>>(~a)~})" (emit a) (mapcar #'emit rest)))))
 		  #+nil (>> (destructuring-bind (a b) (cdr code)
 			      (format nil "(~a)>>~a" (emit a) (emit b))))
 		  (incf (destructuring-bind (a &optional (b 1)) (cdr code) ;; py
@@ -810,16 +1097,53 @@ tuples such as (a, b) intact."
 			    (format nil "if ~a ~a"
 				    (strip-outer-parens (emit `(not ,condition)))
 				    (emit `(progn ,@forms)))))
+		  (if-let
+		      ;; (if-let (pattern scrutinee) then &optional else)
+		      ;;   -> if let pattern = scrutinee { then } else { else }
+		      ;; patterns are ordinary forms: (Some x) emits Some(x),
+		      ;; None and _ work as written.
+		      (destructuring-bind ((pattern scrutinee) then
+					    &optional else)
+			  (cdr code)
+			(with-output-to-string (s)
+			  (format s "if let ~a = ~a ~a"
+				  (emit pattern)
+				  (strip-outer-parens (emit scrutinee))
+				  (emit `(progn ,then)))
+			  (when else
+			    (format s " else ~a"
+				    (emit `(progn ,else)))))))
+		  (while-let
+		      ;; (while-let (pattern scrutinee) form*)
+		      ;;   -> while let pattern = scrutinee { forms }
+		      (destructuring-bind ((pattern scrutinee) &rest body)
+			  (cdr code)
+			(format nil "while let ~a = ~a ~a"
+				(emit pattern)
+				(strip-outer-parens (emit scrutinee))
+				(emit `(progn ,@body)))))
 		  (coerce (let ((args (cdr code)))
 			(destructuring-bind (name type) args
-			    (format nil "(~a as ~a)" (emit name) (emit type)))))
+			  (if *omit-redundant-parens*
+			      (format nil "~a as ~a"
+				      (rust-emit-operand 'coerce :left name #'emit)
+				      (emit type))
+			      (format nil "(~a as ~a)" (emit name) (emit type))))))
 		  (dot (let ((args (cdr code)))
-			 (format nil "~{~a~^.~}" (mapcar #'emit args))))
+			 (if *omit-redundant-parens*
+			     (format nil "~{~a~^.~}"
+				     (cons (rust-emit-tight-operand (car args) #'emit)
+					   (mapcar #'emit (cdr args))))
+			     (format nil "~{~a~^.~}" (mapcar #'emit args)))))
 		  
 
 		  (aref (destructuring-bind (name &rest indices) (cdr code)
 			  ;(format t "aref: ~a ~a~%" (emit name) (mapcar #'emit indices))
-			  (format nil "~a[~{~a~^,~}]" (emit name) (mapcar #'emit indices))))
+			  (if *omit-redundant-parens*
+			      (format nil "~a[~{~a~^,~}]"
+				      (rust-emit-tight-operand name #'emit)
+				      (mapcar #'emit indices))
+			      (format nil "~a[~{~a~^,~}]" (emit name) (mapcar #'emit indices)))))
 		  
 		  (lambda (parse-lambda code #'emit))
 		  #+nil (unsafe (let ((args (cdr code)))
@@ -909,6 +1233,28 @@ tuples such as (a, b) intact."
 					 (destructuring-bind (slot-name &optional type value) desc
 					   (declare (ignorable value))
 					   (format nil "~a: ~a," (emit slot-name) (emit type)))))))))
+		  (deftrait
+		   ;; deftrait name {(defun method (args) declare*)}*
+		   ;;   -> trait name { fn method(args) -> T; ... }
+		   ;; Each body form must be a DEFUN; only the signature is
+		   ;; emitted (like PARSE-DEFUN with :HEADER-ONLY).  Write
+		   ;; bounds as a string name, e.g. "Shape: Debug".
+		   ;;
+		   ;; (deftrait Shape
+		   ;;   (defun area (&self) (declare (values f64))))
+		   ;;  -> trait Shape { fn area(&self) -> f64; }
+		   (destructuring-bind (name &rest methods) (cdr code)
+		     (format nil "trait ~a ~a"
+			     (emit name)
+			     (emit
+			      `(progn
+				 ,@(loop for m in methods collect
+					 (progn
+					   (assert (and (listp m) (eq (car m) 'defun)) nil
+						   "deftrait expects (defun ...) members, got: ~a" m)
+					   (format nil "~a;"
+						   (parse-defun m #'emit
+								:header-only t)))))))))
 		  ((handler-case throw include defclass protected public ->  new)
 		   ;; These forms are leftovers from the C/C++ generator this file
 		   ;; started out as.  Whatever they used to emit is not valid

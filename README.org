@@ -82,12 +82,12 @@ A short map of what exists:
 | assignment | `=`, `setf`, `incf`, `decf`, `/=` (divide-assign), `*=`, `^=` |
 | references | `ref`, `ref-mut`, `deref`, `coerce` (`as`), `?` |
 | collections | `paren`/`values` (tuple), `bracket`/`list`, `curly`, `comma`, `semicolon`, `space` |
-| indexing | `aref`, `slice`, `dot` |
-| control flow | `if`, `when`, `unless`, `while`, `loop`, `break`, `continue`, `for`, `dotimes`, `case` (`match`), `return` |
-| blocks | `do0`, `progn`, `block`, `do`, `unsafe`, `extern` |
+| indexing | `aref`, `slice` (deprecated alias), `range`, `range-inclusive`, `range-from`, `range-to`, `range-to-inclusive`, `range-full`, `dot` |
+| control flow | `if`, `when`, `unless`, `if-let`, `while-let`, `while`, `loop`, `break`, `continue`, `for`, `dotimes`, `case` (`match`), `return` |
+| blocks | `do0`, `progn`, `block`, `do`, `stmt`, `unsafe`, `extern` |
 | bindings | `let`, `let*`, `declare` (`type`, `values`, `mutable`, `immutable`) |
 | functions | `defun`, `lambda`, plain function call |
-| items | `defstruct0`, `make-instance`, `impl`, `deftype`, `use`, `mod`, `macroexpand`, `struct` |
+| items | `defstruct0`, `deftrait`, `make-instance`, `impl`, `deftype`, `use`, `mod`, `macroexpand`, `struct` |
 
 ### Mutability
 
@@ -125,6 +125,40 @@ The redundant outer pair is removed again in the places where `rustc`'s
 `unused_parens` lint would fire: `if`/`while` conditions, `match` subjects,
 `for` iterators, `return` values and the right hand side of an assignment.
 Tuples are left alone. Everything else is left to `rustfmt` and `cargo fix`.
+
+### Eliding parentheses
+
+Bind `cl-rust-generator::*omit-redundant-parens*` to true and the operator
+forms consult a precedence table (`*rust-precedence*`, derived from Table 5-1
+of "Programming Rust", see `operator-precedence.md`) instead of
+parenthesising everything:
+
+```lisp
+(let ((*omit-redundant-parens* t))
+  (emit-rs :code '(+ 1 (* 2 3))))   ;; "1 + 2 * 3"
+```
+
+Same-level nesting stays flat only where Rust allows it: `a - b - c` is
+fine, `a - (b - c)` keeps its parentheses, and comparisons never chain
+(`a == (b == c)`, since `a==b==c` would not even parse). Unlike C, Rust's
+bitwise `&` binds tighter than `==`, so `(== (logand x mask) 0)` becomes
+`x & mask == 0`. The fully parenthesised output is the oracle: the value
+tests in `transpiler-tests.lisp` compile and run in both modes and must
+compute the same results.
+
+### Semicolons
+
+`do0` terminates each form with a semicolon unless one of three things is
+true: the emission already ends with `;`, the form is a plain string (the
+escape hatch, passed through verbatim), or the head is a block/item form
+(`*keywords-without-semicolon*`: `defun`, `if`, `when`, `case`, `for`,
+`while`, `loop`, `let`, `progn`, `deftrait`, ...). `progn` drops the
+semicolon after the *last* form, so a block evaluates to it (Rust's implicit
+return); `block` keeps it, so the block evaluates to `()`.
+
+When the heuristic cannot know — typically a `(space ...)` escape-hatch
+form in statement position — say so explicitly with `(stmt form)`, which
+appends exactly one `;`.
 
 ## Examples
 
@@ -219,8 +253,9 @@ cd examples/01_gcd && sbcl --load gen00.lisp --quit
 
 Rust concepts the generator has no form for; use strings for these:
 
-* traits (`trait`), enums (`enum`), generics, lifetimes, `where` clauses
-* `if let` / `while let`, match guards, `..=` ranges
+* traits with default bodies or generics (see `deftrait` for plain method
+  signatures), enums (`enum`), lifetimes, `where` clauses
+* match guards
 * `pub`, `const`, `static`, attributes — write them as strings, or use
   `(space pub ...)`
 * `async` / `await`
