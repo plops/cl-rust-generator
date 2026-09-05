@@ -153,7 +153,47 @@ for pattern in iterable { }
 
 their value is ()
 
-loop can create value with break
+loop (and labelled blocks) can create value with break (not necessary in match)
+
+continue jumps to the next loop iteration
 
 
  0..20 is the same as std::ops::Range { start: 0, end: 20 }.
+
+a loop can be labelled
+
+'search:
+for room in apartment {
+    for spot in room.hiding_spots() {
+        if spot.contains(keys) {
+            println!("Your keys are {spot} in the {room}.");
+            break 'search;
+        }
+    }
+}
+
+rust rejects some safe programs:
+
+fn wait_for_process(process: &mut Process) -> i32 {
+    while true {
+        if process.wait() {
+            return process.exit_code();
+        }
+    }
+}  // error: mismatched types: expected i32, found ()
+
+
+fn exit(code: i32) -> !
+The ! means that exit() never returns. It’s a divergent function.
+
+
+Turbofish ::<T>
+
+One quirk of Rust syntax is that in a function call or method call, the usual
+syntax for generic types, Vec<T>, does not work:
+return Vec<i32>::with_capacity(1000);  // error: something about
+
+The problem is that in expressions, < is the less-than operator. The Rust
+compiler helpfully suggests writing ::<T> instead of <T> in this case, and that
+solves the problem:
+return Vec::<i32>::with_capacity(1000);  // ok, using ::<
