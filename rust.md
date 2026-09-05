@@ -206,3 +206,29 @@ The problem is that in expressions, < is the less-than operator. The Rust
 compiler helpfully suggests writing ::<T> instead of <T> in this case, and that
 solves the problem:
 return Vec::<i32>::with_capacity(1000);  // ok, using ::<
+
+
+Rust uses ! instead of ~ for bitwise NOT
+
+
+Bit shifting is always sign-extending on signed integer types and zero-
+extending on unsigned integer types.
+
+Bitwise operations have higher precedence than comparisons, unlike C,
+
+ x & BIT != 0, means (x & BIT) != 0, as you probably intended
+
+
+casting a u16 to type
+char is banned because some u16 values, like 0xd800, correspond to
+Unicode surrogate code points and therefore would not make valid
+char values. There is a standard method, std::char::from_u32(),
+which performs the run-time check and returns an Option<char>;
+
+User-defined types can implement the Deref trait, too. When you need to
+write your own smart pointer type
+
+
+closure needs block if it has a return value
+
+let is_even = |x: u64| -> bool { x % 2 == 0 }; 
