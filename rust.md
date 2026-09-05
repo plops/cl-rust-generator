@@ -72,3 +72,61 @@ compare two reference addresses std::ptr::eq
 Option<&T> is just as efficient as a c pointer but safer
 
 slice and trait references are special (fat pointers)
+
+
+how to exit a labelled block:
+
+let trimmed = 'trim: {
+    if string.chars().last() != Some('\n') {
+        break 'trim None;
+    }
+    string.pop();
+    if string.chars().last() != Some('\r') {
+        break 'trim Some(Newline::Unix);
+    }
+    string.pop();
+    Some(Newline::Windows)
+};
+
+Declaration with late initialization (no need for mut):
+
+let name;
+if user.has_nickname() {
+    name = user.nickname();
+} else {
+    name = generate_unique_name();
+    user.register(&name);
+}
+
+
+Shadowing:
+
+for line in file.lines() {
+    let line = line?;
+    ...
+}
+The let declaration creates a new, second variable, of a different type. The
+type of the first variable line is Result<String, io::Error>. The second
+line is a String.
+
+
+if let <pattern> = <expr> expression:
+
+if let Some(cookie) = request.session_cookie {
+    return restore_session(cookie);
+}
+
+shorthand for
+
+match expr {
+    pattern => { block1 }
+    _ => { block2 }
+}
+
+
+let <pattern> = <expr> expression:
+
+let Ok(config_file) = File::open(&config_path) else {
+    panic!("Unable to open config file {}.",
+config_path.display());
+};

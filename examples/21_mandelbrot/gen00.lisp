@@ -24,7 +24,8 @@
 			     (format nil "~a={:?}" (emit-rs :code e)))))
        ,@(loop for e in vars
 	    collect
-	    (emit-rs :code `(ref ,e)))
+	    (emit-rs :code `(ref ,e)
+		     ))
       ))
   (write-source
    *code-file*
@@ -206,11 +207,13 @@
 				 (expect (string "error querying CPU count"))
 				 (get)))
 		   (rows_per_band (bounds.1.div_ceil threads))
+		   
 		   (bands (pixels.chunks_mut (* rows_per_band bounds.0))))
-	       ,(lprint :vars `(bounds
-					 upper_left lower_right
-					 threads
-					 rows_per_band))
+	       
+	       ,(lprint :vars `(bounds 
+				upper_left lower_right
+				threads
+				rows_per_band))
 	       (std--thread--scope (lambda (spawner)
 				     (for ((tuple i band)
 					   (bands.enumerate))
@@ -225,7 +228,7 @@
 						(band_lower_right (pixel_to_point bounds
 										  (tuple bounds.0 (+ top height))
 										  upper_left lower_right)))
-					    ,(lprint :vars `(i top height band_bounds band_upper_left band_lower_right))
+					    ,(lprint :vars `(i  top height band_bounds band_upper_left band_lower_right))
 					    (do0 ;; hack to force semicolon
 					     (spawner.spawn (space move (lambda ()
 									  (do0 (render band band_bounds
