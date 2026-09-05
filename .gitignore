@@ -6,3 +6,8 @@ target/
 *.png
 *.jpg
 *#
+*.lock
+**/.idea/
+*.spv
+*.frag
+*.vert
