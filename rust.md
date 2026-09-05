@@ -130,3 +130,30 @@ let Ok(config_file) = File::open(&config_path) else {
     panic!("Unable to open config file {}.",
 config_path.display());
 };
+
+shorthand for
+
+let name = match expr {
+    pattern => { convergent block }
+    _ => { divergent block }
+}
+
+four loop expressions
+
+while condition {
+    block
+}
+while let pattern = expr {
+    block
+}
+loop {
+    block
+}
+for pattern in iterable { }
+
+their value is ()
+
+loop can create value with break
+
+
+ 0..20 is the same as std::ops::Range { start: 0, end: 20 }.
