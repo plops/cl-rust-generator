@@ -160,6 +160,15 @@ continue jumps to the next loop iteration
 
  0..20 is the same as std::ops::Range { start: 0, end: 20 }.
 
+
+..      // RangeFull
+a..     // RangeFrom { start: a }
+..b     // RangeTo { end: b }
+a..b    // Range { start: a, end: b }
+
+..=b     // RangeToInclusive { end: b }
+a..=b    // RangeInclusive::new(a, b)
+
 a loop can be labelled
 
 'search:
