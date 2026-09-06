@@ -142,3 +142,32 @@ alle laufen doppelt (voll geklammert + elidiert) als differentielles Orakel.
 cd examples/21_mandelbrot/mandelbrot && cargo check --offline
 cd ../../01_gcd/rs01_gcd && cargo test --offline
 ```
+
+# Kosten
+
+```
+│  USAGE          12,122,100 tokens · 92 turns · 0 subagents │
+│  CONTEXT        81% left · 191K used / 1008K · normal      │
+│                                                            │
+│  SESSION        01a07625-7dc6-7492-81d0-70410a257037       │
+│  ACTIVITY       no tasks                                   │
+│                 0 terminals · inbox clear                  │
+│                                                            │
+│  BILLING        Subscription · Muse Code Everyday Usage    │
+└────────────────────────────────────────────────────────────┘
+
+  Session usage
+
+    Input      12,068,554
+    Cached     11,872,939
+    Output         53,546
+    Total      12,122,100
+
+    Turns               92
+    Subagents         none
+
+  Subscription · Muse Code Everyday Usage
+    Current        85% used · Resets at 1:59 PM
+    Weekly         78% used · Resets Sep 7 at 12:00 AM
+    as of 10:11 AM
+```
