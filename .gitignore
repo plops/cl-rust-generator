@@ -11,3 +11,4 @@ target/
 *.spv
 *.frag
 *.vert
+data/*.db
