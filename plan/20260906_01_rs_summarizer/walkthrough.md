@@ -64,3 +64,14 @@ Split-monolith regeneration after a backquote regression. Findings:
 
 - `78b8bcb` toolkit + MVP slice; `f717aa3` scratch removal.
 - Transpiler/docs commits with their owners.
+
+## Follow-up: fake-AI integration (2026-09-06)
+
+- Plumb `ai_base_url` through `AppState` (`GEMINI_BASE_URL`, gateway
+  default) into `ai` fns and `run_generation`; `cargo test` 10/10 incl.
+  `background_generation_against_mock` (literal mock routes on
+  127.0.0.1:0, canned summary/embedding JSON, asserts status/tokens/
+  stored bytes — $0 quota).
+- Axum 0.8 `Serve` implements await but not `Future`: `tokio::spawn`
+  needs the `async move` wrapper; explicit `crate::`/`super::` paths
+  made the glob import unused (dropped).

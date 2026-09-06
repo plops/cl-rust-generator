@@ -10,6 +10,7 @@ clippy-clean Rust (edition 2024). Schema = the verbatim upstream
 ```sh
 cd /workspace/src/cl-rust-generator
 export GEMINI_API_KEY=...            # empty also works; generations then fail visibly
+export GEMINI_BASE_URL=...           # optional; defaults to the Google endpoint (tests point it at a local mock)
 cargo run --offline --manifest-path examples/22_summarizer/summarizer-mvp/Cargo.toml
 # open http://127.0.0.1:5001/ — paste a transcript, submit, poll /status/<id>
 ```

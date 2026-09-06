@@ -86,13 +86,13 @@
                         (values String))
                (format! (string "Summarize the following transcript. Reply with facts, decisions and numbers first, then a short abstract: {}")
                         transcript)))
-     ,(pub_ `(defun-async generate_summary (client api_key model transcript)
+     ,(pub_ `(defun-async generate_summary (client base_url api_key model transcript)
       (declare
        (type "reqwest::Client" &client)
-       (type &str api_key model transcript)
+       (type &str base_url api_key model transcript)
        (values "Result<GenOutput, String>"))
       (let
-       ((url (format! (string "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent") model)) (request (make-instance ReqGen :contents (vec! (make-instance ReqContent :parts (vec! (make-instance ReqPart :text (build_prompt transcript))))))) (response ,(fallible `(dot client (post url) (query (ref (bracket (tuple (string "key") api_key)))) (json (ref request)) (send)))))
+       ((url (format! (string "{}/v1beta/models/{}:generateContent") base_url model)) (request (make-instance ReqGen :contents (vec! (make-instance ReqContent :parts (vec! (make-instance ReqPart :text (build_prompt transcript))))))) (response ,(fallible `(dot client (post url) (query (ref (bracket (tuple (string "key") api_key)))) (json (ref request)) (send)))))
        (unless
         (dot response (status) (is_success))
         (return (Err (format! (string "gemini http error: {}") (dot response (status))))))
@@ -139,13 +139,13 @@
          ;; literal is a (space Name (curly ...)) escape: GenOutput
          ;; {summary, in_tokens, out_tokens}.
          (Ok (space GenOutput (curly "summary" "in_tokens" "out_tokens"))))))))
-     ,(pub_ `(defun-async embed_text (client api_key text)
+     ,(pub_ `(defun-async embed_text (client base_url api_key text)
       (declare
        (type "reqwest::Client" &client)
-       (type &str api_key text)
+       (type &str base_url api_key text)
        (values "Result<Vec<f32>, String>"))
       (let
-       ((url (string "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent")) (request (make-instance ReqEmbed :content (make-instance ReqContent :parts (vec! (make-instance ReqPart :text (dot text (to_string))))))) (response ,(fallible `(dot client (post url) (query (ref (bracket (tuple (string "key") api_key)))) (json (ref request)) (send)))))
+       ((url (format! (string "{}/v1beta/models/gemini-embedding-001:embedContent") base_url)) (request (make-instance ReqEmbed :content (make-instance ReqContent :parts (vec! (make-instance ReqPart :text (dot text (to_string))))))) (response ,(fallible `(dot client (post url) (query (ref (bracket (tuple (string "key") api_key)))) (json (ref request)) (send)))))
        (unless
         (dot response (status) (is_success))
         (return (Err (format! (string "gemini embed http error: {}") (dot response (status))))))

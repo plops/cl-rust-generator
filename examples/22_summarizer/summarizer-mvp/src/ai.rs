@@ -93,15 +93,13 @@ pub fn build_prompt(transcript: &str) -> String {
 }
 pub async fn generate_summary(
     client: &reqwest::Client,
+    base_url: &str,
     api_key: &str,
     model: &str,
     transcript: &str,
 ) -> Result<GenOutput, String> {
     {
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-            model
-        );
+        let url = format!("{}/v1beta/models/{}:generateContent", base_url, model);
         let request = ReqGen {
             contents: vec![ReqContent {
                 parts: vec![ReqPart {
@@ -166,11 +164,15 @@ pub async fn generate_summary(
 }
 pub async fn embed_text(
     client: &reqwest::Client,
+    base_url: &str,
     api_key: &str,
     text: &str,
 ) -> Result<Vec<f32>, String> {
     {
-        let url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent";
+        let url = format!(
+            "{}/v1beta/models/gemini-embedding-001:embedContent",
+            base_url
+        );
         let request = ReqEmbed {
             content: ReqContent {
                 parts: vec![ReqPart {

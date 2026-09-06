@@ -23,10 +23,19 @@ async fn submit(State(app): State<AppState>, Form(input): Form<SubmitForm>) -> i
             };
             let db_clone = app.db.clone();
             let key_clone = app.api_key.clone();
+            let base_clone = app.ai_base_url.clone();
             let model_clone = input.model.clone();
             let text_owned = transcript.to_string();
             tokio::spawn(async move {
-                run_generation(db_clone, identifier, key_clone, model_clone, text_owned).await
+                run_generation(
+                    db_clone,
+                    identifier,
+                    key_clone,
+                    base_clone,
+                    model_clone,
+                    text_owned,
+                )
+                .await
             });
             Html(format!(
                 "<p>queued #{}</p><p><a href='/status/{}'>poll status</a></p>",
@@ -48,10 +57,11 @@ async fn status(State(app): State<AppState>, Path(identifier): Path<i64>) -> imp
 async fn search(State(app): State<AppState>, Form(input): Form<SearchForm>) -> impl IntoResponse {
     {
         let client = reqwest::Client::new();
-        let query_vec = match ai::embed_text(&client, &app.api_key, &input.query).await {
-            Ok(v) => v,
-            Err(e) => return Html(format!("<p>embed error: {}", e)),
-        };
+        let query_vec =
+            match ai::embed_text(&client, &app.ai_base_url, &app.api_key, &input.query).await {
+                Ok(v) => v,
+                Err(e) => return Html(format!("<p>embed error: {}", e)),
+            };
         let rows = match db::fetch_all_embeddings(&app.db).await {
             Ok(r) => r,
             Err(e) => return Html(format!("<p>db error: {}", e)),
@@ -81,6 +91,7 @@ async fn run_generation(
     db: SqlitePool,
     identifier: i64,
     api_key: String,
+    base_url: String,
     model: String,
     transcript: String,
 ) {
@@ -89,7 +100,8 @@ async fn run_generation(
         if let Ok(true) = db::claim_running(&db, identifier, &now).await {
             {
                 let client = reqwest::Client::new();
-                match ai::generate_summary(&client, &api_key, &model, &transcript).await {
+                match ai::generate_summary(&client, &base_url, &api_key, &model, &transcript).await
+                {
                     Err(message) => {
                         drop(db::finish_failed(&db, identifier, message, &now).await);
                     }
@@ -107,7 +119,7 @@ async fn run_generation(
                             .await,
                         );
                         if let Ok(vec) =
-                            ai::embed_text(&client, &api_key, &generation.summary).await
+                            ai::embed_text(&client, &base_url, &api_key, &generation.summary).await
                         {
                             drop(
                                 db::store_embedding(&db, identifier, ai::embedding_to_bytes(&vec))
@@ -127,4 +139,57 @@ pub fn build_router(state: AppState) -> Router {
         .route("/status/{identifier}", get(status))
         .route("/search", post(search))
         .with_state(state)
+}
+#[cfg(test)]
+mod tests {
+    const MOCK_SUMMARY_JSON: &str = "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"mock summary\"}]}}],\"usageMetadata\":{\"promptTokenCount\":7,\"candidatesTokenCount\":13}}";
+    const MOCK_EMBED_JSON: &str = "{\"embedding\":{\"values\":[0.5,0.25]}}";
+    async fn mock_generate() -> String {
+        MOCK_SUMMARY_JSON.to_string()
+    }
+    async fn mock_embed() -> String {
+        MOCK_EMBED_JSON.to_string()
+    }
+    #[tokio::test]
+    async fn background_generation_against_mock() -> Result<(), sqlx::Error> {
+        {
+            let mock = axum::Router::new()
+                .route(
+                    "/v1beta/models/m:generateContent",
+                    axum::routing::post(mock_generate),
+                )
+                .route(
+                    "/v1beta/models/gemini-embedding-001:embedContent",
+                    axum::routing::post(mock_embed),
+                );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let pool = crate::db::init_db("sqlite::memory:").await?;
+            let id = crate::db::insert_submit(&pool, "m", "t").await?;
+            tokio::spawn(async move {
+                axum::serve(listener, mock.into_make_service())
+                    .await
+                    .unwrap();
+            });
+            super::run_generation(
+                pool.clone(),
+                id,
+                "k".to_string(),
+                base,
+                "m".to_string(),
+                "t".to_string(),
+            )
+            .await;
+            {
+                let row = crate::db::fetch_row(&pool, id).await?.expect("row present");
+                assert!(row.generation_status == "succeeded");
+                assert!(row.summary == "mock summary");
+            }
+            {
+                let rows = crate::db::fetch_all_embeddings(&pool).await?;
+                assert!(rows.len() == 1);
+            }
+            Ok(())
+        }
+    }
 }

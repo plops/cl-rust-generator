@@ -43,13 +43,13 @@ Keep each phase's context narrow; finish + verify one phase before starting the 
 
 - [x] Rust unit tests **emitted by the generator** (`cfg(test)` + `space "mod tests"` escape, no transpiler change): 9/9 pass — cosine identical/orthogonal/zero/empty/unequal-length, bytes roundtrip; DB lifecycle on `:memory:` (insert→claim CAS incl. double-claim `false`→success/fetch, failed path, embedding roundtrip). `&vec![…]`→`&[…]` via `bracket`/`comma` for clippy `useless_vec`.
 - [x] Lisp-side: `check-toolkit.lisp` 10/10 incl. golden assertions for `Ok(true)` fold, `drop()` discard, unnest-`let`, `cfg(test)` module, `bracket`/`comma`.
-- [ ] Integration test with fake AI service — DEFERRED: Gemini URL is hardcoded in `ai.rs`; injecting a fake base requires plumbing it through `AppState` (generator + routes change). No epoch-guard exists in the slice, so that case is moot.
+- [x] Integration test with fake AI service — DONE, deterministic ($0 quota): `ai_base_url` on `AppState` (`GEMINI_BASE_URL` env, gateway default), threaded through `ai` fns + `run_generation`; `routes::tests::background_generation_against_mock` serves canned Gemini JSON on 127.0.0.1:0 literal routes and asserts succeeded + mock summary/tokens + stored embedding. No epoch-guard exists in the slice, so that case is moot. (Axum 0.8 `Serve` is not a `Future`: spawn needs the `async move` wrapper.)
 - [x] Live smoke tests (quota ≈ 2 generates + 3 embeds): keyless run → `failed` with 403 recorded/pollable ($0); keyed run → `succeeded` (50/102 tokens), 12288 B embedding stored, search `ferry harbor dawn` → `summary #1: 0.720`. Embed model fixed: `text-embedding-004` retired (404) → `gemini-embedding-001`.
 - [x] `/root/.env` provides `GEMINI_API_KEY` (+`HETZNER_API_KEY`); names only, values never read.
 
 ## Phase 5 — Docs & hardening
 
-- [x] `cargo build`, `cargo test` (9/9), `cargo clippy --all-targets`, `cargo fmt --check` clean (0 warnings).
+- [x] `cargo build`, `cargo test` (10/10), `cargo clippy --all-targets`, `cargo fmt --check` clean (0 warnings).
 - [x] Example README (`examples/22_summarizer/README.md`: how to run generation, how to extend via toolkit).
 - [ ] `SUPPORTED_FORMS.md` final regeneration; README cross-links (with Phase 1 owner — earlier phases' tree changes, not this slice).
 - [x] `plan/20260906_01_rs_summarizer/walkthrough.md` with results + unexpected findings.
