@@ -81,13 +81,13 @@ A short map of what exists:
 | comparison | `== != < > <= >=`, `and`, `or`, `not` |
 | assignment | `=`, `setf`, `incf`, `decf`, `/=` (divide-assign), `*=`, `^=` |
 | references | `ref`, `ref-mut`, `deref`, `coerce` (`as`), `?` |
-| collections | `paren`/`values` (tuple), `bracket`/`list`, `curly`, `comma`, `semicolon`, `space` |
+| collections | `paren`/`values` (tuple), `bracket`/`list`, `vec!`, `curly`, `comma`, `semicolon`, `space` |
 | indexing | `aref`, `slice` (deprecated alias), `range`, `range-inclusive`, `range-from`, `range-to`, `range-to-inclusive`, `range-full`, `dot` |
 | control flow | `if`, `when`, `unless`, `if-let`, `while-let`, `while`, `loop`, `break`, `continue`, `for`, `dotimes`, `case` (`match`), `return` |
 | blocks | `do0`, `progn`, `block`, `do`, `stmt`, `unsafe`, `extern` |
 | bindings | `let`, `let*`, `declare` (`type`, `values`, `mutable`, `immutable`) |
-| functions | `defun`, `lambda`, plain function call |
-| items | `defstruct0`, `deftrait`, `make-instance`, `impl`, `deftype`, `use`, `mod`, `macroexpand`, `struct` |
+| functions | `defun`, `defun-async`, `await`, `lambda`, plain function call |
+| items | `defstruct0`, `defenum`, `deftrait`, `make-instance`, `impl`, `deftype`, `use`, `mod`, `macroexpand`, `struct`, `attr` |
 
 ### Mutability
 
@@ -145,6 +145,26 @@ bitwise `&` binds tighter than `==`, so `(== (logand x mask) 0)` becomes
 `x & mask == 0`. The fully parenthesised output is the oracle: the value
 tests in `transpiler-tests.lisp` compile and run in both modes and must
 compute the same results.
+
+### Async, attributes and `?`
+
+`(defun-async name (args) ...)` is `defun` emitting `async fn`, for
+tokio/axum handlers. `(await expr)` appends `.await`, `(? expr)`
+appends `?`; both strip redundant outer parentheses like `return`
+does. `(attr "derive(Clone)" form)` writes one `#[...]` line per
+string in front of `form`, so derives and attributes keep working
+through the generator instead of being hand-written strings around
+whole items. `attr` and `defun-async` are in
+`*keywords-without-semicolon*`, so `do0` adds no stray `;` after
+them; `await`/`?` in statement position correctly get one.
+
+```lisp
+(defun-async fetch (id)
+  (declare (type i64 id)
+           (values String))
+  (return (await (db--fetch id))))
+;; async fn fetch(id: i64) -> String { return db::fetch(id).await }
+```
 
 ### Semicolons
 

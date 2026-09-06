@@ -12,7 +12,7 @@ die inputs und outputs werden in einer sqlite database gespeichert und es gibt f
 die api keys fuer die AI services befinden sich in /root/.env
 
 du kannst selbst entscheiden wieviel du davon umsetzt. mir genuegt ein minimum viable product, dass im transpiler ausgedrueckt wird. 
-deine hauptaufgabe ist herauszufinden bzw. zu demonstrieren, wie man lesbaren / wartbaren / erweiterbaren code mittels des lisp-to-rust transpilers erzeugen kann.
+deine hauptaufgabe ist herauszufinden bzw. zu demonstrieren, wie man lesbaren / wartbaren / erweiterbaren code mittels des lisp-to-rust transpilers erzeugen kann. deine ausgabe soll in das verzeichnis /workspace/src/cl-rust-generator/examples/22... geschrieben werden
 
 du sollst z.b. lisp macros, literate programming, die entwicklung kleiner wiederverwendbare tools einsetzen, um den urspruenglichen rs-summarizer code besser wartbar, verstaendlich und erweiterbar zu machen. du musst den rs-summarizer code nicht genau gleich umsetzen. aber falls du die datenbank nutzt, dann solltest du kompatibel zu der datenbank in rs-summarizer bleiben. anstonsten steht dir frei anderer ansaetze oder libraries zu waehlen. mir waere es lieb, wenn die anzahl der externen dependencies reduziert werden koennte. natuerlich nur, wenn das programm dabei immernoch gut wartbar bleibt
 

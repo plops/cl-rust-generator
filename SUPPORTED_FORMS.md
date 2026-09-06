@@ -477,6 +477,18 @@ pub struct P {
 }
 ```
 
+### `(vec! 1 2)`
+
+(vec! a b) emits the vec! macro with bracket syntax.
+
+```lisp
+(vec! 1 2)
+```
+
+```rust
+vec![1, 2]
+```
+
 ## control-flow Forms
 
 ### `(if (< x 0)
@@ -999,6 +1011,27 @@ fn merge(&mut self, other: InMemoryIndex) {
 }
 ```
 
+### `(defun-async fetch_summary (identifier)
+      (declare (type i64 identifier)
+               (values String))
+      (return (await (db--fetch_summary identifier))))`
+
+(defun-async name (args) body) emits an async Rust fn
+for tokio/axum handlers.
+
+```lisp
+(defun-async fetch_summary (identifier)
+ (declare (type i64 identifier)
+          (values String))
+ (return (await (db--fetch_summary identifier))))
+```
+
+```rust
+async fn fetch_summary(identifier: i64) -> String {
+    return db::fetch_summary(identifier).await
+}
+```
+
 ### `(lambda (x)
        (declare (type i32 x)
                 (values i32))
@@ -1189,6 +1222,82 @@ for x in 0..n {
 ```
 
 ## item Forms
+
+### `(attr "derive(Clone, Debug)" (defstruct0 Point (x f64) (y f64)))`
+
+(attr s* form) emits one #[s] line per attribute string
+in front of form.
+
+```lisp
+(attr "derive(Clone, Debug)" (defstruct0 Point (x f64) (y f64)))
+```
+
+```rust
+#[derive(Clone, Debug)]
+struct Point {
+    x: f64,
+    y: f64,
+}
+```
+
+### `(defenum GenerationStatus Queued Running Succeeded Failed)`
+
+(defenum name variant*) emits a unit-variant Rust enum.
+
+```lisp
+(defenum GenerationStatus Queued Running Succeeded Failed)
+```
+
+```rust
+enum GenerationStatus {
+    Queued,
+    Running,
+    Succeeded,
+    Failed,
+}
+```
+
+### `(attr "derive(Debug, Clone, Copy, PartialEq, Eq)"
+      (defenum ThinkingPreference Auto Minimal Low Medium High))`
+
+Derives reach defenum through the attr wrapper.
+
+```lisp
+(attr "derive(Debug, Clone, Copy, PartialEq, Eq)"
+ (defenum ThinkingPreference Auto Minimal Low Medium High))
+```
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ThinkingPreference {
+    Auto,
+    Minimal,
+    Low,
+    Medium,
+    High,
+}
+```
+
+### `(do0 (attr "derive(Debug)" (defstruct0 A (x i32)))
+      (defun-async f nil (declare (values i32)) (return 0)))`
+
+attr and defun-async are in *keywords-without-semicolon*:
+do0 adds no stray semicolon after attributed items.
+
+```lisp
+(do0 (attr "derive(Debug)" (defstruct0 A (x i32)))
+ (defun-async f nil (declare (values i32)) (return 0)))
+```
+
+```rust
+#[derive(Debug)]
+struct A {
+    x: i32,
+}
+async fn f() -> i32 {
+    return 0
+}
+```
 
 ### `(defstruct0 Point (x f64) (y f64))`
 
@@ -1588,6 +1697,20 @@ are needed.
 
 ```rust
 1 + 2 * 3
+```
+
+### `(do0 (? (fetch row)) (dot (fetch row) (to_string)))`
+
+Calls bind tightest: no parentheses as ? operand or
+dot receiver.
+
+```lisp
+(do0 (? (fetch row)) (dot (fetch row) (to_string)))
+```
+
+```rust
+fetch(row)?;
+fetch(row).to_string();
 ```
 
 ### `(* (+ 1 2) 3)`
@@ -2074,5 +2197,30 @@ Note the argument order: value first, unlike the old C-style cast.
 
 ```rust
 f.read_to_string(&mut s)?
+```
+
+### `(await (fetch_summary identifier))`
+
+(await expr) appends .await; outer parentheses are
+stripped like in return and conditions.
+
+```lisp
+(await (fetch_summary identifier))
+```
+
+```rust
+fetch_summary(identifier).await
+```
+
+### `(? (parse_url link))`
+
+(? expr) emits Rust's ? error-propagation operator.
+
+```lisp
+(? (parse_url link))
+```
+
+```rust
+parse_url(link)?
 ```
 

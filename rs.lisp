@@ -310,13 +310,15 @@ is `mut x: T', a mutable reference is `x: &mut T'."
 					      (funcall emit value)))))
 			  ,@body)))))))
 
-(defun parse-defun (code emit &key header-only)
+(defun parse-defun (code emit &key header-only async)
   ;; defun function-name lambda-list [declaration*] form*
+  ;; with ASYNC non-nil emit "async fn" (used by DEFUN-ASYNC).
   (destructuring-bind (name lambda-list &rest body) (cdr code)
     (multiple-value-bind (body env) (consume-declare body)
       (let ((req-param lambda-list))
 	(with-output-to-string (s)
-	  (format s "fn ~a~a~@[ -> ~a~]"
+	  (format s "~:[fn ~;async fn ~]~a~a~@[ -> ~a~]"
+		  async
 		  (funcall emit name)
 		  (funcall emit `(paren
 				  ,@(loop for rp in req-param collect
@@ -505,6 +507,18 @@ means the same as (a+b)+c (up to floating point rounding, documented).")
     (assert entry nil "no Rust precedence for operator ~a" op)
     (values (second entry) (third entry))))
 
+(defparameter *rust-loose-heads*
+  '(if when unless if-let while-let case for dotimes while loop
+    return break continue
+    let let* setf = incf decf /= *= ^= %=
+    defun defun-async lambda impl use mod deftype struct
+    defstruct0 defenum deftrait make-instance macroexpand attr
+    do progn block do0 do0-no-final-semicolon stmt unsafe extern indent
+    not deref ref ref-mut coerce cast quote)
+  "Heads whose emission is not self-delimited (control flow, bindings,
+items, blocks, prefix operators).  Anything else with a symbol head is
+a plain (possibly macro) call and counts as :PRIMARY.")
+
 (defun rust-expression-operator (form)
   "Classify FORM by the operator its emission binds with.  Returns one of:
 :PRIMARY -- self-delimited, never needs parentheses as an operand
@@ -514,7 +528,8 @@ means the same as (a+b)+c (up to floating point rounding, documented).")
   parenthesised in omit mode;
 or an operator head (a key of *RUST-PRECEDENCE*, or -UNARY for a
 single-argument -).  A single-argument + is transparent and classifies as
-its operand; a single-argument / (reciprocal) classifies as /."
+its operand; a single-argument / (reciprocal) classifies as /.
+(await x) and (? x) are postfix and likewise :PRIMARY."
   (cond ((atom form) :primary)
 	((not (symbolp (car form))) :loose)
 	((and (eq (car form) '-) (= 1 (length (cdr form)))) '-unary)
@@ -528,7 +543,12 @@ its operand; a single-argument / (reciprocal) classifies as /."
 			      range-to-inclusive range-full slice
 			      string string# string-r string-b char byte hex))
 	 :primary)
-	(t :loose)))
+	((member (car form) *rust-loose-heads*) :loose)
+	;; Anything else with a symbol head is a plain call (f x),
+	;; a macro call (vec![..], format!(..)), a path call
+	;; (db::fetch(..)) or a constructor (Ok(..), Some(..)): all bind
+	;; tighter than any operator, so no parentheses are needed.
+	(:primary)))
 
 (defun rust-operator-level (form)
   "Precedence level of FORM's own operator; :PRIMARY counts as top (16),
@@ -618,7 +638,7 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
     `(;; forms that expand into a Rust item or a block expression used as a
       ;; statement.  Rust does not want (and clippy complains about) a
       ;; semicolon after those.
-      defun defstruct0 deftrait impl use mod
+      defun defun-async defstruct0 defenum deftrait impl use mod attr
       if when unless if-let while-let case for dotimes while loop
       progn do do0 do0-no-final-semicolon stmt
       extern unsafe macroexpand space let let*)
@@ -668,6 +688,10 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 		     (format nil "[~{~a~^, ~}]" (mapcar #'emit args))))
 		  (list
 		   (emit `(bracket ,@(cdr code))))
+		  (vec!
+		   ;; (vec! a b) -> vec![a, b]; (vec!) -> vec![].
+		   (let ((args (cdr code)))
+		     (format nil "vec![~{~a~^, ~}]" (mapcar #'emit args))))
 		  (curly
 		   ;; curly {args}*
 		   (let ((args (cdr code)))
@@ -838,6 +862,24 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 			  (parse-defun code #'emit)
 			(when hook-defun
 			  (funcall hook-defun (parse-defun code #'emit :header-only t)))))
+		  (defun-async
+		      ;; defun-async name lambda-list [declaration*] form*
+		      ;; like DEFUN but emits "async fn" (tokio/axum handlers).
+		      (prog1
+			  (parse-defun code #'emit :async t)
+			(when hook-defun
+			  (funcall hook-defun (parse-defun code #'emit :header-only t :async t)))))
+		  (await
+		   ;; (await expr) -> expr.await (outer parens stripped).
+		   (format nil "~a.await" (strip-outer-parens (emit (cadr code)))))
+		  (attr
+		   ;; (attr attr-string* form) -> one #[attr] line per string, then form.
+		   ;; (attr "derive(Clone, Debug)" (defstruct0 ...))
+		   (let ((args (cdr code)))
+		     (format nil "~{~a~^~%~}~%~a"
+			     (mapcar (lambda (a) (format nil "#[~a]" (emit a)))
+				     (butlast args))
+			     (emit (car (last args))))))
 		  (return (format nil "return ~a"
 				  (strip-outer-parens (emit (car (cdr code))))))
 		  (break
@@ -1233,6 +1275,17 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 					 (destructuring-bind (slot-name &optional type value) desc
 					   (declare (ignorable value))
 					   (format nil "~a: ~a," (emit slot-name) (emit type)))))))))
+		  (defenum
+		   ;; defenum name {variant}*
+		   ;; (defenum Status Queued Running) -> enum Status { Queued, Running, }
+		   ;; Derives/attributes via (attr ... (defenum ...)).
+		   (destructuring-bind (name &rest variants) (cdr code)
+		     (format nil "enum ~a ~a"
+			     (emit name)
+			     (emit
+			      `(progn
+				 ,@(loop for v in variants collect
+					 (format nil "~a," (emit v))))))))
 		  (deftrait
 		   ;; deftrait name {(defun method (args) declare*)}*
 		   ;;   -> trait name { fn method(args) -> T; ... }

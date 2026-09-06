@@ -210,6 +210,15 @@ are needed."
      :omit-parens t
      :tags (:operator :precedence))
 
+    (:name "omit-call-tight-operand"
+     :description "Calls bind tightest: no parentheses as ? operand or
+dot receiver."
+     :lisp (do0 (? (fetch row))
+                (dot (fetch row) (to_string)))
+     :rust "fetch(row)?; fetch(row).to_string();"
+     :omit-parens t
+     :tags (:operator :precedence))
+
     (:name "omit-mul-add"
      :description "A looser operand keeps its parentheses."
      :lisp (* (+ 1 2) 3)
@@ -970,6 +979,71 @@ strings is the escape hatch used for self, lifetimes and generics."
              (return 0))
      :rust "fn merge(&mut self, other: InMemoryIndex) { return 0 }"
      :tags (:function))
+
+    (:name "defun-async"
+     :description "(defun-async name (args) body) emits an async Rust fn
+for tokio/axum handlers."
+     :lisp (defun-async fetch_summary (identifier)
+             (declare (type i64 identifier)
+                      (values String))
+             (return (await (db--fetch_summary identifier))))
+     :rust "async fn fetch_summary(identifier: i64) -> String { return db::fetch_summary(identifier).await }"
+     :item t
+     :tags (:function))
+
+    (:name "await"
+     :description "(await expr) appends .await; outer parentheses are
+stripped like in return and conditions."
+     :lisp (await (fetch_summary identifier))
+     :rust "fetch_summary(identifier).await"
+     :tags (:reference))
+
+    (:name "question-mark"
+     :description "(? expr) emits Rust's ? error-propagation operator."
+     :lisp (? (parse_url link))
+     :rust "parse_url(link)?"
+     :tags (:reference))
+
+    (:name "attr"
+     :description "(attr s* form) emits one #[s] line per attribute string
+in front of form."
+     :lisp (attr "derive(Clone, Debug)"
+             (defstruct0 Point (x f64) (y f64)))
+     :rust "#[derive(Clone, Debug)] struct Point { x: f64, y: f64, }"
+     :item t
+     :tags (:item))
+
+    (:name "defenum"
+     :description "(defenum name variant*) emits a unit-variant Rust enum."
+     :lisp (defenum GenerationStatus Queued Running Succeeded Failed)
+     :rust "enum GenerationStatus { Queued, Running, Succeeded, Failed, }"
+     :item t
+     :tags (:item))
+
+    (:name "vec-macro"
+     :description "(vec! a b) emits the vec! macro with bracket syntax."
+     :lisp (vec! 1 2)
+     :rust "vec![1, 2]"
+     :tags (:collection))
+
+    (:name "defenum-derived"
+     :description "Derives reach defenum through the attr wrapper."
+     :lisp (attr "derive(Debug, Clone, Copy, PartialEq, Eq)"
+             (defenum ThinkingPreference Auto Minimal Low Medium High))
+     :rust "#[derive(Debug, Clone, Copy, PartialEq, Eq)] enum ThinkingPreference { Auto, Minimal, Low, Medium, High, }"
+     :item t
+     :tags (:item))
+
+    (:name "attr-no-semicolon"
+     :description "attr and defun-async are in *keywords-without-semicolon*:
+do0 adds no stray semicolon after attributed items."
+     :lisp (do0 (attr "derive(Debug)"
+                  (defstruct0 A (x i32)))
+                (defun-async f ()
+                  (declare (values i32))
+                  (return 0)))
+     :rust "#[derive(Debug)] struct A { x: i32, } async fn f() -> i32 { return 0 }"
+     :tags (:item))
 
     (:name "lambda"
      :description "(lambda (args) body) emits a Rust closure.  Declared
