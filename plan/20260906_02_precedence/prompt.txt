@@ -1,0 +1,32 @@
+du befindest dich in einem docker container mit ubuntu 26 und solltest alle programme haben um die aufgabe zu loesen.
+falls programme fehlen, installiere sie im container.
+
+du arbeitest fuer wol pumba (wolpumba@gmail.com)
+
+gestern haben wir den task cl-rust-generator/plan/20260905_01_forms/walkthrough.md implementiert.
+dabei wurden neue forms eingefuehrt, die nah an common lisp angelehnt sein sollten. weiterhin haben wir
+einen ansatz implementiert um unnoetige klammern vom transpiler output zu entfernen und auch die handhabung von semicolons genauer angeschaut. fuer die aenderungen wurden auch tests gebaut.
+
+fuer diese implementierung wurde jedoch nicht cl-rust-generator/operator-precedence.md angeschaut.
+diese datei enthaelt eine zusammenfassung der operatoren und prezedenzen aus dem "programming rust" text buch.
+
+mache einen code review vom rust generator.
+
+ich denke du dir fallen stellen auf wo der transpiler erweitert werden kann.
+mir geht es insbesondere um forms, die bisher noch nicht unterstuetzt sind, oder welche die es schon gibt, aber die besser benannt werden koennten. wie vorher moechte ich, dass die forms moeglich nah an common lisp angelehnt sind.
+
+es ist auch sehr wichtig, dass die semikolons gut behandelt werden. bei rust indiziert ein fehlendes semicolon dass der wert returned werden soll. ich moechte das diese funktionalitaet robust und einfach im transpiler zu nutzen ist.
+
+dafuer ist es notwendig die operator prezedenz gut zu verstehen. das rust.md dokument beschreibt diese bereits aber dennoch ist es noetig unit tests zu bauen.
+
+es geht mir nicht um backward compatibilitaet. wenn ein form durch ein anderes ersetzt wird kannst du das alte (sollst du sogar) loeschen. ich moechte das der transpiler input eine systematische und gut verstaendliche repraesentation von rust code ist. halte die inkompatiblen aenderungen mit migrationsinstruktionen in einem markdown dokument fest. so dass ich spaeter die beispiele anpassen kann.
+
+update dokumentation oder quellcode, wo du verbesserungen feststellst.
+
+falls moeglich baue unit tests fuer den rust generator und ergaenze den  ueberblick ueber alle unterstuetzten forms
+wie du siehst ist deine aufgabe weit umfassend. falls noetig (und moeglich) erzeuge eine tasks.md datei um die aufgabe in mehrere schritte zu teilen um die context groesse konzentriert auf einem task zu halten.
+
+nutze den rust compiler selbst (bzw cargo), cargo clippy und cargo fmt (und was es sonst fuer tools im rust ecosystem gibt) um die validitaet von rust code zu ueberpruefen.
+
+speichere die resultate und unerwartete findings deiner untersuchung in diesem plan ordner als walkthrough.md ab
+(z.b. auch welche fehlenden programme wie installiert werden mussten) commite die aenderungen
