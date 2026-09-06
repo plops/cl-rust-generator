@@ -485,19 +485,22 @@ results.")
 (defparameter *rust-precedence*
   '((-unary 15 left)
     (not 15 left) (deref 15 left) (ref 15 left) (ref-mut 15 left)
-    (coerce 14 left) (cast 14 left)
+    (coerce 14 left)
     (* 13 left) (/ 13 left) (% 13 left)
     (+ 12 left) (- 12 left)
     (<< 11 left) (>> 11 left)
-    (logand 10 left) (& 10 left)
-    (logxor 9 left) (^ 9 left)
+    (logand 10 left)
+    (logxor 9 left)
     (logior 8 left)
     (== 7 non) (!= 7 non) (< 7 non) (<= 7 non) (> 7 non) (>= 7 non)
     (and 6 left) (or 5 left)
     (? 16 left))
-  "Operator head -> (level associativity).  See *OMIT-REDUNDANT-PARENS*.")
+  "Operator head -> (level associativity).  See *OMIT-REDUNDANT-PARENS*.
+  Only heads with a CASE clause in EMIT-RS appear here: the single-character
+  aliases & and ^ and the deprecated CAST were removed (use LOGAND, LOGXOR
+  and COERCE, see MIGRATION.md).")
 
-(defparameter *rust-associative-ops* '(+ * logand logior logxor & ^ or and)
+(defparameter *rust-associative-ops* '(+ * logand logior logxor or and)
   "Operators whose chains may stay flat on the right hand side: a+(b+c)
 means the same as (a+b)+c (up to floating point rounding, documented).")
 
@@ -510,11 +513,11 @@ means the same as (a+b)+c (up to floating point rounding, documented).")
 (defparameter *rust-loose-heads*
   '(if when unless if-let while-let case for dotimes while loop
     return break continue
-    let let* setf = incf decf /= *= ^= %=
+    let let* let-else setf = incf decf /= *= ^= %= <<= >>= &= \|=
     defun defun-async lambda impl use mod deftype struct
     defstruct0 defenum deftrait make-instance macroexpand attr
-    do progn block do0 do0-no-final-semicolon stmt unsafe extern indent
-    not deref ref ref-mut coerce cast quote)
+    do progn block do0 do0-no-final-semicolon stmt expr unsafe extern indent
+    not deref ref ref-mut coerce quote)
   "Heads whose emission is not self-delimited (control flow, bindings,
 items, blocks, prefix operators).  Anything else with a symbol head is
 a plain (possibly macro) call and counts as :PRIMARY.")
@@ -540,8 +543,8 @@ its operand; a single-argument / (reciprocal) classifies as /.
 	((member (car form) '(dot aref paren tuple values bracket curly comma
 			      scope angle space
 			      range range-inclusive range-from range-to
-			      range-to-inclusive range-full slice
-			      string string# string-r string-b char byte hex))
+			      range-to-inclusive range-full array-repeat
+			      string string-r string-b char byte hex))
 	 :primary)
 	((member (car form) *rust-loose-heads*) :loose)
 	;; Anything else with a symbol head is a plain call (f x),
@@ -640,7 +643,7 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
       ;; semicolon after those.
       defun defun-async defstruct0 defenum deftrait impl use mod attr
       if when unless if-let while-let case for dotimes while loop
-      progn do do0 do0-no-final-semicolon stmt
+      progn do do0 do0-no-final-semicolon stmt expr let-else
       extern unsafe macroexpand space let let*)
     "Heads of forms that must not get a semicolon appended by DO0.")
   (defun emit-rs (&key code (str nil)  (level 0) (hook-defun nil))
@@ -857,6 +860,13 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 		     (if (emission-ends-with-semicolon-p s)
 			 s
 			 (format nil "~a;" s))))
+		  (expr
+		   ;; (expr form) is the counterpart of STMT: it forces
+		   ;; expression position, i.e. no semicolon is added.  Like
+		   ;; STMT this is the explicit override for escape-hatch
+		   ;; forms, for the tail of a PROGN (Rust's implicit return:
+		   ;; a missing semicolon means "return this value").
+		   (emit (cadr code)))
 		  (defun
 		      (prog1
 			  (parse-defun code #'emit)
@@ -887,20 +897,10 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 		   (let ((args (cdr code)))
 		     (format nil "break~@[ ~a~]" (when args (emit (car args))))))
 		  (continue "continue")
-		  (cast
-		   ;; cast value type  ->  (value as type)
-		   ;; deprecated alias of COERCE; the C-style (cast type value)
-		   ;; that this used to emit is not valid Rust.
-		   (destructuring-bind (value type) (cdr code)
-		     (if *omit-redundant-parens*
-			 (format nil "~a as ~a"
-				 (rust-emit-operand 'cast :left value #'emit)
-				 (emit type))
-			 (format nil "(~a as ~a)" (emit value) (emit type)))))
-		  (slice (let ((args (cdr code)))
-			   ;; deprecated alias of RANGE; the old examples
-			   ;; (vulkano depth_range, mandelbrot) still use it.
-			   (format nil "(~{~a~^..~})" (mapcar #'emit args))))
+		  (array-repeat (destructuring-bind (value count) (cdr code)
+				;; (array-repeat value count) -> [value; count],
+				;; the repeat array literal from Table 5-1.
+				(format nil "[~a; ~a]" (emit value) (emit count))))
 		  (range (destructuring-bind (a b) (cdr code)
 			   ;; (range a b) -> (a..b), end-exclusive Rust range.
 			   (format nil "(~a..~a)" (emit a) (emit b))))
@@ -977,16 +977,6 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 			   (format nil "~{~a~^ * ~}"
 				   (rust-emit-operand-list '* args #'emit))
 			   (format nil "(~{(~a)~^*~})" (mapcar #'emit args)))))
-		  (^ (let ((args (cdr code)))
-		       (if *omit-redundant-parens*
-			   (format nil "~{~a~^ ^ ~}"
-				   (rust-emit-operand-list '^ args #'emit))
-			   (format nil "(~{(~a)~^^~})" (mapcar #'emit args)))))
-		  (& (let ((args (cdr code)))
-		       (if *omit-redundant-parens*
-			   (format nil "~{~a~^ & ~}"
-				   (rust-emit-operand-list '& args #'emit))
-			   (format nil "(~{(~a)~^&~})" (mapcar #'emit args)))))
 		  (/ (let ((args (cdr code)))
 		       (if (eq 1 (length args))
 			   (if *omit-redundant-parens*
@@ -1035,6 +1025,18 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 			(format nil "~a*=(~a)" (emit a) (emit b))))
 		  (^= (destructuring-bind (a b) (cdr code)
 			(format nil "(~a)^=(~a)" (emit a) (emit b))))
+		  (<<= (destructuring-bind (a b) (cdr code)
+			 ;; (<<= place value) is shift-left-assignment.
+			 (format nil "~a<<=(~a)" (emit a) (emit b))))
+		  (>>= (destructuring-bind (a b) (cdr code)
+			 ;; (>>= place value) is shift-right-assignment.
+			 (format nil "~a>>=(~a)" (emit a) (emit b))))
+		  (&= (destructuring-bind (a b) (cdr code)
+			;; (&= place value) is bitwise-and-assignment.
+			(format nil "~a&=(~a)" (emit a) (emit b))))
+		  (\|= (destructuring-bind (a b) (cdr code)
+			 ;; (\|= place value) is bitwise-or-assignment.
+			 (format nil "~a|=(~a)" (emit a) (emit b))))
 		  ;; NOTE: binary operators parenthesise their RESULT as well as
 		  ;; their operands.  Without the outer pair
 		  ;;   (dot (% a b) c) -> (a)%(b).c
@@ -1107,10 +1109,11 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 		  (byte  (format nil "b'~a'" (cadr code)))
 		  (string (format nil "\"~a\"" (cadr code)))
 		  (string-b (format nil "b\"~a\"" (cadr code)))
-		  ;; string# / string-r  ->  raw string literal r#"..."#
+		  ;; string-r  ->  raw string literal r#"..."#
 		  ;; enough hashes are added so that the payload may itself
-		  ;; contain quote-hash sequences.
-		  ((string# string-r)
+		  ;; contain quote-hash sequences.  (The old STRING# alias
+		  ;; was removed; see MIGRATION.md.)
+		  (string-r
 		   (let* ((str (cadr code))
 			  (n-of-hash (count #\# str))
 			  (list-of-hash (loop for i upto n-of-hash collect "#")))
@@ -1161,6 +1164,20 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 		      (destructuring-bind ((pattern scrutinee) &rest body)
 			  (cdr code)
 			(format nil "while let ~a = ~a ~a"
+				(emit pattern)
+				(strip-outer-parens (emit scrutinee))
+				(emit `(progn ,@body)))))
+		  (let-else
+		      ;; (let-else (pattern scrutinee) form*)
+		      ;;   -> let pattern = scrutinee else { forms };
+		      ;; A let-else always ends with a semicolon (Rust
+		      ;; requires it), so the branch terminates itself and
+		      ;; the head is in *KEYWORDS-WITHOUT-SEMICOLON* to
+		      ;; avoid a second one.  Patterns are ordinary forms
+		      ;; like in IF-LET: (Some x) emits Some(x).
+		      (destructuring-bind ((pattern scrutinee) &rest body)
+			  (cdr code)
+			(format nil "let ~a = ~a else ~a;"
 				(emit pattern)
 				(strip-outer-parens (emit scrutinee))
 				(emit `(progn ,@body)))))
@@ -1308,10 +1325,13 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 					   (format nil "~a;"
 						   (parse-defun m #'emit
 								:header-only t)))))))))
-		  ((handler-case throw include defclass protected public ->  new)
-		   ;; These forms are leftovers from the C/C++ generator this file
-		   ;; started out as.  Whatever they used to emit is not valid
-		   ;; Rust, so fail loudly instead of producing garbage.
+		  ((handler-case throw include defclass protected public ->  new
+		    slice cast string# & ^)
+		   ;; The first group are leftovers from the C/C++ generator
+		   ;; this file started out as; the second group are forms
+		   ;; removed in 2026-09 (see MIGRATION.md).  Whatever they
+		   ;; used to emit is not valid Rust, so fail loudly instead
+		   ;; of producing garbage.
 		   (error "cl-rust-generator: the form ~s is not supported.~%~a"
 			  (car code)
 			  (case (car code)
@@ -1321,7 +1341,12 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 			    (defclass "Use (defstruct0 ...) together with (impl ...).")
 			    ((protected public) "Write \"pub\" as a plain string in front of the item.")
 			    (-> "-> is only valid in a function signature; use (dot a b) for member access.")
-			    (new "Rust has no `new' keyword; call the associated function, e.g. (\"Vec::new\")."))))
+			    (new "Rust has no `new' keyword; call the associated function, e.g. (\"Vec::new\").")
+			    (slice "Removed: use (range a b), (range-inclusive a b), (range-from a), (range-to b), (range-to-inclusive b) or (range-full).")
+			    (cast "Removed: use (coerce value type).")
+			    (string# "Removed: use (string-r ...).")
+			    (& "Removed: use (logand a b).")
+			    (^ "Removed: use (logxor a b)."))))
 		  (t (destructuring-bind (name &rest args) code
 
 		       (if (listp name)

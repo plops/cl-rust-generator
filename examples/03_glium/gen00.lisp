@@ -57,7 +57,7 @@
 		      ("glium::index::NoIndices"
 		       "glium::index::PrimitiveType::TrianglesList"))
 		     (vertex_shader_source
-		      (string# "#version 140
+		      (string-r "#version 140
 in vec2 position;
 uniform float t;
 void main() {
@@ -67,7 +67,7 @@ void main() {
 }"
 ))
 		     (fragment_shader_source
-		      (string# "#version 140
+		      (string-r "#version 140
 out vec4 color;
 void main() {
   color = vec4(1.0,0.0,0.0,1.0);

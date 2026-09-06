@@ -441,7 +441,7 @@ image = \"*\"
 				vulkano_shaders--shader!
 				:ty (string "compute")
 				:src
-				(string#
+				(string-r
 				 ,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
 											(merge-pathnames "trace.comp"
 													 *source-dir*)))))))
@@ -614,7 +614,7 @@ image = \"*\"
 				vulkano_shaders--shader!
 				:ty (string "compute")
 				:src
-				(string#
+				(string-r
 				 ,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
 											(merge-pathnames "trace.comp"
 													 *source-dir*)))))))
@@ -641,7 +641,7 @@ image = \"*\"
 			    (buf (dot (vulkano--buffer--CpuAccessibleBuffer--from_iter
 				       (device.clone)
 				       (vulkano--buffer--BufferUsage--all)
-				       (dot (slice 0 (* 1024 1024 4))
+				       (dot (range 0 (* 1024 1024 4))
 					    (map (lambda (_) "0u8"))))
 				      (expect (string "failed to create buffer"))))
 			    (command_buffer (dot (vulkano--command_buffer--AutoCommandBufferBuilder--new
@@ -744,7 +744,7 @@ image = \"*\"
 				 vulkano_shaders--shader!
 				 :ty (string "vertex")
 				 :src
-				 (string#
+				 (string-r
 				  ,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
 											 (merge-pathnames "trace.vert"
 													  *source-dir*)))))))
@@ -755,7 +755,7 @@ image = \"*\"
 				 vulkano_shaders--shader!
 				 :ty (string "fragment")
 				 :src
-				 (string#
+				 (string-r
 				  ,(read-file-into-string (asdf:system-relative-pathname 'cl-rust-generator
 											 (merge-pathnames "trace.frag"
 													  *source-dir*)))))))
@@ -782,7 +782,7 @@ image = \"*\"
 								       (space vec! (list (make-instance vulkano--pipeline--viewport--Viewport
 													:origin (list 0s0 0s0)
 													:dimensions (list 1024s0 1024s0)
-													:depth_range (slice 0s0 1s0)))))
+													:depth_range (range 0s0 1s0)))))
 							   ".. vulkano::command_buffer::DynamicState::none()")))))
 		   
 		      (let ((command_buffer
@@ -1146,7 +1146,7 @@ image = \"*\"
 					    vulkano_shaders--shader!
 					    :ty (string ,type)
 					    :src
-					    (string#
+					    (string-r
 					     ,(read-file-into-string
 					       (asdf:system-relative-pathname
 						'cl-rust-generator
@@ -1226,7 +1226,7 @@ image = \"*\"
 												    :dimensions (list (coerce (aref dimensions 0) f32)
 														      (coerce (aref dimensions 1) f32))
 					;(list 1024s0 1024s0)
-												    :depth_range (slice 0s0 1s0)))))
+												    :depth_range (range 0s0 1s0)))))
 								  ".. vulkano::command_buffer::DynamicState::none()"
 								  ))
 				    (framebuffers
@@ -1291,7 +1291,7 @@ image = \"*\"
 										       :origin (list 0s0 0s0)
 										       :dimensions (list (coerce (aref dimensions 0) f32)
 													 (coerce (aref dimensions 1) f32))
-										       :depth_range (slice 0s0 1s0)))))
+										       :depth_range (range 0s0 1s0)))))
 						     ".. vulkano::command_buffer::DynamicState::none()"
 						     ))
 				(setf framebuffers

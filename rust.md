@@ -153,6 +153,18 @@ for pattern in iterable { }
 
 their value is ()
 
+operator precedence (tightest first; see operator-precedence.md Table 5-1
+and `*rust-precedence*` in rs.lisp, which the elision mode
+`*omit-redundant-parens*` consults):
+
+unary (!, -, *, &) > `as` > `* / %` > `+ -` > `<< >>` > `&` > `^` > `|`
+> comparisons (never chained: `a==b==c` does not parse) > `&&` > `||`
+
+unlike C, bitwise `& ^ |` bind tighter than comparisons, so
+`x & mask == 0` needs no parentheses. `*omit-redundant-parens*` drops
+exactly the parentheses this table makes redundant; the value tests in
+transpiler-tests.lisp compile and run in both modes and must agree.
+
 loop (and labelled blocks) can create value with break (not necessary in match)
 
 continue jumps to the next loop iteration

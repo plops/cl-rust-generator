@@ -83,14 +83,8 @@ generator's own test harness would still accept but which reads badly."
      :tags (:literal))
 
     (:name "raw-string-literal"
-     :description "(string# x) and its alias (string-r x) emit a raw string
-literal.  Enough hashes are added so that the payload may contain quote-hash."
-     :lisp (string# "a\"b")
-     :rust "r#\"a\"b\"#"
-     :tags (:literal))
-
-    (:name "raw-string-alias"
-     :description "(string-r x) is the hyphenated alias of string#."
+     :description "(string-r x) emits a raw string literal.  Enough hashes
+are added so that the payload may contain quote-hash."
      :lisp (string-r "a\"b")
      :rust "r#\"a\"b\"#"
      :tags (:literal))
@@ -356,9 +350,76 @@ bare."
      :omit-parens t
      :tags (:operator :precedence))
 
+    (:name "omit-logior-chain"
+     :description "Left-nested bitwise | stays flat."
+     :lisp (logior (logior a b) c)
+     :rust "a | b | c"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-logxor-right"
+     :description "logxor is associative for integers, so a right-nested
+chain stays flat like + and * do."
+     :lisp (logxor a (logxor b c))
+     :rust "a ^ b ^ c"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-logxor-mixed"
+     :description "& binds tighter than ^, so no parentheses are needed."
+     :lisp (logxor (logand a b) c)
+     :rust "a & b ^ c"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-shl-left"
+     :description "Left-nested shifts stay flat (left associative)."
+     :lisp (<< (<< a 1) 2)
+     :rust "a << 1 << 2"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-shr-left"
+     :description "Same for >>."
+     :lisp (>> (>> a 1) 2)
+     :rust "a >> 1 >> 2"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-or-right"
+     :description "|| is associative, so a right-nested chain stays flat."
+     :lisp (or a (or b c))
+     :rust "a || b || c"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-and-or-nested"
+     :description "|| binds looser than &&, so it keeps its parentheses
+as an && operand."
+     :lisp (and (or a b) c)
+     :rust "(a || b) && c"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-add-shift"
+     :description "<< binds looser than +, so the shift keeps its
+parentheses as a + operand."
+     :lisp (+ (<< a 1) b)
+     :rust "(a << 1) + b"
+     :omit-parens t
+     :tags (:operator :precedence))
+
+    (:name "omit-add-right"
+     :description "+ is associative, so a right-nested sum stays flat
+(up to floating point rounding)."
+     :lisp (+ 1 (+ 2 3))
+     :rust "1 + 2 + 3"
+     :omit-parens t
+     :tags (:operator :precedence))
+
     ;; ---------------- bit operations ----------------
     (:name "bitwise-and"
-     :description "(logand a b) and (& a b) both emit Rust's bitwise &."
+     :description "(logand a b) emits Rust's bitwise &."
      :lisp (logand a b)
      :rust "((a) & (b))"
      :tags (:operator :bitwise))
@@ -370,7 +431,7 @@ bare."
      :tags (:operator :bitwise))
 
     (:name "bitwise-xor"
-     :description "(logxor a b) and (^ a b) emit Rust's bitwise ^."
+     :description "(logxor a b) emits Rust's bitwise ^."
      :lisp (logxor a b)
      :rust "((a) ^ (b))"
      :tags (:operator :bitwise))
@@ -494,6 +555,30 @@ b=2;"
      :rust "i %= 2"
      :tags (:assignment))
 
+    (:name "shl-assign"
+     :description "(<<= place value) is shift-left-assignment."
+     :lisp (<<= x 2)
+     :rust "x<<=(2)"
+     :tags (:assignment))
+
+    (:name "shr-assign"
+     :description "(>>= place value) is shift-right-assignment."
+     :lisp (>>= x 2)
+     :rust "x>>=(2)"
+     :tags (:assignment))
+
+    (:name "bitand-assign"
+     :description "(&= place value) is bitwise-and-assignment."
+     :lisp (&= x mask)
+     :rust "x&=(mask)"
+     :tags (:assignment))
+
+    (:name "bitor-assign"
+     :description "(\|= place value) is bitwise-or-assignment."
+     :lisp (\|= x mask)
+     :rust "x|=(mask)"
+     :tags (:assignment))
+
     ;; ---------------- references / casts ----------------
     (:name "reference"
      :description "(ref x) takes a shared reference."
@@ -521,16 +606,8 @@ parentheses have to enclose the deref, not its operand."
      :tags (:reference :precedence))
 
     (:name "coerce"
-     :description "(coerce value type) emits Rust's `as' cast.  (cast value
-type) is a deprecated alias."
+     :description "(coerce value type) emits Rust's `as' cast."
      :lisp (coerce x u8)
-     :rust "(x as u8)"
-     :tags (:reference))
-
-    (:name "cast-alias"
-     :description "(cast value type) is the deprecated alias of coerce.
-Note the argument order: value first, unlike the old C-style cast."
-     :lisp (cast x u8)
      :rust "(x as u8)"
      :tags (:reference))
 
@@ -558,6 +635,13 @@ used for tuples."
      :description "(bracket a b) and (list a b) emit a Rust array literal."
      :lisp (list 1 2)
      :rust "[1, 2]"
+     :tags (:collection))
+
+    (:name "array-repeat"
+     :description "(array-repeat value count) emits the repeat array
+literal [value; count]."
+     :lisp (array-repeat 0 50)
+     :rust "[0; 50]"
      :tags (:collection))
 
     (:name "curly"
@@ -598,13 +682,6 @@ Index impl takes a tuple-like argument)."
      :rust "arr[i,j]"
      :tags (:indexing))
 
-    (:name "slice"
-     :description "(slice a b) emits a Rust range.  Deprecated alias of
-(range a b); the old examples still use it."
-     :lisp (slice 0 4)
-     :rust "(0..4)"
-     :tags (:indexing))
-
     (:name "range"
      :description "(range a b) emits the end-exclusive Rust range a..b."
      :lisp (range 0 n)
@@ -643,7 +720,7 @@ Index impl takes a tuple-like argument)."
 
     (:name "range-in-for"
      :description "A range used as a for collection loses its redundant
-parentheses like slice does."
+parentheses."
      :lisp (for (x (range 0 n)) (f x))
      :rust "for x in 0..n { f(x) }"
      :tags (:indexing))
@@ -652,6 +729,12 @@ parentheses like slice does."
      :description "(dot a b c) chains field accesses and method calls."
      :lisp (dot v (iter) (map f) (collect))
      :rust "v.iter().map(f).collect()"
+     :tags (:accessor))
+
+    (:name "dot-tuple-field"
+     :description "A numeric field access is Rust's tuple field access."
+     :lisp (dot pair 0)
+     :rust "pair.0"
      :tags (:accessor))
 
     ;; ---------------- control flow ----------------
@@ -702,6 +785,21 @@ while let loop."
      :lisp (while-let ((Some x) (dot it (next))) (f x))
      :rust "while let Some(x) = it.next() { f(x) }"
      :tags (:control-flow))
+
+    (:name "let-else"
+     :description "(let-else (pattern scrutinee) form*) emits Rust's
+let-else.  The form terminates itself with a semicolon (Rust requires
+it), so it is safe in any statement position."
+     :lisp (let-else ((Some x) y) (return 1))
+     :rust "let Some(x) = y else { return 1 };"
+     :tags (:binding))
+
+    (:name "let-else-in-do0"
+     :description "let-else in statement position needs no help: the
+following statement still gets its own semicolon and nothing is doubled."
+     :lisp (do0 (let-else ((Some x) y) (return 1)) (g))
+     :rust "let Some(x) = y else { return 1 }; g();"
+     :tags (:binding))
 
     (:name "while"
      :description "(while c form*) emits a while loop."
@@ -859,6 +957,30 @@ in statement position, where the semicolon heuristic cannot know whether
 the expansion is a statement or an expression."
      :lisp (do0 (stmt (space foo bar)) (g))
      :rust "foo bar; g();"
+     :tags (:block))
+
+    (:name "expr"
+     :description "(expr form) is the counterpart of stmt: it forces
+expression position, i.e. no semicolon is added.  Use it for the tail
+of a progn, where a missing semicolon means Rust returns the value."
+     :lisp (do0 (expr (space foo bar)) (g))
+     :rust "foo bar g();"
+     :tags (:block))
+
+    (:name "progn-assign-no-semi"
+     :description "An assignment in tail position keeps implicit-return
+semantics: no semicolon is added, so the block evaluates to the
+assigned value.  This is the semicolon rule the whole generator is
+built around: a missing semicolon means `return this value'."
+     :lisp (progn (= x 5))
+     :rust "{ x=5 }"
+     :tags (:block))
+
+    (:name "block-assign-semi"
+     :description "block is the opposite of progn: the last form is
+terminated too, so the block evaluates to ()."
+     :lisp (block (= x 5))
+     :rust "{ x=5; }"
      :tags (:block))
 
     ;; ---------------- bindings ----------------
@@ -1176,7 +1298,15 @@ as a string, e.g. \"Shape: Debug\"."
                                (!= 2 3))
                             1 0)                          1)
     ("neg-of-neg"       (- (- 5))                          5)
-    ("coerce-shift"     (coerce (<< 1 4) i64)              16)))
+    ("coerce-shift"     (coerce (<< 1 4) i64)              16)
+    ("shl-left-nested"  (<< (<< 1 2) 3)                   32)
+    ("shr-left-nested"  (>> (>> 64 1) 2)                  8)
+    ("xor-chain"        (logxor (logxor 7 3) 1)            5)
+    ("xor-right-nested" (logxor 7 (logxor 3 1))            5)
+    ("bitor-basic"      (logior 5 3)                       7)
+    ("or-right-nested"  (if (or (== 1 0) (or (== 2 2) (== 3 4))) 1 0) 1)
+    ("add-right-nested" (+ 1 (+ 2 3))                     6)
+    ("coerce-bitand"    (coerce (logand 6 3) i64)          2)))
 
 ;;; ===================================================================
 ;;; helpers

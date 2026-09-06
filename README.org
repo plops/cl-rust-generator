@@ -75,17 +75,17 @@ A short map of what exists:
 
 | Group | Forms |
 |-------|-------|
-| literals | `string`, `string#`/`string-r` (raw), `string-b` (byte string), `char`, `byte`, `hex`, integers, `f32`/`f64` |
+| literals | `string`, `string-r` (raw), `string-b` (byte string), `char`, `byte`, `hex`, integers, `f32`/`f64` |
 | arithmetic | `+ - * / %` |
-| bit operations | `logand`/`&`, `logior`, `logxor`/`^`, `<<`, `>>` |
+| bit operations | `logand`, `logior`, `logxor`, `<<`, `>>` |
 | comparison | `== != < > <= >=`, `and`, `or`, `not` |
-| assignment | `=`, `setf`, `incf`, `decf`, `/=` (divide-assign), `*=`, `^=` |
+| assignment | `=`, `setf`, `incf`, `decf`, `/=` (divide-assign), `*=`, `^=`, `%=`, `<<=`, `>>=`, `&=`, `\|=` |
 | references | `ref`, `ref-mut`, `deref`, `coerce` (`as`), `?` |
-| collections | `paren`/`values` (tuple), `bracket`/`list`, `vec!`, `curly`, `comma`, `semicolon`, `space` |
-| indexing | `aref`, `slice` (deprecated alias), `range`, `range-inclusive`, `range-from`, `range-to`, `range-to-inclusive`, `range-full`, `dot` |
+| collections | `paren`/`values` (tuple), `bracket`/`list`, `array-repeat`, `vec!`, `curly`, `comma`, `semicolon`, `space` |
+| indexing | `aref`, `range`, `range-inclusive`, `range-from`, `range-to`, `range-to-inclusive`, `range-full`, `dot` |
 | control flow | `if`, `when`, `unless`, `if-let`, `while-let`, `while`, `loop`, `break`, `continue`, `for`, `dotimes`, `case` (`match`), `return` |
-| blocks | `do0`, `progn`, `block`, `do`, `stmt`, `unsafe`, `extern` |
-| bindings | `let`, `let*`, `declare` (`type`, `values`, `mutable`, `immutable`) |
+| blocks | `do0`, `progn`, `block`, `do`, `stmt`, `expr`, `unsafe`, `extern` |
+| bindings | `let`, `let*`, `let-else`, `declare` (`type`, `values`, `mutable`, `immutable`) |
 | functions | `defun`, `defun-async`, `await`, `lambda`, plain function call |
 | items | `defstruct0`, `defenum`, `deftrait`, `make-instance`, `impl`, `deftype`, `use`, `mod`, `macroexpand`, `struct`, `attr` |
 
@@ -178,7 +178,10 @@ return); `block` keeps it, so the block evaluates to `()`.
 
 When the heuristic cannot know — typically a `(space ...)` escape-hatch
 form in statement position — say so explicitly with `(stmt form)`, which
-appends exactly one `;`.
+appends exactly one `;`, or with `(expr form)`, which adds none (for the
+tail of a `progn`, where a missing semicolon means Rust returns the
+value). `(let-else ...)` always terminates itself, because Rust requires
+the semicolon there in every position.
 
 ## Examples
 
@@ -274,11 +277,14 @@ cd examples/01_gcd && sbcl --load gen00.lisp --quit
 Rust concepts the generator has no form for; use strings for these:
 
 * traits with default bodies or generics (see `deftrait` for plain method
-  signatures), enums (`enum`), lifetimes, `where` clauses
+  signatures), struct variants in enums (see `defenum` for unit variants),
+  lifetimes, `where` clauses
 * match guards
-* `pub`, `const`, `static`, attributes — write them as strings, or use
-  `(space pub ...)`
-* `async` / `await`
+* `pub`, `const`, `static` — write them as strings, or use
+  `(space pub ...)` (attributes use the `attr` form)
+
+Removed forms fail loudly with the replacement named; see `MIGRATION.md`
+for the list (`slice`, `cast`, `string#`, `&`, `^`).
 
 Forms inherited from the C/C++ generator this file grew out of
 (`handler-case`, `throw`, `include`, `defclass`, `protected`, `public`, `->`,

@@ -39,7 +39,7 @@
 		 (mutable n m)
 		 (values Option<usize>))
 	(let* ((z (make-instance Complex :re .0 :im .0)))
-	  (for (i (slice 0 limit))
+	  (for (i (range 0 limit))
 	       (if (< 4.0 (z.norm_sqr))
 		   (return (Some i))
 		   (setf z (+ (* z z) c)))))

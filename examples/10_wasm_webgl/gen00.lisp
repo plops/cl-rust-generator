@@ -207,7 +207,7 @@ dwarf-debug-info = true
 					("dyn_into::<WebGlRenderingContext>"))))
 			 (vert_shader (? (compile_shader &context
 						       WebGlRenderingContext--VERTEX_SHADER
-						       (string# "attribute vec4 position;
+						       (string-r "attribute vec4 position;
 void main(){
   gl_Position = position;
 }
@@ -215,7 +215,7 @@ void main(){
 			 (frag_shader (? (compile_shader &context
 						       WebGlRenderingContext--FRAGMENT_SHADER
 						       (include_str! (string "trace.frag"))
-						       #+nil (string# "void main(){
+						       #+nil (string-r "void main(){
   gl_FragColor = vec4(1.0,1.0,1.0,1.0);
 }
 "))))

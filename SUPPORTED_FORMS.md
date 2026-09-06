@@ -36,6 +36,18 @@ left really does produce the Rust on the right.
 v.iter().map(f).collect()
 ```
 
+### `(dot pair 0)`
+
+A numeric field access is Rust's tuple field access.
+
+```lisp
+(dot pair 0)
+```
+
+```rust
+pair.0
+```
+
 ## assignment Forms
 
 ### `(= x 5)`
@@ -137,7 +149,87 @@ i*=(2)
 i %= 2
 ```
 
+### `(<<= x 2)`
+
+(<<= place value) is shift-left-assignment.
+
+```lisp
+(<<= x 2)
+```
+
+```rust
+x<<=(2)
+```
+
+### `(>>= x 2)`
+
+(>>= place value) is shift-right-assignment.
+
+```lisp
+(>>= x 2)
+```
+
+```rust
+x>>=(2)
+```
+
+### `(&= x mask)`
+
+(&= place value) is bitwise-and-assignment.
+
+```lisp
+(&= x mask)
+```
+
+```rust
+x&=(mask)
+```
+
+### `(|\|=| x mask)`
+
+(|= place value) is bitwise-or-assignment.
+
+```lisp
+(|\|=| x mask)
+```
+
+```rust
+x|=(mask)
+```
+
 ## binding Forms
+
+### `(let-else ((Some x) y) (return 1))`
+
+(let-else (pattern scrutinee) form*) emits Rust's
+let-else.  The form terminates itself with a semicolon (Rust requires
+it), so it is safe in any statement position.
+
+```lisp
+(let-else ((Some x) y) (return 1))
+```
+
+```rust
+let Some(x) = y else {
+    return 1
+};
+```
+
+### `(do0 (let-else ((Some x) y) (return 1)) (g))`
+
+let-else in statement position needs no help: the
+following statement still gets its own semicolon and nothing is doubled.
+
+```lisp
+(do0 (let-else ((Some x) y) (return 1)) (g))
+```
+
+```rust
+let Some(x) = y else {
+    return 1
+};
+g();
+```
 
 ### `(let ((x 5))
        (f x))`
@@ -387,6 +479,53 @@ foo bar;
 g();
 ```
 
+### `(do0 (expr (space foo bar)) (g))`
+
+(expr form) is the counterpart of stmt: it forces
+expression position, i.e. no semicolon is added.  Use it for the tail
+of a progn, where a missing semicolon means Rust returns the value.
+
+```lisp
+(do0 (expr (space foo bar)) (g))
+```
+
+```rust
+foo bar
+g();
+```
+
+### `(progn (= x 5))`
+
+An assignment in tail position keeps implicit-return
+semantics: no semicolon is added, so the block evaluates to the
+assigned value.  This is the semicolon rule the whole generator is
+built around: a missing semicolon means `return this value'.
+
+```lisp
+(progn (= x 5))
+```
+
+```rust
+{
+    x=5
+}
+```
+
+### `(block (= x 5))`
+
+block is the opposite of progn: the last form is
+terminated too, so the block evaluates to ().
+
+```lisp
+(block (= x 5))
+```
+
+```rust
+{
+    x=5;
+}
+```
+
 ## collection Forms
 
 ### `(paren a b)`
@@ -424,6 +563,19 @@ used for tuples.
 
 ```rust
 [1, 2]
+```
+
+### `(array-repeat 0 50)`
+
+(array-repeat value count) emits the repeat array
+literal [value; count].
+
+```lisp
+(array-repeat 0 50)
+```
+
+```rust
+[0; 50]
 ```
 
 ### `(curly Read Write)`
@@ -1121,19 +1273,6 @@ Index impl takes a tuple-like argument).
 arr[i,j]
 ```
 
-### `(slice 0 4)`
-
-(slice a b) emits a Rust range.  Deprecated alias of
-(range a b); the old examples still use it.
-
-```lisp
-(slice 0 4)
-```
-
-```rust
-(0..4)
-```
-
 ### `(range 0 n)`
 
 (range a b) emits the end-exclusive Rust range a..b.
@@ -1209,7 +1348,7 @@ arr[i,j]
 ### `(for (x (range 0 n)) (f x))`
 
 A range used as a for collection loses its redundant
-parentheses like slice does.
+parentheses.
 
 ```lisp
 (for (x (range 0 n)) (f x))
@@ -1513,22 +1652,10 @@ Large doubles use exponent notation.
 "hello"
 ```
 
-### `(|STRING#| "a\"b")`
-
-(string# x) and its alias (string-r x) emit a raw string
-literal.  Enough hashes are added so that the payload may contain quote-hash.
-
-```lisp
-(|STRING#| "a\"b")
-```
-
-```rust
-r#"a"b"#
-```
-
 ### `(string-r "a\"b")`
 
-(string-r x) is the hyphenated alias of string#.
+(string-r x) emits a raw string literal.  Enough hashes
+are added so that the payload may contain quote-hash.
 
 ```lisp
 (string-r "a\"b")
@@ -1940,9 +2067,121 @@ A call needs no parentheses under ?.
 f.read_to_string(&mut s)?
 ```
 
+### `(logior (logior a b) c)`
+
+Left-nested bitwise | stays flat.
+
+```lisp
+(logior (logior a b) c)
+```
+
+```rust
+a | b | c
+```
+
+### `(logxor a (logxor b c))`
+
+logxor is associative for integers, so a right-nested
+chain stays flat like + and * do.
+
+```lisp
+(logxor a (logxor b c))
+```
+
+```rust
+a ^ b ^ c
+```
+
+### `(logxor (logand a b) c)`
+
+& binds tighter than ^, so no parentheses are needed.
+
+```lisp
+(logxor (logand a b) c)
+```
+
+```rust
+a & b ^ c
+```
+
+### `(<< (<< a 1) 2)`
+
+Left-nested shifts stay flat (left associative).
+
+```lisp
+(<< (<< a 1) 2)
+```
+
+```rust
+a << 1 << 2
+```
+
+### `(>> (>> a 1) 2)`
+
+Same for >>.
+
+```lisp
+(>> (>> a 1) 2)
+```
+
+```rust
+a >> 1 >> 2
+```
+
+### `(or a (or b c))`
+
+|| is associative, so a right-nested chain stays flat.
+
+```lisp
+(or a (or b c))
+```
+
+```rust
+a || b || c
+```
+
+### `(and (or a b) c)`
+
+|| binds looser than &&, so it keeps its parentheses
+as an && operand.
+
+```lisp
+(and (or a b) c)
+```
+
+```rust
+(a || b) && c
+```
+
+### `(+ (<< a 1) b)`
+
+<< binds looser than +, so the shift keeps its
+parentheses as a + operand.
+
+```lisp
+(+ (<< a 1) b)
+```
+
+```rust
+(a << 1) + b
+```
+
+### `(+ 1 (+ 2 3))`
+
++ is associative, so a right-nested sum stays flat
+(up to floating point rounding).
+
+```lisp
+(+ 1 (+ 2 3))
+```
+
+```rust
+1 + 2 + 3
+```
+
 ### `(logand a b)`
 
-(logand a b) and (& a b) both emit Rust's bitwise &.
+(logand a b) emits Rust's bitwise &.
 
 ```lisp
 (logand a b)
@@ -1966,7 +2205,7 @@ f.read_to_string(&mut s)?
 
 ### `(logxor a b)`
 
-(logxor a b) and (^ a b) emit Rust's bitwise ^.
+(logxor a b) emits Rust's bitwise ^.
 
 ```lisp
 (logxor a b)
@@ -2163,24 +2402,10 @@ parentheses have to enclose the deref, not its operand.
 
 ### `(coerce x u8)`
 
-(coerce value type) emits Rust's `as' cast.  (cast value
-type) is a deprecated alias.
+(coerce value type) emits Rust's `as' cast.
 
 ```lisp
 (coerce x u8)
-```
-
-```rust
-(x as u8)
-```
-
-### `(cast x u8)`
-
-(cast value type) is the deprecated alias of coerce.
-Note the argument order: value first, unlike the old C-style cast.
-
-```lisp
-(cast x u8)
 ```
 
 ```rust
