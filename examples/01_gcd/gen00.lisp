@@ -1,7 +1,5 @@
 (eval-when (:compile-toplevel :execute :load-toplevel)
-  (ql:quickload "cl-rust-generator")
-  ;(ql:quickload "cl-ppcre")
-  )
+  (ql:quickload "cl-rust-generator"))
 
 (in-package :cl-rust-generator)
 
@@ -29,7 +27,7 @@
 ;; cargo clean
 ;; cargo clippy
 ;; cargo clippy --fix --bin "rs01_gcd" -p rs01_gcd --tests
-(progn
+(let ((*omit-redundant-parens* t))
   (defparameter *source-dir* #P"examples/01_gcd/rs01_gcd/src/")
   (defparameter *code-file* (asdf:system-relative-pathname 'cl-rust-generator (merge-pathnames #P"main.rs"
 											       *source-dir*)))
