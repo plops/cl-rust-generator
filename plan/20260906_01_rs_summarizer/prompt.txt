@@ -1,0 +1,29 @@
+du befindest dich in einem docker container mit ubuntu 26 und solltest alle programme haben um die aufgabe zu loesen.
+falls programme fehlen, installiere sie im container.
+
+du arbeitest fuer wol pumba (wolpumba@gmail.com)
+
+schau dir /workspace/src/rs-summarizer an
+erzeuge in  /workspace/src/cl-rust-generator/plan/20260906_01_rs_summarizer/ einen implementation_plan.md und tasks.md um diesen rust quellcode in der lisp aehnlichen input sprache des cl-rust-generators auszudruecken.
+
+der rs-summarizer ist eine webseite um youtube video summaries mittels gemini und openai interface erstellen zu lassen.
+die inputs und outputs werden in einer sqlite database gespeichert und es gibt funktionen um in den eintraegen mittels embedding zu suchen. ich habe auch die visualisierung der embeddings vorbereitet.
+
+die api keys fuer die AI services befinden sich in /root/.env
+
+du kannst selbst entscheiden wieviel du davon umsetzt. mir genuegt ein minimum viable product, dass im transpiler ausgedrueckt wird. 
+deine hauptaufgabe ist herauszufinden bzw. zu demonstrieren, wie man lesbaren / wartbaren / erweiterbaren code mittels des lisp-to-rust transpilers erzeugen kann.
+
+du sollst z.b. lisp macros, literate programming, die entwicklung kleiner wiederverwendbare tools einsetzen, um den urspruenglichen rs-summarizer code besser wartbar, verstaendlich und erweiterbar zu machen. du musst den rs-summarizer code nicht genau gleich umsetzen. aber falls du die datenbank nutzt, dann solltest du kompatibel zu der datenbank in rs-summarizer bleiben. anstonsten steht dir frei anderer ansaetze oder libraries zu waehlen. mir waere es lieb, wenn die anzahl der externen dependencies reduziert werden koennte. natuerlich nur, wenn das programm dabei immernoch gut wartbar bleibt
+
+update dokumentation oder quellcode, wo du verbesserungen feststellst (du kannst auch rs.lisp verbessern, falls dir noch nuetzliche forms auffallen. versuche (falls moeglich) neue forms an die in common lisp existierenden anzulehnen).
+
+falls moeglich baue unit tests fuer den rust generator und ergaenze den  ueberblick ueber alle unterstuetzten forms
+wie du siehst ist deine aufgabe weit umfassend. falls noetig (und moeglich) erzeuge eine tasks.md datei um die aufgabe in mehrere schritte zu teilen um die context groesse konzentriert auf einem task zu halten.
+
+schreibe unit und integration tests um zu gewaehrleisten dass der code gut funktioniert. ich schlage vor gemini-3.5-flash-lite einzusetzen, denn da haben wir taeglich 500 requests die wir z.b. fuer tests nutzen koennen (verglichen mit 20 bei anderen modellen).
+
+nutze den rust compiler selbst, cargo clippy und cargo fmt (und was es sonst fuer tools im rust ecosystem gibt) um die validitaet von rust code zu ueberpruefen.
+
+speichere die resultate und unerwartete findings deiner untersuchung in diesem plan ordner als walkthrough.md ab
+commite die aenderungen
