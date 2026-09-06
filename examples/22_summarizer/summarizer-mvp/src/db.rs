@@ -79,7 +79,7 @@ pub async fn store_embedding(
     identifier: i64,
     bytes: Vec<u8>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE summaries SET embedding = ?, embedding_model = 'text-embedding-004' WHERE identifier = ?").bind(bytes).bind(identifier).execute(db).await?;
+    sqlx::query("UPDATE summaries SET embedding = ?, embedding_model = 'gemini-embedding-001' WHERE identifier = ?").bind(bytes).bind(identifier).execute(db).await?;
     Ok(())
 }
 pub async fn fetch_all_embeddings(db: &SqlitePool) -> Result<Vec<(i64, Vec<u8>)>, sqlx::Error> {
@@ -90,5 +90,67 @@ pub async fn fetch_all_embeddings(db: &SqlitePool) -> Result<Vec<(i64, Vec<u8>)>
         .fetch_all(db)
         .await?;
         Ok(rows)
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn lifecycle_success() -> Result<(), sqlx::Error> {
+        {
+            let pool = init_db("sqlite::memory:").await?;
+            let id = insert_submit(&pool, "m", "t").await?;
+            {
+                let queued = fetch_row(&pool, id).await?.expect("row present");
+                assert!(queued.generation_status == "queued");
+            }
+            {
+                let claimed = claim_running(&pool, id, "t0").await?;
+                assert!(claimed);
+                {
+                    let again = claim_running(&pool, id, "t1").await?;
+                    assert!(!again);
+                }
+            }
+            finish_success(&pool, id, "the summary".to_string(), 10, 20, "t2").await?;
+            {
+                let done = fetch_row(&pool, id).await?.expect("row present");
+                assert!(done.generation_status == "succeeded");
+                assert!(done.summary == "the summary");
+                assert!(done.summary_done);
+            }
+            Ok(())
+        }
+    }
+    #[tokio::test]
+    async fn lifecycle_failed() -> Result<(), sqlx::Error> {
+        {
+            let pool = init_db("sqlite::memory:").await?;
+            let id = insert_submit(&pool, "m", "t").await?;
+            claim_running(&pool, id, "t0").await?;
+            finish_failed(&pool, id, "boom".to_string(), "t1").await?;
+            {
+                let row = fetch_row(&pool, id).await?.expect("row present");
+                assert!(row.generation_status == "failed");
+                assert!(row.generation_error_message == "boom");
+            }
+            Ok(())
+        }
+    }
+    #[tokio::test]
+    async fn embedding_roundtrip() -> Result<(), sqlx::Error> {
+        {
+            let pool = init_db("sqlite::memory:").await?;
+            let id = insert_submit(&pool, "m", "t").await?;
+            let bytes = vec![0, 1, 2, 3];
+            store_embedding(&pool, id, bytes.clone()).await?;
+            {
+                let rows = fetch_all_embeddings(&pool).await?;
+                assert!(rows.len() == 1);
+                assert!(rows[0].0 == id);
+                assert!(rows[0].1 == bytes);
+            }
+            Ok(())
+        }
     }
 }

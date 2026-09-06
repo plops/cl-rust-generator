@@ -46,4 +46,30 @@
     'identifier)
   "sqlx::query_as::<_, SummaryRow>" ".bind(identifier)" ".fetch_optional(db).await")
 
+;;;; Phase 3 golden patterns: quote raw syntax (builders stay unquoted).
+
+(check "ok-true-fold"
+  '(if-let ((Ok true) (f)) (do0 (g)))
+  "if let Ok(true) = f")
+
+(check "drop-discard"
+  '(stmt (drop (await (do_work))))
+  "drop(do_work().await);")
+
+(check "unnest-let"
+  '(if-let ((Some c) x)
+     (let ((f (dot c (first))))
+       (if-let ((Some f) f) (g f))))
+  "let f = c.first();" "if let Some(f) = f")
+
+(check "cfg-test-module"
+  '(attr "cfg(test)"
+     (space "mod tests"
+       (block (use (super *)))))
+  "#[cfg(test)]" "mod tests" "use super::*;")
+
+(check "bracket-comma"
+  '(ref (bracket (comma 1.0 2.0)))
+  "&[1.0, 2.0]")
+
 (format t "toolkit OK~%")

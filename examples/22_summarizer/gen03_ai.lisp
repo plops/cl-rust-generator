@@ -145,7 +145,7 @@
        (type &str api_key text)
        (values "Result<Vec<f32>, String>"))
       (let
-       ((url (string "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent")) (request (make-instance ReqEmbed :content (make-instance ReqContent :parts (vec! (make-instance ReqPart :text (dot text (to_string))))))) (response ,(fallible `(dot client (post url) (query (ref (bracket (tuple (string "key") api_key)))) (json (ref request)) (send)))))
+       ((url (string "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent")) (request (make-instance ReqEmbed :content (make-instance ReqContent :parts (vec! (make-instance ReqPart :text (dot text (to_string))))))) (response ,(fallible `(dot client (post url) (query (ref (bracket (tuple (string "key") api_key)))) (json (ref request)) (send)))))
        (unless
         (dot response (status) (is_success))
         (return (Err (format! (string "gemini embed http error: {}") (dot response (status))))))
@@ -159,4 +159,34 @@
           ;; Arm tails: bare expressions, no (return ...).
           (Ok (dot values (clone)))
           (Err (dot (string "no values in embedding") (to_string))))
-         (Err (dot (string "no embedding in response") (to_string))))))))))
+         (Err (dot (string "no embedding in response") (to_string))))))))
+     (attr "cfg(test)"
+        (space "mod tests"
+          (block
+            (use (super *))
+            (attr "test"
+              (defun cosine_identical ()
+                (let ((result (cosine_similarity (ref (bracket (comma 1.0 2.0 3.0))) (ref (bracket (comma 1.0 2.0 3.0))))))
+                  (stmt (assert! (> result 0.99999))))))
+            (attr "test"
+              (defun cosine_orthogonal ()
+                (let ((result (cosine_similarity (ref (bracket (comma 1.0 0.0))) (ref (bracket (comma 0.0 1.0))))))
+                  (stmt (assert! (== result 0.0))))))
+            (attr "test"
+              (defun cosine_zero_vector ()
+                (let ((result (cosine_similarity (ref (bracket (comma 0.0 0.0))) (ref (bracket (comma 1.0 2.0))))))
+                  (stmt (assert! (== result 0.0))))))
+            (attr "test"
+              (defun cosine_empty ()
+                (let ((result (cosine_similarity (ref (bracket (comma))) (ref (bracket (comma 1.0))))))
+                  (stmt (assert! (== result 0.0))))))
+            (attr "test"
+              (defun cosine_unequal_lengths ()
+                (let ((result (cosine_similarity (ref (bracket (comma 1.0 0.0 0.0))) (ref (bracket (comma 1.0 0.0))))))
+                  (stmt (assert! (== result 1.0))))))
+            (attr "test"
+              (defun bytes_roundtrip ()
+                (let ((original (vec! 1.5 -2.25 0.0))
+                      (back (bytes_to_embedding (ref (embedding_to_bytes (ref (bracket (comma 1.5 -2.25 0.0))))))))
+                  (stmt (assert! (== back original)))))))))
+))

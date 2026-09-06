@@ -170,7 +170,7 @@ pub async fn embed_text(
     text: &str,
 ) -> Result<Vec<f32>, String> {
     {
-        let url = "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent";
+        let url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent";
         let request = ReqEmbed {
             content: ReqContent {
                 parts: vec![ReqPart {
@@ -199,6 +199,53 @@ pub async fn embed_text(
             } else {
                 Err("no embedding in response".to_string())
             }
+        }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn cosine_identical() {
+        {
+            let result = cosine_similarity(&[1.0, 2.0, 3.0], &[1.0, 2.0, 3.0]);
+            assert!(result > 0.999990);
+        }
+    }
+    #[test]
+    fn cosine_orthogonal() {
+        {
+            let result = cosine_similarity(&[1.0, 0.0], &[0.0, 1.0]);
+            assert!(result == 0.0);
+        }
+    }
+    #[test]
+    fn cosine_zero_vector() {
+        {
+            let result = cosine_similarity(&[0.0, 0.0], &[1.0, 2.0]);
+            assert!(result == 0.0);
+        }
+    }
+    #[test]
+    fn cosine_empty() {
+        {
+            let result = cosine_similarity(&[], &[1.0]);
+            assert!(result == 0.0);
+        }
+    }
+    #[test]
+    fn cosine_unequal_lengths() {
+        {
+            let result = cosine_similarity(&[1.0, 0.0, 0.0], &[1.0, 0.0]);
+            assert!(result == 1.0);
+        }
+    }
+    #[test]
+    fn bytes_roundtrip() {
+        {
+            let original = vec![1.50, (-2.250), 0.0];
+            let back = bytes_to_embedding(&embedding_to_bytes(&[1.50, (-2.250), 0.0]));
+            assert!(back == original);
         }
     }
 }
