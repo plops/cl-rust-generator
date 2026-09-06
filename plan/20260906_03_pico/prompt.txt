@@ -34,5 +34,9 @@ wie du siehst ist deine aufgabe weit umfassend. falls noetig (und moeglich) erze
 
 nutze den rust compiler selbst (bzw cargo), cargo clippy und cargo fmt (und was es sonst fuer tools im rust ecosystem gibt) um die validitaet von rust code zu ueberpruefen.
 
+splitte und nummeriere die lisp input dateien, gib ihnen verstaendliche namen. dies kann dabei helfen, dass du dich bei den klammern nicht verzaehlst. sei mit den klammern sehr vorsichtig. ein fehler zu korrigieren ist oft sehr aufwaendig
+
+bei sehr redundanten code nutze splices ,@(loop...) oder common lisp funktionen um den redundanten code im transpiler automatisch zu erzeugen (eine art macros, auch wenn es keine common lisp macros sind).
+
 speichere die resultate und unerwartete findings deiner untersuchung in diesem plan ordner als walkthrough.md ab
 (z.b. auch welche fehlenden programme wie installiert werden mussten) commite die aenderungen

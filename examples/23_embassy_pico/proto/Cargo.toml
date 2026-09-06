@@ -1,0 +1,14 @@
+[package]
+name = "pico-link-proto"
+version = "0.1.0"
+edition = "2021"
+description = "Framed UART protocol shared by the Pico 2 firmware and the Linux host (generated from gen00_proto.lisp, do not edit lib.rs by hand)"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "pico_link_proto"
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = "s"
+lto = true
