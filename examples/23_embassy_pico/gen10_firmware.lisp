@@ -8,7 +8,8 @@
 ;; via duty) / PIO0 cap sensing on PIN_22 + Flex on 20,21,23 / HSTX lane 0
 ;; via PAC + DMA ring. Host sends param commands, firmware streams status.
 
-(let ((*omit-redundant-parens* t))
+(let ((*omit-redundant-parens* t)
+      (*rustfmt-arguments* (list "--edition" "2024")))
   (defparameter *source-dir* #P"examples/23_embassy_pico/fw_pico2/src/")
   (defparameter *code-file* (asdf:system-relative-pathname 'cl-rust-generator (merge-pathnames #P"main.rs"
 											       *source-dir*)))
@@ -19,12 +20,12 @@
      "#![no_std]"
      "#![no_main]"
      "use defmt_rtt as _;"
-     "use embassy_rp::adc::{Adc, Channel as AdcChannel, Config as AdcConfig};"
+     "use embassy_rp::adc::{Adc, Config as AdcConfig};"
      "use embassy_rp::gpio::{Flex, Level, Output, Pull};"
      "use embassy_rp::pio::{Config as PioConfig, Pio};"
      "use embassy_rp::pwm::{Config as PwmConfig, Pwm};"
-     "use embassy_rp::uart::{Config as UartConfig, Uart};"
-     "use embassy_rp::{bind_interrupts, pac};"
+     "use embassy_rp::uart::{BufferedUart, Config as UartConfig};"
+     "use embassy_rp::pac;"
      "use embassy_time::{Duration, Instant, Ticker, Timer};"
      "use embedded_io_async::{Read, Write};"
      "use panic_probe as _;"
@@ -50,22 +51,6 @@
      "static UART_TX_BUF: static_cell::StaticCell<[u8; 256]> = static_cell::StaticCell::new();"
      "static UART_RX_BUF: static_cell::StaticCell<[u8; 256]> = static_cell::StaticCell::new();"
      "const SIN_Q16: [u16; 64] = [32768,35979,39160,42279,45307,48214,50972,53555,55938,58097,60013,61666,63041,64124,64905,65377,65535,65377,64905,64124,63041,61666,60013,58097,55938,53555,50972,48214,45307,42279,39160,35979,32768,29556,26375,23256,20228,17321,14563,11980,9597,7438,5522,3869,2494,1411,630,158,0,158,630,1411,2494,3869,5522,7438,9597,11980,14563,17321,20228,23256,26375,29556];"
-     "const CAP_PROG: pio::Program<12> = pio_asm!("
-     "    \"set pindirs, 1\","
-     "    \"set pins, 1 [31]\","
-     "    \"set pindirs, 0\","
-     "    \"mov x, ~null\","
-     "    \"again:\","
-     "    \"jmp x--, dec\","
-     "    \"mov isr, null\","
-     "    \"push\","
-     "    \"jmp again\","
-     "    \"dec:\","
-     "    \"jmp pin, again\","
-     "    \"mov isr, x\","
-     "    \"push\","
-     "    \"jmp again\","
-     ");"
 
      (defun temp_raw_to_c10 (raw)
        (declare (type u16 raw)
@@ -77,6 +62,7 @@
      (defun pwm_carrier ()
        (declare (values PwmConfig))
        (let ((c (PwmConfig--default)))
+	 (declare (mutable c))
 	 (setf (dot c top) 6250)
 	 c))
 
@@ -97,10 +83,10 @@
      "#[embassy_executor::task]"
      (defun-async adc_task (adc pin0 pin1 pin2 pin_ts)
        (declare (type "embassy_rp::adc::Adc<'static, embassy_rp::adc::Async>" adc)
-		(type "embassy_rp::peripherals::PIN_26" pin0)
-		(type "embassy_rp::peripherals::PIN_27" pin1)
-		(type "embassy_rp::peripherals::PIN_28" pin2)
-		(type "embassy_rp::peripherals::ADC_TEMP_SENSOR" pin_ts)
+		(type "embassy_rp::Peri<'static, embassy_rp::peripherals::PIN_26>" pin0)
+		(type "embassy_rp::Peri<'static, embassy_rp::peripherals::PIN_27>" pin1)
+		(type "embassy_rp::Peri<'static, embassy_rp::peripherals::PIN_28>" pin2)
+		(type "embassy_rp::Peri<'static, embassy_rp::peripherals::ADC_TEMP_SENSOR>" pin_ts)
 		(mutable adc))
        (let ((c0 (embassy_rp--adc--Channel--new_pin pin0 Pull--None))
 	     (c1 (embassy_rp--adc--Channel--new_pin pin1 Pull--None))
@@ -123,7 +109,7 @@
 		  (type usize idx0 idx1 idx2)
 		  (type u16 valid0 valid1 valid2)
 		  (type "[u16; 256]" cap0 cap1 cap2)
-		  (mutable c0 c1 c2 cts tick n temp_every idx0 idx1 idx2 valid0 valid1 valid2 cap0 cap1 cap2))
+		  (mutable c0 c1 c2 cts tick rate_hz n temp_every idx0 idx1 idx2 valid0 valid1 valid2 cap0 cap1 cap2))
 	 (loop
 	   (while-let ((Ok cmd) (dot ADC_CH (try_receive))
 		       )
@@ -220,12 +206,12 @@
 	 (coerce (dot (dot t0 (elapsed)) (as_micros)) u32)))
 
      "#[embassy_executor::task]"
-     (defun-async cap_task (rx p20 p21 p23)
-       (declare (type "embassy_rp::pio::StateMachineRx<'static, embassy_rp::peripherals::PIO0, 0>" rx)
-		(type "embassy_rp::peripherals::PIN_20" p20)
-		(type "embassy_rp::peripherals::PIN_21" p21)
-		(type "embassy_rp::peripherals::PIN_23" p23)
-		(mutable rx))
+     (defun-async cap_task (sm p20 p21 p23)
+       (declare (type "embassy_rp::pio::StateMachine<'static, embassy_rp::peripherals::PIO0, 0>" sm)
+		(type "embassy_rp::Peri<'static, embassy_rp::peripherals::PIN_20>" p20)
+		(type "embassy_rp::Peri<'static, embassy_rp::peripherals::PIN_21>" p21)
+		(type "embassy_rp::Peri<'static, embassy_rp::peripherals::PIN_23>" p23)
+		(mutable sm))
        (let ((flexes (list (Flex--new p20) (Flex--new p21) (Flex--new p23)))
 	     (sel 3))
 	 (declare (type "[embassy_rp::gpio::Flex<'static>; 3]" flexes)
@@ -241,11 +227,10 @@
 			(declare (mutable g))
 			(setf (deref g) v))))
 	       (do0 (let ((g (await (dot CAP_PIO_VAL (lock)))))
-		      (declare (mutable g))
 		      (let ((h (await (dot CAP_VAL (lock)))))
 			(declare (mutable h))
 			(setf (deref h) (deref g))))))
-	   (if-let ((Some v) (dot rx (try_pull)))
+	   (if-let ((Some v) (dot (dot sm (rx)) (try_pull)))
 	     (do0 (let ((g (await (dot CAP_PIO_VAL (lock)))))
 		    (declare (mutable g))
 		    (setf (deref g) v))))
@@ -302,7 +287,7 @@
 		(type u32 freq_hz)
 		(type u16 amp_tenth phase_deg))
        (let ((cyc (/ (* freq_hz 8192) 15625000)))
-	 (declare (type u32 cyc))
+	 (declare (type u32 cyc) (mutable cyc))
 	 (setf cyc (if (< cyc 1) 1 (if (< 64 cyc) 64 cyc)))
 	 (let ((poff (/ (* (coerce phase_deg u32) 64) 360)))
 	   (declare (type u32 poff))
@@ -319,14 +304,13 @@
 			 (saw (* (% pos 128) 512)))
 		     (declare (type u32 sph duty saw))
 		     (when (< saw duty)
-		       (|=| word bit)))
+		       (\|= word bit)))
 		   (<<= bit 1)))
 	       (setf (aref buf w) word))))))
 
      "#[embassy_executor::task]"
      (defun-async hstx_task (buf)
-       (declare (type "&'static mut [u32; 256]" buf)
-		(mutable buf))
+       (declare (type "&'static mut [u32; 256]" buf))
        (hstx_init)
        (let ((freq 30)
 	     (amp 800))
@@ -346,8 +330,7 @@
 
      (defun-async send_status (tx seq)
        (declare (type "&mut embassy_rp::uart::BufferedUartTx" tx)
-		(type u8 seq)
-		(mutable tx))
+		(type u8 seq))
        (let ((tg (await (dot TEMP_VAL (lock))))
 	     (cg (await (dot CAP_VAL (lock)))))
 	 (let ((msg (make-instance proto--StatusMsg :seq seq :temp_c10 (temp_raw_to_c10 (deref tg)) :cap (deref cg) :flags 0))
@@ -366,8 +349,7 @@
      (defun-async send_block (tx ch m)
        (declare (type "&mut embassy_rp::uart::BufferedUartTx" tx)
 		(type u8 ch)
-		(type u16 m)
-		(mutable tx))
+		(type u16 m))
        (let ((g (await (dot BLOCK_BUF (lock)))))
 	 (let ((off 0))
 	   (declare (type u16 off)
@@ -385,18 +367,17 @@
 		      (proto--put_u16_le "&mut pl" 2 k)
 		      (dotimes (j (coerce k usize))
 			(proto--put_u16_le "&mut pl" (+ 4 (* 2 j)) (aref g (coerce (+ (coerce off usize) j) usize))))
-		      (let ((len (+ 4 (* 2 (coerce k usize))))))
-		      (if-let ((Some n) (proto--encode_frame "&pl[..len]" "&mut frame"))
-			(do0 (let ((r (await (dot tx (write_all "&frame[..n]")))))
-			       (when (dot r (is_err))
-				 (return))))))
+		      (let ((len (+ 4 (* 2 (coerce k usize)))))
+			(if-let ((Some n) (proto--encode_frame "&pl[..len]" "&mut frame"))
+			  (do0 (let ((r (await (dot tx (write_all "&frame[..n]")))))
+				 (when (dot r (is_err))
+				   (return)))))))
 		    (setf off (+ off k)))))))
 
 
      "#[embassy_executor::task]"
      (defun-async uart_task (uart)
-       (declare (type "embassy_rp::uart::BufferedUart" uart)
-		(mutable uart))
+       (declare (type "embassy_rp::uart::BufferedUart" uart))
        (let ((dec (proto--Decoder--new))
 	     (one (array-repeat 0 1))
 	     (seq 0)
@@ -443,27 +424,33 @@
        (defun-async main (spawner)
 	 (declare (type "embassy_executor::Spawner" spawner))
 	 (let ((p (embassy_rp--init (Default--default)))
-	       (uart (Uart--new_blocking (dot p UART0) (dot p PIN_0) (dot p PIN_1) (UartConfig--default)))
 	       (txb (dot UART_TX_BUF (init (array-repeat 0 256))))
 	       (rxb (dot UART_RX_BUF (init (array-repeat 0 256))))
-	       (buart (dot uart (into_buffered Irqs txb rxb)))
-	       (adc (Adc--new (dot p ADC) Irqs (make-instance AdcConfig)))
+	       (buart (BufferedUart--new (dot p UART0) (dot p PIN_0) (dot p PIN_1) Irqs txb rxb (UartConfig--default)))
+	       (adc (Adc--new (dot p ADC) Irqs (AdcConfig--default)))
 	       (pwm0 (Pwm--new_output_a (dot p PWM_SLICE1) (dot p PIN_2) (pwm_carrier)))
 	       (pwm1 (Pwm--new_output_a (dot p PWM_SLICE2) (dot p PIN_4) (pwm_carrier)))
 	       (pwm2 (Pwm--new_output_a (dot p PWM_SLICE3) (dot p PIN_6) (pwm_carrier)))
 	       (pwm3 (Pwm--new_output_a (dot p PWM_SLICE4) (dot p PIN_8) (pwm_carrier)))
 	       (pio (Pio--new (dot p PIO0) Irqs))
 	       (cap_pin (dot (dot pio common) (make_pio_pin (dot p PIN_22))))
-	       (prog (dot (dot pio common) (load_program CAP_PROG)))
+	       (cap_prog "pio_asm!(\"set pindirs, 1\", \"set pins, 1 [31]\", \"set pindirs, 0\", \"mov x, ~null\", \"again:\", \"jmp x--, dec\", \"mov isr, null\", \"push\", \"jmp again\", \"dec:\", \"jmp pin, again\", \"mov isr, x\", \"push\", \"jmp again\")")
+       (prog (dot (dot pio common) (load_program "&cap_prog.program")))
 	       (cfg (PioConfig--default))
 	       (hbuf (dot HSTX_BUF_CELL (init (array-repeat 0 256))))
 	       (led (Output--new (dot p PIN_25) Level--Low)))
-	   (declare (mutable cfg led))
-	   (dot (spawner.spawn (adc_task adc (dot p PIN_26) (dot p PIN_27) (dot p PIN_28) (dot p ADC_TEMP_SENSOR))) (unwrap))
-	   (dot (spawner.spawn (pwm_task pwm0 pwm1 pwm2 pwm3)) (unwrap))
-	   (dot (spawner.spawn (cap_task (dot (dot pio sm0) rx) (dot p PIN_20) (dot p PIN_21) (dot p PIN_23))) (unwrap))
-	   (dot (spawner.spawn (hstx_task hbuf)) (unwrap))
-	   (dot (spawner.spawn (uart_task buart)) (unwrap))
+	   (declare (mutable pio cfg led))
+   (dot cfg (use_program "&prog" "&[]"))
+   (dot cfg (set_jmp_pin "&cap_pin"))
+   (dot cfg (set_set_pins "&[&cap_pin]"))
+   (dot cfg (set_in_pins "&[&cap_pin]"))
+   (dot (dot pio sm0) (set_config "&cfg"))
+   (dot (dot pio sm0) (set_enable true))
+	   (dot spawner (spawn (dot (adc_task adc (dot p PIN_26) (dot p PIN_27) (dot p PIN_28) (dot p ADC_TEMP_SENSOR)) (unwrap))))
+	   (dot spawner (spawn (dot (pwm_task pwm0 pwm1 pwm2 pwm3) (unwrap))))
+	   (dot spawner (spawn (dot (cap_task (dot pio sm0) (dot p PIN_20) (dot p PIN_21) (dot p PIN_23)) (unwrap))))
+	   (dot spawner (spawn (dot (hstx_task hbuf) (unwrap))))
+	   (dot spawner (spawn (dot (uart_task buart) (unwrap))))
 	   (await (dot PWM_CH (send (make-instance proto--PwmCmd :ch 0 :freq_hz 5 :amp_tenth_pct 800 :phase_deg 0))))
 	   (await (dot PWM_CH (send (make-instance proto--PwmCmd :ch 1 :freq_hz 5 :amp_tenth_pct 800 :phase_deg 90))))
 	   (await (dot PWM_CH (send (make-instance proto--PwmCmd :ch 2 :freq_hz 5 :amp_tenth_pct 800 :phase_deg 180))))

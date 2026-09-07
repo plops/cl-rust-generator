@@ -1,0 +1,31 @@
+[package]
+name = "pico2-fw"
+version = "0.1.0"
+edition = "2024"
+description = "Pico 2 Embassy firmware: ADC+PIO-cap+PWM+HSTX, UART proto link (generated from gen10_firmware.lisp, do not edit by hand)"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "pico2-fw"
+path = "src/main.rs"
+
+[dependencies]
+embassy-rp = { version = "0.10.0", features = ["rp235xa", "critical-section-impl", "time-driver", "defmt", "unstable-pac"] }
+embassy-executor = { version = "0.10.0", features = ["platform-cortex-m", "executor-thread", "defmt"] }
+embassy-time = { version = "0.5.1", features = ["defmt"] }
+embassy-sync = { version = "0.8.0", features = ["defmt"] }
+embassy-futures = "0.1.2"
+defmt = "1.0.1"
+defmt-rtt = "1.0.0"
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+cortex-m = { version = "0.7.6", features = ["inline-asm"] }
+cortex-m-rt = "0.7.0"
+static_cell = "2.1"
+pio = "0.3"
+embedded-io-async = { version = "0.7.0", features = ["defmt"] }
+pico-link-proto = { path = "../proto" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+debug = true

@@ -1,0 +1,16 @@
+[package]
+name = "pico-host-ctl"
+version = "0.1.0"
+edition = "2024"
+description = "Linux TUI control program for the Pico 2 firmware (generated from gen20_host.lisp, do not edit by hand)"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "pico-host-ctl"
+path = "src/main.rs"
+
+[dependencies]
+pico-link-proto = { path = "../proto" }
+ratatui = "0.30"
+crossterm = "0.29"
+serialport = "4.10"

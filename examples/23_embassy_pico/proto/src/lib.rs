@@ -58,7 +58,7 @@ pub fn encode_frame(payload: &[u8], out: &mut [u8]) -> Option<usize> {
                 out[n + 2] = (crc & 0xff) as u8;
                 out[n + 3] = (crc >> 8) as u8;
             }
-            return Some(total);
+            Some(total)
         }
     }
 }
@@ -150,7 +150,7 @@ impl Decoder {
                 }
                 self.frame_len = n;
                 self.pos = 0;
-                return Some(n);
+                Some(n)
             }
         }
     }
@@ -172,12 +172,12 @@ pub fn decode_pwm_cmd(p: &[u8]) -> Option<PwmCmd> {
     if p.len() != 10 || p[0] != TAG_SET_PWM {
         return None;
     }
-    return Some(PwmCmd {
+    Some(PwmCmd {
         ch: p[1],
         freq_hz: get_u32_le(p, 2),
         amp_tenth_pct: get_u16_le(p, 6),
         phase_deg: get_u16_le(p, 8),
-    });
+    })
 }
 pub struct HstxCmd {
     pub freq_hz: u32,
@@ -194,11 +194,11 @@ pub fn decode_hstx_cmd(p: &[u8]) -> Option<HstxCmd> {
     if p.len() != 9 || p[0] != TAG_SET_HSTX {
         return None;
     }
-    return Some(HstxCmd {
+    Some(HstxCmd {
         freq_hz: get_u32_le(p, 1),
         amp_tenth_pct: get_u16_le(p, 5),
         phase_deg: get_u16_le(p, 7),
-    });
+    })
 }
 pub struct AdcCmd {
     pub rate_hz: u32,
@@ -213,10 +213,10 @@ pub fn decode_adc_cmd(p: &[u8]) -> Option<AdcCmd> {
     if p.len() != 7 || p[0] != TAG_SET_ADC {
         return None;
     }
-    return Some(AdcCmd {
+    Some(AdcCmd {
         rate_hz: get_u32_le(p, 1),
         phase_deg: get_u16_le(p, 5),
-    });
+    })
 }
 pub struct StatusMsg {
     pub seq: u8,
@@ -235,15 +235,15 @@ pub fn decode_status(p: &[u8]) -> Option<StatusMsg> {
     if p.len() != 9 || p[0] != TAG_STATUS {
         return None;
     }
-    return Some(StatusMsg {
+    Some(StatusMsg {
         seq: p[1],
         temp_c10: get_u16_le(p, 2) as i16,
         cap: get_u32_le(p, 4),
         flags: p[8],
-    });
+    })
 }
 pub fn block_sample(p: &[u8], i: usize) -> u16 {
-    get_u16_le(p, 3 + i * 2)
+    get_u16_le(p, 4 + i * 2)
 }
 #[cfg(test)]
 mod tests {
@@ -311,16 +311,10 @@ mod tests {
         {
             let empty: [u8; 0] = [0; 0];
             let mut out: [u8; 80] = [0; 80];
-            match encode_frame(&empty, &mut out) {
-                Some(_) => return,
-                None => {}
-            }
+            assert!(encode_frame(&empty, &mut out).is_none());
             {
                 let big: [u8; 65] = [7; 65];
-                match encode_frame(&big, &mut out) {
-                    Some(_) => return,
-                    None => {}
-                }
+                assert!(encode_frame(&big, &mut out).is_none())
             }
         }
     }
@@ -342,6 +336,14 @@ mod tests {
             assert_eq!(440, back.freq_hz);
             assert_eq!(800, back.amp_tenth_pct);
             assert_eq!(90, back.phase_deg)
+        }
+    }
+    #[test]
+    fn adc_block_sample_offset() {
+        {
+            let p: [u8; 8] = [17, 1, 2, 0, 0x34, 0x12, 0x78, 0x56];
+            assert_eq!(0x1234, block_sample(&p, 0));
+            assert_eq!(0x5678, block_sample(&p, 1))
         }
     }
     #[test]

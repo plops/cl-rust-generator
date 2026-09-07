@@ -11,7 +11,8 @@
 ;; First payload byte is the message tag (host->fw 0x01..0x05, fw->host 0x10..0x12).
 ;; no_std compatible (uses core only). Unit tests run on the host.
 
-(let ((*omit-redundant-parens* t))
+(let ((*omit-redundant-parens* t)
+      (*rustfmt-arguments* (list "--edition" "2024")))
   (defparameter *source-dir* #P"examples/23_embassy_pico/proto/src/")
   (defparameter *code-file* (asdf:system-relative-pathname 'cl-rust-generator (merge-pathnames #P"lib.rs"
 											       *source-dir*)))
@@ -82,7 +83,7 @@
 	     (declare (type u16 crc))
 	     (setf (aref out (+ n 2)) (coerce (logand crc (hex ff)) u8))
 	     (setf (aref out (+ n 3)) (coerce (>> crc 8) u8)))
-	   (return (Some total))))))
+	   (Some total)))))
 
      (space pub (defun put_u16_le (o i v)
        (declare (type "&mut [u8]" o)
@@ -175,7 +176,7 @@
 		     (incf i)))
 		 (setf (dot self frame_len) n)
 		 (setf (dot self pos) 0)
-		 (return (Some n)))))))
+		 (Some n))))))
 
      (space pub (defstruct0 PwmCmd ((space pub ch) u8) ((space pub freq_hz) u32) ((space pub amp_tenth_pct) u16) ((space pub phase_deg) u16)))
      (space pub (defun encode_pwm_cmd (cmd out)
@@ -191,11 +192,11 @@
 		(values "Option<PwmCmd>"))
        (when (or (!= (dot p (len)) 10) (!= (aref p 0) TAG_SET_PWM))
 	 (return None))
-       (return (Some (make-instance PwmCmd
+       (Some (make-instance PwmCmd
 				    :ch (aref p 1)
 				    :freq_hz (get_u32_le p 2)
 				    :amp_tenth_pct (get_u16_le p 6)
-				    :phase_deg (get_u16_le p 8))))))
+				    :phase_deg (get_u16_le p 8)))))
 
      (space pub (defstruct0 HstxCmd ((space pub freq_hz) u32) ((space pub amp_tenth_pct) u16) ((space pub phase_deg) u16)))
      (space pub (defun encode_hstx_cmd (cmd out)
@@ -210,10 +211,10 @@
 		(values "Option<HstxCmd>"))
        (when (or (!= (dot p (len)) 9) (!= (aref p 0) TAG_SET_HSTX))
 	 (return None))
-       (return (Some (make-instance HstxCmd
+       (Some (make-instance HstxCmd
 				    :freq_hz (get_u32_le p 1)
 				    :amp_tenth_pct (get_u16_le p 5)
-				    :phase_deg (get_u16_le p 7))))))
+				    :phase_deg (get_u16_le p 7)))))
 
      (space pub (defstruct0 AdcCmd ((space pub rate_hz) u32) ((space pub phase_deg) u16)))
      (space pub (defun encode_adc_cmd (cmd out)
@@ -227,9 +228,9 @@
 		(values "Option<AdcCmd>"))
        (when (or (!= (dot p (len)) 7) (!= (aref p 0) TAG_SET_ADC))
 	 (return None))
-       (return (Some (make-instance AdcCmd
+       (Some (make-instance AdcCmd
 				    :rate_hz (get_u32_le p 1)
-				    :phase_deg (get_u16_le p 5))))))
+				    :phase_deg (get_u16_le p 5)))))
 
      (space pub (defstruct0 StatusMsg ((space pub seq) u8) ((space pub temp_c10) i16) ((space pub cap) u32) ((space pub flags) u8)))
      (space pub (defun encode_status (msg out)
@@ -245,17 +246,17 @@
 		(values "Option<StatusMsg>"))
        (when (or (!= (dot p (len)) 9) (!= (aref p 0) TAG_STATUS))
 	 (return None))
-       (return (Some (make-instance StatusMsg
+       (Some (make-instance StatusMsg
 				    :seq (aref p 1)
 				    :temp_c10 (coerce (get_u16_le p 2) i16)
 				    :cap (get_u32_le p 4)
-				    :flags (aref p 8))))))
+				    :flags (aref p 8)))))
 
      (space pub (defun block_sample (p i)
        (declare (type "&[u8]" p)
 		(type usize i)
 		(values u16))
-       (get_u16_le p (+ 3 (* i 2)))))
+       (get_u16_le p (+ 4 (* i 2)))))
 
      "#[cfg(test)]"
      "mod tests {"
@@ -314,14 +315,10 @@
 	 (declare (type "[u8; 0]" empty)
 		  (type "[u8; 80]" out)
 		  (mutable out))
-	 (case (encode_frame (ref empty) "&mut out")
-	   ((Some _) (return))
-	   (None nil))
+	 (assert! (dot (encode_frame (ref empty) "&mut out") (is_none)))
 	 (let ((big (array-repeat 7 65)))
 	   (declare (type "[u8; 65]" big))
-	   (case (encode_frame (ref big) "&mut out")
-	     ((Some _) (return))
-	     (None nil)))))
+	   (assert! (dot (encode_frame (ref big) "&mut out") (is_none))))))
      "#[test]"
      (defun pwm_cmd_round_trip ()
        (let ((cmd (make-instance PwmCmd :ch 3 :freq_hz 440 :amp_tenth_pct 800 :phase_deg 90))
@@ -335,6 +332,12 @@
 	 (assert_eq! 440 (dot back freq_hz))
 	 (assert_eq! 800 (dot back amp_tenth_pct))
 	 (assert_eq! 90 (dot back phase_deg))))
+     "#[test]"
+     (defun adc_block_sample_offset ()
+       (let ((p (list 17 1 2 0 (hex 52) (hex 18) (hex 120) (hex 86))))
+	 (declare (type "[u8; 8]" p))
+	 (assert_eq! (hex 4660) (block_sample (ref p) 0))
+	 (assert_eq! (hex 22136) (block_sample (ref p) 1))))
      "#[test]"
      (defun status_negative_temp ()
        (let ((msg (make-instance StatusMsg :seq 7 :temp_c10 -55 :cap 123456 :flags 1))
