@@ -89,3 +89,40 @@ probe-rs 0.32.0. All generated crates use Rust edition 2024.
 - `doc/pins.md` (user-added board pinout) left untouched.
 - Committed per `prompt.txt` ("commite die aenderungen"); pre-existing
   unrelated change `examples/02_webgcd/...` left uncommitted.
+
+# Cost
+
+  Session usage
+
+    Input      85,876,802
+    Cached     83,966,108
+    Output        246,235
+    Total      86,123,037
+
+    Turns              356
+    Subagents         none
+
+  Subscription · Muse Code Everyday Usage
+    Current        93% used · Resets at 10:54 PM
+    Weekly         32% used · Resets Sep 14 at 12:00 AM
+
+┌─────────────────────────────────────────────────────────────┐
+│  MUSE CODE 1.0.3                                  COMPLETED │
+│                                                             │
+│  MODEL          muse-spark-1.3-contributor · high           │
+│                 meta · native-basic                         │
+│                                                             │
+│  WORKSPACE      /workspace/src/cl-rust-generator            │
+│                 trusted · not found                         │
+│  ACCESS         Unrestricted                                │
+│                 Meta account                                │
+│                                                             │
+│  USAGE          86,123,037 tokens · 356 turns · 0 subagents │
+│  CONTEXT        95% left · 47.8K used / 1008K · normal      │
+│                                                             │
+│  SESSION        01a07d04-7c92-71b0-8146-015c2c0f00e3        │
+│  ACTIVITY       no tasks                                    │
+│                 0 terminals · inbox clear                   │
+│                                                             │
+│  BILLING        Subscription · Muse Code Everyday Usage     │
+└─────────────────────────────────────────────────────────────┘
