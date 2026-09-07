@@ -3,7 +3,11 @@ falls programme fehlen, installiere sie im container.
 
 du arbeitest fuer wol pumba (wolpumba@gmail.com)
 
+die folgende aufgabe wurde zum teil schon bearbeitet (siehe tasks.md). in tasks.md sind bereits durchgefuehrte tasks noch nicht unbedingt angekreuzt. finde raus was noch bearbeitet werden muss und fuehre die aufgabe zuende.
+
+
 lies die dokumente in /workspace/src/cl-rust-generator/examples/23_embassy_pico/doc
+vor kurzem erst habe ich examples/23_embassy_pico/doc/pins.md hinzugefuegt. diese datei beschreibt die pin belegung meine pi pico 2 boards
 
 ich moechte ein beispielprogram mittels des lisp-to-rust transpiler erzeugen.
 das programm soll grob in zwei teile geteilt werden eine steuerungssoftware (in linux mit tui)
