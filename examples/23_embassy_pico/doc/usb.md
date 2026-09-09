@@ -55,3 +55,17 @@ SiliconWit
     Human Interface Devices (HID): Emulating high-speed peripherals like gamepads, keyboards, and custom raw HID devices. 
     Reddit·r/rust +1
     Composite Layouts: Combining multiple interfaces (such as running a network interface side-by-side with an automated HID injector layout) inside a single USB connection.
+
+
+
+can i use picotool to reboot pi pico 2 into bootsel without pressing the button?
+
+Yes, you can use picotool to reboot a Raspberry Pi Pico 2
+(or original Pico/RP2040/RP2350 device) into BOOTSEL mode without pressing the physical button, provided your running firmware uses USB stdio support. 
+How to Do It
+Run the following command in your terminal: 
+bash
+
+picotool reboot -f -u
+
+
