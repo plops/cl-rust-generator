@@ -1,0 +1,5 @@
+TENSTAR ROBOT Store
+TENSTAR RP2350-USB 16 MB Flash Mini Development Board Modul Dual-Core RP2350A Chip 520 KB SRAM Für Raspberry Pi PICO2 RP2350
+RP2350-USB 16MB
+CHF4.19
+   x1
