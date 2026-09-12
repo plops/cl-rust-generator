@@ -22,12 +22,18 @@ Plan: `plan.md`, Schritte: `task.md` (T1–T8).
   `common::router` und wird **exakt derselbe Code** in der Firmware verwendet — die T5-Matrix
   (Text/Binär gemischt, paketweise gesplittet, korrupt→Recovery, TOOLONG→Resync) läuft als
   Host-Unit-Test statt nur auf dem Gerät.
-- **T6 host-smoke:** sendet die T5-Matrix gegen `/dev/ttyACMx`, Exit-Code 0/1, keine Panics
-  (Timeouts → `FAIL`-Zeilen). Gebaut und Clippy-sauber, aber **noch nicht grün gegen Hardware**
-  (s. Kap. 5, Blocker).
-- **T7 Stabilisierung (Code):** `wait_connection`-Reconnect-Loop, Accumulator-Reset nach jedem
-  Fehler, `PROTO_VER` in `Ver`-Antwort, Limits dokumentiert (Zeile 64, Frame 128). Dauerlauf
-  steht aus (Blocker).
+- **T6 host-smoke: GRÜN auf beiden Transporten.** `g474-host-smoke /dev/ttyACM1` (USB) und
+  `/dev/ttyACM0` (UART via STLink-VCP): jeweils `all smoke checks passed` — Text-Matrix
+  (PING/HELP/GET VER/GET UID mit echter UID `4C002B000250314B56373820`/FOO/PING-CRLF),
+  Binär-Matrix (Ping→Pong, GetVer→Ver), korruptes Frame → `Err`, danach weiter `PONG`.
+- **UART-Zweitpfad (nachträglich, User-Wunsch):** `USART1` auf `PA9` (TX)/`PA10` (RX),
+  115200 8N1, DMA (`DMA1_CH1` TX, `DMA1_CH2` RX), `read_until_idle`-Chunks durch denselben
+  `common::router` (`dispatch()`-Helper teilen sich USB- und UART-Pfad). `GET UID`-Logik als
+  `reply_text()` nach `common` gezogen + Unit-Test (`reply_text_uid_branch`).
+- **T7 Stabilisierung:** `wait_connection`-Reconnect-Loop, Accumulator-Reset nach jedem
+  Fehler, `PROTO_VER` in `Ver`-Antwort, Limits dokumentiert (Zeile 64, Frame 128).
+  Mini-Dauerlauf: **6/6 Smoke-Durchläufe grün** (3× USB + 3× UART im Wechsel, je frischem
+  Port-Open).
 
 ## 2. Abweichungen vom Plan (begründet)
 
@@ -48,8 +54,8 @@ Plan: `plan.md`, Schritte: `task.md` (T1–T8).
 
 ## 3. Test-Evidenz (alle Gates grün außer Geräte-HIL)
 
-- `cargo test -p g474-common`: **16/16 ok** (10× text/frame + 6× router: CRLF, Split-Frames,
-  Mixed-Mode, Corrupt-Recovery, TooLong-Resync, Lone-NUL).
+- `cargo test -p g474-common`: **17/17 ok** (10× text/frame + 6× router: CRLF, Split-Frames,
+  Mixed-Mode, Corrupt-Recovery, TooLong-Resync, Lone-NUL + `reply_text_uid_branch`).
 - `cargo fmt --check`: sauber (alle drei Crates).
 - `cargo clippy -p g474-common -p g474-host-smoke --all-targets -- -D warnings`: sauber.
 - `cargo clippy --release -- -D warnings` (Firmware, thumbv7em): sauber.
@@ -68,16 +74,22 @@ Plan: `plan.md`, Schritte: `task.md` (T1–T8).
 Belegt: Clock-Setup ohne HSE, USB-Stack inkl. CDC-Endpoints initialisiert, kein Panic bis zum
 Warten auf den Host. `USB connected` kann hier nicht erscheinen (s. Kap. 5).
 
-## 5. Blocker: Geräte-HIL über USB derzeit unmöglich
+## 5. HIL-Blocker (aufgelöst) + Learnings zum Flashen
 
-- **Evidenz:** `lsusb` zeigt nur `0483:3752 STLink`, kein Zweitgerät (erwartet `C0DE:CAFE`);
-  `/dev/ttyACM0` (10:48, Container-Start) ist der STLink-VCP — `host-smoke` läuft dort in
-  `TIMEOUT`s. Das Board-USB-C ist physisch nicht mit diesem Host verbunden (nur SWD über STLink).
-- **Folge:** T5-Geräte-Matrix, T6-grün und T7-Dauerlauf sind offen, aber Code + Host-Tests dafür
-  fertig. Nachholen sobald USB-C steckt:
-  `cargo run -p g474-host-smoke -- /dev/ttyACMx` (erwartet: `all smoke checks passed`),
-  danach 60-s-Dauerlauf und T7-Commit.
-- Kein dritter Goal-Turn mit demselben Blocker bisher — kein `blocked`-Status.
+- **Ursprünglicher Blocker:** Board-USB hing nicht am Host (`lsusb` nur STLink). Nach Anstecken
+  (User): `c0de:cafe … G474 dual-mode proto` → `ttyACM1`. Im Container fehlte der Device-Node
+  (kein udev-Hotplug) — behoben via `mknod /dev/ttyACM1 c 166 1` (Nummer aus
+  `/sys/class/tty/ttyACM1/dev`).
+- **`probe-rs download` lässt den Core angehalten zurück:** Nach `download` enumeriert das Gerät
+  nicht — erst `probe-rs run` (oder Reset/Power-Cycle) startet die Firmware. Falsche Fährte
+  („UART-Umbau hat USB kaputtgemacht") wurde per RTT-Log widerlegt: USB-Enumeration
+  (`SETUP`, `SET_ADDRESS`) lief parallel zu `UART ready/serving` normal weiter.
+- **UART-Verdrahtung (User-seitig, verifiziert):** STLink-VCP ↔ `PA9`/`PA10` gekreuzt am
+  unteren Header (Pos. 6). Durch den grünen UART-Smoke ist die Richtung bewiesen
+  (falsch herum käme kein einziges `ok`).
+- RTT-Beleg UART-Pfad: `USART: … desired baudrate: 115200, actual baudrate: 115107`,
+  `UART ready on PA9/PA10 @115200`, `UART serving on USART1`, danach USB-Reset/Setup —
+  kein Panic, kein HardFault.
 
 ## 6. Learnings
 
