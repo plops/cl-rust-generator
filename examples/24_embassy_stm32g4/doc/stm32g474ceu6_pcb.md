@@ -106,3 +106,33 @@ Die untere Leiste ist zweireihig angeordnet (innere Reihe = Richtung MCU, äuße
   * SPI / I2S
   * USART / UART (inkl. ISO 7816, LIN, IrDA)
   * USB 2.0 Full-Speed Device.
+
+
+# Information from supplier:
+
+1. Product Informaton【Mandatory】
+Product Name: Demo Board
+Model: STM32G431/G474
+Batch/Serial Number: \
+2. MANUFACTURER & EU REPRESENTATIVE INFO【Mandatory】
+ Manufacturer: Dongguan Dongcheng Weixing Electronic Studio
+Room 206, Cluster 504593TB, Building 6, No.1 Dongke Road, Dongcheng Street,
+Dongguan City, Guangdong Province, WeAct_TC@163.com
+ EU Authorized Representative: Apex CE Specialists GmbH
+Grafenberger Allee 277,40237 Düsseldorf, Info@apex-ce.com
+3. Compliance Information【Mandatory】
+Complies with general electronic requirements.
+4. Safety & Warnings 【Mandatory by Category】
+Important Safety Information
+Read all instructions before use. Failure to follow these instructions may result in damage to the
+product or personal injury.
+ Warning: Keep the device and its cord out of reach of children under 3 years old.
+ Keep away from children unless supervised by an adult.
+ Do not use this product for purposes other than its intended use.
+ Inspect the product before each use; do not use if damaged.
+ Follow installation and operation guidelines to avoid injury.
+ Do not expose to water or moisture.
+5. Instructions for Use【Mandatory】
+1. Before First Use: Remove all protective films from the device.
+2. Charging: Connect the provided USB cable to a certified 5V power adapter.
+3. After Use: Turn off the device and store it in a dry place. Keep away from children.
