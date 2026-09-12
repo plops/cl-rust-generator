@@ -1,1 +1,154 @@
 ich moechte ein auf einem stm32g474 basierendes geraet bauen was wie oszilloskop, signal generator, frequenzzaehler und capacity messgeraet in einem arbeitet. alles soll im chip ablaufen (interne komperatoren, adc, dac, pwm, timer, ...) ein paar passive komponenten kann ich anbringen (rc filter fuer pwm). ich moechte wirklich an die grenzen der hardware kommen (in terms of sample rate aber auch anzahl kanaele). ich werde die firmware in rust bauen zusammen mit einer tui anwendung die mittels usb und/oder uart mit der firmware redet - aber dies ist erstmal nicht so wichtig. wichtiger ist dass du mir einen ueberblick des moeglichen designs gibst.
+
+capacity measurement for multi-dimensional touch sensing
+- multiple pins (at least 3) in time division multiplexing
+- comparator and timer
+
+
+oscilloscope
+
+Maximale Performance (1-Kanal-Modus): Der STM32G474 hat 5 unabhängige ADCs. Jeder schafft bei voller 12-Bit-Auflösung 4 MSPS (Megasamples pro Sekunde). Wenn du ADC1, ADC2, ADC3 und ADC4 so konfigurierst, dass sie zeitversetzt (interleaved) denselben Pin abtasten, erreichst du theoretisch bis zu 16 MSPS bei 12-Bit (bzw. noch mehr bei reduzierter Auflösung wie 8-Bit, wo ein einzelner ADC bis zu 6,66 MSPS schafft, was im Interleave-Modus über 26 MSPS ermöglicht).
+Multi-Kanal-Modus:
+
+    2 Kanäle: ADC1+ADC2 (interleaved für Kanal 1 = 8 MSPS) und ADC3+ADC4 (interleaved für Kanal 2 = 8 MSPS).
+    4 Kanäle: ADC1, ADC2, ADC3, ADC4 messen alle parallel auf eigenen Kanälen mit jeweils 4 MSPS.
+
+
+es soll auch equivalent time sampling unterstuetzt werden:
+
+ Damit lässt sich die effektive Abtastrate bei periodischen (sich wiederholenden) Signalen extrem weit über die physikalische Grenze des ADCs hinaus katapultieren.
+Mit dem HRTIM (High-Resolution Timer) des STM32G474 hast du dafür die perfekte Waffe an Bord, da er mit einer Auflösung von 184 Pikosekunden arbeiten kann.
+------------------------------
+## Das Prinzip: Wie ETS mit dem HRTIM funktioniert
+Anstatt zu versuchen, eine Periode des Signals mit einem einzigen, ultraschnellen Durchlauf zu erfassen, nimmst du bei jeder neuen Periode des Signals nur ein einziges (oder wenige) Samples auf – aber jedes Mal präzise zeitlich minimal verschoben.
+
+Signal:      _/\_            _/\_            _/\_
+Trigger:     |               |               |
+
+             |               |               |
+Sample 1:    |--> dt         |               |       (Phase 1)
+Sample 2:    |               |----> 2*dt     |       (Phase 2)
+Sample 3:    |               |               |------> 3*dt  (Phase 3)
+
+Ergebnis:    . (1)            . (2)           . (3)  -> Zusammengesetzte Kurve
+
+Wenn du diese versetzten Datenpunkte im SRAM wieder in der richtigen Reihenfolge zusammensetzt, entsteht eine Kurve mit einer gigantischen virtuellen Samplerate.
+
+* Beispiel: Wenn du den ADC-Trigger nach jedem Trigger-Event um ein HRTIM-Inkrement von z. B. 1 Nanosekunde weiterverschiebst ($dt = 1\,\text{ns}$), entspricht das einer effektiven Abtastrate von 1 GSPS (Giga-Sample pro Sekunde)!
+
+------------------------------
+## Die Hardware-Verschaltung im STM32G474
+Um das komplett in Hardware ohne CPU-Jitter umzusetzen, nutzt du die interne Kreuzschiene (Interconnect Matrix) des Chips:
+
+   1. Der Trigger-Eingang: Das analoge Signal geht wieder auf einen internen Komparator (COMPx), der die steigende Flanke des sich wiederholenden Signals erkennt.
+   2. HRTIM als Verzögerungs-Zentrale: Der Ausgang des Komparators wird intern direkt als External Event in den HRTIM geroutet.
+   3. Der verschobene Trigger: Der HRTIM startet bei diesem Event einen Timer-Kanal. Nach Ablauf einer definierten Zeit (Verzögerung $T + \Delta t$) erzeugt der HRTIM ein Ausgangssignal (z. B. hrtim_evnt1).
+   4. ADC startet Messung: Dieses HRTIM-Event triggert direkt den ADC. Der ADC tastet ab und der DMA schreibt das Sample in den RAM.
+
+------------------------------
+## Die Software-Schleife in Rust
+Da der HRTIM-Verzögerungswert für jedes neue Sample inkrementiert werden muss, sieht die hardwarenahe Schleife im Rust-Programm so aus:
+
+   1. Initialisierung: Setze die HRTIM-Verzögerung auf den Basiswert $T$ (z. B. 100 ns nach der Flanke).
+   2. Messung starten: Aktiviere den DMA für ein einzelnes (oder eine feste Anzahl von) Samples.
+   3. Warten auf Fertigstellung: Sobald der DMA-Transfer fertig ist (Signalperiode wurde abgetastet):
+   4. Phase verschieben: Erhöhe das Compare-Register des HRTIM um deinen gewünschten Schritt $\Delta t$ (z. B. 5 HRTIM-Ticks $\approx 920\,\text{ps}$).
+   5. Wiederholen: Starte den nächsten DMA-Transfer für die nächste Periode.
+
+Sobald du z. B. 256 oder 512 Iterationen durchlaufen hast, stoppst du, sortierst das Array im RAM um und sendest das perfekt rekonstruierte High-Speed-Signal an deine TUI.
+
+Ich moechte dies fuer 1, 2, 3 und 4 kanaele erlauben
+
+------------------------------
+## Grenzen des Verfahrens
+
+* Nur für rein periodische Signale: Jede kleinste Amplituden- oder Frequenzänderung des Signals während der Messung führt zu starkem Bildrauschen (Aliasing / Jitter-Artefakte).
+* Trigger-Jitter des Komparators: Die effektive maximale Auflösung wird nicht durch den HRTIM (184 ps) begrenzt, sondern durch das Eigenrauschen und den Jitter des internen Komparators (dieser liegt meist im Bereich von wenigen Nanosekunden). Dennoch sind damit effektive Sampleraten im Bereich von 100 bis 200 MSPS qualitativ absolut realistisch.
+
+
+
+
+trigger implementierung
+
+Der Analoge Trigger (Echtzeit & Hardware-Präzision)
+Dies ist die performanteste Methode. Du nutzt einen der 7 internen Komparatoren (COMPx) als Trigger-Zentrale.
+
+Signal ──┬──> ADC1..4 (Interleaved) ──> DMA ──> SRAM (Circular Buffer)
+         │
+         └──> COMP1 (Analoger Trigger)
+                │
+                ├──> DAC3 (Setzt das "Trigger Level")
+                └──> COMP_OUT ──> Trigger-Eingang des Timers (TIMx)
+
+1. Trigger Level einstellen
+Das Trigger-Level (die Spannung, bei der getriggert wird) stellst du über einen der internen DACs (z. B. DAC3) ein. Der Ausgang des DACs wird intern direkt als Referenz an den Minus-Eingang des Komparators geroutet. Änderst du den DAC-Wert in Rust, verschiebst du das Trigger-Level stufenlos.
+2. Analoger Filter (Hysterese & Glitch-Filter)
+Um Fehlauslösungen durch verrauschte Signale zu verhindern, hat der Komparator des G474 eingebaute Schutzmechanismen:
+
+    Hysterese (Hardware): Du kannst im Komparator-Register eine Hysterese (No Hysteresis, Low, Medium, High – bis zu ca. 70mV) aktivieren. Das Signal muss die Schwelle also deutlich überschreiten, um zu triggern.
+    Blanking-Fenster: Du kannst den Komparator so mit einem Timer verknüpfen, dass er direkt nach einem Trigger-Event für eine definierte Anzahl an Nanosekunden "blind" geschaltet wird. Das filtert hochfrequente Schwingungen (Glitches) direkt nach der Flanke heraus.
+
+
+
+## Technische Spezifikation: Phasenstarre Vektor-Netzwerkanalyse mittels High-Resolution Timer (HRTIM)
+Für präzise Impedanz- und Vektornetzwerkanalysen (VNA) ist eine starr gekoppelte Zeitbasis zwischen der Signalerzeugung (Arbitrary Waveform Generator / AWG) und der Signalerfassung (Oszilloskop) zwingend erforderlich. Dieses System realisiert die Phasen- und Amplitudenmessung über eine zeitlich verschobene, hochauflösende Hardware-Triggerung, die vollständig innerhalb der Peripheriearchitektur des Mikrocontrollers abwickelt wird.
+------------------------------
+## Systemarchitektur und Signalfluss
+Die Synchronisation basiert auf dem internen High-Resolution Timer (HRTIM) des Prozessors. Durch die Nutzung der integrierten Delay-Locked Loop (DLL) arbeitet der HRTIM mit einer effektiven Zeitbasis von ca. 5,4 GHz, was einer zeitlichen Auflösung von 184 Pikosekunden entspricht.
+Der HRTIM fungiert als Master-Zeitbasis und generiert zwei physikalisch gekoppelte, jedoch zeitlich zueinander verzögerte Trigger-Ereignisse:
+
++-----------------------------------------------------------------+
+
+|                       HRTIM Master Clock                        |
+|             (170 MHz Systemtakt * DLL = ~5.4 GHz)               |
++-------------------------------+---------------------------------+
+                                |
+        +-----------------------+-----------------------+
+
+        |                                               |
+        v (T0: Start-Impuls)                            v (T0 + dt: Mess-Impuls)
++-----------------------+                       +-----------------------+
+
+|      HRTIM_OUT1       |                       |      HRTIM_EVNT1      |
++-----------+-----------+                       +-----------+-----------+
+
+            |                                               |
+            v                                               v
++-----------------------+                       +-----------------------+
+
+|  Digital-Analog-Conv. |                       | Analog-Digital-Conv.  |
+|     (AWG-Ausgang)     |                       | (Oszilloskop-Eingang) |
++-----------+-----------+                       +-----------+-----------+
+
+            |                                               |
+            v                                               |
+   [ Testobjekt / DUT ] ------------------------------------+
+
+
+   1. Erzeugungs-Trigger ($T_0$): Der HRTIM initiiert über den Ausgang HRTIM_OUT1 den Digital-Analog-Wandler (DAC). Dieser gibt das erste Sample der im SRAM hinterlegten Wellenform an das zu vermessende Bauteil (Device Under Test / DUT) aus.
+   2. Erfassungs-Trigger ($T_0 + \Delta t$): Nach Ablauf einer exakt definierten Verzögerungszeit $\Delta t$ generiert der HRTIM das interne Ereignis HRTIM_EVNT1. Dieses Signal triggert direkt die Wandlung des Analog-Digital-Wandlers (ADC), um die analoge Antwort des Bauteils zu erfassen.
+
+------------------------------
+## Messverfahren (Phase Sweep)
+Die Ermittlung von Betrag und Phase des komplexen Übertragungsfaktors erfolgt über ein sequentielles Durchsteppen des Abtastzeitpunkts entlang der Signalperiode.
+## 1. Kalibrierung (Nullphasen-Referenz)
+Vor der eigentlichen Messung wird das System kalibriert, indem der AWG-Ausgang direkt mit dem ADC-Eingang kurzgeschlossen wird. Die Verzögerung $\Delta t$ des HRTIM wird auf Null gesetzt. Der hierbei erfasste ADC-Wert dient als Referenzpunkt für die Phase $0^\circ$.
+## 2. Sequentielles Abtasten (Time-Delay-Scan)
+Wird das Testobjekt in den Signalpfad geschaltet, erfährt die Signalwelle eine frequenzabhängige Dämpfung und Phasenverschiebung. Um diese Parameter zu extrahieren, erhöht die Firmware den Compare-Wert des HRTIM systematisch in einer Schleife:
+$$\Delta t_n = n \cdot 184\text{ ps} \quad \text{mit } n = \{0, 1, 2, \dots, N\}$$ 
+
+* Messpunkt 1 ($n=0$): $\Delta t = 0\text{ ps} \rightarrow$ ADC tastet das Signal ab.
+* Messpunkt 2 ($n=1$): $\Delta t = 184\text{ ps} \rightarrow$ ADC tastet das Signal ab.
+* Messpunkt 3 ($n=2$): $\Delta t = 368\text{ ps} \rightarrow$ ADC tastet das Signal ab.
+
+Durch dieses schrittweise Verschieben des Messzeitpunkts wird die Signalform am Ausgang des Bauteils mit einer virtuellen Abtastrate von bis zu 5,4 GSPS rekonstruiert.
+## 3. Vektorielle Auswertung
+Aus dem resultierenden Daten-Array im SRAM berechnet der mathematische Core der Firmware die vektoriellen Komponenten:
+
+* Amplitude (Betrag): Wird direkt über die Peak-to-Peak-Differenz des rekonstruierten Signalverlaufs ermittelt.
+* Phase (Winkel): Wird aus der Differenz (Anzahl der $184\text{-ps}$-Schritte) zwischen dem mathematischen Maximum der erzeugten Erregerwelle und dem ermittelten Maximum der gemessenen Antwortkurve berechnet.
+
+------------------------------
+## Hardware-Automatisierung via Burst-DMA
+Um Jitter durch Software-Interferenzen vollständig auszuschließen und die CPU zu entlasten, wird die Aktualisierung der Verzögerungszeit $\Delta t$ automatisiert.
+Dazu wird das Burst-DMA-Feature des HRTIM konfiguriert. Nach jedem abgeschlossenen ADC-Abtastzyklus schreibt der DMA-Controller autonom den nächsten Verzögerungswert aus einer im RAM vorab berechneten Tabelle direkt in das zuständige HRTIM-Compare-Register. Der gesamte Frequenz- oder Phasensweep läuft somit deterministisch in Hardware ab.
