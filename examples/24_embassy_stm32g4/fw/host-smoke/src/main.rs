@@ -5,18 +5,30 @@
 //! and exits 0 only if every expectation holds.
 
 use g474_common::frame::encode_cmd;
-use g474_common::{DeviceResp, HostCmd};
+use g474_common::modes_04::{FreqConfig, ScopeConfig};
+use g474_common::{DeviceResp, HostCmd, PROTO_VER};
 use postcard::accumulator::{CobsAccumulator, FeedResult};
 use std::io::{Read, Write};
 use std::time::Duration;
 
 fn main() {
     let port_name = std::env::args().nth(1).unwrap_or_else(|| {
-        eprintln!("usage: g474-host-smoke /dev/ttyACMx");
+        eprintln!("usage: g474-host-smoke /dev/ttyACMx [gate_ms]");
         std::process::exit(2);
     });
+    // Optional longer gate to catch slow/rare edges on a floating input.
+    let gate_ms: u32 = std::env::args()
+        .nth(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(200)
+        .clamp(10, 10000);
+    let level_mv: u16 = std::env::args()
+        .nth(3)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1650)
+        .min(3300);
     let mut port = serialport::new(&port_name, 115_200)
-        .timeout(Duration::from_millis(2000))
+        .timeout(Duration::from_millis(15000))
         .open()
         .unwrap_or_else(|e| {
             eprintln!("open {}: {}", port_name, e);
@@ -28,14 +40,16 @@ fn main() {
 
     let mut failures = 0;
     // T5 text matrix.
-    for (send, expect) in [
-        ("PING\n", "PONG"),
-        ("HELP\n", "OK HELP"),
-        ("GET VER\n", "OK VER proto=1"),
-        ("G UID\n", "OK UID "),
-        ("FOO\n", "ERR UNKNOWN"),
-        ("PING\r\n", "PONG"),
-    ] {
+    let ver_expect = format!("OK VER proto={}", PROTO_VER);
+    let text_matrix: Vec<(&str, String)> = vec![
+        ("PING\n", "PONG".to_string()),
+        ("HELP\n", "OK HELP".to_string()),
+        ("GET VER\n", ver_expect),
+        ("G UID\n", "OK UID ".to_string()),
+        ("FOO\n", "ERR UNKNOWN".to_string()),
+        ("PING\r\n", "PONG".to_string()),
+    ];
+    for (send, expect) in &text_matrix {
         if !check_text(&mut port, send, expect) {
             failures += 1;
         }
@@ -53,9 +67,68 @@ fn main() {
     if !check_binary(
         &mut port,
         HostCmd::GetVer,
-        |r| matches!(r, DeviceResp::Ver { proto: 1, .. }),
+        |r| matches!(r, DeviceResp::Ver { proto: p, .. } if *p == PROTO_VER),
         "GetVer->Ver",
     ) {
+        failures += 1;
+    }
+
+    // Mode protocol (v2): self-test, unimplemented scope, freq measure/read/stop.
+    if !check_binary(
+        &mut port,
+        HostCmd::SelfTest,
+        |r| matches!(r, DeviceResp::SelfTestOk { .. }),
+        "SelfTest->SelfTestOk",
+    ) {
+        failures += 1;
+    }
+    if !check_binary(
+        &mut port,
+        HostCmd::ScopeStart(ScopeConfig {
+            interleaved: 1,
+            level_mv: 100,
+        }),
+        |r| matches!(r, DeviceResp::Err { code: 8 }),
+        "ScopeStart->NOT_IMPL",
+    ) {
+        failures += 1;
+    }
+    // Short gate (200 ms); PA7 floating or grounded gives an arbitrary but
+    // well-formed count — the check asserts shape, plausibility is logged.
+    let freq_cfg = FreqConfig {
+        level_mv,
+        hyst: 2,
+        filter: 0,
+        gate_ms,
+    };
+    if !check_binary(
+        &mut port,
+        HostCmd::FreqStart(freq_cfg),
+        |r| matches!(r, DeviceResp::Freq { gate_ms: g, .. } if *g == gate_ms),
+        "FreqStart->Freq",
+    ) {
+        failures += 1;
+    }
+    if !check_binary(
+        &mut port,
+        HostCmd::FreqRead,
+        |r| matches!(r, DeviceResp::Freq { .. }),
+        "FreqRead->Freq",
+    ) {
+        failures += 1;
+    }
+    if !check_binary(
+        &mut port,
+        HostCmd::ModeStop,
+        |r| r == &DeviceResp::ModeIdle,
+        "ModeStop->ModeIdle",
+    ) {
+        failures += 1;
+    }
+    if !check_text(&mut port, "GET FREQ\n", "OK FREQ hz=") {
+        failures += 1;
+    }
+    if !check_text(&mut port, "MODE STOP\n", "OK MODE IDLE") {
         failures += 1;
     }
 
