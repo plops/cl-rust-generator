@@ -23,6 +23,7 @@ pub struct Control {
     mode: u8,
     freq_cfg: Option<FreqConfig>,
     freq_last: Option<(u32, u32)>,
+    cap_last: Option<(u8, u32, bool)>,
 }
 
 /// What the transport must do for one command.
@@ -32,6 +33,8 @@ pub enum Action {
     MeasureFreq(FreqConfig),
     /// Start/retune the AWG tone, then reply `ModeOk`.
     AwgStart(AwgConfig),
+    /// Measure one discharge timing, then reply `Cap`.
+    CapStart(u8),
     /// Acquire a snapshot, then stream `Block`s plus `BlockEnd`.
     ScopeRead {
         off: u32,
@@ -52,6 +55,7 @@ impl Control {
             mode: id::NONE,
             freq_cfg: None,
             freq_last: None,
+            cap_last: None,
         }
     }
 
@@ -63,6 +67,10 @@ impl Control {
 
     pub fn store_freq(&mut self, counts: u32, gate_ms: u32) {
         self.freq_last = Some((counts, gate_ms));
+    }
+
+    pub fn store_cap(&mut self, pin: u8, time_us: u32, timeout: bool) {
+        self.cap_last = Some((pin, time_us, timeout));
     }
 
     pub fn handle_cmd(&mut self, cmd: HostCmd) -> Action {
@@ -151,15 +159,26 @@ impl Control {
                     len: len as u16,
                 };
             }
-            // Mode D lands here until its task exists (order E→C→A→B→D).
+            HostCmd::CapStart(cfg) => {
+                if cfg.validate().is_err() {
+                    return Action::Reply(DeviceResp::Err { code: err::BAD_ARG });
+                }
+                self.mode = id::D_CAP;
+                return Action::CapStart(cfg.pin);
+            }
+            HostCmd::CapRead => match self.cap_last {
+                Some((pin, time_us, timeout)) => DeviceResp::Cap {
+                    pin,
+                    time_us,
+                    timeout,
+                },
+                None => DeviceResp::Err { code: err::NO_DATA },
+            },
             // AwgLoad (LUT upload) waits for timer-triggered DAC DMA (stage 2).
-            HostCmd::CapStart(_) | HostCmd::AwgLoad { .. } => DeviceResp::Err {
+            HostCmd::AwgLoad { .. } => DeviceResp::Err {
                 code: err::NOT_IMPL,
             },
             HostCmd::BlockAck { .. } => DeviceResp::Err { code: err::NO_DATA },
-            HostCmd::CapRead => DeviceResp::Err {
-                code: err::NOT_IMPL,
-            },
         };
         Action::Reply(reply)
     }
@@ -186,6 +205,23 @@ impl Control {
                             FreqConfig::hz_from_counts(counts, gate_ms),
                             counts,
                             gate_ms
+                        ),
+                    );
+                }
+                None => {
+                    let _ = out.push_str("ERR NO_DATA");
+                }
+            }
+            return Some(out);
+        }
+        if t.eq_ignore_ascii_case("GET CAP") || t.eq_ignore_ascii_case("G CAP") {
+            match self.cap_last {
+                Some((pin, time_us, timeout)) => {
+                    let _ = core::fmt::write(
+                        &mut out,
+                        format_args!(
+                            "OK CAP pin={} time_us={} timeout={}",
+                            pin, time_us, timeout as u8
                         ),
                     );
                 }

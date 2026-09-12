@@ -14,8 +14,9 @@ pub mod router;
 pub mod text;
 
 /// Protocol version, bumped on incompatible changes:
-/// v2: mode commands + blocks; v3: leading-`0x00` binary framing marker.
-pub const PROTO_VER: u8 = 3;
+/// v2: mode commands + blocks; v3: leading-`0x00` binary framing marker;
+/// v4: `Cap` discharge-time response (mode D).
+pub const PROTO_VER: u8 = 4;
 /// Firmware version string reported by `GET VER` / `DeviceResp::Ver`.
 pub const FW_VER: &str = env!("CARGO_PKG_VERSION");
 
@@ -91,6 +92,11 @@ pub enum DeviceResp {
     },
     SelfTestOk {
         bits: u16,
+    },
+    Cap {
+        pin: u8,
+        time_us: u32,
+        timeout: bool,
     },
 }
 

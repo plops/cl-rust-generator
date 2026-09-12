@@ -5,7 +5,7 @@
 //! and exits 0 only if every expectation holds.
 
 use g474_common::frame::encode_cmd;
-use g474_common::modes_04::{AwgConfig, FreqConfig, ScopeConfig, VnaConfig};
+use g474_common::modes_04::{AwgConfig, CapConfig, FreqConfig, ScopeConfig, VnaConfig};
 use g474_common::{DeviceResp, HostCmd, PROTO_VER};
 use postcard::accumulator::{CobsAccumulator, FeedResult};
 use std::io::{Read, Write};
@@ -152,6 +152,37 @@ fn main() {
         |r| matches!(r, DeviceResp::Err { code: 7 }),
         "VnaRead(beyond)->BAD_ARG",
     ) {
+        failures += 1;
+    }
+    // Capacitance: all three TDM channels answer with a discharge time
+    // (floating pins read ~0, no timeout); bad index is rejected.
+    for pin in 0..=2u8 {
+        if !check_binary(
+            &mut port,
+            HostCmd::CapStart(CapConfig { pin }),
+            |r| matches!(r, DeviceResp::Cap { pin: p, .. } if *p == pin),
+            &format!("CapStart({})->Cap", pin),
+        ) {
+            failures += 1;
+        }
+    }
+    if !check_binary(
+        &mut port,
+        HostCmd::CapStart(CapConfig { pin: 9 }),
+        |r| matches!(r, DeviceResp::Err { code: 7 }),
+        "CapStart(9)->BAD_ARG",
+    ) {
+        failures += 1;
+    }
+    if !check_binary(
+        &mut port,
+        HostCmd::CapRead,
+        |r| matches!(r, DeviceResp::Cap { .. }),
+        "CapRead->Cap",
+    ) {
+        failures += 1;
+    }
+    if !check_text(&mut port, "GET CAP\n", "OK CAP pin=") {
         failures += 1;
     }
     // Short gate (200 ms); PA7 floating or grounded gives an arbitrary but

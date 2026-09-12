@@ -20,6 +20,7 @@ use g474_common::text::reply_text;
 use g474_common::{DeviceResp, HostCmd, MAX_FRAME};
 
 use crate::awg_06::{AwgReq, AWG_ACK, AWG_REQ};
+use crate::cap_09::{CapReq, CAP_REQ, CAP_RESP};
 use crate::control_04::{Action, Control};
 use crate::mode_freq_05::{FreqResult, FREQ_REQ, FREQ_RESP};
 use crate::scope_07::{ScopeReq, SCOPE_PER_BLOCK, SCOPE_REQ, SCOPE_RESP, SCOPE_SNAP};
@@ -116,6 +117,20 @@ async fn run_action(action: Action) -> DeviceResp {
                 mode: g474_common::modes_04::id::B_VNA,
             }
         }
+        Action::CapStart(pin) => {
+            if CAP_REQ.try_send(CapReq { pin }).is_err() {
+                return DeviceResp::Err {
+                    code: err::MODE_BUSY,
+                };
+            }
+            let r = CAP_RESP.receive().await;
+            CONTROL.lock().await.store_cap(r.pin, r.time_us, r.timeout);
+            DeviceResp::Cap {
+                pin: r.pin,
+                time_us: r.time_us,
+                timeout: r.timeout,
+            }
+        }
     }
 }
 
@@ -133,7 +148,11 @@ async fn dispatch(ev: InEvent, tx: &mut [u8; MAX_FRAME + 32], uid_hex: &str) -> 
             let action = CONTROL.lock().await.handle_cmd(cmd);
             if is_stop {
                 // Quiesce the tone generator too (harmless when already idle).
-                let _ = AWG_REQ.try_send(AwgReq::Stop);
+                // Rendezvous: consume the ack so none goes stale (a stale ack
+                // would wedge the AWG task on its next send).
+                if AWG_REQ.try_send(AwgReq::Stop).is_ok() {
+                    AWG_ACK.receive().await;
+                }
             }
             match action {
                 Action::ScopeRead { off, len } => Out::Scope {

@@ -115,7 +115,10 @@ pub async fn vna_task(
                 snap.pts[i] = (f, mv);
                 snap.n = i + 1;
             }
-            let _ = AWG_REQ.try_send(AwgReq::Stop);
+            // Rendezvous (not fire-and-forget): every request pairs with one
+            // ack; a stray ack would wedge the AWG task on its next send.
+            AWG_REQ.send(AwgReq::Stop).await;
+            AWG_ACK.receive().await;
             defmt::info!("vna: done");
         }
         resp.send(VnaResp { points }).await;

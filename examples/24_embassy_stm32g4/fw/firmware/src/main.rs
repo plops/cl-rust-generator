@@ -20,6 +20,8 @@ use core::sync::atomic::Ordering;
 
 #[path = "06_awg.rs"]
 mod awg_06;
+#[path = "09_cap.rs"]
+mod cap_09;
 #[path = "01_clock.rs"]
 mod clock_01;
 #[path = "04_control.rs"]
@@ -95,6 +97,7 @@ async fn main(spawner: embassy_executor::Spawner) {
         scope_07::scope_task(p.ADC1, p.PA0, &scope_07::SCOPE_REQ, &scope_07::SCOPE_RESP).unwrap(),
     );
     spawner.spawn(vna_08::vna_task(&vna_08::VNA_REQ, &vna_08::VNA_RESP).unwrap());
+    spawner.spawn(cap_09::cap_task(&cap_09::CAP_REQ, &cap_09::CAP_RESP).unwrap());
 
     core::future::pending::<()>().await;
 }

@@ -98,8 +98,17 @@ impl AwgConfig {
 /// Capacitance-meter config (mode D, spec §3.4).
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CapConfig {
-    /// TDM channel index, 0..=2.
+    /// TDM channel index, 0..=2 (0: PA1/COMP1, 1: PB1/COMP1, 2: PB0/COMP4).
     pub pin: u8,
+}
+
+impl CapConfig {
+    pub fn validate(&self) -> Result<(), u8> {
+        if self.pin > 2 {
+            return Err(super::err::BAD_ARG);
+        }
+        Ok(())
+    }
 }
 
 /// VNA sweep config (mode B, spec §3.2).
@@ -202,6 +211,13 @@ mod tests {
         assert!(AwgConfig { freq_hz: 1_000_000 }.validate().is_ok());
         assert!(AwgConfig { freq_hz: 0 }.validate().is_err());
         assert!(AwgConfig { freq_hz: 1_000_001 }.validate().is_err());
+    }
+
+    #[test]
+    fn cap_config_bounds() {
+        assert!(CapConfig { pin: 0 }.validate().is_ok());
+        assert!(CapConfig { pin: 2 }.validate().is_ok());
+        assert!(CapConfig { pin: 3 }.validate().is_err());
     }
 
     #[test]

@@ -217,6 +217,47 @@ mod tests {
     }
 
     #[test]
+    fn roundtrip_cap_resp() {
+        for resp in [
+            DeviceResp::Cap {
+                pin: 1,
+                time_us: 1234,
+                timeout: false,
+            },
+            DeviceResp::Cap {
+                pin: 2,
+                time_us: 200_000,
+                timeout: true,
+            },
+        ] {
+            let mut tx = [0u8; 160];
+            let n = encode_resp(&resp, &mut tx).expect("encode");
+            assert_eq!(tx[0], 0x00);
+            assert_eq!(tx[n - 1], 0x00);
+            let mut acc: CobsAccumulator<160> = CobsAccumulator::new();
+            let mut got = None;
+            let mut started = false;
+            for b in &tx[..n] {
+                if !started {
+                    if *b == 0x00 {
+                        continue;
+                    }
+                    started = true;
+                }
+                match acc.feed::<DeviceResp>(&[*b]) {
+                    FeedResult::Success { data, .. } => {
+                        got = Some(data);
+                        break;
+                    }
+                    FeedResult::Consumed => {}
+                    _ => panic!("unexpected feed result"),
+                }
+            }
+            assert_eq!(got, Some(resp));
+        }
+    }
+
+    #[test]
     fn block_resp_fits_frame_budget() {
         use crate::MAX_FRAME;
         let mut data: heapless::Vec<u8, 96> = heapless::Vec::new();
