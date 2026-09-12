@@ -7,6 +7,8 @@ spezifikation:
 die spezifikation fuer das projekt findest du hier:
 /workspace/src/cl-rust-generator/examples/24_embassy_stm32g4/plan/20260912_00_what/spec.md
 
+im ordner /workspace/src/cl-rust-generator/examples/24_embassy_stm32g4/doc gibt es ein paar zusaetzliche informationen (markdown version vom datenblatt, pcb...). 
+
 in /workspace/src/cl-rust-generator/examples/24_embassy_stm32g4/doc/deps.md
 habe ich einige projekte von github in der <organization>/<projekt> notation aufgelistet. dies kannst du benutzen um in deepwiki mcp nach weiteren informationen zu suchen / fragen.
 
@@ -48,6 +50,8 @@ embassy/examples/stm32g474 $ cargo run --release --bin comp
 0.500305 [INFO ] output: false (comp src/bin/comp.rs:41)
 ```
 
+ich bin mir sicher, dass der rust compiler und probe-rs funktionieren. trotzdem waere es gut, wenn du bei der umsetzung gelegentlich ein program hochlaedst und tests durchfuehrst. einfach um zu validieren, dass deine annahmen korrekt sind.
+
 nice to have:
 ich moechte das embedded geraet per terminal mit menschen lesbaren kommandos steuern (die ich selbst eingebe) andererseits moechte ich auch effiziente kommunikation mittels eines linux tui program ermoeglichen
 
@@ -67,6 +71,10 @@ So sieht der Parser auf dem Mikrocontroller aus:
 nice to have:
 ich moechte sowohl usb als auch uart fuer die kommunikation einsetzen koennen. 
 wenn es einfacher ist, dann baue erstmal nur die usb loesung.
+
+ordnerstruktur:
+erzeuge einen neuen ordner unterhalb von /workspace/src/cl-rust-generator/examples/24_embassy_stm32g4
+mit dem rust quellcode 
 
 
 vorgehensweise:
