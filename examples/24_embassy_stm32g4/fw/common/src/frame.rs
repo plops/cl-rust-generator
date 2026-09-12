@@ -3,14 +3,26 @@
 use crate::{DeviceResp, HostCmd, MAX_FRAME};
 use postcard::accumulator::{CobsAccumulator, FeedResult};
 
-/// Encode a host command into `buf`, COBS-framed (`0x00` terminated).
+/// Encode a host command into `buf`: leading `0x00` marker, then a
+/// COBS frame (`0x00` terminated).
+///
+/// The leading marker puts the shared byte-stream router into binary mode,
+/// so `0x0A`/`0x0D` bytes *inside* the COBS payload are never mistaken for
+/// text-line terminators (COBS only excludes `0x00`, e.g. `AwgStart(1000)`
+/// contains a `0x0A`). See `router::Router`.
 pub fn encode_cmd(cmd: &HostCmd, buf: &mut [u8]) -> Option<usize> {
-    postcard::to_slice_cobs(cmd, buf).ok().map(|s| s.len())
+    let (head, tail) = buf.split_first_mut()?;
+    *head = 0x00;
+    postcard::to_slice_cobs(cmd, tail).ok().map(|s| s.len() + 1)
 }
 
-/// Encode a device response into `buf`, COBS-framed.
+/// Encode a device response into `buf` (same framing as [`encode_cmd`]).
 pub fn encode_resp(resp: &DeviceResp, buf: &mut [u8]) -> Option<usize> {
-    postcard::to_slice_cobs(resp, buf).ok().map(|s| s.len())
+    let (head, tail) = buf.split_first_mut()?;
+    *head = 0x00;
+    postcard::to_slice_cobs(resp, tail)
+        .ok()
+        .map(|s| s.len() + 1)
 }
 
 /// Decode result for one fed chunk.
@@ -23,14 +35,19 @@ pub enum DecodeEvent {
 }
 
 /// Stateful COBS receiver for `HostCmd` (device side).
+///
+/// Leading `0x00` framing markers are skipped, so whole encoded frames
+/// (with marker) and bare COBS payloads both decode.
 pub struct CmdReceiver {
     acc: CobsAccumulator<MAX_FRAME>,
+    started: bool,
 }
 
 impl CmdReceiver {
     pub fn new() -> Self {
         Self {
             acc: CobsAccumulator::new(),
+            started: false,
         }
     }
 
@@ -39,9 +56,22 @@ impl CmdReceiver {
     }
 
     pub fn feed(&mut self, chunk: &[u8]) -> DecodeEvent {
+        let mut chunk = chunk;
+        if !self.started {
+            match chunk.iter().position(|&b| b != 0x00) {
+                None => return DecodeEvent::None,
+                Some(i) => {
+                    chunk = &chunk[i..];
+                    self.started = true;
+                }
+            }
+        }
         match self.acc.feed::<HostCmd>(chunk) {
             FeedResult::Consumed => DecodeEvent::None,
-            FeedResult::Success { data, .. } => DecodeEvent::Cmd(data),
+            FeedResult::Success { data, .. } => {
+                self.started = false;
+                DecodeEvent::Cmd(data)
+            }
             FeedResult::OverFull(_) => {
                 self.reset();
                 DecodeEvent::OverFull
@@ -68,9 +98,10 @@ mod tests {
     fn roundtrip(cmd: HostCmd) {
         let mut tx = [0u8; 160];
         let n = encode_cmd(&cmd, &mut tx).expect("encode");
-        // COBS invariant: 0x00 only as the final delimiter.
+        // Framing invariant: leading 0x00 marker, then COBS (0x00 only last).
+        assert_eq!(tx[0], 0x00);
         assert_eq!(tx[n - 1], 0x00);
-        assert!(!tx[..n - 1].contains(&0x00));
+        assert!(!tx[1..n - 1].contains(&0x00));
         let mut rx = CmdReceiver::new();
         // Feed byte-by-byte (worst-case chunking).
         let mut got = None;
@@ -107,10 +138,19 @@ mod tests {
         };
         let mut tx = [0u8; 160];
         let n = encode_resp(&resp, &mut tx).expect("encode");
+        assert_eq!(tx[0], 0x00);
         assert_eq!(tx[n - 1], 0x00);
         let mut acc: CobsAccumulator<160> = CobsAccumulator::new();
         let mut got = None;
+        let mut started = false;
         for b in &tx[..n] {
+            // Host-side decoders skip the leading framing marker.
+            if !started {
+                if *b == 0x00 {
+                    continue;
+                }
+                started = true;
+            }
             match acc.feed::<DeviceResp>(&[*b]) {
                 FeedResult::Success { data, .. } => {
                     got = Some(data);

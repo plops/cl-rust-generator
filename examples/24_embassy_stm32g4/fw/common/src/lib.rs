@@ -13,8 +13,9 @@ pub mod modes_04;
 pub mod router;
 pub mod text;
 
-/// Protocol version, bumped on incompatible changes (v2: mode commands + blocks).
-pub const PROTO_VER: u8 = 2;
+/// Protocol version, bumped on incompatible changes:
+/// v2: mode commands + blocks; v3: leading-`0x00` binary framing marker.
+pub const PROTO_VER: u8 = 3;
 /// Firmware version string reported by `GET VER` / `DeviceResp::Ver`.
 pub const FW_VER: &str = env!("CARGO_PKG_VERSION");
 

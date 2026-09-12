@@ -73,6 +73,16 @@ pub struct AwgConfig {
     pub freq_hz: u32,
 }
 
+impl AwgConfig {
+    pub fn validate(&self) -> Result<(), u8> {
+        if (1..=1_000_000).contains(&self.freq_hz) {
+            Ok(())
+        } else {
+            Err(super::err::BAD_ARG)
+        }
+    }
+}
+
 /// Capacitance-meter config (mode D, spec §3.4).
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CapConfig {
@@ -126,6 +136,14 @@ mod tests {
         assert_eq!(FreqConfig::hz_from_counts(1, 10), 100);
         assert_eq!(FreqConfig::hz_from_counts(7, 0), 0);
         assert_eq!(FreqConfig::hz_from_counts(u32::MAX, 1), u32::MAX);
+    }
+
+    #[test]
+    fn awg_config_bounds() {
+        assert!(AwgConfig { freq_hz: 1 }.validate().is_ok());
+        assert!(AwgConfig { freq_hz: 1_000_000 }.validate().is_ok());
+        assert!(AwgConfig { freq_hz: 0 }.validate().is_err());
+        assert!(AwgConfig { freq_hz: 1_000_001 }.validate().is_err());
     }
 
     #[test]

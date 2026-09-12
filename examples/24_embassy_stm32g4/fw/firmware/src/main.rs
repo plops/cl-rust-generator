@@ -18,6 +18,8 @@ use panic_probe as _;
 
 use core::sync::atomic::Ordering;
 
+#[path = "06_awg.rs"]
+mod awg_06;
 #[path = "01_clock.rs"]
 mod clock_01;
 #[path = "04_control.rs"]
@@ -84,6 +86,7 @@ async fn main(spawner: embassy_executor::Spawner) {
     spawner.spawn(transport_03::uart_serve_task(uart).unwrap());
     spawner
         .spawn(mode_freq_05::freq_task(&mode_freq_05::FREQ_REQ, &mode_freq_05::FREQ_RESP).unwrap());
+    spawner.spawn(awg_06::awg_task(p.TIM2, p.PA5, &awg_06::AWG_REQ, &awg_06::AWG_ACK).unwrap());
 
     core::future::pending::<()>().await;
 }

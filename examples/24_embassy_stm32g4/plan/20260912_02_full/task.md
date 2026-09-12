@@ -19,6 +19,10 @@ Dateiregeln aus dem Prompt gelten ab der ersten angefassten Datei
 ## F1 — Protokoll v2 in `common` (04_modes.rs + 05_blocks.rs)
 - `HostCmd`/`DeviceResp` nach `plan.md` Kap. 3 erweitern, `PROTO_VER=2`,
   `err::{MODE_BUSY,NO_DATA,BAD_ARG}`; Text-Aliase (`MODE …`, `GET FREQ`).
+- FIX 2026-09-12 (PROTO_VER=3): Binaer-Frames brauchen einen fuehrenden `0x00`-Marker
+  (`encode_cmd`/`encode_resp`), der Router oeffnet Binaer-Modus nur auf leerer Zeile.
+  Grund: COBS schliesst nur `0x00` aus — `0x0A`/`0x0D` im Payload (z.B. AwgStart(1000)
+  = `[04,0A,E8,07,00]`) wurden als Text-\n gefressen (HIL-belegt, Router-Regressionstests).
 - Unit-Tests: Roundtrip je neue Variante (1-Byte-Feed), COBS-Invariante,
   `Block`-Groessenbeweis (Frame ≤128 B), Router-Matrix mit Modus-Frames, PROTO_MISMATCH-Pfad.
 - Gates: `cargo test -p g474-common` gruen (neu ≥10 Tests), `fmt`, `clippy`.

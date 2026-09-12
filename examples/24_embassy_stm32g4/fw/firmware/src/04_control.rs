@@ -6,7 +6,7 @@
 
 use core::sync::atomic::{AtomicU16, Ordering};
 
-use g474_common::modes_04::{id, FreqConfig};
+use g474_common::modes_04::{id, AwgConfig, FreqConfig};
 use g474_common::{err, DeviceResp, HostCmd, PROTO_VER};
 
 /// Self-test capability bits (`DeviceResp::SelfTestOk::bits`).
@@ -30,6 +30,8 @@ pub enum Action {
     Reply(DeviceResp),
     /// Run a frequency measurement, store it, and reply `Freq`.
     MeasureFreq(FreqConfig),
+    /// Start/retune the AWG tone, then reply `ModeOk`.
+    AwgStart(AwgConfig),
 }
 
 impl Control {
@@ -86,9 +88,16 @@ impl Control {
                 },
                 None => DeviceResp::Err { code: err::NO_DATA },
             },
-            // Modes A–D land here until their tasks exist (task order E→C→A→B→D).
+            HostCmd::AwgStart(cfg) => {
+                if cfg.validate().is_err() {
+                    return Action::Reply(DeviceResp::Err { code: err::BAD_ARG });
+                }
+                self.mode = id::C_AWG;
+                return Action::AwgStart(cfg);
+            }
+            // Modes A, B, D land here until their tasks exist (order E→C→A→B→D).
+            // AwgLoad (LUT upload) waits for timer-triggered DAC DMA (stage 2).
             HostCmd::ScopeStart(_)
-            | HostCmd::AwgStart(_)
             | HostCmd::CapStart(_)
             | HostCmd::VnaStart(_)
             | HostCmd::AwgLoad { .. } => DeviceResp::Err {

@@ -17,8 +17,9 @@ use g474_common::err;
 use g474_common::frame::encode_resp;
 use g474_common::router::{InEvent, Router};
 use g474_common::text::reply_text;
-use g474_common::{DeviceResp, MAX_FRAME};
+use g474_common::{DeviceResp, HostCmd, MAX_FRAME};
 
+use crate::awg_06::{AwgReq, AWG_ACK, AWG_REQ};
 use crate::control_04::{Action, Control};
 use crate::mode_freq_05::{FreqResult, FREQ_REQ, FREQ_RESP};
 use crate::usb_02::{write_all, Disconnected};
@@ -32,6 +33,27 @@ enum Out {
     Text(heapless::String<96>),
     Bin(usize),
     Skip,
+}
+
+fn discriminant(cmd: &HostCmd) -> u8 {
+    match cmd {
+        HostCmd::Ping => 0,
+        HostCmd::GetVer => 1,
+        HostCmd::Echo(_) => 2,
+        HostCmd::ModeStop => 3,
+        HostCmd::SelfTest => 4,
+        HostCmd::FreqStart(_) => 5,
+        HostCmd::FreqRead => 6,
+        HostCmd::ScopeStart(_) => 7,
+        HostCmd::ScopeRead { .. } => 8,
+        HostCmd::AwgLoad { .. } => 9,
+        HostCmd::AwgStart(_) => 10,
+        HostCmd::CapStart(_) => 11,
+        HostCmd::CapRead => 12,
+        HostCmd::VnaStart(_) => 13,
+        HostCmd::VnaRead { .. } => 14,
+        HostCmd::BlockAck { .. } => 15,
+    }
 }
 
 /// Execute a control action: pure replies answer immediately, measurements
@@ -54,6 +76,25 @@ async fn run_action(action: Action) -> DeviceResp {
                 gate_ms: r.gate_ms,
             }
         }
+        Action::AwgStart(cfg) => {
+            if AWG_REQ
+                .try_send(AwgReq::Start {
+                    freq_hz: cfg.freq_hz,
+                })
+                .is_err()
+            {
+                defmt::info!("awg ch full");
+                return DeviceResp::Err {
+                    code: err::MODE_BUSY,
+                };
+            }
+            defmt::info!("awg req sent");
+            AWG_ACK.receive().await;
+            defmt::info!("awg acked");
+            DeviceResp::ModeOk {
+                mode: g474_common::modes_04::id::C_AWG,
+            }
+        }
     }
 }
 
@@ -66,7 +107,13 @@ async fn dispatch(ev: InEvent, tx: &mut [u8; MAX_FRAME + 32], uid_hex: &str) -> 
             Out::Text(reply_text(line.as_str(), uid_hex))
         }
         InEvent::Cmd(cmd) => {
+            defmt::info!("rx {}", discriminant(&cmd));
+            let is_stop = matches!(cmd, HostCmd::ModeStop);
             let action = CONTROL.lock().await.handle_cmd(cmd);
+            if is_stop {
+                // Quiesce the tone generator too (harmless when already idle).
+                let _ = AWG_REQ.try_send(AwgReq::Stop);
+            }
             let resp = run_action(action).await;
             match encode_resp(&resp, tx) {
                 Some(n) => Out::Bin(n),

@@ -5,7 +5,7 @@
 //! and exits 0 only if every expectation holds.
 
 use g474_common::frame::encode_cmd;
-use g474_common::modes_04::{FreqConfig, ScopeConfig};
+use g474_common::modes_04::{AwgConfig, FreqConfig, ScopeConfig};
 use g474_common::{DeviceResp, HostCmd, PROTO_VER};
 use postcard::accumulator::{CobsAccumulator, FeedResult};
 use std::io::{Read, Write};
@@ -119,6 +119,22 @@ fn main() {
     }
     if !check_binary(
         &mut port,
+        HostCmd::AwgStart(AwgConfig { freq_hz: 1000 }),
+        |r| r == &DeviceResp::ModeOk { mode: 3 },
+        "AwgStart->ModeOk(C)",
+    ) {
+        failures += 1;
+    }
+    if !check_binary(
+        &mut port,
+        HostCmd::AwgStart(AwgConfig { freq_hz: 0 }),
+        |r| matches!(r, DeviceResp::Err { .. }),
+        "AwgStart(0)->Err",
+    ) {
+        failures += 1;
+    }
+    if !check_binary(
+        &mut port,
         HostCmd::ModeStop,
         |r| r == &DeviceResp::ModeIdle,
         "ModeStop->ModeIdle",
@@ -190,8 +206,16 @@ fn read_line(port: &mut Box<dyn serialport::SerialPort>) -> Option<String> {
 fn read_frame(port: &mut Box<dyn serialport::SerialPort>) -> Option<DeviceResp> {
     let mut acc: CobsAccumulator<256> = CobsAccumulator::new();
     let mut one = [0u8; 1];
-    for _ in 0..512 {
+    let mut started = false;
+    for _ in 0..1024 {
         port.read_exact(&mut one).unwrap();
+        // Skip the leading 0x00 framing marker (COBS payload has none inside).
+        if !started {
+            if one[0] == 0x00 {
+                continue;
+            }
+            started = true;
+        }
         match acc.feed::<DeviceResp>(&one) {
             FeedResult::Success { data, .. } => return Some(data),
             FeedResult::Consumed => {}
