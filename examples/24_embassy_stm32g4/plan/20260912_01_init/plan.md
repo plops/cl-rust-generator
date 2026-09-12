@@ -75,7 +75,7 @@ präzise Regel, weil COBS-codierte Bytes **auch** ASCII-Buchstaben sein können:
 | embassy-usb | embassy-rs/embassy | 0.6.0 | USB-Stack, CDC-ACM-Klasse |
 | postcard | jamesmunns/postcard | 1.1.3 (+`use-std` nur hostseitig) | Binär-Serialisierung + COBS (`to_slice_cobs`, `CobsAccumulator`) |
 | serde | serde-rs/serde | 1.0.229 (`derive`, `default-features=false`) | `Serialize/Deserialize` für `common` |
-| heapless | rust-embedded/heapless | 0.9.3 (`default-features=false`) | `Vec`/Puffer ohne Alloc |
+| heapless | rust-embedded/heapless | 0.7 (`default-features=false`, von postcard 1.1.3 gepinnt) | `Vec`/Puffer ohne Alloc |
 | static_cell | rust-embedded/static_cell | 2.0.0 | `'static`-Buffers für USB-Builder |
 | defmt / defmt-rtt / panic-probe | knurling-rs/defmt u.a. | 1.0.1 / 1.0.0 / 1.0.0 | RTT-Logging (nicht über USB loggen!) |
 | embassy-executor/time/futures/sync | embassy-rs/embassy | passend zu 0.6.0 | Executor, Timer, Join |
