@@ -144,6 +144,55 @@ mod tests {
     }
 
     #[test]
+    fn roundtrip_v2_mode_variants() {
+        use crate::modes_04::{AwgConfig, CapConfig, FreqConfig, ScopeConfig, VnaConfig};
+        let cfg = FreqConfig {
+            level_mv: 1650,
+            hyst: 1,
+            filter: 0,
+            gate_ms: 1000,
+        };
+        for cmd in [
+            HostCmd::ModeStop,
+            HostCmd::SelfTest,
+            HostCmd::FreqStart(cfg),
+            HostCmd::FreqRead,
+            HostCmd::ScopeStart(ScopeConfig {
+                interleaved: 1,
+                level_mv: 100,
+            }),
+            HostCmd::ScopeRead { off: 0, len: 96 },
+            HostCmd::AwgStart(AwgConfig { freq_hz: 1000 }),
+            HostCmd::CapStart(CapConfig { pin: 0 }),
+            HostCmd::CapRead,
+            HostCmd::VnaStart(VnaConfig {
+                f0_hz: 1000,
+                f1_hz: 2000,
+                points: 11,
+            }),
+            HostCmd::BlockAck { seq: 3 },
+        ] {
+            roundtrip(cmd);
+        }
+    }
+
+    #[test]
+    fn block_resp_fits_frame_budget() {
+        use crate::MAX_FRAME;
+        let mut data: heapless::Vec<u8, 96> = heapless::Vec::new();
+        data.extend_from_slice(&[0xAA; 96]).unwrap();
+        let resp = DeviceResp::Block {
+            seq: 41,
+            total: 42,
+            data,
+        };
+        let mut tx = [0u8; MAX_FRAME + 32];
+        let n = encode_resp(&resp, &mut tx).expect("encode");
+        assert!(n <= MAX_FRAME, "block frame {} > {}", n, MAX_FRAME);
+        assert_eq!(tx[n - 1], 0x00);
+    }
+
+    #[test]
     fn multi_byte_chunks() {
         let mut tx = [0u8; 160];
         let n = encode_cmd(&HostCmd::GetVer, &mut tx).unwrap();

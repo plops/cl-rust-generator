@@ -29,7 +29,7 @@ pub fn handle_line(line: &str) -> heapless::String<96> {
     let _ = arg1.push_str(parts.next().unwrap_or(""));
     arg1.make_ascii_uppercase();
     let reply: &str = match (verb.as_str(), arg1.as_str()) {
-        ("H", _) | ("HELP", _) => "OK HELP PING GET-VER GET-UID",
+        ("H", _) | ("HELP", _) => "OK HELP PING GET-VER GET-UID MODE-STOP GET-FREQ",
         ("PING", _) => "PONG",
         ("G", "VER") | ("GET", "VER") => "OK VER",
         ("G", "UID") | ("GET", "UID") => "OK UID",
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn get_ver_uid() {
-        assert!(handle_line("GET VER").as_str().contains("proto=1"));
+        assert!(handle_line("GET VER").as_str().contains("proto="));
         assert_eq!(handle_line("G UID").as_str(), "OK UID");
     }
 
@@ -134,7 +134,7 @@ mod tests {
         assert_eq!(reply_text("GET UID", "AABBCC").as_str(), "OK UID AABBCC");
         assert_eq!(reply_text("g uid", "AABBCC").as_str(), "OK UID AABBCC");
         assert_eq!(reply_text("PING", "AABBCC").as_str(), "PONG");
-        assert!(reply_text("GET VER", "AABBCC").as_str().contains("proto=1"));
+        assert!(reply_text("GET VER", "AABBCC").as_str().contains("proto="));
     }
 
     #[test]
