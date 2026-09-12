@@ -45,10 +45,3 @@ Optionally, some features requiring embassy-time can be activated with the time 
 The low-power feature integrates specifically with embassy-executor, it can't be used on other executors for now.
 
 
-## stm32-rs/stm32-rs
-
-The stm32-rs project serves two primary purposes: creating a source of corrected STM32 SVD files with manufacturer errors and inconsistencies fixed, and creating and publishing svd2rust-generated crates covering all STM32 device families. For detailed information about the build system mechanics, see Build System & Architecture. For device-specific configurations, see Device Configuration System.
-
-## stm32-rs/stm32g4xx-hal
-
-stm32g4xx-hal is a hardware abstraction layer (HAL) crate providing safe, idiomatic, and multi-device peripheral APIs on top of the peripheral access cell (PAC) for the STMicroelectronics STM32G4 series of microcontrollers. Its primary role is to sit between raw register-level register blocks (stm32g4) and standard embedded ecosystem traits (embedded-hal), turning unsafe memory mappings into robust, type-checked hardware drivers
