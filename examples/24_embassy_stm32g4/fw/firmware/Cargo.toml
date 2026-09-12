@@ -1,0 +1,28 @@
+[package]
+name = "g474-firmware"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "usb_proto"
+path = "src/main.rs"
+
+[dependencies]
+g474-common = { path = "../common" }
+embassy-stm32 = { version = "0.6", features = ["defmt", "time-driver-any", "stm32g474ce", "memory-x", "dual-bank", "unstable-pac", "exti"] }
+embassy-sync = { version = "0.8", features = ["defmt"] }
+embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread", "defmt"] }
+embassy-time = { version = "0.5", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-32_768"] }
+embassy-futures = "0.1"
+embassy-usb = { version = "0.6", features = ["defmt"] }
+defmt = "1.0"
+defmt-rtt = "1.0"
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+panic-probe = { version = "1.0", features = ["print-defmt"] }
+heapless = { version = "0.7", default-features = false }
+static_cell = "2"
+postcard = { version = "1.1", default-features = false, features = ["heapless"] }
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+
