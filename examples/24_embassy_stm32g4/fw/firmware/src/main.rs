@@ -6,23 +6,29 @@
 #![no_std]
 #![no_main]
 
-use defmt::{info, panic};
+use defmt::{info, panic, warn};
 use defmt_rtt as _;
-use embassy_futures::join::join;
+use embassy_futures::join::join3;
+use embassy_stm32::usart::{Config as UsartConfig, Uart};
 use embassy_stm32::usb::{self, Driver, Instance};
-use embassy_stm32::{bind_interrupts, peripherals, Config};
+use embassy_stm32::{bind_interrupts, dma, mode, peripherals, usart, Config};
+use embassy_time::Timer;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use embassy_usb::driver::EndpointError;
 use embassy_usb::Builder;
+use embedded_io_async::Write;
 use g474_common::err;
 use g474_common::frame::encode_resp;
 use g474_common::router::{InEvent, Router};
-use g474_common::text::handle_line;
+use g474_common::text::reply_text;
 use g474_common::{DeviceResp, HostCmd, MAX_FRAME, PROTO_VER};
 use panic_probe as _;
 
 bind_interrupts!(struct Irqs {
     USB_LP => usb::InterruptHandler<peripherals::USB>;
+    USART1 => usart::InterruptHandler<peripherals::USART1>;
+    DMA1_CHANNEL1 => dma::InterruptHandler<peripherals::DMA1_CH1>;
+    DMA1_CHANNEL2 => dma::InterruptHandler<peripherals::DMA1_CH2>;
 });
 
 #[embassy_executor::main]
@@ -66,6 +72,14 @@ async fn main(_spawner: embassy_executor::Spawner) {
     );
     let mut class = CdcAcmClass::new(&mut builder, cdc_state, 64);
     let mut usb = builder.build();
+
+    // Second transport: USART1 on PA9 (TX) / PA10 (RX), 115200 8N1.
+    // Same protocol as USB (shared Router), reachable via STLink VCP.
+    let mut uc = UsartConfig::default();
+    uc.baudrate = 115_200;
+    let mut uart = Uart::new(p.USART1, p.PA10, p.PA9, p.DMA1_CH1, p.DMA1_CH2, Irqs, uc).unwrap();
+    info!("UART ready on PA9/PA10 @115200");
+
     let usb_fut = usb.run();
     let proto_fut = async {
         loop {
@@ -75,7 +89,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
             info!("USB disconnected");
         }
     };
-    join(usb_fut, proto_fut).await;
+    let uart_fut = serve_uart(&mut uart);
+    join3(usb_fut, proto_fut, uart_fut).await;
 }
 
 struct Disconnected;
@@ -110,52 +125,89 @@ fn answer_cmd(cmd: HostCmd) -> DeviceResp {
     }
 }
 
+/// Transport-independent reply to one router event. Binary replies are
+/// encoded into `tx`; the length is valid only for `Out::Bin`.
+enum Out {
+    Text(heapless::String<96>),
+    Bin(usize),
+    Skip,
+}
+
+fn dispatch(ev: InEvent, tx: &mut [u8; MAX_FRAME + 32], uid_hex: &str) -> Out {
+    match ev {
+        InEvent::Text(line) => Out::Text(reply_text(line.as_str(), uid_hex)),
+        InEvent::Cmd(cmd) => match encode_resp(&answer_cmd(cmd), tx) {
+            Some(n) => Out::Bin(n),
+            None => Out::Skip,
+        },
+        InEvent::TextTooLong => Out::Text(heapless::String::from("ERR TOOLONG")),
+        InEvent::BinError => match encode_resp(
+            &DeviceResp::Err {
+                code: err::BAD_FRAME,
+            },
+            tx,
+        ) {
+            Some(n) => Out::Bin(n),
+            None => Out::Skip,
+        },
+    }
+}
+
 async fn serve<'d, T: Instance + 'd>(
     class: &mut CdcAcmClass<'d, Driver<'d, T>>,
 ) -> Result<(), Disconnected> {
     let mut pkt = [0u8; 64];
     let mut router = Router::new();
     let mut tx = [0u8; MAX_FRAME + 32];
+    let uid = embassy_stm32::uid::uid_hex();
     loop {
         let n = class.read_packet(&mut pkt).await?;
         for &b in &pkt[..n] {
             match router.feed(b) {
                 None => {}
-                Some(InEvent::Text(line)) => {
-                    // GET UID is answered with the real chip UID here, not in common.
-                    let trimmed = line.as_str().trim();
-                    let reply: heapless::String<96> = if trimmed.eq_ignore_ascii_case("GET UID")
-                        || trimmed.eq_ignore_ascii_case("G UID")
-                    {
-                        let mut s: heapless::String<96> = heapless::String::new();
-                        let _ = core::fmt::write(
-                            &mut s,
-                            format_args!("OK UID {}", embassy_stm32::uid::uid_hex()),
-                        );
-                        s
-                    } else {
-                        handle_line(line.as_str())
-                    };
-                    write_all(class, reply.as_bytes()).await?;
-                    write_all(class, b"\n").await?;
-                }
-                Some(InEvent::Cmd(cmd)) => {
-                    let resp = answer_cmd(cmd);
-                    if let Some(len) = encode_resp(&resp, &mut tx) {
-                        write_all(class, &tx[..len]).await?;
+                Some(ev) => match dispatch(ev, &mut tx, uid) {
+                    Out::Text(s) => {
+                        write_all(class, s.as_bytes()).await?;
+                        write_all(class, b"\n").await?;
+                    }
+                    Out::Bin(m) => {
+                        write_all(class, &tx[..m]).await?;
+                    }
+                    Out::Skip => {}
+                },
+            }
+        }
+    }
+}
+
+async fn serve_uart(uart: &mut Uart<'_, mode::Async>) {
+    let mut pkt = [0u8; 64];
+    let mut router = Router::new();
+    let mut tx = [0u8; MAX_FRAME + 32];
+    let uid = embassy_stm32::uid::uid_hex();
+    info!("UART serving on USART1");
+    loop {
+        // Idle-line detection returns whatever arrived as one chunk.
+        match uart.read_until_idle(&mut pkt).await {
+            Ok(n) => {
+                for &b in &pkt[..n] {
+                    if let Some(ev) = router.feed(b) {
+                        match dispatch(ev, &mut tx, uid) {
+                            Out::Text(s) => {
+                                let _ = uart.write_all(s.as_bytes()).await;
+                                let _ = uart.write_all(b"\n").await;
+                            }
+                            Out::Bin(m) => {
+                                let _ = uart.write_all(&tx[..m]).await;
+                            }
+                            Out::Skip => {}
+                        }
                     }
                 }
-                Some(InEvent::TextTooLong) => {
-                    write_all(class, b"ERR TOOLONG\n").await?;
-                }
-                Some(InEvent::BinError) => {
-                    let resp = DeviceResp::Err {
-                        code: err::BAD_FRAME,
-                    };
-                    if let Some(len) = encode_resp(&resp, &mut tx) {
-                        write_all(class, &tx[..len]).await?;
-                    }
-                }
+            }
+            Err(_) => {
+                warn!("UART read error");
+                Timer::after_millis(10).await;
             }
         }
     }

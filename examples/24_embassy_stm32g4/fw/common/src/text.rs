@@ -2,6 +2,20 @@
 
 use crate::{FW_VER, MAX_LINE, PROTO_VER};
 
+/// Build the reply for a received text line. `GET UID`/`G UID` is answered
+/// with the caller-provided UID hex (the real chip UID on firmware);
+/// everything else goes through [`handle_line`].
+pub fn reply_text(line: &str, uid_hex: &str) -> heapless::String<96> {
+    let trimmed = line.trim();
+    if trimmed.eq_ignore_ascii_case("GET UID") || trimmed.eq_ignore_ascii_case("G UID") {
+        let mut s: heapless::String<96> = heapless::String::new();
+        let _ = core::fmt::write(&mut s, format_args!("OK UID {}", uid_hex));
+        s
+    } else {
+        handle_line(line)
+    }
+}
+
 /// Parse one stripped text line, return the reply line (without terminator).
 pub fn handle_line(line: &str) -> heapless::String<96> {
     let mut out: heapless::String<96> = heapless::String::new();
@@ -113,6 +127,14 @@ mod tests {
     fn get_ver_uid() {
         assert!(handle_line("GET VER").as_str().contains("proto=1"));
         assert_eq!(handle_line("G UID").as_str(), "OK UID");
+    }
+
+    #[test]
+    fn reply_text_uid_branch() {
+        assert_eq!(reply_text("GET UID", "AABBCC").as_str(), "OK UID AABBCC");
+        assert_eq!(reply_text("g uid", "AABBCC").as_str(), "OK UID AABBCC");
+        assert_eq!(reply_text("PING", "AABBCC").as_str(), "PONG");
+        assert!(reply_text("GET VER", "AABBCC").as_str().contains("proto=1"));
     }
 
     #[test]
