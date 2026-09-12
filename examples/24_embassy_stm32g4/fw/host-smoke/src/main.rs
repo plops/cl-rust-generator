@@ -12,10 +12,31 @@ use std::io::{Read, Write};
 use std::time::Duration;
 
 fn main() {
-    let port_name = std::env::args().nth(1).unwrap_or_else(|| {
-        eprintln!("usage: g474-host-smoke /dev/ttyACMx [gate_ms]");
+    let args: Vec<String> = std::env::args().collect();
+    let port_name = args.get(1).cloned().unwrap_or_else(|| {
+        eprintln!("usage: g474-host-smoke /dev/ttyACMx [gate_ms] [level_mv] [--endurance N] [--reconnect]");
         std::process::exit(2);
     });
+    // T2 hardening flags (positional numeric args keep working: flags do not
+    // parse as numbers and fall back to defaults).
+    let endurance: u32 = args
+        .iter()
+        .position(|a| a == "--endurance")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let reconnect_only: bool = args.iter().any(|a| a == "--reconnect");
+    // T2 size sweep: comma-separated scope lengths to download on the open port.
+    let sweep: Vec<u16> = args
+        .iter()
+        .position(|a| a == "--sweep-lens")
+        .and_then(|i| args.get(i + 1))
+        .map(|s| {
+            s.split(',')
+                .filter_map(|p| p.parse().ok())
+                .collect::<Vec<u16>>()
+        })
+        .unwrap_or_default();
     // Optional longer gate to catch slow/rare edges on a floating input.
     let gate_ms: u32 = std::env::args()
         .nth(2)
@@ -27,16 +48,86 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(1650)
         .min(3300);
-    let mut port = serialport::new(&port_name, 115_200)
-        .timeout(Duration::from_millis(15000))
-        .open()
-        .unwrap_or_else(|e| {
-            eprintln!("open {}: {}", port_name, e);
-            std::process::exit(2);
-        });
-    // Give the device a moment after DTR/reset-triggering open.
-    std::thread::sleep(Duration::from_millis(500));
-    let _ = port.clear(serialport::ClearBuffer::All);
+    let mut port = open_port(&port_name);
+    if reconnect_only {
+        // T2 reconnect: close + reopen must leave a live protocol session.
+        let mut failures = 0;
+        if !check_binary(
+            &mut port,
+            HostCmd::Ping,
+            |r| r == &DeviceResp::Pong,
+            "Ping#1",
+        ) {
+            failures += 1;
+        }
+        drop(port);
+        std::thread::sleep(Duration::from_millis(500));
+        let mut port = open_port(&port_name);
+        if !check_binary(
+            &mut port,
+            HostCmd::Ping,
+            |r| r == &DeviceResp::Pong,
+            "Ping#2",
+        ) {
+            failures += 1;
+        }
+        if !check_text(&mut port, "PING\n", "PONG") {
+            failures += 1;
+        }
+        if failures > 0 {
+            eprintln!("{} FAILURES", failures);
+            std::process::exit(1);
+        }
+        println!("reconnect check passed");
+        return;
+    }
+    if !sweep.is_empty() {
+        // Minimal resync: the first frame after open can lose its leading
+        // marker in the VCP (→ one BAD_FRAME); retry once, then sweep.
+        let mut failures = 0;
+        for attempt in 0..2 {
+            if check_binary(
+                &mut port,
+                HostCmd::Ping,
+                |r| r == &DeviceResp::Pong,
+                "Ping-resync",
+            ) {
+                break;
+            }
+            failures += (attempt == 1) as u32;
+        }
+        if !check_binary(
+            &mut port,
+            HostCmd::ScopeStart(ScopeConfig {
+                interleaved: 0,
+                level_mv: 100,
+            }),
+            |r| r == &DeviceResp::ModeOk { mode: 1 },
+            "ScopeStart->ModeOk(A)",
+        ) {
+            failures += 1;
+        }
+        for len in &sweep {
+            if !check_scope_read(&mut port, 0, *len) {
+                failures += 1;
+            }
+        }
+        if failures > 0 {
+            eprintln!("{} FAILURES", failures);
+            std::process::exit(1);
+        }
+        println!("sweep check passed");
+        return;
+    }
+    if endurance > 0 {
+        let failures = endurance_run(&mut port, endurance);
+        if failures > 0 {
+            eprintln!("{} FAILURES", failures);
+            std::process::exit(1);
+        }
+        println!("endurance check passed");
+        return;
+    }
 
     let mut failures = 0;
     // T5 text matrix.
@@ -231,6 +322,12 @@ fn main() {
         |r| r == &DeviceResp::ModeIdle,
         "ModeStop->ModeIdle",
     ) {
+        failures += 1;
+    }
+    // T2: ModeStop issued mid-transfer. The serve loop is sequential, so the
+    // device finishes the in-flight block stream first and answers ModeIdle
+    // after it; the host must drain the trailing frames, not wedge on them.
+    if !check_stop_during_transfer(&mut port) {
         failures += 1;
     }
     if !check_text(&mut port, "GET FREQ\n", "OK FREQ hz=") {
@@ -428,6 +525,163 @@ fn check_vna_read(port: &mut Box<dyn serialport::SerialPort>, off: u32, len: u16
             }
         }
     }
+}
+
+fn open_port(name: &str) -> Box<dyn serialport::SerialPort> {
+    let port = serialport::new(name, 115_200)
+        .timeout(Duration::from_millis(15000))
+        .open()
+        .unwrap_or_else(|e| {
+            eprintln!("open {}: {}", name, e);
+            std::process::exit(2);
+        });
+    // Give the device a moment after DTR/reset-triggering open.
+    std::thread::sleep(Duration::from_millis(500));
+    let _ = port.clear(serialport::ClearBuffer::All);
+    port
+}
+
+/// T2: start a 10-block scope download, read one block, then stop. Accepts
+/// both stream-completes-first (current firmware) and abort-first orderings;
+/// afterwards the device must answer PING.
+fn check_stop_during_transfer(port: &mut Box<dyn serialport::SerialPort>) -> bool {
+    if !check_binary(
+        port,
+        HostCmd::ScopeStart(ScopeConfig {
+            interleaved: 0,
+            level_mv: 100,
+        }),
+        |r| r == &DeviceResp::ModeOk { mode: 1 },
+        "ScopeStart->ModeOk(A)",
+    ) {
+        return false;
+    }
+    let mut buf = [0u8; 160];
+    let n = encode_cmd(&HostCmd::ScopeRead { off: 0, len: 480 }, &mut buf).expect("encode");
+    port.write_all(&buf[..n]).unwrap();
+    match read_frame(port) {
+        Some(DeviceResp::Block { seq: 0, .. }) => {}
+        other => {
+            println!("FAIL stop-mid-transfer first block -> {:?}", other);
+            return false;
+        }
+    }
+    let n = encode_cmd(&HostCmd::ModeStop, &mut buf).expect("encode");
+    port.write_all(&buf[..n]).unwrap();
+    let mut blocks = 1u32;
+    let mut ended = false;
+    for _ in 0..16 {
+        match read_frame(port) {
+            Some(DeviceResp::Block { .. }) => blocks += 1,
+            Some(DeviceResp::BlockEnd { .. }) => ended = true,
+            Some(DeviceResp::ModeIdle) => {
+                println!(
+                    "ok   stop-mid-transfer drained {} blocks ended={} -> ModeIdle",
+                    blocks, ended
+                );
+                return check_binary(
+                    port,
+                    HostCmd::Ping,
+                    |r| r == &DeviceResp::Pong,
+                    "Ping-alive",
+                );
+            }
+            other => {
+                println!("FAIL stop-mid-transfer drain -> {:?}", other);
+                return false;
+            }
+        }
+    }
+    println!("FAIL stop-mid-transfer: no ModeIdle within 16 frames");
+    false
+}
+
+/// T2 endurance: cycle every mode with alternating text/binary traffic.
+/// Short gates keep one iteration under ~1 s; N=60 approximates the 60-s
+/// Dauerlauf across all modes.
+fn endurance_run(port: &mut Box<dyn serialport::SerialPort>, iters: u32) -> u32 {
+    use std::time::Instant;
+    let mut failures = 0;
+    let start = Instant::now();
+    for i in 0..iters {
+        let tag = format!("iter{}", i);
+        if !check_text(port, "PING\n", "PONG") {
+            failures += 1;
+        }
+        if !check_binary(port, HostCmd::Ping, |r| r == &DeviceResp::Pong, &tag) {
+            failures += 1;
+        }
+        let cfg = FreqConfig {
+            level_mv: 1650,
+            hyst: 2,
+            filter: 0,
+            gate_ms: 50,
+        };
+        if !check_binary(
+            port,
+            HostCmd::FreqStart(cfg),
+            |r| matches!(r, DeviceResp::Freq { gate_ms: 50, .. }),
+            &tag,
+        ) {
+            failures += 1;
+        }
+        if !check_text(port, "GET FREQ\n", "OK FREQ hz=") {
+            failures += 1;
+        }
+        if !check_binary(
+            port,
+            HostCmd::AwgStart(AwgConfig { freq_hz: 1000 }),
+            |r| r == &DeviceResp::ModeOk { mode: 3 },
+            &tag,
+        ) {
+            failures += 1;
+        }
+        if !check_scope_read(port, 0, 48) {
+            failures += 1;
+        }
+        if !check_binary(
+            port,
+            HostCmd::VnaStart(VnaConfig {
+                f0_hz: 500,
+                f1_hz: 2000,
+                points: 2,
+            }),
+            |r| r == &DeviceResp::ModeOk { mode: 2 },
+            &tag,
+        ) {
+            failures += 1;
+        }
+        if !check_vna_read(port, 0, 2) {
+            failures += 1;
+        }
+        let pin = (i % 3) as u8;
+        if !check_binary(
+            port,
+            HostCmd::CapStart(CapConfig { pin }),
+            |r| matches!(r, DeviceResp::Cap { .. }),
+            &tag,
+        ) {
+            failures += 1;
+        }
+        if !check_binary(
+            port,
+            HostCmd::ModeStop,
+            |r| r == &DeviceResp::ModeIdle,
+            &tag,
+        ) {
+            failures += 1;
+        }
+        if !check_text(port, "MODE STOP\n", "OK MODE IDLE") {
+            failures += 1;
+        }
+    }
+    println!(
+        "endurance: {} iters in {:.1}s ({} failures)",
+        iters,
+        start.elapsed().as_secs_f32(),
+        failures
+    );
+    failures
 }
 
 fn check_binary(

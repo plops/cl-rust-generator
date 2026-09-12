@@ -1,5 +1,5 @@
 [workspace]
-members = ["firmware", "common", "host-smoke"]
+members = ["firmware", "common", "host-smoke", "tui"]
 resolver = "2"
 
 [profile.release]
