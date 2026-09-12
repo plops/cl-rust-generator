@@ -1,4 +1,4 @@
-# Systemkonzept: STM32G474 "All-in-One" Advanced Instrument
++ Systemkonzept: STM32G474 "All-in-One" Advanced Instrument
 
 ## 1. Übersicht und Zielsetzung
 Entwicklung eines hochintegrierten, modularen Messgeräts auf Basis des **STM32G474CEU6** (170 MHz, 128 KB RAM, 512 KB Flash). Das System agiert als Multi-Instrument (Oszilloskop, Vektor-Netzwerkanalysator, AWG, Frequenzzähler, Kapazitätsmessgerät) und lagert rechen- sowie zeitkritische Operationen komplett in die analoge und digitale Hardware-Peripherie (HRTIM, ADCs, DACs, COMPs, OPAMPs, DMA) des Mikrocontrollers aus. 

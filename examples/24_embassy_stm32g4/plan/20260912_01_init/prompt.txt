@@ -1,7 +1,7 @@
+du arbeitest im auftrag von wol pumba (wolpumba@gmail.com)
+wir arbeiten an einem STM32G474CEU6 mcu firmware projekt
 
-wir arbeiten auf einen STM32G474CEU6
-
-programmiert kann dieser werden mittels STLink-STM32 programmierer. ich habe dies mit den beispielprogrammen in embassy verifiziert:
+programmiert kann diese MCU werden mittels STLink-STM32 programmierer. ich habe dies mit den beispielprogrammen in embassy verifiziert:
 
 ```
 embassy/examples/stm32g474 $ cat .cargo/config.toml
@@ -67,3 +67,24 @@ So sieht der Parser auf dem Mikrocontroller aus:
    -> Schalte den Parser in den Binär-Modus. Lies die exakte Anzahl an Bytes (Längen-Byte), validiere die CRC-Prüfsumme und antworte mit einem kompakten Binär-Frame (z. B. [0x02][0x04][0x00][0x19][0xCRC][0x03]).
 
 ich moechte sowohl usb als auch uart fuer die kommunikation einsetzen koennen. 
+wenn es einfacher ist, dann baue erstmal nur die usb loesung.
+
+nutze tools um konsistenten und aufgeraeumten quellcode zu gewaehrleisten (also `cargo fmt` um formatierung zu normalisieren, `cargo clippy` um moegliche fehler oder verbesserungen zu finden, cargo-edit mit	`cargo upgrade` um bei den abhaengigkeiten die neueste version zu verwenden, ...)
+
+Schaue dir den Quellcode an und die Architektur dieser Software. Nutze deepwiki mcp fuer plops/rs-summarizer um dokumentation zu bekommen und fragen beantworten zu lassen. falls abhaengigkeiten eingefuehrt werden sind diese mitsamt ihrer github organisation in deps.md aufzuschreiben, so dass wir spaeter einfach die deepwiki abfragen konstruieren koennen. nutze rust tools um auf die neueste vorhandene version zu switchen (auch wenn vor kompatibilitaet gewarnt wird, wenn wir gerade eine dependency einfuehren ist es wichtig, die neueste version zu nehmen) und schon vorab usage examples in den plan aufzunehmen (mit deepwiki mcp zu erfragen)
+
+du befindest dich in einem docker container, basierend auf ubuntu 26. du darfst neue programme installieren, falls noetig. 
+
+Schlage vor, wie wir dieses Feature implementieren können. Habe ich alle Requirements aufgelistet, die wichtig sind, oder kannst du dir vorstellen, dass noch andere Dinge werden sollen? Liste mir diese auf Vorschlägen, was man am besten umsetzen könnte.
+
+Schreibe einen Implementierungsplan. Dieser Implementierungsplan soll einen unabhängigen AI-Agenten dazu befähigen, selbstständig einen Kontext aufzubauen, der die wesentlichen
+quellen beinhaltet. Das heißt, der Implementierungsplan hat eine Liste von Dateien, die sich der Agent sich anschauen sollte, mit einer kurzen Beschreibung für jede Datei.
+Weiterhin soll der Implementierungsplan eine Erklärung Commit Messages sendet werden sollen. Und zwar sollen diese mit einer umfassenden Beschreibung und als Conventional Commit format ausgeführt werden.
+
+Neue Unit-Tests und Integration-Tests sollen wie erforderlich eingeführt werden.
+Diese sollen auch ausgeführt werden.
+
+schreibe task.md wo du die implementierungs und test schritte aufeinander abfolgen laesst, so dass ein agent die tasks seriell abarbeiten kann und die arbeit in jedem schritt getested und validiert wird.
+
+Nach der vollständigen Implementierung, wenn alle Tests abgeschlossen sind und alles committed ist, soll auch ein Walkthrough-Dokument entgeschrieben werden und 
+in plan/2026.../walkthrough.md abgelegt werden. Dieses soll zusammenfassen, was wirklich implementiert wurde, welche Stellen aufgrund der Tests oder wie auch immer gemacht wurden, als im Untergrund auch Learnings und mögliche Erweiterungen. liste auch die neuen programme die mit in den docker container aufgenommen werden sollten 
