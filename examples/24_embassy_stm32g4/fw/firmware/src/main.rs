@@ -32,6 +32,8 @@ mod scope_07;
 mod transport_03;
 #[path = "02_usb.rs"]
 mod usb_02;
+#[path = "08_vna.rs"]
+mod vna_08;
 
 bind_interrupts!(struct Irqs {
     USB_LP => usb::InterruptHandler<peripherals::USB>;
@@ -92,6 +94,7 @@ async fn main(spawner: embassy_executor::Spawner) {
     spawner.spawn(
         scope_07::scope_task(p.ADC1, p.PA0, &scope_07::SCOPE_REQ, &scope_07::SCOPE_RESP).unwrap(),
     );
+    spawner.spawn(vna_08::vna_task(&vna_08::VNA_REQ, &vna_08::VNA_RESP).unwrap());
 
     core::future::pending::<()>().await;
 }

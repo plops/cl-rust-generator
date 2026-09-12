@@ -6,7 +6,7 @@
 
 use core::sync::atomic::{AtomicU16, Ordering};
 
-use g474_common::modes_04::{id, AwgConfig, FreqConfig};
+use g474_common::modes_04::{id, AwgConfig, FreqConfig, VnaConfig};
 use g474_common::{err, DeviceResp, HostCmd, PROTO_VER};
 
 /// Self-test capability bits (`DeviceResp::SelfTestOk::bits`).
@@ -34,6 +34,13 @@ pub enum Action {
     AwgStart(AwgConfig),
     /// Acquire a snapshot, then stream `Block`s plus `BlockEnd`.
     ScopeRead {
+        off: u32,
+        len: u16,
+    },
+    /// Run a VNA sweep, then reply `ModeOk`.
+    VnaStart(VnaConfig),
+    /// Download sweep points as `Block`s plus `BlockEnd`.
+    VnaRead {
         off: u32,
         len: u16,
     },
@@ -125,16 +132,31 @@ impl Control {
                     len: len as u16,
                 };
             }
-            // Modes B, D land here until their tasks exist (order E→C→A→B→D).
-            // AwgLoad (LUT upload) waits for timer-triggered DAC DMA (stage 2).
-            HostCmd::CapStart(_) | HostCmd::VnaStart(_) | HostCmd::AwgLoad { .. } => {
-                DeviceResp::Err {
-                    code: err::NOT_IMPL,
+            HostCmd::VnaStart(cfg) => {
+                if cfg.validate().is_err() {
+                    return Action::Reply(DeviceResp::Err { code: err::BAD_ARG });
                 }
+                self.mode = id::B_VNA;
+                return Action::VnaStart(cfg);
             }
-            HostCmd::VnaRead { .. } | HostCmd::BlockAck { .. } => {
-                DeviceResp::Err { code: err::NO_DATA }
+            HostCmd::VnaRead { off, len } => {
+                let off = off as usize;
+                let len = len as usize;
+                if len == 0 || off.saturating_add(len) > crate::vna_08::VNA_MAX_POINTS {
+                    return Action::Reply(DeviceResp::Err { code: err::BAD_ARG });
+                }
+                self.mode = id::B_VNA;
+                return Action::VnaRead {
+                    off: off as u32,
+                    len: len as u16,
+                };
             }
+            // Mode D lands here until its task exists (order E→C→A→B→D).
+            // AwgLoad (LUT upload) waits for timer-triggered DAC DMA (stage 2).
+            HostCmd::CapStart(_) | HostCmd::AwgLoad { .. } => DeviceResp::Err {
+                code: err::NOT_IMPL,
+            },
+            HostCmd::BlockAck { .. } => DeviceResp::Err { code: err::NO_DATA },
             HostCmd::CapRead => DeviceResp::Err {
                 code: err::NOT_IMPL,
             },

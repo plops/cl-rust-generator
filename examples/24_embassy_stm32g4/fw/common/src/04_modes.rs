@@ -107,8 +107,32 @@ pub struct CapConfig {
 pub struct VnaConfig {
     pub f0_hz: u32,
     pub f1_hz: u32,
-    /// Sweep points, 2..=1024.
+    /// Sweep points, 2..=128 (bounds total sweep time).
     pub points: u16,
+}
+
+impl VnaConfig {
+    /// Frequencies in Hz for all sweep points (linear, inclusive).
+    pub fn freq_at(&self, i: usize) -> u32 {
+        if self.points <= 1 {
+            return self.f0_hz;
+        }
+        let span = self.f1_hz.saturating_sub(self.f0_hz) as u64;
+        self.f0_hz + (span * i as u64 / (self.points as u64 - 1)) as u32
+    }
+
+    pub fn validate(&self) -> Result<(), u8> {
+        if self.f0_hz == 0 || self.f0_hz > 1_000_000 {
+            return Err(super::err::BAD_ARG);
+        }
+        if self.f1_hz < self.f0_hz || self.f1_hz > 1_000_000 {
+            return Err(super::err::BAD_ARG);
+        }
+        if !(2..=128).contains(&self.points) {
+            return Err(super::err::BAD_ARG);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -178,6 +202,23 @@ mod tests {
         assert!(AwgConfig { freq_hz: 1_000_000 }.validate().is_ok());
         assert!(AwgConfig { freq_hz: 0 }.validate().is_err());
         assert!(AwgConfig { freq_hz: 1_000_001 }.validate().is_err());
+    }
+
+    #[test]
+    fn vna_config_sweep() {
+        let cfg = VnaConfig {
+            f0_hz: 1000,
+            f1_hz: 3000,
+            points: 3,
+        };
+        assert!(cfg.validate().is_ok());
+        assert_eq!(cfg.freq_at(0), 1000);
+        assert_eq!(cfg.freq_at(1), 2000);
+        assert_eq!(cfg.freq_at(2), 3000);
+        assert!(VnaConfig { f0_hz: 0, ..cfg }.validate().is_err());
+        assert!(VnaConfig { f1_hz: 999, ..cfg }.validate().is_err());
+        assert!(VnaConfig { points: 1, ..cfg }.validate().is_err());
+        assert!(VnaConfig { points: 129, ..cfg }.validate().is_err());
     }
 
     #[test]

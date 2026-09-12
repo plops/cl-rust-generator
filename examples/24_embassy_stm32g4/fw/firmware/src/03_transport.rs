@@ -24,6 +24,7 @@ use crate::control_04::{Action, Control};
 use crate::mode_freq_05::{FreqResult, FREQ_REQ, FREQ_RESP};
 use crate::scope_07::{ScopeReq, SCOPE_PER_BLOCK, SCOPE_REQ, SCOPE_RESP, SCOPE_SNAP};
 use crate::usb_02::{write_all, Disconnected};
+use crate::vna_08::{VnaReq, VNA_PER_BLOCK, VNA_REQ, VNA_RESP, VNA_SNAP};
 use g474_common::blocks_05::crc16_update;
 
 /// Exclusive mode state shared by USB and UART tasks.
@@ -35,6 +36,7 @@ enum Out {
     Text(heapless::String<96>),
     Bin(usize),
     Scope { off: usize, len: usize },
+    Vna { off: usize, len: usize },
     Skip,
 }
 
@@ -63,9 +65,10 @@ fn discriminant(cmd: &HostCmd) -> u8 {
 /// round-trip through the mode task (second request → `MODE_BUSY`).
 async fn run_action(action: Action) -> DeviceResp {
     match action {
-        // Scope downloads stream multiple frames; dispatch routes them to
-        // Out::Scope before run_action, so this arm is unreachable.
+        // Scope/VNA downloads stream multiple frames; dispatch routes them to
+        // Out::Scope/Out::Vna before run_action, so these arms are unreachable.
         Action::ScopeRead { .. } => unreachable!("scope uses Out::Scope"),
+        Action::VnaRead { .. } => unreachable!("vna uses Out::Vna"),
         Action::Reply(r) => r,
         Action::MeasureFreq(cfg) => {
             if FREQ_REQ.try_send(cfg).is_err() {
@@ -101,6 +104,18 @@ async fn run_action(action: Action) -> DeviceResp {
                 mode: g474_common::modes_04::id::C_AWG,
             }
         }
+        Action::VnaStart(cfg) => {
+            if VNA_REQ.try_send(VnaReq { cfg }).is_err() {
+                return DeviceResp::Err {
+                    code: err::MODE_BUSY,
+                };
+            }
+            let r = VNA_RESP.receive().await;
+            defmt::info!("vna swept {} pts", r.points);
+            DeviceResp::ModeOk {
+                mode: g474_common::modes_04::id::B_VNA,
+            }
+        }
     }
 }
 
@@ -122,6 +137,10 @@ async fn dispatch(ev: InEvent, tx: &mut [u8; MAX_FRAME + 32], uid_hex: &str) -> 
             }
             match action {
                 Action::ScopeRead { off, len } => Out::Scope {
+                    off: off as usize,
+                    len: len as usize,
+                },
+                Action::VnaRead { off, len } => Out::Vna {
                     off: off as usize,
                     len: len as usize,
                 },
@@ -233,6 +252,112 @@ async fn serve_scope_usb<'d, T: Instance + 'd>(
     .await
 }
 
+/// Download sweep points `[off..off+len)` as `Block`s + `BlockEnd` (USB).
+/// Unlike scope, VNA downloads the last completed sweep (no re-acquire).
+async fn serve_vna_usb<'d, T: Instance + 'd>(
+    class: &mut CdcAcmClass<'d, Driver<'d, T>>,
+    tx: &mut [u8; MAX_FRAME + 32],
+    off: usize,
+    len: usize,
+) -> Result<(), Disconnected> {
+    let have = VNA_SNAP.lock().await.n;
+    if have == 0 {
+        return send_bin(class, tx, &DeviceResp::Err { code: err::NO_DATA }).await;
+    }
+    if off.saturating_add(len) > have {
+        return send_bin(class, tx, &DeviceResp::Err { code: err::BAD_ARG }).await;
+    }
+    let total = len.div_ceil(VNA_PER_BLOCK);
+    let mut crc: u16 = 0xFFFF;
+    for seq in 0..total {
+        let s = off + seq * VNA_PER_BLOCK;
+        let e = (s + VNA_PER_BLOCK).min(off + len);
+        let data = {
+            let snap = VNA_SNAP.lock().await;
+            let mut data = heapless::Vec::<u8, 96>::new();
+            snap.bytes_into(s, e, &mut data);
+            data
+        };
+        crc = crc16_update(crc, &data);
+        send_bin(
+            class,
+            tx,
+            &DeviceResp::Block {
+                seq: seq as u16,
+                total: total as u16,
+                data,
+            },
+        )
+        .await?;
+    }
+    send_bin(
+        class,
+        tx,
+        &DeviceResp::BlockEnd {
+            total: total as u16,
+            crc,
+        },
+    )
+    .await
+}
+
+/// UART twin of [`serve_vna_usb`].
+async fn serve_vna_uart(
+    uart: &mut Uart<'static, mode::Async>,
+    tx: &mut [u8; MAX_FRAME + 32],
+    off: usize,
+    len: usize,
+) {
+    async fn send(uart: &mut Uart<'static, mode::Async>, tx: &[u8]) {
+        usart_write_all(uart, tx).await;
+    }
+    let have = VNA_SNAP.lock().await.n;
+    if have == 0 {
+        if let Some(n) = encode_resp(&DeviceResp::Err { code: err::NO_DATA }, tx) {
+            send(uart, &tx[..n]).await;
+        }
+        return;
+    }
+    if off.saturating_add(len) > have {
+        if let Some(n) = encode_resp(&DeviceResp::Err { code: err::BAD_ARG }, tx) {
+            send(uart, &tx[..n]).await;
+        }
+        return;
+    }
+    let total = len.div_ceil(VNA_PER_BLOCK);
+    let mut crc: u16 = 0xFFFF;
+    for seq in 0..total {
+        let s = off + seq * VNA_PER_BLOCK;
+        let e = (s + VNA_PER_BLOCK).min(off + len);
+        let data = {
+            let snap = VNA_SNAP.lock().await;
+            let mut data = heapless::Vec::<u8, 96>::new();
+            snap.bytes_into(s, e, &mut data);
+            data
+        };
+        crc = crc16_update(crc, &data);
+        if let Some(n) = encode_resp(
+            &DeviceResp::Block {
+                seq: seq as u16,
+                total: total as u16,
+                data,
+            },
+            tx,
+        ) {
+            send(uart, &tx[..n]).await;
+        }
+    }
+    if let Some(n) = encode_resp(
+        &DeviceResp::BlockEnd {
+            total: total as u16,
+            crc,
+        },
+        tx,
+    ) {
+        send(uart, &tx[..n]).await;
+    }
+}
+
 async fn serve<'d, T: Instance + 'd>(
     class: &mut CdcAcmClass<'d, Driver<'d, T>>,
 ) -> Result<core::convert::Infallible, Disconnected> {
@@ -254,6 +379,9 @@ async fn serve<'d, T: Instance + 'd>(
                     }
                     Out::Scope { off, len } => {
                         serve_scope_usb(class, &mut tx, off, len).await?;
+                    }
+                    Out::Vna { off, len } => {
+                        serve_vna_usb(class, &mut tx, off, len).await?;
                     }
                     Out::Skip => {}
                 }
@@ -289,6 +417,9 @@ async fn serve_uart(mut uart: Uart<'static, mode::Async>) {
                             }
                             Out::Scope { off, len } => {
                                 serve_scope_uart(&mut uart, &mut tx, off, len).await;
+                            }
+                            Out::Vna { off, len } => {
+                                serve_vna_uart(&mut uart, &mut tx, off, len).await;
                             }
                             Out::Skip => {}
                         }

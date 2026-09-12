@@ -5,7 +5,7 @@
 //! and exits 0 only if every expectation holds.
 
 use g474_common::frame::encode_cmd;
-use g474_common::modes_04::{AwgConfig, FreqConfig, ScopeConfig};
+use g474_common::modes_04::{AwgConfig, FreqConfig, ScopeConfig, VnaConfig};
 use g474_common::{DeviceResp, HostCmd, PROTO_VER};
 use postcard::accumulator::{CobsAccumulator, FeedResult};
 use std::io::{Read, Write};
@@ -114,6 +114,43 @@ fn main() {
         HostCmd::ScopeRead { off: 0, len: 0 },
         |r| matches!(r, DeviceResp::Err { code: 7 }),
         "ScopeRead(0)->BAD_ARG",
+    ) {
+        failures += 1;
+    }
+    // VNA: 3-point sweep (fast: ~15 ms settle per point), then download.
+    // PA5/PA0 unconnected: amplitudes ~0, shape + CRC are checked.
+    if !check_binary(
+        &mut port,
+        HostCmd::VnaStart(VnaConfig {
+            f0_hz: 500,
+            f1_hz: 2000,
+            points: 3,
+        }),
+        |r| r == &DeviceResp::ModeOk { mode: 2 },
+        "VnaStart->ModeOk(B)",
+    ) {
+        failures += 1;
+    }
+    if !check_binary(
+        &mut port,
+        HostCmd::VnaStart(VnaConfig {
+            f0_hz: 500,
+            f1_hz: 2000,
+            points: 1,
+        }),
+        |r| matches!(r, DeviceResp::Err { code: 7 }),
+        "VnaStart(1pt)->BAD_ARG",
+    ) {
+        failures += 1;
+    }
+    if !check_vna_read(&mut port, 0, 3) {
+        failures += 1;
+    }
+    if !check_binary(
+        &mut port,
+        HostCmd::VnaRead { off: 0, len: 99 },
+        |r| matches!(r, DeviceResp::Err { code: 7 }),
+        "VnaRead(beyond)->BAD_ARG",
     ) {
         failures += 1;
     }
@@ -295,6 +332,67 @@ fn check_scope_read(port: &mut Box<dyn serialport::SerialPort>, off: u32, len: u
             }
             other => {
                 println!("FAIL scope unexpected {:?}", other);
+                return false;
+            }
+        }
+    }
+}
+
+/// Download `len` VNA points at `off` and verify order, frequencies,
+/// byte count, and CRC. Returns false on any mismatch.
+fn check_vna_read(port: &mut Box<dyn serialport::SerialPort>, off: u32, len: u16) -> bool {
+    use g474_common::blocks_05::crc16;
+    let mut buf = [0u8; 160];
+    let n = encode_cmd(&HostCmd::VnaRead { off, len }, &mut buf).expect("encode");
+    port.write_all(&buf[..n]).unwrap();
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut total = usize::MAX;
+    let mut next_seq = 0u16;
+    loop {
+        match read_frame(port) {
+            Some(DeviceResp::Block {
+                seq,
+                total: t,
+                data,
+            }) => {
+                if seq != next_seq || (total != usize::MAX && t as usize != total) {
+                    println!("FAIL vna block order seq={} total={}", seq, t);
+                    return false;
+                }
+                total = t as usize;
+                next_seq += 1;
+                bytes.extend_from_slice(&data);
+            }
+            Some(DeviceResp::BlockEnd { total: t, crc }) => {
+                if t as usize != total || next_seq as usize != total {
+                    println!("FAIL vna BlockEnd total={} (saw {} blocks)", t, next_seq);
+                    return false;
+                }
+                if bytes.len() != len as usize * 6 {
+                    println!("FAIL vna byte count {}", bytes.len());
+                    return false;
+                }
+                if crc16(&bytes) != crc {
+                    println!("FAIL vna CRC {:04X} != {:04X}", crc16(&bytes), crc);
+                    return false;
+                }
+                // Frequencies must be ascending starting at f0 of the sweep.
+                let mut freqs = Vec::new();
+                for chunk in bytes.as_chunks::<6>().0 {
+                    freqs.push(u32::from_le_bytes(chunk[0..4].try_into().unwrap()));
+                }
+                if freqs.windows(2).any(|w| w[0] >= w[1]) {
+                    println!("FAIL vna freqs not ascending {:?}", freqs);
+                    return false;
+                }
+                println!(
+                    "ok   vna off={} len={} freqs={:?} crc={:04X}",
+                    off, len, freqs, crc
+                );
+                return true;
+            }
+            other => {
+                println!("FAIL vna unexpected {:?}", other);
                 return false;
             }
         }
