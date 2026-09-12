@@ -35,3 +35,34 @@ embassy/examples/stm32g474 $ cargo run --release --bin comp
 0.000183 [INFO ] output: false (comp src/bin/comp.rs:41)
 0.500305 [INFO ] output: false (comp src/bin/comp.rs:41)
 ```
+
+bemerkung: der sehr aehnlich aussehende DAPLink-APM32 mini debugger scheint nicht zu funktionieren:
+
+```
+embassy/examples/stm32g474 $ cargo run --release --bin comp
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.15s
+     Running `probe-rs run --chip STM32G474RETx target/thumbv7em-none-eabi/release/comp`
+Error: Connecting to the chip was unsuccessful.
+
+Caused by:
+    0: An ARM specific error occurred.
+    1: No target responded to the debug port. Check that the target is connected and powered, and that the SWD/JTAG wiring is correct.
+    2: An error occurred in the communication with an access port or debug port.
+    3: Target device did not respond to request.
+```
+
+ich moechte das embedded geraet per terminal mit menschen lesbaren kommandos steuern (die ich selbst eingebe) andererseits moechte ich auch effiziente kommunikation mit anderen programmen ermoeglichen
+
+Statt zwei Modi zu trennen, schreibst du einen Parser auf dem eingebetteten Gerät, der anhand des ersten empfangenen Bytes sofort erkennt, ob ein Mensch oder eine Maschine spricht.
+
+* Regel für den Menschen: Textkommandos beginnen immer mit einem Buchstaben (z. B. H für HELP, G für GET) und enden mit einem Newline (\n oder \r).
+* Regel für die Maschine: Binäre Frames beginnen niemals mit einem ASCII-Buchstaben, sondern mit einem speziellen, nicht-druckbaren Start-Byte (z. B. 0x02 für STX oder 0xAA).
+
+So sieht der Parser auf dem Mikrocontroller aus:
+
+   1. Das erste Byte kommt im UART-Buffer an.
+   2. Ist das Byte ein Buchstabe (z. B. zwischen 'A' und 'Z')?
+   -> Schalte den Parser in den Text-Modus. Lies alle weiteren Zeichen bis zum \n und verarbeite das Kommando (z. B. per Textausgabe Temperatur ist 25°C\n).
+   3. Ist das Byte ein magisches Start-Byte (z. B. 0x02)?
+   -> Schalte den Parser in den Binär-Modus. Lies die exakte Anzahl an Bytes (Längen-Byte), validiere die CRC-Prüfsumme und antworte mit einem kompakten Binär-Frame (z. B. [0x02][0x04][0x00][0x19][0xCRC][0x03]).
+
