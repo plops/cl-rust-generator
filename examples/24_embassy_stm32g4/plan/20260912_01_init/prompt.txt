@@ -66,3 +66,4 @@ So sieht der Parser auf dem Mikrocontroller aus:
    3. Ist das Byte ein magisches Start-Byte (z. B. 0x02)?
    -> Schalte den Parser in den Binär-Modus. Lies die exakte Anzahl an Bytes (Längen-Byte), validiere die CRC-Prüfsumme und antworte mit einem kompakten Binär-Frame (z. B. [0x02][0x04][0x00][0x19][0xCRC][0x03]).
 
+ich moechte sowohl usb als auch uart fuer die kommunikation einsetzen koennen. 
