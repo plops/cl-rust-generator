@@ -58,8 +58,12 @@ Dateiregeln aus dem Prompt gelten ab der ersten angefassten Datei
 ## C1/C2 — Modus C AWG (06_awg.rs + LUT) + HIL-Loopback
 - SRAM1-LUT → DMA → DAC1 → OPAMP1; `AwgLoad{off,len}` + `AwgStart{freq_hz}`;
   Software-Limit 0–3,3 V. HIL: Loopback auf Scope-Pin (oder DMM), Sinus/Rechteck erkannt.
-- Zusaetzlich E2-Schluss: DAC1_CH2-Rechteck (PA5) per Jumper auf PA7 → `FreqStart`
-  muss die Tonfrequenz zaehlen (Kanten-Nachweis Modus E, ±Toleranz).
+- Stand 2026-09-12 (Stufe 1 gruen): TIM2-PWM-Rechteck auf PA5, `AwgStart{1000}` →
+  `ModeOk(C)`, `AwgStart{0}` → `BAD_ARG`, `ModeStop` stoppt; smoke gruen USB+UART.
+  LUT/DMA-Playback (Stufe 2) wartet auf Timer-getriggertes DAC-DMA (embassy 0.6.0
+  kennt nur SOFTWARE-Trigger); `AwgLoad` → `NOT_IMPL`.
+- Offen (1 Jumper): PA5→PA7 → `FreqStart` muss Tonfrequenz zaehlen (E-Kantennachweis);
+  alternativ DMM/Scope an PA5 (0–3,3 V, 1 kHz).
 - Gates analog E1/E2. Commit: `feat(mode-c): dma dac awg from sram1`.
 
 ## A1/A2 — Modus A Scope RTS (06_scope.rs) + HIL
