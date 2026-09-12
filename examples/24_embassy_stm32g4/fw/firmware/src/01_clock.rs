@@ -10,4 +10,7 @@ pub fn apply_clock(config: &mut Config) {
         sync_from_usb: true,
     });
     config.rcc.mux.clk48sel = mux::Clk48sel::HSI48;
+    // ADC12 needs an explicit kernel clock (Adc::new panics without one);
+    // sysclk (HSI 16 MHz) keeps the ADC in spec without a PLL.
+    config.rcc.mux.adc12sel = mux::Adcsel::SYS;
 }

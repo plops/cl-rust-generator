@@ -60,10 +60,22 @@ pub fn dac12_from_mv(mv: u16) -> u16 {
 /// Oscilloscope acquisition config (mode A, spec §3.1). RTS first, ETS later.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ScopeConfig {
-    /// 0 = 4 MSPS single ADC, 1 = 16 MSPS interleaved (ADC1..4).
+    /// 0 = single ADC, 1 = 16 MSPS interleaved (ADC1..4, stage 2).
     pub interleaved: u8,
     /// Trigger level in mV (COMP1 + DAC3), 0..=3300.
     pub level_mv: u16,
+}
+
+impl ScopeConfig {
+    pub fn validate(&self) -> Result<(), u8> {
+        if self.interleaved > 1 {
+            return Err(super::err::BAD_ARG);
+        }
+        if self.level_mv > 3300 {
+            return Err(super::err::BAD_ARG);
+        }
+        Ok(())
+    }
 }
 
 /// AWG output config (mode C, spec §3.3).
@@ -136,6 +148,28 @@ mod tests {
         assert_eq!(FreqConfig::hz_from_counts(1, 10), 100);
         assert_eq!(FreqConfig::hz_from_counts(7, 0), 0);
         assert_eq!(FreqConfig::hz_from_counts(u32::MAX, 1), u32::MAX);
+    }
+
+    #[test]
+    fn scope_config_bounds() {
+        assert!(ScopeConfig {
+            interleaved: 0,
+            level_mv: 3300
+        }
+        .validate()
+        .is_ok());
+        assert!(ScopeConfig {
+            interleaved: 2,
+            level_mv: 0
+        }
+        .validate()
+        .is_err());
+        assert!(ScopeConfig {
+            interleaved: 0,
+            level_mv: 3301
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]

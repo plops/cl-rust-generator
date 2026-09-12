@@ -22,7 +22,9 @@ use g474_common::{DeviceResp, HostCmd, MAX_FRAME};
 use crate::awg_06::{AwgReq, AWG_ACK, AWG_REQ};
 use crate::control_04::{Action, Control};
 use crate::mode_freq_05::{FreqResult, FREQ_REQ, FREQ_RESP};
+use crate::scope_07::{ScopeReq, SCOPE_PER_BLOCK, SCOPE_REQ, SCOPE_RESP, SCOPE_SNAP};
 use crate::usb_02::{write_all, Disconnected};
+use g474_common::blocks_05::crc16_update;
 
 /// Exclusive mode state shared by USB and UART tasks.
 pub static CONTROL: Mutex<CriticalSectionRawMutex, Control> = Mutex::new(Control::new());
@@ -32,6 +34,7 @@ pub static CONTROL: Mutex<CriticalSectionRawMutex, Control> = Mutex::new(Control
 enum Out {
     Text(heapless::String<96>),
     Bin(usize),
+    Scope { off: usize, len: usize },
     Skip,
 }
 
@@ -60,6 +63,9 @@ fn discriminant(cmd: &HostCmd) -> u8 {
 /// round-trip through the mode task (second request → `MODE_BUSY`).
 async fn run_action(action: Action) -> DeviceResp {
     match action {
+        // Scope downloads stream multiple frames; dispatch routes them to
+        // Out::Scope before run_action, so this arm is unreachable.
+        Action::ScopeRead { .. } => unreachable!("scope uses Out::Scope"),
         Action::Reply(r) => r,
         Action::MeasureFreq(cfg) => {
             if FREQ_REQ.try_send(cfg).is_err() {
@@ -114,10 +120,18 @@ async fn dispatch(ev: InEvent, tx: &mut [u8; MAX_FRAME + 32], uid_hex: &str) -> 
                 // Quiesce the tone generator too (harmless when already idle).
                 let _ = AWG_REQ.try_send(AwgReq::Stop);
             }
-            let resp = run_action(action).await;
-            match encode_resp(&resp, tx) {
-                Some(n) => Out::Bin(n),
-                None => Out::Skip,
+            match action {
+                Action::ScopeRead { off, len } => Out::Scope {
+                    off: off as usize,
+                    len: len as usize,
+                },
+                _ => {
+                    let resp = run_action(action).await;
+                    match encode_resp(&resp, tx) {
+                        Some(n) => Out::Bin(n),
+                        None => Out::Skip,
+                    }
+                }
             }
         }
         InEvent::TextTooLong => Out::Text(heapless::String::from("ERR TOOLONG")),
@@ -151,6 +165,74 @@ pub async fn usb_serve_task(mut class: CdcAcmClass<'static, Driver<'static, peri
     }
 }
 
+/// Encode one response into `tx` and USB-write it.
+async fn send_bin<'d, T: Instance + 'd>(
+    class: &mut CdcAcmClass<'d, Driver<'d, T>>,
+    tx: &mut [u8; MAX_FRAME + 32],
+    resp: &DeviceResp,
+) -> Result<(), Disconnected> {
+    match encode_resp(resp, tx) {
+        Some(n) => write_all(class, &tx[..n]).await,
+        None => Ok(()),
+    }
+}
+
+/// Acquire `off..off+len` samples and stream them as `Block`s + `BlockEnd`.
+async fn serve_scope_usb<'d, T: Instance + 'd>(
+    class: &mut CdcAcmClass<'d, Driver<'d, T>>,
+    tx: &mut [u8; MAX_FRAME + 32],
+    off: usize,
+    len: usize,
+) -> Result<(), Disconnected> {
+    if SCOPE_REQ.try_send(ScopeReq { n: off + len }).is_err() {
+        return send_bin(
+            class,
+            tx,
+            &DeviceResp::Err {
+                code: err::MODE_BUSY,
+            },
+        )
+        .await;
+    }
+    let got = SCOPE_RESP.receive().await;
+    if got.n < off + len {
+        return send_bin(class, tx, &DeviceResp::Err { code: err::NO_DATA }).await;
+    }
+    // CRC covers exactly the downloaded range (streaming, no temp buffer).
+    let total = len.div_ceil(SCOPE_PER_BLOCK);
+    let mut crc: u16 = 0xFFFF;
+    for seq in 0..total {
+        let s = off + seq * SCOPE_PER_BLOCK;
+        let e = (s + SCOPE_PER_BLOCK).min(off + len);
+        let data = {
+            let snap = SCOPE_SNAP.lock().await;
+            let mut data = heapless::Vec::<u8, 96>::new();
+            snap.bytes_into(s, e, &mut data);
+            data
+        };
+        crc = crc16_update(crc, &data);
+        send_bin(
+            class,
+            tx,
+            &DeviceResp::Block {
+                seq: seq as u16,
+                total: total as u16,
+                data,
+            },
+        )
+        .await?;
+    }
+    send_bin(
+        class,
+        tx,
+        &DeviceResp::BlockEnd {
+            total: total as u16,
+            crc,
+        },
+    )
+    .await
+}
+
 async fn serve<'d, T: Instance + 'd>(
     class: &mut CdcAcmClass<'d, Driver<'d, T>>,
 ) -> Result<core::convert::Infallible, Disconnected> {
@@ -169,6 +251,9 @@ async fn serve<'d, T: Instance + 'd>(
                     }
                     Out::Bin(m) => {
                         write_all(class, &tx[..m]).await?;
+                    }
+                    Out::Scope { off, len } => {
+                        serve_scope_usb(class, &mut tx, off, len).await?;
                     }
                     Out::Skip => {}
                 }
@@ -202,6 +287,9 @@ async fn serve_uart(mut uart: Uart<'static, mode::Async>) {
                             Out::Bin(m) => {
                                 let _ = usart_write_all(&mut uart, &tx[..m]).await;
                             }
+                            Out::Scope { off, len } => {
+                                serve_scope_uart(&mut uart, &mut tx, off, len).await;
+                            }
                             Out::Skip => {}
                         }
                     }
@@ -218,4 +306,67 @@ async fn serve_uart(mut uart: Uart<'static, mode::Async>) {
 async fn usart_write_all(uart: &mut Uart<'static, mode::Async>, data: &[u8]) {
     use embedded_io_async::Write;
     let _ = uart.write_all(data).await;
+}
+
+/// UART twin of [`serve_scope_usb`]: UART writes are infallible-by-policy
+/// (errors only logged), so this returns `()`.
+async fn serve_scope_uart(
+    uart: &mut Uart<'static, mode::Async>,
+    tx: &mut [u8; MAX_FRAME + 32],
+    off: usize,
+    len: usize,
+) {
+    async fn send(uart: &mut Uart<'static, mode::Async>, tx: &[u8]) {
+        usart_write_all(uart, tx).await;
+    }
+    if SCOPE_REQ.try_send(ScopeReq { n: off + len }).is_err() {
+        if let Some(n) = encode_resp(
+            &DeviceResp::Err {
+                code: err::MODE_BUSY,
+            },
+            tx,
+        ) {
+            send(uart, &tx[..n]).await;
+        }
+        return;
+    }
+    let got = SCOPE_RESP.receive().await;
+    if got.n < off + len {
+        if let Some(n) = encode_resp(&DeviceResp::Err { code: err::NO_DATA }, tx) {
+            send(uart, &tx[..n]).await;
+        }
+        return;
+    }
+    let total = len.div_ceil(SCOPE_PER_BLOCK);
+    let mut crc: u16 = 0xFFFF;
+    for seq in 0..total {
+        let s = off + seq * SCOPE_PER_BLOCK;
+        let e = (s + SCOPE_PER_BLOCK).min(off + len);
+        let data = {
+            let snap = SCOPE_SNAP.lock().await;
+            let mut data = heapless::Vec::<u8, 96>::new();
+            snap.bytes_into(s, e, &mut data);
+            data
+        };
+        crc = crc16_update(crc, &data);
+        if let Some(n) = encode_resp(
+            &DeviceResp::Block {
+                seq: seq as u16,
+                total: total as u16,
+                data,
+            },
+            tx,
+        ) {
+            send(uart, &tx[..n]).await;
+        }
+    }
+    if let Some(n) = encode_resp(
+        &DeviceResp::BlockEnd {
+            total: total as u16,
+            crc,
+        },
+        tx,
+    ) {
+        send(uart, &tx[..n]).await;
+    }
 }

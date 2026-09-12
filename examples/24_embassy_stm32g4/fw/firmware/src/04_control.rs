@@ -32,6 +32,11 @@ pub enum Action {
     MeasureFreq(FreqConfig),
     /// Start/retune the AWG tone, then reply `ModeOk`.
     AwgStart(AwgConfig),
+    /// Acquire a snapshot, then stream `Block`s plus `BlockEnd`.
+    ScopeRead {
+        off: u32,
+        len: u16,
+    },
 }
 
 impl Control {
@@ -95,15 +100,39 @@ impl Control {
                 self.mode = id::C_AWG;
                 return Action::AwgStart(cfg);
             }
-            // Modes A, B, D land here until their tasks exist (order E→C→A→B→D).
+            HostCmd::ScopeStart(cfg) => {
+                if cfg.validate().is_err() {
+                    return Action::Reply(DeviceResp::Err { code: err::BAD_ARG });
+                }
+                if cfg.interleaved != 0 {
+                    // 4×ADC interleaving is stage 2.
+                    return Action::Reply(DeviceResp::Err {
+                        code: err::NOT_IMPL,
+                    });
+                }
+                self.mode = id::A_SCOPE;
+                return Action::Reply(DeviceResp::ModeOk { mode: id::A_SCOPE });
+            }
+            HostCmd::ScopeRead { off, len } => {
+                let off = off as usize;
+                let len = len as usize;
+                if len == 0 || off.saturating_add(len) > crate::scope_07::SCOPE_MAX {
+                    return Action::Reply(DeviceResp::Err { code: err::BAD_ARG });
+                }
+                self.mode = id::A_SCOPE;
+                return Action::ScopeRead {
+                    off: off as u32,
+                    len: len as u16,
+                };
+            }
+            // Modes B, D land here until their tasks exist (order E→C→A→B→D).
             // AwgLoad (LUT upload) waits for timer-triggered DAC DMA (stage 2).
-            HostCmd::ScopeStart(_)
-            | HostCmd::CapStart(_)
-            | HostCmd::VnaStart(_)
-            | HostCmd::AwgLoad { .. } => DeviceResp::Err {
-                code: err::NOT_IMPL,
-            },
-            HostCmd::ScopeRead { .. } | HostCmd::VnaRead { .. } | HostCmd::BlockAck { .. } => {
+            HostCmd::CapStart(_) | HostCmd::VnaStart(_) | HostCmd::AwgLoad { .. } => {
+                DeviceResp::Err {
+                    code: err::NOT_IMPL,
+                }
+            }
+            HostCmd::VnaRead { .. } | HostCmd::BlockAck { .. } => {
                 DeviceResp::Err { code: err::NO_DATA }
             }
             HostCmd::CapRead => DeviceResp::Err {

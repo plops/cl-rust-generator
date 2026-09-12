@@ -23,7 +23,11 @@ pub fn block_range(len: usize, seq: usize) -> Option<(usize, usize)> {
 
 /// CRC-16/CCITT (poly 0x1021, init 0xFFFF) over the raw snapshot bytes.
 pub fn crc16(data: &[u8]) -> u16 {
-    let mut crc: u16 = 0xFFFF;
+    crc16_update(0xFFFF, data)
+}
+
+/// Continue a CRC-16 over the next chunk (streaming, same parameters).
+pub fn crc16_update(mut crc: u16, data: &[u8]) -> u16 {
     for &b in data {
         crc ^= (b as u16) << 8;
         for _ in 0..8 {
@@ -63,5 +67,15 @@ mod tests {
         // Standard check vector for CRC-16/CCITT-FALSE.
         assert_eq!(crc16(b"123456789"), 0x29B1);
         assert_eq!(crc16(b""), 0xFFFF);
+    }
+
+    #[test]
+    fn crc16_streaming_matches_oneshot() {
+        let data = b"123456789";
+        let mut crc = 0xFFFF;
+        for chunk in data.chunks(3) {
+            crc = crc16_update(crc, chunk);
+        }
+        assert_eq!(crc, crc16(data));
     }
 }

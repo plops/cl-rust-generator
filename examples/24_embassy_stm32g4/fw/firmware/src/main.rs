@@ -26,6 +26,8 @@ mod clock_01;
 mod control_04;
 #[path = "05_mode_freq.rs"]
 mod mode_freq_05;
+#[path = "07_scope.rs"]
+mod scope_07;
 #[path = "03_transport.rs"]
 mod transport_03;
 #[path = "02_usb.rs"]
@@ -87,6 +89,9 @@ async fn main(spawner: embassy_executor::Spawner) {
     spawner
         .spawn(mode_freq_05::freq_task(&mode_freq_05::FREQ_REQ, &mode_freq_05::FREQ_RESP).unwrap());
     spawner.spawn(awg_06::awg_task(p.TIM2, p.PA5, &awg_06::AWG_REQ, &awg_06::AWG_ACK).unwrap());
+    spawner.spawn(
+        scope_07::scope_task(p.ADC1, p.PA0, &scope_07::SCOPE_REQ, &scope_07::SCOPE_RESP).unwrap(),
+    );
 
     core::future::pending::<()>().await;
 }

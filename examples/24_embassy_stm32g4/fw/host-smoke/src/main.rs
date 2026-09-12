@@ -85,11 +85,35 @@ fn main() {
     if !check_binary(
         &mut port,
         HostCmd::ScopeStart(ScopeConfig {
+            interleaved: 0,
+            level_mv: 100,
+        }),
+        |r| r == &DeviceResp::ModeOk { mode: 1 },
+        "ScopeStart->ModeOk(A)",
+    ) {
+        failures += 1;
+    }
+    if !check_binary(
+        &mut port,
+        HostCmd::ScopeStart(ScopeConfig {
             interleaved: 1,
             level_mv: 100,
         }),
         |r| matches!(r, DeviceResp::Err { code: 8 }),
-        "ScopeStart->NOT_IMPL",
+        "ScopeStart(interleaved)->NOT_IMPL",
+    ) {
+        failures += 1;
+    }
+    // 96 samples = 192 bytes = 2 blocks; CRC over the downloaded bytes must
+    // match BlockEnd. PA0 floats: values arbitrary, shape + CRC are checked.
+    if !check_scope_read(&mut port, 0, 96) {
+        failures += 1;
+    }
+    if !check_binary(
+        &mut port,
+        HostCmd::ScopeRead { off: 0, len: 0 },
+        |r| matches!(r, DeviceResp::Err { code: 7 }),
+        "ScopeRead(0)->BAD_ARG",
     ) {
         failures += 1;
     }
@@ -223,6 +247,58 @@ fn read_frame(port: &mut Box<dyn serialport::SerialPort>) -> Option<DeviceResp> 
         }
     }
     None
+}
+
+/// Download `len` samples at `off` and verify block order, byte count,
+/// and the trailing CRC. Returns false on any mismatch.
+fn check_scope_read(port: &mut Box<dyn serialport::SerialPort>, off: u32, len: u16) -> bool {
+    use g474_common::blocks_05::crc16;
+    let mut buf = [0u8; 160];
+    let n = encode_cmd(&HostCmd::ScopeRead { off, len }, &mut buf).expect("encode");
+    port.write_all(&buf[..n]).unwrap();
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut total = usize::MAX;
+    let mut next_seq = 0u16;
+    loop {
+        match read_frame(port) {
+            Some(DeviceResp::Block {
+                seq,
+                total: t,
+                data,
+            }) => {
+                if seq != next_seq || (total != usize::MAX && t as usize != total) {
+                    println!("FAIL scope block order seq={} total={}", seq, t);
+                    return false;
+                }
+                total = t as usize;
+                next_seq += 1;
+                bytes.extend_from_slice(&data);
+            }
+            Some(DeviceResp::BlockEnd { total: t, crc }) => {
+                if t as usize != total || next_seq as usize != total {
+                    println!("FAIL scope BlockEnd total={} (saw {} blocks)", t, next_seq);
+                    return false;
+                }
+                if bytes.len() != len as usize * 2 {
+                    println!("FAIL scope byte count {}", bytes.len());
+                    return false;
+                }
+                if crc16(&bytes) != crc {
+                    println!("FAIL scope CRC {:04X} != {:04X}", crc16(&bytes), crc);
+                    return false;
+                }
+                println!(
+                    "ok   scope off={} len={} blocks={} crc={:04X}",
+                    off, len, total, crc
+                );
+                return true;
+            }
+            other => {
+                println!("FAIL scope unexpected {:?}", other);
+                return false;
+            }
+        }
+    }
 }
 
 fn check_binary(
