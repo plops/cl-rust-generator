@@ -1,0 +1,37 @@
+
+wir arbeiten auf einen STM32G474CEU6
+
+programmiert kann dieser werden mittels STLink-STM32 programmierer. ich habe dies mit den beispielprogrammen in embassy verifiziert:
+
+```
+embassy/examples/stm32g474 $ cat .cargo/config.toml
+[target.'cfg(all(target_arch = "arm", target_os = "none"))']
+runner = "probe-rs run --chip STM32G474RETx"
+
+[build]
+target = "thumbv7em-none-eabi"
+
+[env]
+DEFMT_LOG = "trace"
+```
+
+```
+embassy/examples/stm32g474 $ cargo run --release --bin comp
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.23s
+     Running `probe-rs run --chip STM32G474RETx target/thumbv7em-none-eabi/release/comp`
+      Erasing ✔ 100% [####################]  18.00 KiB @  46.53 KiB/s (took 0s)                                                     Finished in 1.07s
+0.000000 [TRACE] rcc: reset 0x18:0 (embassy_stm32 src/rcc/mod.rs:329)
+0.000000 [TRACE] rcc: enabled 0x18:0 (embassy_stm32 src/rcc/mod.rs:355)
+0.000000 [TRACE] rcc: reset 0x16:28 (embassy_stm32 src/rcc/mod.rs:329)
+0.000000 [TRACE] rcc: enabled 0x16:28 (embassy_stm32 src/rcc/mod.rs:355)
+0.000000 [TRACE] rcc: skip reset 0x12:8 (embassy_stm32 src/rcc/mod.rs:331)
+0.000000 [TRACE] rcc: enabled 0x12:8 (embassy_stm32 src/rcc/mod.rs:355)
+0.000000 [TRACE] BDCR ok: 00008200 (embassy_stm32 src/rcc/bd.rs:327)
+0.000000 [DEBUG] rcc: Clocks { hclk1: MaybeHertz(16000000), hclk2: MaybeHertz(16000000), hclk3: MaybeHertz(16000000), hse: MaybeHertz(0), hsi: MaybeHertz(16000000), hsi48: MaybeHertz(48000000), i2s_ckin: MaybeHertz(0), lse: MaybeHertz(0), lsi: MaybeHertz(0), pclk1: MaybeHertz(16000000), pclk1_tim: MaybeHertz(16000000), pclk2: MaybeHertz(16000000), pclk2_tim: MaybeHertz(16000000), pll1_p: MaybeHertz(0), pll1_q: MaybeHertz(0), rtc: MaybeHertz(32000), sys: MaybeHertz(16000000) } (embassy_stm32 src/rcc/mod.rs:100)
+0.000000 [TRACE] rcc: reset 0x16:3 (embassy_stm32 src/rcc/mod.rs:329)
+0.000000 [TRACE] rcc: enabled 0x16:3 (embassy_stm32 src/rcc/mod.rs:355)
+0.000000 [INFO ] COMP example starting! (comp src/bin/comp.rs:29)
+0.000091 [INFO ] Comparator configured. Comparing PA7 against Vref (~1.2V) (comp src/bin/comp.rs:37)
+0.000183 [INFO ] output: false (comp src/bin/comp.rs:41)
+0.500305 [INFO ] output: false (comp src/bin/comp.rs:41)
+```
