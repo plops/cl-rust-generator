@@ -1,0 +1,118 @@
+du lauefst in einem docker image mit ubuntu 26 auf einem linux host und hast zugriff auf
+kernel messages vom host und auch die usb geraete. falls dir packete fehlen installiere sie.
+du arbeitest im auftrag von wol pumba (wolpumba@gmail.com)
+wir arbeiten an einem STM32G474CEU6 mcu firmware projekt
+
+spezifikation:
+die spezifikation fuer das projekt findest du hier:
+/workspace/src/cl-rust-generator/examples/24_embassy_stm32g4/plan/20260912_00_what/spec.md
+
+im ordner /workspace/src/cl-rust-generator/examples/24_embassy_stm32g4/doc gibt es ein paar zusaetzliche informationen (markdown version vom datenblatt, pcb...).
+
+in /workspace/src/cl-rust-generator/examples/24_embassy_stm32g4/doc/deps.md
+habe ich einige projekte von github in der <organization>/<projekt> notation aufgelistet. dies kannst du benutzen um in deepwiki mcp nach weiteren informationen zu suchen / fragen.
+
+stand vom vorgaenger (01_init, bereits fertig und auf hardware validiert):
+den implementierungsplan, die tasks und den walkthrough des ersten schritts findest du hier:
+/workspace/src/cl-rust-generator/examples/24_embassy_stm32g4/plan/20260912_01_init/plan.md
+/workspace/src/cl-rust-generator/examples/24_embassy_stm32g4/plan/20260912_01_init/task.md
+/workspace/src/cl-rust-generator/examples/24_embassy_stm32g4/plan/20260912_01_init/walkthrough.md
+lies zuerst den walkthrough, er enthaelt den aktuellen stand, alle learnings (heapless-pinning,
+probe-rs download vs. run, mknod fuer ttyACM-nodes) und die offenen punkte.
+der quellcode liegt hier: /workspace/src/cl-rust-generator/examples/24_embassy_stm32g4/fw/
+(workspace mit `firmware`, `common`, `host-smoke`). was bereits funktioniert und per
+hardware-in-the-loop getestet ist: USB-CDC plus UART (USART1, PA9/PA10, 115200 8N1) mit
+first-byte-dispatch-parser (text mit fuehrendem buchstaben bis \n, binaer als postcard+COBS
+mit 0x00-delimiter), geteiltes `common`-crate mit 17 unit-tests, `host-smoke`-vertragstest
+gruen auf beiden transporten. baue darauf auf, schreibe nichts davon neu.
+
+deine aufgabe: setze den rest der spec um (modi A–E aus spec §3, exklusives task-modell mit
+RAM-sharing aus spec §2, PC-TUI aus spec §1+§5). reihenfolge-vorschlag: zuerst einen messmodus
+mit snapshot-transfer (z.b. modus E frequenzzaehler: COMP + TIM2 + TIM6-gate, kleiner RAM-bedarf,
+gut testbar), dann die analog aufwendigeren modi (oszilloskop/VNA/AWG/kapazitaet), zuletzt die TUI.
+jeder modus wird als exklusiver embassy-task umgesetzt (cancellation per drop, de-init der
+hardware, freigabe des SRAM1-puffers), gesteuert vom bestehenden control-task ueber das
+bestehende protokoll (erweitere HostCmd/DeviceResp in `common` um modus-befehle und
+block-transfers, versioniere PROTO_VER bei inkompatiblen aenderungen).
+
+hardware ansteuerung:
+du kannst die hardware programmieren und mit ihr kommunizieren.
+
+programmiert kann diese MCU werden mittels STLink-STM32 programmierer. der firmware-ordner
+enthaelt bereits die funktionierende `.cargo/config.toml` (runner `probe-rs run --chip
+STM32G474RETx`, target `thumbv7em-none-eabi`, `DEFMT_LOG=trace`). beachte: `probe-rs download`
+laesst den core angehalten zurueck (danach kein USB) — zum starten `probe-rs run` oder
+reset/power-cycle verwenden. das board meldet sich per USB als c0de:cafe (`G474 dual-mode proto`,
+ttyACM1) und per STLink-VCP (ttyACM0, UART-bruecke zu USART1). im container fehlende
+device-nodes bei fehlendem udev-hotplug per `mknod /dev/ttyACMx c 166 <n>` anlegen
+(nummer aus /sys/class/tty/ttyACMx/dev).
+
+ich bin mir sicher, dass der rust compiler und probe-rs funktionieren. trotzdem waere es gut,
+wenn du bei der umsetzung gelegentlich ein programm hochlaedst und tests durchfuehrst. einfach
+um zu validieren, dass deine annahmen korrekt sind. jeder neue modus braucht einen HIL-nachweis
+auf echter hardware (z.b. host-smoke-erweiterung oder modus-spezifischer check mit plausiblen
+messwerten), nicht nur host-unit-tests.
+
+ordnerstruktur:
+arbeite im bestehenden ordner /workspace/src/cl-rust-generator/examples/24_embassy_stm32g4/fw/
+weiter (kein neuer workspace). lege neue file/module dort an wo sie hinkommen (modus-treiber
+in `firmware`, geteilte typen in `common`, host-seite in `host-smoke` bzw. neuem TUI-crate).
+
+datei-aufteilung (neu, verbindlich):
+lange quelltext-dateien sind zu vermeiden. sobald eine datei mehr als eine klar abgrenzbare
+zustaendigkeit hat oder ca. 300 zeilen ueberschreitet, ist sie in semantisch getrennte einzelne
+dateien zu unterteilen. jede neue datei bekommt am anfang eine zweistellige nummer plus einen
+namen der widerspiegelt was darinsteht, z.b. `01_clock.rs`, `02_usb_cdc.rs`, `03_router.rs`
+in `firmware/src/` bzw. `01_types.rs`, `02_frame.rs` in `common/src/`. regeln: aufsteigende
+nummern folgen der initialisierungs-/datenfluss-reihenfolge (clock vor peripherie, transport
+vor protokoll, protokoll vor modus), zusammengehoeriges bleibt in einer datei (kein
+auseinanderreissen von zusammengehoerigen typen + ihren tests), `mod.rs`/`lib.rs`/`main.rs`
+enthalten nur modul-deklarationen und die oberste verdrahtung (init, spawn, join), kein
+verhalten. aufteilung immer ohne verhaltens-aenderung durchfuehren (vorher/nachher: alle tests
+plus smoke gruens). bestehende dateien (`main.rs`, `text.rs`, `frame.rs`, `router.rs`) bei
+bedarf nach diesen regeln umbauen, sobald du sie anfasst.
+
+vorgehensweise:
+nutze tools um konsistenten und aufgeraeumten quellcode zu gewaehrleisten (also `cargo fmt` um
+formatierung zu normalisieren, `cargo clippy` um moegliche fehler oder verbesserungen zu finden,
+cargo-edit mit `cargo upgrade` um bei den abhaengigkeiten die neueste version zu verwenden, ...)
+
+Schaue dir den Quellcode an und die Architektur dieser Software. Nutze deepwiki mcp fuer
+plops/rs-summarizer um dokumentation zu bekommen und fragen beantworten zu lassen. falls
+abhaengigkeiten eingefuehrt werden sind diese mitsamt ihrer github organisation in deps.md
+aufzuschreiben, so dass wir spaeter einfach die deepwiki abfragen konstruieren koennen. nutze
+rust tools um auf die neueste vorhandene version zu switchen (auch wenn vor kompatibilitaet
+gewarnt wird, wenn wir gerade eine dependency einfuehren ist es wichtig, die neueste version
+zu nehmen) und schon vorab usage examples in den plan aufzunehmen (mit deepwiki mcp zu erfragen)
+
+du befindest dich in einem docker container, basierend auf ubuntu 26. du darfst neue programme
+installieren, falls noetig.
+
+Schlage vor, wie wir dieses Feature implementieren können. Habe ich alle Requirements aufgelistet,
+die wichtig sind, oder kannst du dir vorstellen, dass noch andere Dinge werden sollen? Liste mir
+diese auf Vorschlägen, was man am besten umsetzen könnte. beruecksichtige dabei: messgenauigkeit
+und kalibrierung (referenzspannung, quarz-toleranz), schutzbeschaltung/limits aus spec §4
+(max. 3,3 V an analogen pins), TUI-protokoll-versionierung, fehlerverhalten bei modus-wechsel
+waehrend laufender messung, sowie persistente konfiguration (soll die firmware einstellungen
+behalten?).
+
+Schreibe einen Implementierungsplan. Dieser Implementierungsplan soll einen unabhängigen AI-Agenten
+dazu befähigen, selbstständig einen Kontext aufzubauen, der die wesentlichen quellen beinhaltet.
+Das heißt, der Implementierungsplan hat eine Liste von Dateien, die sich der Agent sich anschauen
+sollte, mit einer kurzen Beschreibung für jede Datei.
+Weiterhin soll der Implementierungsplan eine Erklärung Commit Messages sendet werden sollen. Und zwar
+sollen diese mit einer umfassenden Beschreibung und als Conventional Commit format ausgeführt werden.
+
+Neue Unit-Tests und Integration-Tests sollen wie erforderlich eingeführt werden.
+Diese sollen auch ausgeführt werden.
+
+schreibe task.md wo du die implementierungs und test schritte aufeinander abfolgen laesst, so dass
+ein agent die tasks seriell abarbeiten kann und die arbeit in jedem schritt getested und validiert
+wird. jeder modus bekommt eigene tasks (implementierung, host-tests, HIL-nachweis), danach erst
+die TUI-tasks.
+
+Nach der vollständigen Implementierung, wenn alle Tests abgeschlossen sind und alles committed ist,
+soll auch ein Walkthrough-Dokument entgeschrieben werden und in plan/20260912_02_full/walkthrough.md
+abgelegt werden. Dieses soll zusammenfassen, was wirklich implementiert wurde, welche Stellen
+aufgrund der Tests oder wie auch immer gemacht wurden, als im Untergrund auch Learnings und mögliche
+Erweiterungen. liste auch die neuen programme die mit in den docker container aufgenommen werden sollten
