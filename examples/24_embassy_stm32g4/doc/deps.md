@@ -96,3 +96,46 @@ Wiki pages you might want to explore:
 - [Applications and Tasks (justinlhudson/embassy-stm32-starter)](/wiki/justinlhudson/embassy-stm32-starter#5)
 - [Glossary (justinlhudson/embassy-stm32-starter)](/wiki/justinlhudson/embassy-stm32-starter#7)
 
+# 20260912_01_init — Dual-Mode-Parser + USB-CDC Bring-up
+
+Eingeführt für den Kommunikations-Layer (postcard + COBS über USB-CDC, First-Byte-Dispatch).
+DeepWiki-Abfragen als `embassy-rs/embassy` bzw. `jamesmunns/postcard` konstruieren.
+
+## embassy-rs/embassy (embassy-usb, embassy-stm32, embassy-executor, embassy-time, embassy-futures, embassy-sync)
+
+Async USB-Device-Stack (`embassy-usb` 0.6.0, CDC-ACM-Klasse `CdcAcmClass::read_packet/write_packet`,
+`Builder` mit Config-/BOS-/Control-Buffern) plus STM32-HAL (`embassy-stm32` 0.6.0, Feature
+`stm32g474ce`, USB_FS `Driver::new(p.USB, p.PA12, p.PA11, Irqs)`, RCC HSI48+CRS `sync_from_usb`).
+Referenz: `examples/stm32g4/src/bin/usb_serial.rs` (G4-USB-Muster), `examples/stm32g474/src/bin/comp.rs`
+(G474-Crate-Muster). Genutzt für USB-Bring-up und spätere exklusive Modus-Tasks (Cancellation).
+
+## jamesmunns/postcard
+
+`no_std`-fähige serde-kompatible Binärserialisierung mit COBS-Framing (`to_slice_cobs`,
+`CobsAccumulator<128>::feed`, `FeedResult::{Consumed, Success, OverFull, DeserError}`, `0x00` als
+Frame-Delimiter). Version 1.1.3 (FW ohne `use-std`, Host mit `use-std`). Kanonisches Binärformat
+für `HostCmd`/`DeviceResp` im neuen `common`-Crate (Spec §5), statt separatem `0x02…0x03`-Format.
+
+## serde-rs/serde
+
+Generisches Serialisierungs-Framework (1.0.229, `derive`, `default-features = false` im `common`-Crate).
+Basis für `HostCmd`/`DeviceResp`-Enums, die per postcard codiert werden.
+
+## rust-embedded/heapless
+
+Alloc-freie Container für `no_std` (**0.7**, `default-features = false` — exakt die Version,
+die `postcard 1.1.3` intern nutzt; 0.8/0.9 erzeugen einen zweiten heapless-Typ im Graph und
+brechen `Serialize`/`Deserialize`-Derives). Puffer für COBS-Frames und Textzeilen im Parser,
+ohne Heap auf 128 KB RAM / 512 KB Flash.
+
+## rust-embedded/static_cell
+
+`'static`-Zellen für USB-Deskriptor-/Control-Buffer (2.0.0). Ersetzt lokale Arrays, sobald USB-Stack
+und Klassen in gespawnte Tasks wandern.
+
+## knurling-rs/defmt (+ defmt-rtt, panic-probe)
+
+RTT-Logging (defmt 1.0.1, defmt-rtt 1.0.0, panic-probe 1.0.0 mit `print-defmt`). Ausschließlich für
+Diagnose; Anwendungsdaten laufen über USB-CDC, nie über defmt.
+
+
