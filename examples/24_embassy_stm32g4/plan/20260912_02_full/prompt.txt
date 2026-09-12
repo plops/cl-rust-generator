@@ -19,6 +19,28 @@ den implementierungsplan, die tasks und den walkthrough des ersten schritts find
 /workspace/src/cl-rust-generator/examples/24_embassy_stm32g4/plan/20260912_01_init/walkthrough.md
 lies zuerst den walkthrough, er enthaelt den aktuellen stand, alle learnings (heapless-pinning,
 probe-rs download vs. run, mknod fuer ttyACM-nodes) und die offenen punkte.
+
+was in der spec steht (§1–§5 im ueberblick, damit die verweise unten verstaendlich sind):
+§1 uebersicht und ziel: hochintegriertes multi-instrument auf STM32G474CEU6 (170 MHz, 128 KB RAM,
+512 KB Flash); rechen- und zeitkritisches laeuft in hardware-peripherie (HRTIM, ADCs, DACs, COMPs,
+OPAMPs, DMA); steuerung und visualisierung ueber PC-TUI in rust; firmware in embassy (no_std).
+§2 speicher- und firmware-architektur: eine monolithische firmware, streng exklusiv ein modus
+zur zeit; modus-wechsel per embassy-cancellation (drop) des mess-tasks (hardware de-init, puffer
+freigeben). CCM-SRAM (32 KB) fuer code/stack/executor/interrupts, SRAM1 (80 KB) als DMA-puffer
+des jeweils aktiven modus (bis ~40.000 16-bit-samples).
+§3 die funktionsmodule: modus A oszilloskop (ADC-interleaving bis 16 MSPS, equivalent-time-sampling
+mit COMP-trigger + HRTIM-delay bis ~1 GSPS effektiv), modus B vektor-netzwerkanalysator (HRTIM + DAC1
++ OPAMP als signalquelle, phasenversetzte ADC-trigger), modus C arbitrary-waveform-generator
+(LUT aus SRAM1 per DMA zum DAC + OPAMP), modus D kapazitaetsmessgeraet (lade/entlade-zeit per
+COMP + TIM2-input-capture, multiplex ueber mehrere pins), modus E frequenzzaehler (COMP mit
+DAC-trigger-level + hysterese, TIM2 mit digitalfilter als zaehler, TIM6 als torzeit).
+§4 analoges frontend (barebone): messbereich 0 V bis 3,3 V direkt (V_DDA-bezogen); reine
+analog-pins (TT_a) nur bis 3,6 V belastbar (abs. max. 4,0 V) — uebersteuern zerstoert den chip;
+fuer messeingaenge nur serienwiderstaende (z.b. 1 kOhm) als strombegrenzung in die internen
+klemmdioden; digitale signale (z.b. frequenzzaehler) auf 5-V-tolerante FT-pins legen.
+§5 kommunikation host<->device: USB 2.0 full-speed (12 Mbps) via embassy-usb als CDC
+(virtueller COM-port); blockbasierte snapshot-uebertragung (kein live-streaming); geteiltes
+`common`-crate mit postcard-binaerformat plus COBS-framing (0x00 als frame-trenner).
 der quellcode liegt hier: /workspace/src/cl-rust-generator/examples/24_embassy_stm32g4/fw/
 (workspace mit `firmware`, `common`, `host-smoke`). was bereits funktioniert und per
 hardware-in-the-loop getestet ist: USB-CDC plus UART (USART1, PA9/PA10, 115200 8N1) mit
