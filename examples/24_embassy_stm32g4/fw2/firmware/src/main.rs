@@ -2,146 +2,113 @@
 #![no_main]
 
 use defmt::info;
-use defmt_rtt as _;
-use panic_probe as _;
+use defmt_rtt as _; // Leitet Log-Ausgaben über den ST-Link (Debugger) an den PC
+use panic_probe as _; // Wenn das Programm abstürzt, wird der Fehler geloggt
 
 use embassy_executor::Spawner;
 use embassy_stm32::adc::{Adc, AdcChannel as _, SampleTime};
-use embassy_stm32::dac::{DacChannel, ValueArray};
-use embassy_stm32::{bind_interrupts, dma, peripherals, Config};
-use embassy_time::{Duration, Timer};
+use embassy_stm32::dac::{DacChannel, Value};
+use embassy_stm32::{bind_interrupts, dma, peripherals, Config, Peri};
+use embassy_time::{Duration, Ticker, Timer};
 
-// ============================================================================
-// 1. INTERRUPT-BINDUNG
-// ============================================================================
-// Embassy verlangt, dass Interrupts typensicher deklariert werden.
-// Wenn der DMA-Controller Datenblöcke fertig übertragen hat, löst er einen
-// Interrupt aus, der von den Embassy-Treibern intern abgefangen wird.
+// 1. INTERRUPTS VERKNÜPFEN
+// Für ADC-Messungen via DMA wird in Embassy nur der DMA-Interrupt benötigt.
 bind_interrupts!(struct Irqs {
+    // Unser DMA-Kanal braucht diesen Interrupt, um das Ende der Übertragung zu melden
     DMA1_CHANNEL1 => dma::InterruptHandler<peripherals::DMA1_CH1>;
-    DMA1_CHANNEL2 => dma::InterruptHandler<peripherals::DMA1_CH2>;
 });
 
-// ============================================================================
-// 2. WELLENFORM-DEFINITION (SÄGEZAHN)
-// ============================================================================
-// Der 12-Bit-DAC des STM32G4 akzeptiert Werte von 0 (0,0 V) bis 4095 (3,3 V).
-// Wir berechnen hier eine Lookup-Table (LUT) mit 64 Stufen zur Kompilierzeit
-// (const eval), sodass zur Laufzeit kein Speicher oder Rechenzeit benötigt wird.
-const SAWTOOTH_SAMPLES: usize = 64;
-const SAWTOOTH_TABLE: [u16; SAWTOOTH_SAMPLES] = {
-    let mut table = [0u16; SAWTOOTH_SAMPLES];
-    let mut i = 0;
-    while i < SAWTOOTH_SAMPLES {
-        // Linearer Anstieg: 0 -> 4095
-        table[i] = ((i as u32 * 4095) / (SAWTOOTH_SAMPLES as u32 - 1)) as u16;
-        i += 1;
-    }
-    table
-};
-
-// ============================================================================
-// 3. DAC-TASK (Signalquelle via zirkulärem DMA)
-// ============================================================================
+// ==============================================================================
+// TASK 1: DIGITAL-ANALOG-WANDLER (DAC) - Sägezahn
+// ==============================================================================
 #[embassy_executor::task]
 async fn dac_task(
-    dac_peri: peripherals::DAC1,
-    dma_peri: peripherals::DMA1_CH1,
-    dac_pin: peripherals::PA4,
+    dac_peri: Peri<'static, peripherals::DAC1>,
+    pin: Peri<'static, peripherals::PA4>,
 ) {
-    info!("DAC: Initialisiere DAC1_OUT1 an PA4 mit DMA1_CH1...");
+    info!("DAC Task gestartet (Sägezahn auf PA4)");
 
-    // Erzeugt den asynchronen DAC-Kanal für DAC1 Kanal 1 (PA4) mit DMA-Anbindung.
-    let mut dac = DacChannel::new(dac_peri, dma_peri, dac_pin);
+    // Initialisiere den DAC
+    let mut dac = DacChannel::new_blocking(dac_peri, pin);
+    dac.enable();
 
-    info!("DAC: Starte zirkuläre DMA-Ausgabe des Sägezahns...");
-
-    // dac.write mit `circular = true`:
-    // Der DMA-Controller wird in den Circular-Modus geschaltet. Sobald er das
-    // Ende des Arrays SAWTOOTH_TABLE erreicht hat, springt er in HARDWARE
-    // automatisch wieder an den Anfang.
-    // Dieser Aufruf bleibt aktiv und erzeugt das Signal komplett ohne CPU-Eingriff!
-    dac.write(ValueArray::Bit12Right(&SAWTOOTH_TABLE), true).await;
-}
-
-// ============================================================================
-// 4. ADC-TASK (Messwerterfassung via DMA)
-// ============================================================================
-#[embassy_executor::task]
-async fn adc_task(
-    adc_peri: peripherals::ADC1,
-    mut dma_peri: peripherals::DMA1_CH2,
-    adc_pin: peripherals::PA0,
-) {
-    info!("ADC: Initialisiere ADC1 an PA0 mit DMA1_CH2...");
-
-    // ADC initialisieren. Der Standard-Konstruktor kalibriert den Wandler intern.
-    let mut adc = Adc::new(adc_peri, Default::default());
-
-    // Pin in einen generischen ADC-Kanal umwandeln
-    let mut channel = adc_pin.degrade_adc();
-
-    // Puffer für 64 aufeinanderfolgende Messwerte
-    let mut buffer = [0u16; 64];
+    // Ein Ticker feuert präzise: 100 Mikrosekunden = 10 kHz Update-Rate
+    let mut ticker = Ticker::every(Duration::from_micros(100));
+    let mut value: u16 = 0;
 
     loop {
-        // ADC-Wandlung über DMA ausführen:
-        // Der DMA-Kanal füllt den gesamten Puffer mit 64 Abtastungen.
-        // Der Aufruf blockiert asynchron (.await), bis der DMA-Transfer fertig ist.
+        // DAC ist 12-Bit (Werte von 0 bis 4095). 0 = 0V, 4095 = 3.3V
+        dac.set(Value::Bit12Right(value));
+
+        // Wert um 64 erhöhen. Wenn 4096 erreicht wird, fängt es wieder bei 0 an (Modulo)
+        value = (value + 64) % 4096;
+
+        // Pausiere diesen Task, bis die 100 Mikrosekunden um sind.
+        ticker.next().await;
+    }
+}
+
+// ==============================================================================
+// TASK 2: ANALOG-DIGITAL-WANDLER (ADC) mit DMA
+// ==============================================================================
+#[embassy_executor::task]
+async fn adc_task(
+    adc_peri: Peri<'static, peripherals::ADC1>,
+    pin: Peri<'static, peripherals::PA0>,
+    mut dma_ch: Peri<'static, peripherals::DMA1_CH1>,
+) {
+    info!("ADC Task gestartet (Messen auf PA0)");
+
+    let mut adc = Adc::new(adc_peri, Default::default());
+
+    // Pin in typunabhängigen ADC-Kanal (AnyAdcChannel) umwandeln
+    let mut channel = pin.degrade_adc();
+
+    // Puffer im Arbeitsspeicher (SRAM) für die DMA-Werte
+    let mut buf = [0u16; 128];
+
+    loop {
+        // Asynchrones Auslesen über DMA:
+        // .reborrow() leiht das DMA-Peripheral für diesen Aufruf aus, ohne es zu konsumieren
         adc.read(
-            &mut dma_peri,
-            [(&mut *channel, SampleTime::CYCLES47_5)].into_iter(),
-            &mut buffer,
+            dma_ch.reborrow(),
+            Irqs,
+            [(&mut channel, SampleTime::CYCLES47_5)].into_iter(),
+            &mut buf,
         )
         .await;
 
-        // Statistische Auswertung des Puffers (Mittelwert, Min, Max)
-        let mut sum: u32 = 0;
-        let mut min_val: u16 = u16::MAX;
-        let mut max_val: u16 = 0;
+        // Durchschnittswert der 128 Samples berechnen
+        let sum: u32 = buf.iter().map(|&v| v as u32).sum();
+        let avg = sum / buf.len() as u32;
 
-        for &sample in buffer.iter() {
-            sum += sample as u32;
-            min_val = min_val.min(sample);
-            max_val = max_val.max(sample);
-        }
+        // Umrechnung in Millivolt (Referenzspannung ca. 3300 mV bei 12-Bit)
+        let mv = (avg * 3300) / 4095;
 
-        let avg_raw = (sum / buffer.len() as u32) as u16;
-        // Umrechnung von 12-Bit Rohwert (0..4095) in Millivolt (bei Vdda = 3300 mV)
-        let avg_mv = (avg_raw as u32 * 3300) / 4095;
-        let min_mv = (min_val as u32 * 3300) / 4095;
-        let max_mv = (max_val as u32 * 3300) / 4095;
+        info!("ADC DMA Block fertig! Durchschnitt: {} (ca. {} mV)", avg, mv);
 
-        info!(
-            "ADC: Mittelwert = {} mV (Raw: {}), Min = {} mV, Max = {} mV",
-            avg_mv, avg_raw, min_mv, max_mv
-        );
-
-        // 500 ms Pause bis zur nächsten Messung
-        Timer::after(Duration::from_millis(500)).await;
+        Timer::after_millis(500).await;
     }
 }
 
-// ============================================================================
-// 5. HAUPTPROGRAMM (System-Boot & Task-Start)
-// ============================================================================
+// ==============================================================================
+// HAUPTPROGRAMM (Einstiegspunkt)
+// ==============================================================================
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let mut config = Config::default();
 
-    // WICHTIG beim STM32G4:
-    // Der interne ADC benötigt zwingend einen Takt-Multiplexer-Eintrag im RCC.
-    // Ohne diese Zeile schlägt Adc::new mit einem Panic fehl!
+    // ZWINGEND beim STM32G4:
+    // Der interne ADC benötigt einen Takt-Multiplexer-Eintrag im RCC.
     config.rcc.mux.adc12sel = embassy_stm32::rcc::mux::Adcsel::SYS;
 
-    // Hardware initialisieren
     let p = embassy_stm32::init(config);
-    info!("=== STM32G474 Minimal DMA Demo gestartet ===");
 
-    // Beide Tasks starten: Sie laufen kooperativ nebeneinander auf dem Executor.
-    spawner.spawn(dac_task(p.DAC1, p.DMA1_CH1, p.PA4)).unwrap();
-    spawner.spawn(adc_task(p.ADC1, p.DMA1_CH2, p.PA0)).unwrap();
+    info!("=== Minimales DAC / ADC-DMA Setup ===");
 
-    // Der main-Task hat seine Arbeit erledigt und wartet ewig
+    // In embassy-executor 0.10.0 gehört .unwrap() an den Task-Aufruf:
+    spawner.spawn(dac_task(p.DAC1, p.PA4).unwrap());
+    spawner.spawn(adc_task(p.ADC1, p.PA0, p.DMA1_CH1).unwrap());
+
     core::future::pending::<()>().await;
 }
