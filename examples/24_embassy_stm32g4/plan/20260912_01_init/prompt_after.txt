@@ -1,0 +1,5 @@
+schreibe einen neues prompt.txt aehnlich dem prompt was du gerade abgearbeitet hast auf und speichere es unter /workspace/src/cl-rust-generator/
+  examples/24_embassy_stm32g4/plan/20260912_02.../prompt.txt. dieses prompt soll die anforderungen des original prompts wiedergeben (vorgehensweise mit clippy, usw.). es
+  soll zusaetzlich die anweisung geben, dass lange quelltext dateien falls moeglich in semantisch getrennte einzelne dateien unterteilt werden sollen die am anfang eine
+  nummer haben (z.b. 01_<name>.rs) wobei name auch wiederspiegelt was darinsteht. das neue prompt soll einen agenten der von null auf startet schnell wieder auf denselben
+  stand wie dich bringen und dazu befaehigen, den rest der spec umzusetzen
