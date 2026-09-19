@@ -711,6 +711,119 @@ if !x {
 }
 ```
 
+### `(if c
+         (let ((x 1))
+           (f x))
+         (g))`
+
+A branch holding a single let needs no extra block: the
+let block becomes the branch block instead of nesting inside another one.
+
+```lisp
+(if c
+    (let ((x 1))
+      (f x))
+    (g))
+```
+
+```rust
+if c {
+    let x = 1;
+    f(x)
+} else {
+    g()
+}
+```
+
+### `(when c
+       (let ((x 1))
+         (f x)))`
+
+Same splicing for when: (when c (let ...)) emits one block,
+not a block in a block.
+
+```lisp
+(when c
+  (let ((x 1))
+    (f x)))
+```
+
+```rust
+if c {
+    let x = 1;
+    f(x)
+}
+```
+
+### `(if c
+         (progn (setf a 1) (setf b 2)))`
+
+A single explicit progn as a branch is spliced the same
+way, so hand-grouped statements do not nest either.
+
+```lisp
+(if c
+    (progn (setf a 1) (setf b 2)))
+```
+
+```rust
+if c {
+        a=1;
+        b=2;
+}
+```
+
+### `(loop (f)
+           (let ((x 1))
+             (g x)))`
+
+Only singleton branch bodies splice.  A let that shares its
+body with other statements keeps its own block, so its bindings stay scoped.
+
+```lisp
+(loop (f)
+      (let ((x 1))
+        (g x)))
+```
+
+```rust
+loop {
+    f();
+    {
+        let x = 1;
+        g(x)
+}
+}
+```
+
+### `(case x
+       (1
+        (let ((a 1))
+          (f a)))
+       (t (g)))`
+
+Match arms splice a singleton let the same way branches do.
+
+```lisp
+(case x
+  (1
+   (let ((a 1))
+     (f a)))
+  (t (g)))
+```
+
+```rust
+match x {
+    1 => {
+    let a = 1;
+    f(a)
+},
+    _ => {
+    g()
+},
+}
+```
+
 ### `(if-let ((Some x) y)
        (return x)
        (return 0))`
@@ -1056,6 +1169,26 @@ parse_pair::<i32>
 ```
 
 ## function Forms
+
+### `(defun main ()
+       (let ((x 1))
+         (f x)))`
+
+A function body holding only a let needs no extra block:
+the let block becomes the function body.
+
+```lisp
+(defun main ()
+  (let ((x 1))
+    (f x)))
+```
+
+```rust
+fn main() {
+    let x = 1;
+    f(x)
+}
+```
 
 ### `(defun main () (println! (string "hi")))`
 

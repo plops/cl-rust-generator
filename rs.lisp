@@ -288,6 +288,38 @@ is `mut x: T', a mutable reference is `x: &mut T'."
 	      (format s "~a" (funcall emit declaration))))
 	  (funcall emit rp)))))
 
+(defparameter *block-emitting-heads*
+  '(progn block let let*)
+  "Heads whose emission is already a bare {...} block.  A branch position
+that would wrap one of these in another PROGN would emit a redundant
+nested block ({{ ... }}), so the branch helpers splice it instead.")
+
+(defun block-form-p (form)
+  "True when FORM emits a bare {...} block on its own (PROGN, BLOCK, LET
+or LET*).  Only single-form branch positions may splice such a form;
+anything else still needs its own PROGN wrapper."
+  (and (listp form)
+       (member (car form) *block-emitting-heads* :test #'eq)
+       t))
+
+(defun emit-branch-block (form emit)
+  "Emit single branch FORM as a block.  A bare-block form (PROGN, BLOCK,
+LET, LET*) is emitted directly; anything else is wrapped in a PROGN so
+the branch still gets its braces."
+  (if (block-form-p form)
+      (funcall emit form)
+      (funcall emit `(progn ,form))))
+
+(defun emit-body-block (forms emit)
+  "Emit a multi-form branch BODY as a block.  A singleton bare-block
+form is spliced (its braces become the branch braces); otherwise the
+whole body is wrapped in a PROGN.  Empty bodies keep the old PROGN
+behaviour."
+  (if (and (= 1 (length forms))
+	   (block-form-p (car forms)))
+      (funcall emit (car forms))
+      (funcall emit `(progn ,@forms))))
+
 
 (defun parse-let (code emit &key (mutable-default nil))
   "let ({var | (var [init-form])}*) declaration* form*"
@@ -329,7 +361,7 @@ is `mut x: T', a mutable reference is `x: &mut T'."
 			(when (car r)
 			 (funcall emit (car r))))))
 	  (unless header-only
-	    (format s " ~a" (funcall emit `(progn ,@body)))))))))
+	    (format s " ~a" (emit-body-block body emit))))))))
 
 (defun parse-lambda (code emit)
   ;;  lambda lambda-list [declaration*] form*
@@ -352,7 +384,7 @@ is `mut x: T', a mutable reference is `x: &mut T'."
 			(funcall emit `(paren ,@r))
 			(when (car r)
 			  (funcall emit (car r))))))
-	  (format s " ~a" (funcall emit `(progn ,@body))))))))
+	  (format s " ~a" (emit-body-block body emit)))))))
 
 
 
@@ -1128,20 +1160,20 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 			(with-output-to-string (s)
 			  (format s "if ~a ~a"
 				  (strip-outer-parens (emit condition))
-				  (emit `(progn ,true-statement)))
+				  (emit-branch-block true-statement #'emit))
 			  (when false-statement
 			    (format s " else ~a"
-				    (emit `(progn ,false-statement)))))))
+				    (emit-branch-block false-statement #'emit))))))
 		  (when (destructuring-bind (condition &rest forms) (cdr code)
 			  ;; like IF but with an implicit body block, so several
 			  ;; forms can be given
 			  (format nil "if ~a ~a"
 				  (strip-outer-parens (emit condition))
-				  (emit `(progn ,@forms)))))
+				  (emit-body-block forms #'emit))))
 		  (unless (destructuring-bind (condition &rest forms) (cdr code)
 			    (format nil "if ~a ~a"
 				    (strip-outer-parens (emit `(not ,condition)))
-				    (emit `(progn ,@forms)))))
+				    (emit-body-block forms #'emit))))
 		  (if-let
 		      ;; (if-let (pattern scrutinee) then &optional else)
 		      ;;   -> if let pattern = scrutinee { then } else { else }
@@ -1154,10 +1186,10 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 			  (format s "if let ~a = ~a ~a"
 				  (emit pattern)
 				  (strip-outer-parens (emit scrutinee))
-				  (emit `(progn ,then)))
+				  (emit-branch-block then #'emit))
 			  (when else
 			    (format s " else ~a"
-				    (emit `(progn ,else)))))))
+				    (emit-branch-block else #'emit))))))
 		  (while-let
 		      ;; (while-let (pattern scrutinee) form*)
 		      ;;   -> while let pattern = scrutinee { forms }
@@ -1166,7 +1198,7 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 			(format nil "while let ~a = ~a ~a"
 				(emit pattern)
 				(strip-outer-parens (emit scrutinee))
-				(emit `(progn ,@body)))))
+				(emit-body-block body #'emit))))
 		  (let-else
 		      ;; (let-else (pattern scrutinee) form*)
 		      ;;   -> let pattern = scrutinee else { forms };
@@ -1180,7 +1212,7 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 			(format nil "let ~a = ~a else ~a;"
 				(emit pattern)
 				(strip-outer-parens (emit scrutinee))
-				(emit `(progn ,@body)))))
+				(emit-body-block body #'emit))))
 		  (coerce (let ((args (cdr code)))
 			(destructuring-bind (name type) args
 			  (if *omit-redundant-parens*
@@ -1208,13 +1240,11 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 		  #+nil (unsafe (let ((args (cdr code)))
 			    (format nil "unsafe {~{~a~}}" args)))
 		  (unsafe (let ((args (cdr code)))
-			    (emit `(space "unsafe"
-					  (progn
-					    ,@args)))))
+			    (format nil "unsafe ~a"
+				    (emit-body-block args #'emit))))
 		  (extern (let ((args (cdr code)))
-			    (emit `(space "extern"
-					  (progn
-					    ,@args)))))
+			    (format nil "extern ~a"
+				    (emit-body-block args #'emit))))
 		  (case
 		      ;; case keyform {normal-clause}* [otherwise-clause]
 		      ;; normal-clause::= (key form*)
@@ -1238,7 +1268,7 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 					      (if (eq key t)
 						  "_"
 						  (emit key))
-					      (emit `(progn ,@forms))))))))))
+					      (emit-body-block forms #'emit)))))))))
 		  (dotimes
 		      ;; dotimes (var count [step]) {form}*
 		      ;;   -> for var in 0..count { }
@@ -1250,22 +1280,22 @@ NIL the form is emitted unchanged (callers add their full parentheses)."
 				    (format nil "0..~a" (emit n))
 				    (format nil "(0..~a).step_by(~a)"
 					    (emit n) (emit step)))
-				(emit `(progn ,@body)))))
+				(emit-body-block body #'emit))))
 		  (loop (let ((args (cdr code)))
 			  (format nil "loop ~a"
-				  (emit `(progn ,@args)))))
+				  (emit-body-block args #'emit))))
 		  (for (destructuring-bind ((item collection) &rest body) (cdr code)
 			     (format nil "for ~a in ~a ~a"
 				     (emit item)
 				     (strip-outer-parens (emit collection))
-				     (emit `(progn ,@body)))))
+				     (emit-body-block body #'emit))))
 		  (while  ;; while condition {forms}*
 		      (destructuring-bind (condition &rest body) (cdr code)
 			;; no parentheses around the condition, rustc's
 			;; unused_parens lint complains about them
 			(format nil "while ~a ~a"
 				(strip-outer-parens (emit condition))
-				(emit `(progn ,@body)))))
+				(emit-body-block body #'emit))))
 		  (deftype
 		      ;; deftype name lambda-list {form}*
 		      ;; only the first form of the body is used, lambda list is ignored

@@ -1,0 +1,36 @@
+ich mag nicht, dass der transpiler rs.lisp zur zeit oft unnuetze bloecke "{}" emittiert. z.b. hier:
+
+#[macroquad::main("Treemap Disk Visualizer MVP")]
+async fn main() {
+    {
+        let raw_target = std::env::args()
+            .nth(1)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let target = fs::canonicalize(&raw_target).unwrap_or(raw_target);
+        let (tx, rx) = (channel::<Node>)();
+        eprintln!("target [target.display()]={:?}", target.display());
+        thread::spawn(move || {
+            let root = scan_tree(&target);
+            let _ = tx.send(root);
+        });
+        {
+            let mut root: Option<Node> = None;
+            let mut last_size = (0.0, 0.0);
+            loop {
+                clear_background(Color::new(8.00e-2, 9.00e-2, 0.120, 1.0));
+                {
+                    let (screen_w, screen_h) = (screen_width(), screen_height());
+                    if let Ok(loaded_root) = rx.try_recv() {
+                        {
+                            root = Some(loaded_root);
+                            last_size = (0.0, 0.0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+wenn es ein if { ... gibt dann muss eigentlich kein block mehr fuer ein inneres let geoeffnet werden. wie kann man dies architektonisch in den code generator einbauen?
