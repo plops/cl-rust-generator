@@ -20,12 +20,20 @@ set -eu
 SYSTEM_PKGS="libegl-dev libx11-dev libxkbcommon-dev libgbm-dev libdrm-dev \
   libpipewire-0.3-dev libclang-dev pkg-config build-essential ca-certificates"
 
+if [ "$(id -u)" -eq 0 ]; then
+  SUDO=""
+elif command -v sudo >/dev/null 2>&1; then
+  SUDO="sudo"
+else
+  echo "neither root nor sudo; install manually: $SYSTEM_PKGS" >&2
+  SUDO="false"
+fi
 if command -v apt-get >/dev/null 2>&1; then
   echo "--> installing minimal system deps (no xvfb/feh: no tests built)"
   # shellcheck disable=SC2086
-  sudo apt-get update -qq
+  $SUDO apt-get update -qq
   # shellcheck disable=SC2086
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $SYSTEM_PKGS
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $SYSTEM_PKGS
 else
   echo "no apt-get; ensure installed: $SYSTEM_PKGS" >&2
 fi
