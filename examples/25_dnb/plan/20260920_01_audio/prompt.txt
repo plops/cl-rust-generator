@@ -1,0 +1,194 @@
+du lauefst in einem docker image mit ubuntu 26 auf einem linux host und hast zugriff auf
+kernel messages vom host und auch die usb geraete. falls dir packete fehlen installiere sie.
+du arbeitest im auftrag von wol pumba (wolpumba@gmail.com)
+
+deine aufgabe ist ein linux programm zu schreiben dass drum und bass auf ein alsa geraet ausgibt
+mit diesem genre (aber instrumental):
+
+Drum and Bass at 174 BPM with rolling jump-up momentum, dark jungle reese architecture, distorted 808 sub pressure, crisp fractured breaks, clipped rave-siren transitions, half-time reflective bridge, tightened studio mix and maximum final-tearout drop
+
+To build a standalone Drum and Bass engine in Rust that talks directly to ALSA on Linux, you will use [FunDSP](https://github.com/SamiPerttu/fundsp) to code the synthesis audio graph and [CPAL (Cross-Platform Audio Library)](https://docs.rs/cpal) to handle the native ALSA hardware stream. [1, 2] 
+## Project Setup
+First, create a new Rust binary project and install the dependencies. In your Linux terminal, run:
+
+cargo new dark_dnb_synth
+cd dark_dnb_synth
+cargo add fundsp cpal
+
+Ensure your system has the ALSA development headers installed. On Debian/Ubuntu-based systems, run sudo apt install libasound2-dev.
+## The Rust Implementation
+Replace the contents of src/main.rs with the following code. This script builds a 174 BPM master clock, a detuned, heavily saturated Reese Bass using fundsp math operators, a synchronized Drum Step-Sequencer mapping kick/snare triggers, and pipes the output into your native ALSA system device. [1, 2] 
+
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};use fundsp::hacker::*;use std::sync::Arc;use std::thread;use std::time::Duration;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 1. Initialise the ALSA host via CPAL
+    let host = cpal::default_host();
+    
+    // Explicitly target the default ALSA output hardware
+    let device = host
+        .default_output_device()
+        .expect("Failed to find default ALSA output device");
+    
+    let config = device.default_output_config()?;
+    let sample_rate = config.sample_rate().0 as f64;
+
+    println!("Playing Dark DnB on ALSA device: {}", device.name()?);
+    println!("Tempo: 174 BPM | Sample Rate: {} Hz", sample_rate);
+
+    // 2. Define the Dark DnB Audio Graph using FunDSP
+    // Base 174 BPM Clock setup (174 BPM = 2.9 Hz quarter notes, 11.6 Hz for 16th notes)
+    let dnb_tempo = 174.0;
+    let step_hz = (dnb_tempo / 60.0) * 4.0; // 16th note triggers
+
+    // --- BASS LAYER: Detuned Reese Bass + Tanh Distortion ---
+    // Two detuned sawtooth waves fighting in the sub-lows
+    let reese_oscillators = lfo(move |_t| 50.0) >> saw() 
+                          & lfo(move |_t| 50.8) >> saw();
+    
+    // Low pass filter + raw heavy saturation for the gritty UK sound system edge
+    let reese_bass = reese_oscillators 
+        >> lowpass_hz(280.0, 1.0) 
+        >> shape(Shape::Tanh(2.5)) * 0.4;
+
+    // --- DRUM LAYER: Algorithmic Synthesized Step-Sequencer ---
+    // A 16-step rhythmic pattern loop for Kicks (1) and Snares (2)
+    // 1000 0010 0010 0100 (Classic driving DnB step variations)
+    let drum_pattern = [1, 0, 0, 0,  0, 0, 2, 0,  0, 0, 2, 0,  0, 1, 0, 0];
+
+    let drum_sequencer = lfo(move |t| {
+        let step = (t * step_hz).floor() as usize % 16;
+        let trigger_type = drum_pattern[step];
+        
+        // Simple decay envelope trigger simulation based on clock phase
+        let phase = (t * step_hz) % 1.0;
+        let env = (-8.0 * phase).exp(); // Fast exponential decay
+
+        if trigger_type == 1 {
+            // Kick Drum sound: Pitch-sweeping low sine wave
+            let pitch_sweep = 150.0 * env + 45.0;
+            (f32::sin((t * pitch_sweep * 2.0 * std::f64::consts::PI) as f32) * env as f32 * 0.7) as f64
+        } else if trigger_type == 2 {
+            // Snare Drum sound: White noise filtered around mid frequencies
+            let noise_sample = (rand::random::<f32>() - 0.5) * 2.0;
+            (noise_sample * env as f32 * 0.35) as f64
+        } else {
+            0.0
+        }
+    });
+
+    // --- COMBINE AND MASTER: Mix and output to Stereo ---
+    let master_mix = (reese_bass + drum_sequencer) >> split::<U2>();
+
+    // 3. Instantiate and run the real-time DSP backend
+    let mut audio_node = Block::new(Box::new(master_mix));
+    audio_node.set_sample_rate(sample_rate);
+
+    // Build the thread-safe processing loop
+    let audio_node = Arc::new(std::sync::Mutex::new(audio_node));
+    let stream_node = Arc::clone(&audio_node);
+
+    let stream = device.build_output_stream(
+        &config.into(),
+        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+            let mut node = stream_node.lock().unwrap();
+            for frame in data.chunks_mut(2) {
+                let mut left = 0.0;
+                let mut right = 0.0;
+                node.process(1, &[], &mut [left, right]);
+                
+                if frame.len() == 2 {
+                    frame[0] = left as f32;
+                    frame[1] = right as f32;
+                }
+            }
+        },
+
+        |err| eprintln!("ALSA Stream Error: {}", err),
+        None
+    )?;
+
+    // Start playing audio
+    stream.play()?;
+
+    // Keep execution alive on the main thread
+    println!("Press Ctrl+C to stop playback...");
+    loop {
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+## Running the App
+To ensure the compiler strips debug safety assertions and fully optimizes the nested mathematical operations for glitch-free playback, compile and run your program with the release flag: [3] 
+
+cargo run --release
+
+Would you like to expand this system by implementing a custom sampler node to slice and dice raw sample files like the Amen break, or would you prefer to build out a serialised MIDI tracker network to control your patterns?
+
+[1] [https://www.bekk.christmas](https://www.bekk.christmas/post/2023/19/make-some-noise-with-rust)
+[2] [https://www.youtube.com](https://www.youtube.com/watch?v=R6v96c-ahAM)
+[3] [https://www.youtube.com](https://www.youtube.com/watch?v=R6v96c-ahAM&t=237)
+
+in deps.md sollst du die pfade der abhaengigkeiten auf github in der <organization>/<projekt> notation auflisten. dies kannst du benutzen um in deepwiki mcp nach weiteren informationen zu suchen / fragen.
+
+ordnerstruktur:
+arbeite im  ordner /workspace/src/cl-rust-generator/examples/25../source0
+
+
+datei-aufteilung (neu, verbindlich):
+lange quelltext-dateien sind zu vermeiden. sobald eine datei mehr als eine klar abgrenzbare
+zustaendigkeit hat oder ca. 300 zeilen ueberschreitet, ist sie in semantisch getrennte einzelne
+dateien zu unterteilen. jede neue datei bekommt am anfang eine zweistellige nummer plus einen
+namen der widerspiegelt was darinsteht, z.b. `01_clock.rs`, `02_usb_cdc.rs`, `03_router.rs`
+in `firmware/src/` bzw. `01_types.rs`, `02_frame.rs` in `common/src/`. regeln: aufsteigende
+nummern folgen der initialisierungs-/datenfluss-reihenfolge (clock vor peripherie, transport
+vor protokoll, protokoll vor modus), zusammengehoeriges bleibt in einer datei (kein
+auseinanderreissen von zusammengehoerigen typen + ihren tests), `mod.rs`/`lib.rs`/`main.rs`
+enthalten nur modul-deklarationen und die oberste verdrahtung (init, spawn, join), kein
+verhalten. aufteilung immer ohne verhaltens-aenderung durchfuehren (vorher/nachher: alle tests
+plus smoke gruens). bestehende dateien (`main.rs`, `text.rs`, `frame.rs`, `router.rs`) bei
+bedarf nach diesen regeln umbauen, sobald du sie anfasst.
+
+vorgehensweise:
+nutze tools um konsistenten und aufgeraeumten quellcode zu gewaehrleisten (also `cargo fmt` um
+formatierung zu normalisieren, `cargo clippy` um moegliche fehler oder verbesserungen zu finden,
+cargo-edit mit `cargo upgrade` um bei den abhaengigkeiten die neueste version zu verwenden, ...)
+
+Schaue dir den Quellcode an und die Architektur dieser Software. Nutze deepwiki mcp fuer
+plops/cl-rust-generator um dokumentation zu bekommen und fragen beantworten zu lassen. falls
+abhaengigkeiten eingefuehrt werden sind diese mitsamt ihrer github organisation in deps.md
+aufzuschreiben, so dass wir spaeter einfach die deepwiki abfragen konstruieren koennen. nutze
+rust tools um auf die neueste vorhandene version zu switchen (auch wenn vor kompatibilitaet
+gewarnt wird, wenn wir gerade eine dependency einfuehren ist es wichtig, die neueste version
+zu nehmen) und schon vorab usage examples in den plan aufzunehmen (mit deepwiki mcp zu erfragen)
+
+du befindest dich in einem docker container, basierend auf ubuntu 26. du darfst neue programme
+installieren, falls noetig.
+
+Schlage vor, wie wir dieses Feature implementieren können. Habe ich alle Requirements aufgelistet,
+die wichtig sind, oder kannst du dir vorstellen, dass noch andere Dinge werden sollen? Liste mir
+diese auf Vorschlägen, was man am besten umsetzen könnte. beruecksichtige dabei: messgenauigkeit
+und kalibrierung (referenzspannung, quarz-toleranz), schutzbeschaltung/limits aus spec §4
+(max. 3,3 V an analogen pins), TUI-protokoll-versionierung, fehlerverhalten bei modus-wechsel
+waehrend laufender messung, sowie persistente konfiguration (soll die firmware einstellungen
+behalten?).
+
+Schreibe einen Implementierungsplan. Dieser Implementierungsplan soll einen unabhängigen AI-Agenten
+dazu befähigen, selbstständig einen Kontext aufzubauen, der die wesentlichen quellen beinhaltet.
+Das heißt, der Implementierungsplan hat eine Liste von Dateien, die sich der Agent sich anschauen
+sollte, mit einer kurzen Beschreibung für jede Datei.
+Weiterhin soll der Implementierungsplan eine Erklärung Commit Messages sendet werden sollen. Und zwar
+sollen diese mit einer umfassenden Beschreibung und als Conventional Commit format ausgeführt werden.
+
+Neue Unit-Tests und Integration-Tests sollen wie erforderlich eingeführt werden.
+Diese sollen auch ausgeführt werden.
+
+schreibe task.md wo du die implementierungs und test schritte aufeinander abfolgen laesst, so dass
+ein agent die tasks seriell abarbeiten kann und die arbeit in jedem schritt getested und validiert
+wird. jeder modus bekommt eigene tasks (implementierung, host-tests, HIL-nachweis), danach erst
+die TUI-tasks.
+
+Nach der vollständigen Implementierung, wenn alle Tests abgeschlossen sind und alles committed ist,
+soll auch ein Walkthrough-Dokument entgeschrieben werden und in plan/20260912_02_full/walkthrough.md
+abgelegt werden. Dieses soll zusammenfassen, was wirklich implementiert wurde, welche Stellen
+aufgrund der Tests oder wie auch immer gemacht wurden, als im Untergrund auch Learnings und mögliche
+Erweiterungen. liste auch die neuen programme die mit in den docker container aufgenommen werden sollten

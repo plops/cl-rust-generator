@@ -1,0 +1,23 @@
+[package]
+name = "source0"
+version = "0.1.0"
+edition = "2021"
+default-run = "dark_dnb_synth"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+cpal = "0.18"
+crossterm = "0.29.0"
+fundsp = "0.23"
+hound = "3"
+ratatui = "0.30.2"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.6"
+
+[[bin]]
+name = "dark_dnb_synth"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
