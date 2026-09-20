@@ -2,7 +2,7 @@
 
 Registry für DeepWiki-Abfragen: GitHub-Notation `<organization>/<projekt>`.
 Nur direkt genutzte Deps (transitive nur wenn Abfrage-relevant).
-Stand: 2026-09-20 (docs.rs-latest); bei Einführung jeweils neueste nehmen (Task S0/T2).
+Stand: 2026-09-20, final nach `cargo upgrade` in T2 (no-op — alle schon latest).
 
 | Crate/System | Org/Projekt bzw. Paket | Version (Stand) | Zweck |
 |---|---|---|---|
