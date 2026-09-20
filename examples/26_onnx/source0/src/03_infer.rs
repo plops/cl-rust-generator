@@ -8,7 +8,7 @@
 
 use anyhow::{bail, Context, Result};
 use image::{imageops::FilterType, RgbImage};
-use ndarray::{s, Array2, Array3, ArrayViewD, Axis};
+use ndarray::{s, Array2, Array4, ArrayViewD, Axis};
 use ort::{inputs, session::Session, value::TensorRef};
 use std::path::Path;
 
@@ -124,8 +124,8 @@ pub fn iou(a: &BoundingBox, b: &BoundingBox) -> f32 {
 }
 
 /// Resized das RGB-Bild per Letterbox auf 640×640 und normalisiert
-/// nach CHW-f32 (Werte 0..=1). Layout: `(1, 3, 640, 640)` ohne Batch.
-pub fn preprocess(rgb: &[u8], src_w: u32, src_h: u32) -> Result<Array3<f32>> {
+/// nach NCHW-f32 (Werte 0..=1). Layout: `(1, 3, 640, 640)` mit Batch.
+pub fn preprocess(rgb: &[u8], src_w: u32, src_h: u32) -> Result<Array4<f32>> {
     let expect = (src_w as usize) * (src_h as usize) * 3;
     if rgb.len() != expect {
         bail!("rgb buffer size mismatch: got {}, need {expect}", rgb.len());
@@ -143,11 +143,11 @@ pub fn preprocess(rgb: &[u8], src_w: u32, src_h: u32) -> Result<Array3<f32>> {
         lb.pad_x.round() as i64,
         lb.pad_y.round() as i64,
     );
-    let mut input = Array3::<f32>::zeros((3, size as usize, size as usize));
+    let mut input = Array4::<f32>::zeros((1, 3, size as usize, size as usize));
     for (x, y, px) in canvas.enumerate_pixels() {
-        input[[0, y as usize, x as usize]] = f32::from(px[0]) / 255.0;
-        input[[1, y as usize, x as usize]] = f32::from(px[1]) / 255.0;
-        input[[2, y as usize, x as usize]] = f32::from(px[2]) / 255.0;
+        input[[0, 0, y as usize, x as usize]] = f32::from(px[0]) / 255.0;
+        input[[0, 1, y as usize, x as usize]] = f32::from(px[1]) / 255.0;
+        input[[0, 2, y as usize, x as usize]] = f32::from(px[2]) / 255.0;
     }
     Ok(input)
 }
@@ -401,10 +401,10 @@ mod tests {
     fn preprocess_shape_and_range() {
         let rgb = vec![200u8; 64 * 48 * 3];
         let input = preprocess(&rgb, 64, 48).unwrap();
-        assert_eq!(input.shape(), &[3, 640, 640]);
+        assert_eq!(input.shape(), &[1, 3, 640, 640]);
         assert!(input.iter().all(|v| (0.0..=1.0).contains(v)));
         // Letterbox-Fuellung (114/255) muss in einer Ecke stehen.
-        assert!((input[[0, 0, 0]] - 114.0 / 255.0).abs() < 0.02);
+        assert!((input[[0, 0, 0, 0]] - 114.0 / 255.0).abs() < 0.02);
     }
 
     #[test]

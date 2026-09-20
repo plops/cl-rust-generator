@@ -23,4 +23,4 @@ pub use infer::{
     BoundingBox, Detection, Letterbox, CLASS_LABELS, FALLBACK_INPUT, LETTERBOX_PAD, MODEL_SIZE,
     OUTPUT_NAME,
 };
-pub use view::{blit_nearest, save_frame_png, zoomed_size};
+pub use view::{blit_nearest, frame_period, run_window, save_frame_png, zoomed_size};

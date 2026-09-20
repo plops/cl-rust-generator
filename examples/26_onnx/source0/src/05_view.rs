@@ -6,6 +6,17 @@
 
 use anyhow::{bail, Context, Result};
 use std::path::Path;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use pixels::{Pixels, SurfaceTexture};
+use winit::{
+    dpi::LogicalSize,
+    event::{Event, KeyEvent, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    keyboard::{KeyCode, PhysicalKey},
+    window::Window,
+};
 
 /// Berechnet die Fenster-/Frame-Groesse: explizite `--win-w/--win-h`
 /// gewinnen, sonst Capture-Groesse × `--zoom`.
@@ -58,6 +69,107 @@ pub fn save_frame_png(path: &Path, rgba: &[u8], w: u32, h: u32) -> Result<()> {
     }
     image::save_buffer(path, rgba, w, h, image::ColorType::Rgba8)
         .with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
+}
+
+/// Frame-Periode aus der Framerate (intern auf 1..=30 geclampt).
+#[must_use]
+pub fn frame_period(fps: u32) -> Duration {
+    Duration::from_secs_f64(1.0 / f64::from(fps.clamp(1, 30)))
+}
+
+/// Oeffnet das pixels-Fenster und pumpt Frames: pro Tick fuellt `pump`
+/// den RGBA-Puffer der Capture-Groesse (`src_w` x `src_h`), Anzeige
+/// erfolgt auf `dst_w` x `dst_h` (Zoom-Blit). Esc/Schliessen beendet.
+pub fn run_window(
+    src_w: u32,
+    src_h: u32,
+    dst_w: u32,
+    dst_h: u32,
+    title: &str,
+    fps: u32,
+    mut pump: impl FnMut(&mut Vec<u8>) -> Result<()> + 'static,
+) -> Result<()> {
+    if src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0 {
+        bail!("window and capture sizes must be non-empty");
+    }
+    let event_loop =
+        EventLoop::new().context("creating winit event loop (is a display available?)")?;
+    // `create_window`/`run` sind in winit 0.30 deprecated, aber das
+    // kanonische Muster der pixels-Beispiele (kein self-referenzieller
+    // `ApplicationHandler`-Zustand noetig).
+    #[allow(deprecated)]
+    let window: Arc<Window> = Arc::new(
+        event_loop
+            .create_window(
+                Window::default_attributes()
+                    .with_title(title)
+                    .with_inner_size(LogicalSize::new(f64::from(dst_w), f64::from(dst_h))),
+            )
+            .context("creating window")?,
+    );
+    let mut pixels = Pixels::new(dst_w, dst_h, SurfaceTexture::new(dst_w, dst_h, &window))
+        .context("creating pixels framebuffer (is a GPU/GL driver available?)")?;
+    let period = frame_period(fps);
+    let mut next = Instant::now();
+    let mut src = vec![0u8; (src_w as usize) * (src_h as usize) * 4];
+    let mut pump_err: Option<anyhow::Error> = None;
+
+    #[allow(deprecated)]
+    let res = event_loop.run(|event, elwt| {
+        elwt.set_control_flow(ControlFlow::WaitUntil(next));
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => elwt.exit(),
+            Event::WindowEvent {
+                event:
+                    WindowEvent::KeyboardInput {
+                        event:
+                            KeyEvent {
+                                physical_key: PhysicalKey::Code(KeyCode::Escape),
+                                state,
+                                ..
+                            },
+                        ..
+                    },
+                ..
+            } if state.is_pressed() => elwt.exit(),
+            Event::WindowEvent {
+                event: WindowEvent::Resized(size),
+                ..
+            } => {
+                pixels
+                    .resize_surface(size.width.max(1), size.height.max(1))
+                    .ok();
+            }
+            Event::WindowEvent {
+                event: WindowEvent::RedrawRequested,
+                ..
+            } => {
+                if Instant::now() >= next {
+                    match pump(&mut src) {
+                        Ok(()) => {
+                            blit_nearest(&src, src_w, src_h, pixels.frame_mut(), dst_w, dst_h).ok();
+                            pixels.render().ok();
+                        }
+                        Err(e) => {
+                            pump_err = Some(e);
+                            elwt.exit();
+                        }
+                    }
+                    next = Instant::now() + period;
+                }
+            }
+            Event::AboutToWait => window.request_redraw(),
+            _ => {}
+        }
+    });
+    res.map_err(|e| anyhow::anyhow!("event loop failed: {e:?}"))?;
+    if let Some(e) = pump_err {
+        return Err(e.context("frame pump failed"));
+    }
     Ok(())
 }
 
@@ -123,6 +235,14 @@ mod tests {
         assert_eq!(back.dimensions(), (8, 6));
         assert!(back.as_raw().iter().all(|v| *v == 9));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn period_matches_fps_and_clamps() {
+        assert_eq!(frame_period(5), Duration::from_millis(200));
+        assert_eq!(frame_period(1), Duration::from_secs(1));
+        assert_eq!(frame_period(0), Duration::from_secs(1));
+        assert!(frame_period(999) <= Duration::from_millis(34));
     }
 
     #[test]
