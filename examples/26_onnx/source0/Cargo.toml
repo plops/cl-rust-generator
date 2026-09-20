@@ -1,0 +1,19 @@
+[package]
+name = "source0"
+version = "0.1.0"
+edition = "2021"
+default-run = "x11_yolo_viewer"
+
+[[bin]]
+name = "x11_yolo_viewer"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+image = "0.25.10"
+ndarray = "0.17.2"
+ort = "2.0.0-rc.13"
+pixels = "0.17.2"
+winit = "0.30.13"
+xcap = "0.9.8"
