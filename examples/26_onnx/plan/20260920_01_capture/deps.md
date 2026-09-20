@@ -9,9 +9,9 @@ Stand: 2026-09-20, final nach `cargo upgrade` in T2 (no-op — alle schon latest
 | ort | pykeio/ort | 2.0.0-rc.13 (RC — Drift einplanen) | YOLOv8-Session, `inputs!`, `TensorRef`, `output0`-Decode |
 | xcap | nashaofu/xcap | 0.9.8 (docs.rs-Build defekt — API in S0 per `cargo doc` pinnen) | X11-Regions-Screenshot |
 | pixels | parasyte/pixels | 0.17.2 | GPU-Framebuffer fürs Anzeige-Fenster |
-| winit | rust-windowing/winit | 0.30 (via pixels-Beispiel) | Fenster/Event-Loop (mit pixels eingeführt) |
+| winit | rust-windowing/winit | 0.30 (via pixels-Beispiel), minimal: `default-features=false, features=[rwh_06, x11]` | Fenster/Event-Loop (mit pixels eingeführt; Wayland-Stack auf unserer Seite abgewählt) |
 | clap | clap-rs/clap | 4.6.7 (derive) | CLI (`--x/--y/--w/--h/--zoom/--fps/…`) |
-| image | image-rs/image | 0.25+ (via ort-Beispiel/xcap-Dep) | Preprocess, `--save-frame`-PNG |
+| image | image-rs/image | 0.25+ (via ort-Beispiel/xcap-Dep), minimal: `default-features=false, features=[png]` (wie xcap; spart u. a. rav1e) | Preprocess, `--save-frame`-PNG |
 | ndarray | rust-ndarray/ndarray | 0.17 (via ort-Beispiel) | `(1,3,640,640)`-Input-Tensor |
 | anyhow | dtolnay/anyhow | 1.x | Fehler-Propagierung CLI/Pipeline |
 | Xvfb | system (apt: `xvfb`) | system | Test-Display für Capture-/E2E-Smoke (Task S0/S4) |

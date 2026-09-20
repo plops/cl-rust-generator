@@ -11,9 +11,11 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
-image = "0.25.10"
+# Minimal-Features (s. setup_release_min.sh): nur PNG (wie xcap),
+# winit nur X11 (kein Wayland-Stack). Spart u. a. rav1e/sctk.
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 ndarray = "0.17.2"
 ort = { version = "2.0.0-rc.13", features = ["fetch-models"] }
 pixels = "0.17.2"
-winit = "0.30.13"
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11"] }
 xcap = "0.9.8"
