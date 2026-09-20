@@ -54,6 +54,19 @@ fn preset_roundtrip_and_dump() {
 }
 
 #[test]
+fn unknown_device_fails_with_helpful_message() {
+    // Ohne Hardware lauffaehig: Trefferlosigkeit schlaegt vor dem Stream zu.
+    let out = bin()
+        .args(["--device", "nonexistent-xyz-123", "--bars", "1"])
+        .output()
+        .expect("run with bad device");
+    assert!(!out.status.success(), "bad device must fail");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("no output device matches"), "stderr: {err}");
+    assert!(err.contains("--list-devices"), "stderr: {err}");
+}
+
+#[test]
 fn tui_prints_sections_without_tty() {
     // Unter Test: stdout ist kein TTY -> Tabellen-Fallback, Exit 0.
     let out = Command::new(env!("CARGO_BIN_EXE_dnb_tui"))

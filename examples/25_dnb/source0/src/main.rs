@@ -22,6 +22,10 @@ struct Args {
     /// ALSA-Geraete auflisten und beenden
     #[arg(long)]
     list_devices: bool,
+    /// Ausgabegeraet per Substring waehlen (mpv-Paritaet zu
+    /// --audio-device, z.B. --device Generic_1); default: cpal-Default
+    #[arg(long)]
+    device: Option<String>,
     /// Preset-TOML laden (bpm/bars/gain_db, CLI ueberschreibt nicht)
     #[arg(long)]
     preset: Option<String>,
@@ -85,5 +89,5 @@ fn main() -> Result<()> {
         return Ok(());
     }
     println!("Playing dark DnB: {bpm} BPM, {bars} bars");
-    play_live(bpm, bars, gain_db)
+    play_live(bpm, bars, gain_db, args.device.as_deref())
 }

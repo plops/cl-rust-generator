@@ -17,7 +17,9 @@ mod mixdown;
 mod preset;
 
 pub use arrange::{drum_active, section_at, section_gain, Section, ARR_VER};
-pub use backend::{list_devices, play_live, render_bars, write_wav};
+pub use backend::{
+    device_matches, find_output_device, list_devices, play_live, render_bars, write_wav,
+};
 pub use bass::{build_reese, reese_sample, sub_808_sample};
 pub use clock::{bar_index, bar_secs, frames_per_step, sixteenth_hz, step_index};
 pub use drums::{

@@ -125,14 +125,68 @@ pub fn list_devices() -> Result<Vec<String>> {
     Ok(names)
 }
 
-/// Spiele `bars` Takte live auf dem Default-ALSA-Geraet.
-/// Format-agnostisch (F32/I16/U16, s. plan.md Kap. 7); Fehler -> Err.
-pub fn play_live(bpm: f64, bars: u32, gain_db: f32) -> Result<()> {
+/// Treffer-Pruefung fuer `--device`: case-insensitiver Substring.
+/// Ein mpv-artiges `alsa/sysdefault:CARD=Generic_1` wird auf den
+/// Kern `sysdefault:CARD=Generic_1` reduziert; `CARD=Foo` matcht auch
+/// Beschreibungen, die nur `Foo` enthalten.
+pub fn device_matches(name: &str, query: &str) -> bool {
+    let name = name.to_lowercase();
+    let q = query.strip_prefix("alsa/").unwrap_or(query).to_lowercase();
+    if name.contains(&q) {
+        return true;
+    }
+    // Fallback: `CARD=X`-Kern aus mpv-Schreibweise extrahieren.
+    if let Some(card) = q.split("card=").nth(1) {
+        let card = card.trim_matches(|c| c == '"' || c == '\'' || c == ' ');
+        if !card.is_empty() && name.contains(card) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Ausgabegeraet waehlen: `--device`-Substring oder Default.
+/// Gibt (Device, Anzeigename) zurueck; bei Trefferlosigkeit mit
+/// Geraeteliste als Hilfetext (mpv-Paritaet zu `--audio-device`).
+pub fn find_output_device(query: Option<&str>) -> Result<(cpal::Device, String)> {
     let host = cpal::default_host();
+    if let Some(q) = query {
+        let mut names = Vec::new();
+        for d in host.output_devices().context("output devices")? {
+            let label = d
+                .description()
+                .map(|desc| desc.name().to_string())
+                .unwrap_or_default();
+            names.push(label.clone());
+            if device_matches(&label, q) {
+                return Ok((d, label));
+            }
+        }
+        names.sort();
+        names.dedup();
+        anyhow::bail!(
+            "no output device matches {q:?}; available: {} (see --list-devices)",
+            names.join(", ")
+        );
+    }
     let device = host
         .default_output_device()
-        .context("no default ALSA output device")?;
-    let config = device.default_output_config()?;
+        .context("no default ALSA output device (try --list-devices + --device)")?;
+    let label = device
+        .description()
+        .map(|desc| desc.name().to_string())
+        .unwrap_or_else(|_| "<default>".to_string());
+    Ok((device, label))
+}
+
+/// Spiele `bars` Takte live auf dem gewaehlten ALSA-Geraet.
+/// Format-agnostisch (F32/I16/U16, s. plan.md Kap. 7); Fehler -> Err.
+pub fn play_live(bpm: f64, bars: u32, gain_db: f32, device_query: Option<&str>) -> Result<()> {
+    let (device, label) = find_output_device(device_query)?;
+    eprintln!("output device: {label}");
+    let config = device.default_output_config().with_context(|| {
+        format!("device {label:?} has no default output config (try --list-devices + --device)")
+    })?;
     match config.sample_format() {
         cpal::SampleFormat::F32 => run_stream::<f32>(&device, &config.into(), bpm, bars, gain_db),
         cpal::SampleFormat::I16 => run_stream::<i16>(&device, &config.into(), bpm, bars, gain_db),
@@ -198,6 +252,20 @@ mod tests {
     #[test]
     fn empty_render_is_empty() {
         assert!(render_bars(174.0, 0, 44100.0).is_empty());
+    }
+
+    #[test]
+    fn device_query_matches_mpv_style() {
+        assert!(device_matches("HD-Audio Generic, ALC287", "generic"));
+        assert!(device_matches("HDA NVidia, HDMI 0", "hdmi 0"));
+        // mpv-Alias aus dem Bug-Report.
+        assert!(device_matches(
+            "HD-Audio Generic, ALC287 Analog",
+            "alsa/sysdefault:CARD=Generic"
+        ));
+        assert!(device_matches("HD-Audio Generic", "CARD=Generic"));
+        assert!(!device_matches("HDA NVidia, HDMI 0", "Generic"));
+        assert!(!device_matches("HD-Audio Generic", "hdmi"));
     }
 
     #[test]
