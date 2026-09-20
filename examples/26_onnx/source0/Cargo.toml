@@ -13,7 +13,7 @@ anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
 image = "0.25.10"
 ndarray = "0.17.2"
-ort = "2.0.0-rc.13"
+ort = { version = "2.0.0-rc.13", features = ["fetch-models"] }
 pixels = "0.17.2"
 winit = "0.30.13"
 xcap = "0.9.8"
