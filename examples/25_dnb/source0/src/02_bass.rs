@@ -13,6 +13,15 @@ pub fn build_reese() -> Box<dyn AudioUnit> {
     Box::new(graph)
 }
 
+/// Mid-Bass: gleiche Reese-Architektur eine Oktave hoeher (100/101.6 Hz).
+/// Traegt den Groove auf kleinen Lautsprechern, die 50 Hz nicht abbilden.
+pub fn build_reese_mid() -> Box<dyn AudioUnit> {
+    let graph = (constant(100.0) >> saw() & constant(101.6) >> saw())
+        >> lowpass_hz(560.0, 1.0)
+        >> shape(Tanh(2.0));
+    Box::new(graph)
+}
+
 /// Ein Reese-Mono-Sample ziehen (Graph muss vorher `set_sample_rate` sehen).
 pub fn reese_sample(node: &mut Box<dyn AudioUnit>) -> f32 {
     node.get_mono() * 0.4
@@ -47,6 +56,20 @@ mod tests {
             rms += s * s;
         }
         assert!(rms > 1e-6, "reese must be audible");
+    }
+
+    #[test]
+    fn mid_bass_renders_octave_up() {
+        let mut n = build_reese_mid();
+        n.set_sample_rate(44100.0);
+        n.allocate();
+        let mut peak = 0.0f32;
+        for _ in 0..4410 {
+            let s = n.get_mono();
+            assert!(s.is_finite());
+            peak = peak.max(s.abs());
+        }
+        assert!(peak > 0.05, "mid bass must be audible, peak={peak}");
     }
 
     #[test]

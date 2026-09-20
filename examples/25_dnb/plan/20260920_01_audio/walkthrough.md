@@ -93,3 +93,26 @@ Installiert und verifiziert: `libasound2-dev` (cpal-ALSA-Build),
   format-generisch; hoerbarer Nachweis braucht Host mit Lautsprecher/Kopfhoerer.
 - Antwort auf die Prompt-Schlussfrage: Amen-Slicing und MIDI-Tracker bleiben
   Erweiterungen (s. plan.md Kap. 5.9), kein Scope dieser Phase.
+
+## Fix-Batch 2026-09-20 (Laptop-Feedback von Wol Pumba)
+
+1. **`--device` wählt jetzt das ALSA-Gerät** (`find_output_device`,
+   `device_matches` in `06_backend.rs`): cpal-Default zerfiel auf dem Laptop
+   zu `default:1` (`Unknown PCM default:1`); mpv braucht dort ebenfalls
+   `--audio-device=alsa/sysdefault:CARD=Generic_1`. Matching ist
+   case-insensitiver Substring, mpv-Schreibweise (`alsa/…`, `CARD=…`)
+   wird akzeptiert; Trefferlosigkeit listet (deduped) Geräte + Hinweis.
+   Wichtig: mpv-CARD-Namen (`Generic_1`) stehen NICHT in cpals Aufzählung —
+   dort heißt das Gerät `HD-Audio Generic, CX11880 Analog`, also
+   `--device CX11880` (oder `Analog`) verwenden. `--list-devices` ist
+   jetzt ebenfalls deduped.
+2. **Underrun-Härtung**: Callback verteilt Stereo auf beliebig viele
+   Geräte-Kanäle (`push_frame`, vorher Stille bei `channels != 2`),
+   angeforderter ALSA-Puffer `Fixed(8192)` mit Fallback auf Geräte-Default
+   bei Ablehnung. Reine Pump-Funktion `pump()` ist hardware-frei testbar.
+3. **Musicality-Pass** („wouldn't call it DnB", Laptop-Boxen): Mid-Reese
+   eine Oktave höher (`build_reese_mid`, 0.14 im Mix), Snare mit
+   180-Hz-Korpus (war im Plan, fehlte), Kick mit Trigger-Phase-Click.
+   Snapshot-Gates halten (Peak ≤ −1 dBFS, Bridge < Rolling ≤ Tearout).
+4. Gates: `fmt --check`, `clippy --all-targets -D warnings`,
+   `cargo test --release` **39/39** (32 Unit + 5 CLI + 2 Render).

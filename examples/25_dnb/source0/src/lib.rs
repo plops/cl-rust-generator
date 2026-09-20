@@ -18,9 +18,9 @@ mod preset;
 
 pub use arrange::{drum_active, section_at, section_gain, Section, ARR_VER};
 pub use backend::{
-    device_matches, find_output_device, list_devices, play_live, render_bars, write_wav,
+    device_matches, find_output_device, list_devices, play_live, push_frame, render_bars, write_wav,
 };
-pub use bass::{build_reese, reese_sample, sub_808_sample};
+pub use bass::{build_reese, build_reese_mid, reese_sample, sub_808_sample};
 pub use clock::{bar_index, bar_secs, frames_per_step, sixteenth_hz, step_index};
 pub use drums::{
     decay, hat_sample, kick_sample, pattern_for, siren_sample, snare_sample, Noise, PATTERN,

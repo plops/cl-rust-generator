@@ -6,9 +6,9 @@ use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
 
 use crate::{
-    bar_secs, build_reese, decay, drum_active, hat_sample, kick_sample, mix, pattern_for,
-    reese_sample, section_at, section_gain, siren_sample, snare_sample, step_index, sub_808_sample,
-    Master, Noise, Section,
+    bar_secs, build_reese, build_reese_mid, decay, drum_active, hat_sample, kick_sample, mix,
+    pattern_for, reese_sample, section_at, section_gain, siren_sample, snare_sample, step_index,
+    sub_808_sample, Master, Noise, Section,
 };
 
 /// Rendere `bars` Takte bei `bpm`/`sample_rate` nach Stereo (f32, -1..1).
@@ -19,6 +19,9 @@ pub fn render_bars(bpm: f64, bars: u32, sample_rate: f64) -> Vec<(f32, f32)> {
     let mut reese = build_reese();
     reese.set_sample_rate(sample_rate);
     reese.allocate();
+    let mut reese_mid = build_reese_mid();
+    reese_mid.set_sample_rate(sample_rate);
+    reese_mid.allocate();
     let mut noise = Noise::new(42);
     let step_frames = (sample_rate / ((bpm / 60.0) * 4.0)).round().max(1.0) as u64;
     let bar_frames = (bar_secs(bpm) * sample_rate).round().max(1.0) as u64;
@@ -36,7 +39,8 @@ pub fn render_bars(bpm: f64, bars: u32, sample_rate: f64) -> Vec<(f32, f32)> {
         let frame_in_step = frame % step_frames;
         let phase = frame_in_step as f64 / step_frames as f64;
         let env = decay(phase);
-        let bass = reese_sample(&mut reese);
+        // Sub-Reese plus Mid-Oktave (0.35) fuer kleine Lautsprecher.
+        let bass = reese_sample(&mut reese) + reese_mid.get_mono() * 0.14;
 
         let mut drums = 0.0f32;
         if drum_active(section, step) {
@@ -49,7 +53,7 @@ pub fn render_bars(bpm: f64, bars: u32, sample_rate: f64) -> Vec<(f32, f32)> {
                         last_kick_frame = Some(frame);
                     }
                 }
-                2 => drums += snare_sample(noise.next_sample(), env) * vel,
+                2 => drums += snare_sample(noise.next_sample(), t, env) * vel,
                 _ => {}
             }
         }
@@ -120,7 +124,9 @@ pub fn list_devices() -> Result<Vec<String>> {
             .description()
             .map(|desc| desc.name().to_string())
             .unwrap_or_default();
-        names.push(label);
+        if !names.iter().any(|n| n == &label) {
+            names.push(label);
+        }
     }
     Ok(names)
 }
@@ -195,6 +201,40 @@ pub fn play_live(bpm: f64, bars: u32, gain_db: f32, device_query: Option<&str>) 
     }
 }
 
+/// Ein Stereo-Frame auf beliebig viele Geraete-Kanaele legen
+/// (Mono/Stereo/Surround-sicher: L R L R …). Reine Funktion, testbar.
+pub fn push_frame<T>(out: &mut [T], l: f32, r: f32)
+where
+    T: cpal::SizedSample + cpal::FromSample<f32>,
+{
+    for (ch, s) in out.iter_mut().enumerate() {
+        *s = T::from_sample(if ch % 2 == 0 { l } else { r });
+    }
+}
+
+/// Einen Callback-Puffer aus dem Render fuellen (Stereo -> N Kanaele).
+fn pump<T>(
+    data: &mut [T],
+    channels: usize,
+    cur: &std::sync::Mutex<usize>,
+    frames: &[(f32, f32)],
+    gain: f32,
+) where
+    T: cpal::SizedSample + cpal::FromSample<f32>,
+{
+    let mut i = cur.lock().unwrap();
+    for frame in data.chunks_mut(channels.max(1)) {
+        let (l, r) = if *i < frames.len() {
+            let (left, right) = frames[*i];
+            *i += 1;
+            (left * gain, right * gain)
+        } else {
+            (0.0, 0.0)
+        };
+        push_frame(frame, l, r);
+    }
+}
+
 fn run_stream<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
@@ -209,35 +249,44 @@ where
     use std::sync::{Arc, Mutex};
 
     // cpal 0.18: `StreamConfig.sample_rate` ist `SampleRate = u32`.
-    let frames = render_bars(bpm, bars, config.sample_rate as f64);
+    let frames = Arc::new(render_bars(bpm, bars, config.sample_rate as f64));
     let total = frames.len();
     // Render ist bereits bei -6 dB gemischt; Gain-Delta anwenden.
     let gain = crate::gain_linear(gain_db.min(crate::MAX_GAIN_DB)) / crate::gain_linear(-6.0);
     let cursor = Arc::new(Mutex::new(0usize));
-    let cur = Arc::clone(&cursor);
 
+    // Grosszuegiger ALSA-Puffer gegen Underruns; bei Ablehnung Default.
     // `build_output_stream` nimmt `StreamConfig` by value (cpal 0.18).
-    let stream = device.build_output_stream(
-        *config,
-        move |data: &mut [T], _| {
-            let mut i = cur.lock().unwrap();
-            for out in data.chunks_mut(2) {
-                let s = if *i < frames.len() {
-                    let (l, _) = frames[*i];
-                    *i += 1;
-                    l * gain
-                } else {
-                    0.0
-                };
-                if out.len() == 2 {
-                    out[0] = T::from_sample(s);
-                    out[1] = T::from_sample(s);
-                }
+    let channels = config.channels as usize;
+    let mut wanted = *config;
+    wanted.buffer_size = cpal::BufferSize::Fixed(8192);
+    let stream = match device.build_output_stream(
+        wanted,
+        {
+            let cur = Arc::clone(&cursor);
+            let frames = Arc::clone(&frames);
+            move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+                pump(data, channels, &cur, &frames, gain);
             }
         },
         |err| eprintln!("ALSA stream error: {err}"),
         None,
-    )?;
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("fixed buffer rejected ({e}); retry with device default");
+            let cur = Arc::clone(&cursor);
+            *cur.lock().unwrap() = 0;
+            device.build_output_stream(
+                *config,
+                move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+                    pump(data, channels, &cur, &frames, gain);
+                },
+                |err| eprintln!("ALSA stream error: {err}"),
+                None,
+            )?
+        }
+    };
     stream.play()?;
     while *cursor.lock().unwrap() < total {
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -252,6 +301,19 @@ mod tests {
     #[test]
     fn empty_render_is_empty() {
         assert!(render_bars(174.0, 0, 44100.0).is_empty());
+    }
+
+    #[test]
+    fn push_frame_maps_any_channel_count() {
+        let mut stereo = [0.0f32; 2];
+        push_frame(&mut stereo, 0.5, -0.5);
+        assert_eq!(stereo, [0.5, -0.5]);
+        let mut mono = [0.0f32; 1];
+        push_frame(&mut mono, 0.5, -0.5);
+        assert_eq!(mono, [0.5]);
+        let mut surround = [0.0f32; 6];
+        push_frame(&mut surround, 0.5, -0.5);
+        assert_eq!(surround, [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]);
     }
 
     #[test]

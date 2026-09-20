@@ -31,15 +31,19 @@ pub fn decay(phase: f64) -> f64 {
     (-8.0 * phase).exp()
 }
 
-/// Kick: Sine-Drop 150 -> 45 Hz ueber `phase`, `sample_rate`-unabhaengig via Zeit.
-pub fn kick_sample(t: f64, _phase: f64, env: f64) -> f32 {
+/// Kick: Sine-Drop 150 -> 45 Hz plus Attack-Click ab Trigger.
+/// `phase`: 0..1 seit Trigger (Click klingt in ~11 ms ab).
+pub fn kick_sample(t: f64, phase: f64, env: f64) -> f32 {
     let freq = 150.0 * env + 45.0;
-    (f32::sin((t * freq * 2.0 * std::f64::consts::PI) as f32)) * env as f32 * 0.7
+    let body = f32::sin((t * freq * 2.0 * std::f64::consts::PI) as f32);
+    let click = (-phase * 24.0).exp() as f32 * 0.5;
+    (body * 0.85 + click) * env as f32 * 0.85
 }
 
-/// Snare: Noise-Anteil mit Huelkurve.
-pub fn snare_sample(noise: f32, env: f64) -> f32 {
-    noise * env as f32 * 0.35
+/// Snare: Noise-Anteil plus 180-Hz-Korpus mit Huelkurve.
+pub fn snare_sample(noise: f32, t: f64, env: f64) -> f32 {
+    let tone = f32::sin((t * 180.0 * 2.0 * std::f64::consts::PI) as f32) * 0.45;
+    (noise * 0.65 + tone) * env as f32 * 0.5
 }
 
 /// Closed-Hat: kurzer HP-artiger Noise-Tick (Offbeat, ~0,05 s).
@@ -101,6 +105,24 @@ mod tests {
     #[test]
     fn kick_starts_loud() {
         assert!(kick_sample(0.001, 0.0, 1.0).abs() > 0.01);
+    }
+
+    #[test]
+    fn kick_click_decays_from_trigger() {
+        let at_trigger = kick_sample(5.0, 0.0, 1.0).abs();
+        let later = kick_sample(5.0, 0.5, 0.5).abs();
+        assert!(at_trigger > 0.3, "click must punch, got {at_trigger}");
+        assert!(later < at_trigger);
+    }
+
+    #[test]
+    fn snare_has_180hz_body_without_noise() {
+        // Noise = 0 -> reiner Ton; Maximum ueber Fenster (Nulldurchgaenge).
+        let peak = (0..200)
+            .map(|i| snare_sample(0.0, 2.0 + i as f64 * 0.0002, 1.0).abs())
+            .fold(0.0f32, f32::max);
+        assert!(peak > 0.15, "tone body missing, peak={peak}");
+        assert!(snare_sample(0.0, 2.0, 0.0) == 0.0);
     }
 
     #[test]
