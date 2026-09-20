@@ -1,0 +1,18 @@
+[package]
+name = "source1"
+version = "0.1.0"
+edition = "2021"
+default-run = "x11_rb_mq_viewer"
+
+[[bin]]
+name = "x11_rb_mq_viewer"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+macroquad = "0.4.16"
+ndarray = "0.17.2"
+ort = { version = "2.0.0-rc.13", features = ["fetch-models"] }
+x11rb = "0.14.0"

@@ -24,3 +24,18 @@ DeepWiki-Abfrage-Muster: `pykeio/ort` (Session-/Input-API, YOLOv8-Beispiel),
 (Plan-/Task-Stil, `source0`-Konvention).
 NICHT eingeführt (bewusst): `show_image` + `raqote` (Referenz-Display, ersetzt durch
 `pixels`-Rasterizer), `rand` (kein Bedarf), Video-/Tracking-Crates (außer Scope).
+
+## source1-Variante (`examples/26_onnx/source1/`, x11rb + macroquad statt xcap + pixels)
+
+Gleiche CLI/Inferenz/Overlay (`01_cli`, `03_infer`, `04_draw` kopiert),
+Capture via GetImage-ZPixmap, Display via miniquad-Textur. 128 statt
+456 Crates, kein wgpu/pipewire/wayland-Stack, keine EGL-Header zum
+Bauen; Laufzeit braucht nur X11-Client-Libs (u. a. `libxi6`, von
+miniquad per dlopen geladen). PNGs byte-identisch zu source0
+(md5-verifiziert auf bus.jpg, je 5 Detektionen).
+
+| Crate/System | Org/Projekt bzw. Paket | Version | Zweck |
+|---|---|---|---|
+| x11rb | psychon/x11rb | 0.14.0 | Reines-Rust-X11 (connect, GetImage ZPixmap) statt xcap |
+| macroquad | not-fl3/macroquad | 0.4.16 | Fenster + Textur-Blit statt pixels/wgpu (`Window::from_config`, `Texture2D::update`) |
+| libxi6 | system (apt, Laufzeit) | system | miniquad-dlopen unter X11 |
