@@ -257,7 +257,13 @@ pub fn infer_image(
         .map(|o| o.name().to_string())
         .unwrap_or_else(|| FALLBACK_INPUT.to_string());
     let outputs = session.run(inputs![name.as_str() => TensorRef::from_array_view(&input)?])?;
-    let output = outputs[OUTPUT_NAME].try_extract_array::<f32>()?;
+    let output = outputs
+        .get(OUTPUT_NAME)
+        .with_context(|| {
+            let keys: Vec<&str> = outputs.keys().collect();
+            format!("model output {OUTPUT_NAME:?} missing (got {keys:?}); is this a YOLOv8 model?")
+        })?
+        .try_extract_array::<f32>()?;
     let rows = extract_rows(output)?;
     Ok(decode(&rows, conf, nms, lb, src_w, src_h))
 }
