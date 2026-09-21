@@ -9,7 +9,11 @@
 use anyhow::{bail, Context, Result};
 use image::{imageops::FilterType, RgbImage};
 use ndarray::{s, Array2, Array4, ArrayViewD, Axis};
-use ort::{inputs, session::Session, value::TensorRef};
+use ort::{
+    inputs,
+    session::{builder::GraphOptimizationLevel, Session},
+    value::TensorRef,
+};
 use std::path::Path;
 
 /// Modell-Eingabekante des YOLOv8-Exports.
@@ -125,17 +129,38 @@ pub fn iou(a: &BoundingBox, b: &BoundingBox) -> f32 {
 
 /// Resized das RGB-Bild per Letterbox auf 640×640 und normalisiert
 /// nach NCHW-f32 (Werte 0..=1). Layout: `(1, 3, 640, 640)` mit Batch.
+/// NO-OP for 640x640 input
 pub fn preprocess(rgb: &[u8], src_w: u32, src_h: u32) -> Result<Array4<f32>> {
     let expect = (src_w as usize) * (src_h as usize) * 3;
     if rgb.len() != expect {
         bail!("rgb buffer size mismatch: got {}, need {expect}", rgb.len());
     }
+
+    let size = MODEL_SIZE; // 640
+    let mut input = Array4::<f32>::zeros((1, 3, size as usize, size as usize));
+    let channel_len = (size * size) as usize;
+    const INV_255: f32 = 1.0 / 255.0;
+
+    let (r_plane, rest) = input.as_slice_mut().unwrap().split_at_mut(channel_len);
+    let (g_plane, b_plane) = rest.split_at_mut(channel_len);
+
+    // FAST PATH: If already 640x640, skip imageops::resize entirely!
+    if src_w == size && src_h == size {
+        for (i, px) in rgb.chunks_exact(3).enumerate() {
+            r_plane[i] = f32::from(px[0]) * INV_255;
+            g_plane[i] = f32::from(px[1]) * INV_255;
+            b_plane[i] = f32::from(px[2]) * INV_255;
+        }
+        return Ok(input);
+    }
+
+    // SLOW PATH: Scale & pad to 640x640 (use FilterType::Nearest for speed)
     let lb = Letterbox::for_source(src_w, src_h)?;
     let src = RgbImage::from_raw(src_w, src_h, rgb.to_vec()).context("building source image")?;
-    let size = MODEL_SIZE;
     let new_w = ((src_w as f32 * lb.scale).round() as u32).max(1);
     let new_h = ((src_h as f32 * lb.scale).round() as u32).max(1);
-    let resized = image::imageops::resize(&src, new_w, new_h, FilterType::Triangle);
+    
+    let resized = image::imageops::resize(&src, new_w, new_h, FilterType::Nearest);
     let mut canvas = RgbImage::from_pixel(size, size, image::Rgb([LETTERBOX_PAD; 3]));
     image::imageops::replace(
         &mut canvas,
@@ -143,14 +168,16 @@ pub fn preprocess(rgb: &[u8], src_w: u32, src_h: u32) -> Result<Array4<f32>> {
         lb.pad_x.round() as i64,
         lb.pad_y.round() as i64,
     );
-    let mut input = Array4::<f32>::zeros((1, 3, size as usize, size as usize));
-    for (x, y, px) in canvas.enumerate_pixels() {
-        input[[0, 0, y as usize, x as usize]] = f32::from(px[0]) / 255.0;
-        input[[0, 1, y as usize, x as usize]] = f32::from(px[1]) / 255.0;
-        input[[0, 2, y as usize, x as usize]] = f32::from(px[2]) / 255.0;
+
+    for (i, px) in canvas.as_raw().chunks_exact(3).enumerate() {
+        r_plane[i] = f32::from(px[0]) * INV_255;
+        g_plane[i] = f32::from(px[1]) * INV_255;
+        b_plane[i] = f32::from(px[2]) * INV_255;
     }
+
     Ok(input)
 }
+
 
 /// Holt die (N, 84)-Zeilen aus dem `output0`-Tensor (erwartet [1, C, N]).
 ///
@@ -226,17 +253,30 @@ pub fn decode(
 /// Laedt ein Modell: lokale Datei bevorzugt, sonst URL (mit ort-Cache).
 pub fn load_session(model: &str) -> Result<Session> {
     let path = Path::new(model);
-    if path.is_file() {
-        return Session::builder()?
-            .commit_from_file(path)
-            .with_context(|| format!("loading model file {model}"));
-    }
-    if model.trim().is_empty() {
+    if !path.is_file() && model.trim().is_empty() {
         bail!("--model must not be empty");
     }
-    Session::builder()?
-        .commit_from_url(model)
-        .with_context(|| format!("fetching model from {model}"))
+
+    // Ermittle alle verfuegbaren logischen Kerne (Fallback auf 1)
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+
+    let mut builder = Session::builder()?
+        .with_optimization_level(GraphOptimizationLevel::Level3)
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .with_intra_threads(4) //cores)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if path.is_file() {
+        builder
+            .commit_from_file(path)
+            .with_context(|| format!("loading model file {model}"))
+    } else {
+        builder
+            .commit_from_url(model)
+            .with_context(|| format!("fetching model from {model}"))
+    }
 }
 
 /// Ein Frame: Preprocess → Inferenz → Decode. Gibt Detektionen in

@@ -18,8 +18,9 @@ ort = { version = "2.0.0-rc.13", features = ["fetch-models"] }
 x11rb = "0.14.0"
 
 [profile.release]
-opt-level = "z"       # Small binary size (use "3" for maximum layout speed)
+opt-level = 3       # Small binary size (use 3 for maximum speed and "z" for smallest size)
 lto = true             # Whole-program Link-Time Optimization
+debug = 1              # For profiling with samply
 codegen-units = 1      # Maximizes dead code elimination
 panic = "abort"        # Drops stack unwinding tables
-strip = true           # Automatically strips debug symbols
+strip = false           # Automatically strips debug symbols
