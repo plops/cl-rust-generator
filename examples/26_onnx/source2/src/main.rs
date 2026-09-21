@@ -75,7 +75,7 @@ async fn main() {
         draw_texture(&tex, 0.0, 0.0, WHITE);
 
         for det in dets.chunks_exact(6) {
-            if det[4] >= 0.5 {
+            if det[4] >= 0.1 {
                 draw_rectangle_lines(det[0], det[1], det[2] - det[0], det[3] - det[1], 2.0, RED);
             }
         }
