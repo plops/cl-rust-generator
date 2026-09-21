@@ -91,8 +91,65 @@ libwayland-dev libpipewire-0.3-dev libclang-dev libgbm-dev
 libdrm-dev pkg-config build-essential ca-certificates`.
 Tests: `xvfb` (Pflicht), `feh` (nur manueller Foto-E2E).
 
+## source1: x11rb + macroquad (schlanke Zweitimplementierung)
+
+Motivation: source0 zieht 456 Crates (xcap: pipewire/Wayland-Stack
+inkl. System-Libs; pixels: wgpu). source1 (`examples/26_onnx/source1/`,
+Bin `x11_rb_mq_viewer`) ersetzt nur Capture und Display und landet bei
+**128 Crates** — kein wgpu/pipewire/wayland/rav1e, keine EGL-Header zum
+Bauen, Laufzeit nur X11-Client-Libs (`libxi6`, von miniquad per dlopen).
+
+Architektur (Datenfluss identisch zu source0):
+
+```
+CLI → x11rb-Capture → ort-Inferenz → CPU-Overlay → macroquad-Textur
+```
+
+- `01_cli.rs`, `03_infer.rs`, `04_draw.rs`: aus source0 kopiert
+  (bewusst kein Pfad-Dep — sonst würden xcap/pixels/wgpu mitgebaut).
+- `02_capture.rs` (neu): `x11rb::connect` → X-Screen per `--monitor`,
+  Region-Clamp (gleiche Semantik wie source0), `GetImage`-ZPixmap aufs
+  Root-Window, BGRX→RGB. x11rb-Funde: `ImageFormat::Z_PIXMAP` ist eine
+  Konstante (kein Enum), `Drawable`/`Window` sind `u32`-Aliase,
+  `setup()` leiht (Werte vor dem Move kopieren).
+- `05_view.rs` (neu): reine Helfer (Zoom/Blit/PNG/Pacer) wie source0,
+  plus `run_window_mq` — pro Tick `pump`, `Texture2D::update`,
+  `draw_texture_ex` mit Zoom-`dest_size`, `FilterMode::Nearest`.
+- `main.rs`: plain `fn main` (kein macroquad-Attribut, damit
+  `--headless`/`--save-frame` fensterlos bleiben); Fenster via
+  `macroquad::Window::from_config` (Groesse kommt aus den Flags).
+
+Nachweise: `fmt`, `clippy -D warnings`, 44 Tests + 2 ignored E2E
+grün unter Xvfb; bus.jpg: 5 Detektionen, PNG **md5-identisch** zu
+source0 (BGRX-Reihenfolge damit pixel-exakt bewiesen); macroquad-
+Fenster pumpt Frames unter Xvfb.
+
+Release-Lauf des Users (Screen 1920x1200, Region 1024x512, 3 fps):
+
+```
+$ target/release/x11_rb_mq_viewer --w 1024 --h 512 --fps 3
+capture: screen 0 (1920x1200), region (0, 0, 1024, 512)
+model: https://cdn.pyke.io/0/pyke:ort-rs/example-models@0.0.0/yolov8m.onnx
+view: 1024x512 @ 3 fps
+frame 1024x512: 0 detections, infer 278.1 ms
+frame 1024x512: 0 detections, infer 251.8 ms
+...
+frame 1024x512: 0 detections, infer 248.0 ms
+frame 1024x512: 1 detections, infer 247.7 ms
+```
+
+Lesart: Release-Inferenz stabil bei ~247 ms (erster Frame 278 ms —
+Session-Warmup), Pacer-Ziel 333 ms bei 3 fps wird eingehalten; die
+späte Detektion zeigt, dass Overlay + Timing auch bei Treffern stabil
+bleiben. Größere Regionen skalieren linear über Preprocess/Inferenz;
+wer schneller will, braucht kleinere `--w/--h` oder ein kleineres
+Modell (yolov8n).
+
 ## Commits
 
 `8cb08ae` chore scaffold (S0) · `35bdd5c` capture (S1) · `1bd92fc`
 infer (S2) · `b36316f` draw/view-Helfer (S3) · `a4f1b36` pipeline+E2E
-(S4) · `bdef7fb` hardening (T1) · `e89b5c0` test-suites tracking.
+(S4) · `bdef7fb` hardening (T1) · `e89b5c0` test-suites tracking ·
+`2c2ed56` walkthrough (T2) · `5374ee6` slimming + `setup_release_min.sh`
+· `581b927` release-script-fixes · `744db49` source1-Variante.
+Diese Sektion: Folge-Commit.
