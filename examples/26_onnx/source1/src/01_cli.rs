@@ -8,7 +8,7 @@ use clap::Parser;
 use std::path::PathBuf;
 
 /// Default-Modell: YOLOv8m aus dem ort-Referenzbeispiel.
-pub const YOLOV8M_URL: &str = "https://cdn.pyke.io/0/pyke:ort-rs/example-models@0.0.0/yolov8m.onnx";
+pub const YOLOV8M_URL: &str = "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.onnx"; // "https://cdn.pyke.io/0/pyke:ort-rs/example-models@0.0.0/yolov8m.onnx";
 
 /// Standard-Framerate, wenn `--fps` nicht angegeben ist.
 pub const DEFAULT_FPS: u32 = 5;
