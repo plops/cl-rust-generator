@@ -10,8 +10,8 @@ use clap::Parser;
 use macroquad::prelude::Conf;
 use ort::session::Session;
 use source1::{
-    blit_nearest, clamp_region, draw_detections, frame_period, infer_image, load_session,
-    rgba_image_to_rgb, run_window_mq, save_frame_png, zoomed_size, Args, Capturer, ClampedRegion,
+    Args, Capturer, ClampedRegion, blit_nearest, clamp_region, draw_detections, frame_period,
+    infer_image, load_session, rgba_image_to_rgb, run_window_mq, save_frame_png, zoomed_size,
 };
 use std::time::Instant;
 

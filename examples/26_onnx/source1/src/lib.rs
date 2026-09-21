@@ -15,13 +15,12 @@ mod infer;
 mod view;
 
 pub use capture::{
-    bgrx_to_rgb, clamp_region, rgba_image_to_rgb, Capturer, ClampedRegion, ScreenGeom,
+    Capturer, ClampedRegion, ScreenGeom, bgrx_to_rgb, clamp_region, rgba_image_to_rgb,
 };
 pub use cli::{Args, DEFAULT_FPS, MAX_FPS, MIN_FPS, YOLOV8M_URL};
-pub use draw::{color_for_label, draw_box, draw_detections, LABEL_BAR, THICKNESS};
+pub use draw::{LABEL_BAR, THICKNESS, color_for_label, draw_box, draw_detections};
 pub use infer::{
-    infer_image, intersection, iou, load_session, preprocess, union,
-    BoundingBox, Detection, Letterbox, CLASS_LABELS, FALLBACK_INPUT, LETTERBOX_PAD, MODEL_SIZE,
-    OUTPUT_NAME,
+    BoundingBox, CLASS_LABELS, Detection, FALLBACK_INPUT, LETTERBOX_PAD, Letterbox, MODEL_SIZE,
+    OUTPUT_NAME, infer_image, intersection, iou, load_session, preprocess, union,
 };
 pub use view::{blit_nearest, frame_period, run_window_mq, save_frame_png, zoomed_size};

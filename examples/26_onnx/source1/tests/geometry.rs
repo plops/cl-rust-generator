@@ -4,7 +4,7 @@
 //! lib-API (always-green-Basis, auch offline).
 
 use ndarray::Array2;
-use source1::{decode, BoundingBox, Letterbox};
+use source1::{BoundingBox, Letterbox, decode};
 
 /// Eine synthetische (84,)-Zeile im 640er-Raum.
 fn row(xc: f32, yc: f32, w: f32, h: f32, class: usize, conf: f32) -> Vec<f32> {

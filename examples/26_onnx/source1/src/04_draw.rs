@@ -5,11 +5,12 @@
 //! GPU testbar.
 
 use crate::infer::{BoundingBox, Detection};
+use font8x8::UnicodeFonts;
 
 /// Rahmendicke in px.
 pub const THICKNESS: u32 = 2;
 /// Hoehe des Label-Balkens ueber der Box in px.
-pub const LABEL_BAR: u32 = 6;
+pub const LABEL_BAR: u32 = 12;
 
 /// Kleine Palette; Farbe wird deterministisch aus dem Label gewaehlt.
 const PALETTE: [[u8; 4]; 6] = [
@@ -42,6 +43,34 @@ fn put(frame: &mut [u8], fw: u32, fh: u32, x: i64, y: i64, color: [u8; 4]) {
     }
 }
 
+fn draw_char(frame: &mut [u8], fw: u32, fh: u32, x0: i64, y0: i64, c: char, text_color: [u8; 4]) {
+    if let Some(glyph) = font8x8::BASIC_FONTS.get(c) {
+        for (gy, row) in glyph.iter().enumerate() {
+            for gx in 0..8 {
+                if (row & (1 << gx)) != 0 {
+                    put(frame, fw, fh, x0 + gx, y0 + gy as i64, text_color);
+                }
+            }
+        }
+    }
+}
+
+/// Draws a text string starting at (x, y).
+pub fn draw_text(
+    frame: &mut [u8],
+    fw: u32,
+    fh: u32,
+    mut x: i64,
+    y: i64,
+    text: &str,
+    color: [u8; 4],
+) {
+    for c in text.chars() {
+        draw_char(frame, fw, fh, x, y, c, color);
+        x += 8; // character advance
+    }
+}
+
 /// Zeichnet einen Rahmen (Dicke `THICKNESS`) um die Box (Pixel, float).
 pub fn draw_box(frame: &mut [u8], fw: u32, fh: u32, b: &BoundingBox, color: [u8; 4]) {
     let (xa, xb) = (b.x1.min(b.x2).round() as i64, b.x1.max(b.x2).round() as i64);
@@ -63,14 +92,33 @@ pub fn draw_detections(frame: &mut [u8], fw: u32, fh: u32, dets: &[Detection]) {
     for d in dets {
         let color = color_for_label(d.label);
         let b = &d.bbox;
-        // Label-Balken: volle Box-Breite, LABEL_BAR px hoch, oberhalb (oder innerhalb am Rand).
+        let text = format!("{} {:.0}%", d.label, d.conf * 100.0);
+        let text_width = (text.len() * 8) as i64;
+
+        // Draw label background bar
         let bar_y1 = (b.y1.round() as i64 - LABEL_BAR as i64).max(0);
         let bar_y2 = b.y1.round() as i64;
+        let bar_x1 = b.x1.round() as i64;
+        let bar_x2 = (bar_x1 + text_width + 4).min(fw as i64);
+
         for y in bar_y1..bar_y2 {
-            for x in b.x1.round() as i64..=b.x2.round() as i64 {
+            for x in bar_x1..bar_x2 {
                 put(frame, fw, fh, x, y, color);
             }
         }
+
+        // Draw label text (white with subtle shadow)
+        draw_text(frame, fw, fh, bar_x1 + 3, bar_y1 + 3, &text, [0, 0, 0, 255]);
+        draw_text(
+            frame,
+            fw,
+            fh,
+            bar_x1 + 2,
+            bar_y1 + 2,
+            &text,
+            [255, 255, 255, 255],
+        );
+
         draw_box(frame, fw, fh, b, color);
     }
 }

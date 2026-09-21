@@ -5,7 +5,7 @@
 //! den X-Screen-Index. Geometrie-/Farb-Helfer sind rein und ohne
 //! X-Server testbar.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use image::{RgbImage, RgbaImage};
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::ImageFormat;

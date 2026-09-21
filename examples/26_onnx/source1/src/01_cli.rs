@@ -3,7 +3,7 @@
 //! Alle Laufzeit-Parameter des Viewers als `clap`-derive-Struct plus
 //! reine Validierungs-/Clamp-Funktionen (ohne X11/GPU/Modell testbar).
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::Parser;
 use std::path::PathBuf;
 

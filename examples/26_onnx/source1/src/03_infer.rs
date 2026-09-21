@@ -6,12 +6,12 @@
 //! testbar; nur `load_session`/`infer_image` brauchen eine ONNX-Datei
 //! (oder Netz fuer die URL).
 
-use anyhow::{bail, Context, Result};
-use image::{imageops::FilterType, RgbImage};
-use ndarray::{s, Array4, ArrayViewD, Axis};
+use anyhow::{Context, Result, bail};
+use image::{RgbImage, imageops::FilterType};
+use ndarray::{Array4, ArrayViewD, Axis, s};
 use ort::{
     inputs,
-    session::{builder::GraphOptimizationLevel, Session},
+    session::{Session, builder::GraphOptimizationLevel},
     value::TensorRef,
 };
 use std::path::Path;
