@@ -159,7 +159,7 @@ pub fn preprocess(rgb: &[u8], src_w: u32, src_h: u32) -> Result<Array4<f32>> {
     let src = RgbImage::from_raw(src_w, src_h, rgb.to_vec()).context("building source image")?;
     let new_w = ((src_w as f32 * lb.scale).round() as u32).max(1);
     let new_h = ((src_h as f32 * lb.scale).round() as u32).max(1);
-    
+
     let resized = image::imageops::resize(&src, new_w, new_h, FilterType::Nearest);
     let mut canvas = RgbImage::from_pixel(size, size, image::Rgb([LETTERBOX_PAD; 3]));
     image::imageops::replace(
@@ -177,7 +177,6 @@ pub fn preprocess(rgb: &[u8], src_w: u32, src_h: u32) -> Result<Array4<f32>> {
 
     Ok(input)
 }
-
 
 /// Holt die (N, 84)-Zeilen aus dem `output0`-Tensor (erwartet [1, C, N]).
 ///
@@ -262,10 +261,12 @@ pub fn load_session(model: &str) -> Result<Session> {
         .map(|n| n.get())
         .unwrap_or(1);
 
+    let intra_threads = (cores / 2).max(1);
+
     let mut builder = Session::builder()?
         .with_optimization_level(GraphOptimizationLevel::Level3)
         .map_err(|e| anyhow::anyhow!("{e}"))?
-        .with_intra_threads(4) //cores)
+        .with_intra_threads(intra_threads)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if path.is_file() {

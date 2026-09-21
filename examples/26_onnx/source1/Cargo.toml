@@ -20,7 +20,7 @@ x11rb = "0.14.0"
 [profile.release]
 opt-level = 3       # Small binary size (use 3 for maximum speed and "z" for smallest size)
 lto = true             # Whole-program Link-Time Optimization
-debug = 1              # For profiling with samply
+debug = 0              # For profiling with samply set this to 1
 codegen-units = 1      # Maximizes dead code elimination
 panic = "abort"        # Drops stack unwinding tables
-strip = false           # Automatically strips debug symbols
+strip = true           # Automatically strips debug symbols for profiling set this to false
