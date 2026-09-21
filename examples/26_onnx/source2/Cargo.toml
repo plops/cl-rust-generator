@@ -4,9 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-macroquad = "0.4.16"
-ndarray = "0.17.2"
-ort = { version = "2.0.0-rc.13", features = ["fetch-models"] }
+# default-features = false removes audio and ALSA/C-sound dependencies
+macroquad = { version = "0.4.16", default-features = false }
+
+# default-features = false drops tracing and ndarray; fetch-models is omitted
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["download-binaries", "copy-dylibs", "tls-native"] }
+
+# Uses only core X11 protocol without extra X-extensions
 x11rb = "0.14.0"
 
 [profile.release]
