@@ -1,7 +1,7 @@
 [package]
 name = "source1"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 default-run = "x11_rb_mq_viewer"
 
 [[bin]]
@@ -16,6 +16,8 @@ macroquad = "0.4.16"
 ndarray = "0.17.2"
 ort = { version = "2.0.0-rc.13", features = ["fetch-models"] }
 x11rb = "0.14.0"
+font8x8 = "0.3"
+
 
 [profile.release]
 opt-level = 3       # Small binary size (use 3 for maximum speed and "z" for smallest size)

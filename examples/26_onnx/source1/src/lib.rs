@@ -20,7 +20,7 @@ pub use capture::{
 pub use cli::{Args, DEFAULT_FPS, MAX_FPS, MIN_FPS, YOLOV8M_URL};
 pub use draw::{color_for_label, draw_box, draw_detections, LABEL_BAR, THICKNESS};
 pub use infer::{
-    decode, extract_rows, infer_image, intersection, iou, load_session, preprocess, union,
+    infer_image, intersection, iou, load_session, preprocess, union,
     BoundingBox, Detection, Letterbox, CLASS_LABELS, FALLBACK_INPUT, LETTERBOX_PAD, MODEL_SIZE,
     OUTPUT_NAME,
 };

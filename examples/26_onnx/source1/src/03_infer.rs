@@ -8,7 +8,7 @@
 
 use anyhow::{bail, Context, Result};
 use image::{imageops::FilterType, RgbImage};
-use ndarray::{s, Array2, Array4, ArrayViewD, Axis};
+use ndarray::{s, Array4, ArrayViewD, Axis};
 use ort::{
     inputs,
     session::{builder::GraphOptimizationLevel, Session},
@@ -178,29 +178,58 @@ pub fn preprocess(rgb: &[u8], src_w: u32, src_h: u32) -> Result<Array4<f32>> {
     Ok(input)
 }
 
-/// Holt die (N, 84)-Zeilen aus dem `output0`-Tensor (erwartet [1, C, N]).
-///
-/// Wie im Referenzbeispiel werden die Achsen transponiert und der
-/// Batch-Index 0 gewaehlt.
-pub fn extract_rows(output: ArrayViewD<'_, f32>) -> Result<Array2<f32>> {
+/// Decodes YOLO26 end-to-end output: shape [1, N, 6] with (x1, y1, x2, y2, conf, class_id).
+fn decode_yolo26(
+    output: ArrayViewD<'_, f32>,
+    conf_min: f32,
+    lb: Letterbox,
+    src_w: u32,
+    src_h: u32,
+) -> Vec<Detection> {
     let shape = output.shape();
-    if shape.len() != 3 || shape[0] != 1 {
-        bail!("unexpected output0 shape {shape:?} (need [1, C, N])");
+    let num_dets = shape[1];
+    let mut dets = Vec::new();
+
+    for i in 0..num_dets {
+        let conf = output[[0, i, 4]];
+        if conf < conf_min {
+            continue;
+        }
+
+        let class_id = output[[0, i, 5]].round() as usize;
+        if class_id >= CLASS_LABELS.len() {
+            continue;
+        }
+
+        let raw_box = BoundingBox {
+            x1: output[[0, i, 0]],
+            y1: output[[0, i, 1]],
+            x2: output[[0, i, 2]],
+            y2: output[[0, i, 3]],
+        };
+
+        dets.push(Detection {
+            bbox: lb.back_project(raw_box, src_w, src_h),
+            label: CLASS_LABELS[class_id],
+            conf,
+        });
     }
-    Ok(output.t().into_owned().slice(s![.., .., 0]).into_owned())
+
+    dets
 }
 
-/// Decodiert (N, 4+Klassen)-Zeilen im 640er-Raum: Klassen-Maximum,
-/// Confidence-Filter, NMS per IoU, Rueckprojektion aufs Quellbild.
-pub fn decode(
-    rows: &Array2<f32>,
+/// Decodes YOLOv8 / YOLO11 raw output: shape [1, 84, N] with (xc, yc, w, h, scores...).
+fn decode_yolov8(
+    output: ArrayViewD<'_, f32>,
     conf_min: f32,
     nms_iou: f32,
     lb: Letterbox,
     src_w: u32,
     src_h: u32,
-) -> Vec<Detection> {
+) -> Result<Vec<Detection>> {
+    let rows = output.t().into_owned().slice(s![.., .., 0]).into_owned();
     let mut kept: Vec<(BoundingBox, &'static str, f32)> = Vec::new();
+
     for row in rows.axis_iter(Axis(0)) {
         let row: Vec<f32> = row.iter().copied().collect();
         if row.len() < 5 {
@@ -213,9 +242,11 @@ pub fn decode(
             .map(|(i, v)| (i, *v))
             .reduce(|a, b| if b.1 > a.1 { b } else { a })
             .unwrap_or((0, 0.0));
+
         if conf < conf_min || class_id >= CLASS_LABELS.len() {
             continue;
         }
+
         let (xc, yc, w, h) = (row[0], row[1], row[2], row[3]);
         kept.push((
             BoundingBox {
@@ -228,8 +259,9 @@ pub fn decode(
             conf,
         ));
     }
+
     kept.sort_by(|a, b| b.2.total_cmp(&a.2));
-    // Greedy-NMS: staerkste Box behalten, stark ueberlappende verwerfen.
+
     let mut result: Vec<(BoundingBox, &'static str, f32)> = Vec::new();
     for cand in kept {
         if result
@@ -239,14 +271,54 @@ pub fn decode(
             result.push(cand);
         }
     }
-    result
+
+    Ok(result
         .into_iter()
         .map(|(b, label, conf)| Detection {
             bbox: lb.back_project(b, src_w, src_h),
             label,
             conf,
         })
-        .collect()
+        .collect())
+}
+
+/// Dispatches decoding dynamically depending on the output shape.
+pub fn infer_image(
+    session: &mut Session,
+    rgb: &[u8],
+    src_w: u32,
+    src_h: u32,
+    conf: f32,
+    nms: f32,
+) -> Result<Vec<Detection>> {
+    let lb = Letterbox::for_source(src_w, src_h)?;
+    let input = preprocess(rgb, src_w, src_h)?;
+    let name = session
+        .inputs()
+        .first()
+        .map(|o| o.name().to_string())
+        .unwrap_or_else(|| FALLBACK_INPUT.to_string());
+
+    let outputs = session.run(inputs![name.as_str() => TensorRef::from_array_view(&input)?])?;
+    let output = outputs
+        .get(OUTPUT_NAME)
+        .with_context(|| format!("model output {OUTPUT_NAME:?} missing"))?
+        .try_extract_array::<f32>()?;
+
+    let shape = output.shape();
+    if shape.len() != 3 || shape[0] != 1 {
+        bail!("unsupported output shape: {shape:?}");
+    }
+
+    if shape[2] == 6 {
+        // YOLO26 end-to-end: [1, 300, 6]
+        Ok(decode_yolo26(output, conf, lb, src_w, src_h))
+    } else if shape[1] < shape[2] {
+        // YOLOv8/YOLO11 raw: [1, 84, 8400]
+        decode_yolov8(output, conf, nms, lb, src_w, src_h)
+    } else {
+        bail!("unrecognized detection output shape: {shape:?}");
+    }
 }
 
 /// Laedt ein Modell: lokale Datei bevorzugt, sonst URL (mit ort-Cache).
@@ -278,35 +350,6 @@ pub fn load_session(model: &str) -> Result<Session> {
             .commit_from_url(model)
             .with_context(|| format!("fetching model from {model}"))
     }
-}
-
-/// Ein Frame: Preprocess → Inferenz → Decode. Gibt Detektionen in
-/// Quellbild-Pixeln zurueck.
-pub fn infer_image(
-    session: &mut Session,
-    rgb: &[u8],
-    src_w: u32,
-    src_h: u32,
-    conf: f32,
-    nms: f32,
-) -> Result<Vec<Detection>> {
-    let lb = Letterbox::for_source(src_w, src_h)?;
-    let input = preprocess(rgb, src_w, src_h)?;
-    let name = session
-        .inputs()
-        .first()
-        .map(|o| o.name().to_string())
-        .unwrap_or_else(|| FALLBACK_INPUT.to_string());
-    let outputs = session.run(inputs![name.as_str() => TensorRef::from_array_view(&input)?])?;
-    let output = outputs
-        .get(OUTPUT_NAME)
-        .with_context(|| {
-            let keys: Vec<&str> = outputs.keys().collect();
-            format!("model output {OUTPUT_NAME:?} missing (got {keys:?}); is this a YOLOv8 model?")
-        })?
-        .try_extract_array::<f32>()?;
-    let rows = extract_rows(output)?;
-    Ok(decode(&rows, conf, nms, lb, src_w, src_h))
 }
 
 #[cfg(test)]
