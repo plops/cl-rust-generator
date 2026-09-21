@@ -143,7 +143,19 @@ Session-Warmup), Pacer-Ziel 333 ms bei 3 fps wird eingehalten; die
 späte Detektion zeigt, dass Overlay + Timing auch bei Treffern stabil
 bleiben. Größere Regionen skalieren linear über Preprocess/Inferenz;
 wer schneller will, braucht kleinere `--w/--h` oder ein kleineres
-Modell (yolov8n).
+Modell (s. Modellwechsel-Notiz unten).
+
+## Modellwechsel per `--model` (verifiziert)
+
+`--model` nimmt lokale Datei oder URL; jedes YOLO-Modell mit
+`images`/`output0`-Layout läuft ohne Codeänderung. Befund: ein
+fertiges `yolov8n.onnx` ist nirgends publiziert (pyke-CDN 404,
+ultralytics-assets nur `yolov8n.pt`). Verwendet wurde stattdessen
+`yolo11n.onnx` (gleiche Nano-Klasse, gleicher Head):
+`ultralytics/assets releases/download/v8.3.0/yolo11n.onnx` (10 MB
+statt 104 MB). bus.jpg unter Xvfb: 4 Detektionen (vs. 5 bei yolov8m),
+Release-Inferenz **46,6 ms** (vs. 118 ms) — ca. 21 fps-Headroom statt
+8. URL-Modelle cached ort per SHA256, lokale Dateien laufen direkt.
 
 ## Commits
 
