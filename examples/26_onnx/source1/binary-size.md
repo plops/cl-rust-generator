@@ -59,3 +59,20 @@ cargo nm --release -- -size-sort -print-size
 
 * 
 
+The smoking gun is ort_sys, which is occupying 14.0 MiB (74.8%) of your compiled code size. Along with the [Unknown] entries (which are C++ symbols originating from the same place), the ONNX Runtime engine is responsible for roughly 90% of your binary's weight.
+Because ort compiles and statically links the entire C++ ONNX Runtime library (onnxruntime) into your Rust binary by default, it bundles massive operators, memory layout dispatchers, and matrix multiplication routines (like the MlasGemm symbols you see in the list).
+## How to Fix This## 1. Dynamic Linking (The Ultimate Fix for Size)
+Instead of statically bundling the massive ONNX Runtime inside your binary, configure ort to use a shared dynamic library (.so, .dylib, or .dll) already present on the host system. This will shrink your binary down from 30MB+ to just a few megabytes.
+Change your Cargo.toml dependency to opt out of the default static strategy:
+
+[dependencies]
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["load-dynamic", "fetch-models"] }
+
+
+* What this does: It completely strips out ort_sys's built-in heavy C++ codebase. Your binary will instead look for an external ONNX Runtime library at runtime via an environment variable (like ORT_DYLIB_PATH=/path/to/libonnxruntime.so).
+
+## 2. Minimize ureq and Network Code
+cargo-bloat shows ureq taking up noticeable room. It is pulled in by ort's fetch-models feature to download ONNX files over HTTPS.
+
+* If you manually download your .onnx models and include them via include_bytes!() or load them via standard file paths (std::fs), you can remove the fetch-models feature entirely.
+* Dropping it removes ureq, http, sha2, and internal TLS/crypto infrastructure.
