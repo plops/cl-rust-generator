@@ -10,9 +10,11 @@ macroquad = { version = "0.4.16", default-features = false }
 # Uses only core X11 protocol without extra X-extensions
 x11rb = "0.14.0"
 
-# Pure Rust neural-network inference engine on CPU (no C/C++ dylibs or runtime downloads)
+# Pure Rust neural-network inference engine
 tract = { version = "0.23.9-pre", path = "/home/kiel/src/tract/api/rs" }
-ndarray = { version = "0.16", default-features = false }
+
+# ndarray with standard features so ShapeError implements std::error::Error
+ndarray = "0.16"
 
 [profile.release]
 opt-level = 3

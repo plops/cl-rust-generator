@@ -40,7 +40,6 @@ async fn main() {
         tmp
     };
 
-    // Load and optimize ONNX model with tract
     let mut model = tract::onnx()
         .unwrap()
         .load(&model_path)
@@ -82,9 +81,8 @@ async fn main() {
             b_plane[i] = b as f32 / 255.0;
         }
 
-        // Zero-copy array view over the input buffer converted into a tract tensor
         let input_view = ndarray::ArrayView4::from_shape((1, 3, SIZE, SIZE), &input).unwrap();
-        let outputs = model.run([input_view.tract().unwrap()]).unwrap();
+        let outputs = model.run([input_view.to_owned().tract().unwrap()]).unwrap();
         let dets = outputs[0].as_slice::<f32>().unwrap();
 
         tex.update(&img);
