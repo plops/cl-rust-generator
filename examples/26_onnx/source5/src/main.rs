@@ -27,6 +27,7 @@ fn window_conf() -> Conf {
     }
 }
 
+#[derive(Clone, Default)]
 struct TextBox {
     x: f32,
     y: f32,
@@ -36,7 +37,224 @@ struct TextBox {
 }
 
 // ----------------------------------------------------------------------------
-// Dictionary & Decoder
+// OCR Engine (Detection + Recognition)
+// ----------------------------------------------------------------------------
+
+struct OcrEngine {
+    det_session: Session,
+    rec_session: Session,
+    det_in_name: String,
+    rec_in_name: String,
+    dict: Vec<&'static str>,
+
+    // Reusable scratch buffers
+    det_input: Vec<f32>,
+    rec_input: Vec<f32>,
+    visited: Vec<u32>,
+    tag: u32,
+    bfs_queue: Vec<(usize, usize)>,
+}
+
+impl OcrEngine {
+    fn new() -> Self {
+        let det_session = Session::builder()
+            .unwrap()
+            .commit_from_memory(DET_BYTES)
+            .unwrap();
+        let det_in_name = det_session.inputs()[0].name().to_string();
+
+        let rec_session = Session::builder()
+            .unwrap()
+            .commit_from_memory(REC_BYTES)
+            .unwrap();
+        let rec_in_name = rec_session.inputs()[0].name().to_string();
+
+        Self {
+            det_session,
+            rec_session,
+            det_in_name,
+            rec_in_name,
+            dict: load_dict(DICT_YAML),
+            det_input: vec![0.0f32; 3 * PLANE],
+            rec_input: Vec::with_capacity(3 * REC_H * 960),
+            visited: vec![0u32; PLANE],
+            tag: 0,
+            bfs_queue: Vec::with_capacity(512),
+        }
+    }
+
+    /// Prepares detection planar RGB floats and texture RGBA bytes from X11 BGRA
+    fn prepare_inputs(&mut self, bgra_src: &[u8], rgba_dst: &mut [u8]) {
+        let (r_plane, rest) = self.det_input.split_at_mut(PLANE);
+        let (g_plane, b_plane) = rest.split_at_mut(PLANE);
+
+        // Pre-calculated normalization multipliers: (1 / 255) / std
+        const R_SCALE: f32 = 1.0 / (255.0 * 0.229);
+        const R_OFF: f32 = 0.485 / 0.229;
+        const G_SCALE: f32 = 1.0 / (255.0 * 0.224);
+        const G_OFF: f32 = 0.456 / 0.224;
+        const B_SCALE: f32 = 1.0 / (255.0 * 0.225);
+        const B_OFF: f32 = 0.406 / 0.225;
+
+        for (i, px) in bgra_src.chunks_exact(4).take(PLANE).enumerate() {
+            let (b, g, r) = (px[0], px[1], px[2]);
+            let off = i * 4;
+            rgba_dst[off..off + 4].copy_from_slice(&[r, g, b, 255]);
+
+            r_plane[i] = r as f32 * R_SCALE - R_OFF;
+            g_plane[i] = g as f32 * G_SCALE - G_OFF;
+            b_plane[i] = b as f32 * B_SCALE - B_OFF;
+        }
+    }
+
+    /// Runs DBNet text detector
+    fn detect(&mut self) -> Vec<TextBox> {
+        let det_outs = self
+            .det_session
+            .run(inputs![
+                self.det_in_name.as_str() => TensorRef::from_array_view(([1, 3, SIZE, SIZE], &self.det_input[..])).unwrap()
+            ])
+            .unwrap();
+
+        self.tag = self.tag.wrapping_add(1);
+        if self.tag == 0 {
+            self.visited.fill(0);
+            self.tag = 1;
+        }
+
+        let (_, prob_map) = det_outs[0].try_extract_tensor::<f32>().unwrap();
+        self.postprocess_dbnet(prob_map)
+    }
+
+    /// Connected-components and unclip approximation
+    fn postprocess_dbnet(&mut self, prob: &[f32]) -> Vec<TextBox> {
+        let mut boxes = Vec::new();
+        let tag = self.tag;
+
+        for y in 0..SIZE {
+            for x in 0..SIZE {
+                let idx = y * SIZE + x;
+                if prob[idx] < DET_THRESH || self.visited[idx] == tag {
+                    continue;
+                }
+
+                self.visited[idx] = tag;
+                self.bfs_queue.clear();
+                self.bfs_queue.push((x, y));
+
+                let (mut min_x, mut max_x, mut min_y, mut max_y) = (x, x, y, y);
+                let mut score_sum = 0.0f32;
+                let mut head = 0;
+
+                while head < self.bfs_queue.len() {
+                    let (cx, cy) = self.bfs_queue[head];
+                    head += 1;
+
+                    min_x = min_x.min(cx);
+                    max_x = max_x.max(cx);
+                    min_y = min_y.min(cy);
+                    max_y = max_y.max(cy);
+                    score_sum += prob[cy * SIZE + cx];
+
+                    for (dx, dy) in [(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
+                        let nx = cx as isize + dx;
+                        let ny = cy as isize + dy;
+                        if nx >= 0 && nx < SIZE as isize && ny >= 0 && ny < SIZE as isize {
+                            let n_idx = ny as usize * SIZE + nx as usize;
+                            if self.visited[n_idx] != tag && prob[n_idx] >= DET_THRESH {
+                                self.visited[n_idx] = tag;
+                                self.bfs_queue.push((nx as usize, ny as usize));
+                            }
+                        }
+                    }
+                }
+
+                let bw = (max_x - min_x + 1) as f32;
+                let bh = (max_y - min_y + 1) as f32;
+                let avg_score = score_sum / self.bfs_queue.len() as f32;
+
+                if self.bfs_queue.len() >= 16 && avg_score >= BOX_THRESH && bw >= 8.0 && bh >= 6.0 {
+                    let dist = (bw * bh * UNCLIP_RATIO) / (2.0 * (bw + bh));
+                    let dist_y = (dist * 0.4).min(bh * 0.15).max(1.0);
+
+                    let x1 = (min_x as f32 - dist).max(0.0);
+                    let y1 = (min_y as f32 - dist_y).max(0.0);
+                    let x2 = (max_x as f32 + dist).min((SIZE - 1) as f32);
+                    let y2 = (max_y as f32 + dist_y).min((SIZE - 1) as f32);
+
+                    boxes.push(TextBox {
+                        x: x1,
+                        y: y1,
+                        w: x2 - x1,
+                        h: y2 - y1,
+                        text: String::new(),
+                    });
+                }
+            }
+        }
+
+        // Sort into natural reading order (lines top-to-bottom, then left-to-right)
+        boxes.sort_by(|a, b| {
+            ((a.y / 16.0) as i32)
+                .cmp(&((b.y / 16.0) as i32))
+                .then_with(|| a.x.total_cmp(&b.x))
+        });
+        boxes
+    }
+
+    /// Crops each bounding box and runs text recognition
+    fn recognize(&mut self, rgba: &[u8], boxes: &mut [TextBox]) {
+        let count = boxes.len().min(MAX_REC_LINES);
+        for b in boxes.iter_mut().take(count) {
+            let target_w = self.preprocess_crop(rgba, b);
+            let input_slice = &self.rec_input[..3 * REC_H * target_w];
+            let rec_outs = self
+                .rec_session
+                .run(inputs![
+                    self.rec_in_name.as_str() => TensorRef::from_array_view(([1, 3, REC_H, target_w], input_slice)).unwrap()
+                ])
+                .unwrap();
+
+            let (shape, preds) = rec_outs[0].try_extract_tensor::<f32>().unwrap();
+            b.text = ctc_decode(preds, shape, &self.dict);
+        }
+    }
+
+    fn preprocess_crop(&mut self, rgba: &[u8], crop: &TextBox) -> usize {
+        let (cw, ch) = (crop.w.max(1.0), crop.h.max(1.0));
+        let raw_w = (REC_H as f32 * (cw / ch)).round() as usize;
+        let target_w = (((raw_w + 31) / 32) * 32).clamp(32, 960);
+        let resized_w = raw_w.min(target_w).max(1);
+
+        let total = 3 * REC_H * target_w;
+        if self.rec_input.len() < total {
+            self.rec_input.resize(total, 0.0);
+        }
+        self.rec_input[..total].fill(0.0);
+
+        let plane_stride = REC_H * target_w;
+        for dy in 0..REC_H {
+            let sy = (crop.y + (dy as f32 + 0.5) * (ch / REC_H as f32) - 0.5).round() as usize;
+            let sy_c = sy.clamp(0, SIZE - 1);
+
+            for dx in 0..resized_w {
+                let sx = (crop.x + (dx as f32 + 0.5) * (cw / resized_w as f32) - 0.5).round() as usize;
+                let sx_c = sx.clamp(0, SIZE - 1);
+
+                let src = (sy_c * SIZE + sx_c) * 4;
+                let dst = dy * target_w + dx;
+
+                self.rec_input[dst] = rgba[src] as f32 / 127.5 - 1.0;
+                self.rec_input[plane_stride + dst] = rgba[src + 1] as f32 / 127.5 - 1.0;
+                self.rec_input[2 * plane_stride + dst] = rgba[src + 2] as f32 / 127.5 - 1.0;
+            }
+        }
+        target_w
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Helpers
 // ----------------------------------------------------------------------------
 
 fn load_dict(yaml: &'static str) -> Vec<&'static str> {
@@ -97,151 +315,27 @@ fn ctc_decode(data: &[f32], shape: &[i64], dict: &[&str]) -> String {
 }
 
 // ----------------------------------------------------------------------------
-// Vision & Post-Processing
-// ----------------------------------------------------------------------------
-
-fn postprocess_dbnet(prob: &[f32], visited: &mut [u32], tag: u32) -> Vec<TextBox> {
-    let mut boxes = Vec::new();
-    let mut q = Vec::with_capacity(512);
-
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let idx = y * SIZE + x;
-            if prob[idx] < DET_THRESH || visited[idx] == tag {
-                continue;
-            }
-
-            visited[idx] = tag;
-            q.clear();
-            q.push((x, y));
-
-            let (mut min_x, mut max_x, mut min_y, mut max_y) = (x, x, y, y);
-            let mut score_sum = 0.0f32;
-            let mut head = 0;
-
-            while head < q.len() {
-                let (cx, cy) = q[head];
-                head += 1;
-
-                min_x = min_x.min(cx);
-                max_x = max_x.max(cx);
-                min_y = min_y.min(cy);
-                max_y = max_y.max(cy);
-                score_sum += prob[cy * SIZE + cx];
-
-                for (dx, dy) in [(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
-                    let nx = cx as isize + dx;
-                    let ny = cy as isize + dy;
-                    if nx >= 0 && nx < SIZE as isize && ny >= 0 && ny < SIZE as isize {
-                        let n_idx = ny as usize * SIZE + nx as usize;
-                        if visited[n_idx] != tag && prob[n_idx] >= DET_THRESH {
-                            visited[n_idx] = tag;
-                            q.push((nx as usize, ny as usize));
-                        }
-                    }
-                }
-            }
-
-            let bw = (max_x - min_x + 1) as f32;
-            let bh = (max_y - min_y + 1) as f32;
-            let avg_score = score_sum / q.len() as f32;
-
-            if q.len() >= 16 && avg_score >= BOX_THRESH && bw >= 8.0 && bh >= 6.0 {
-                let dist = (bw * bh * UNCLIP_RATIO) / (2.0 * (bw + bh));
-                let dist_y = (dist * 0.4).min(bh * 0.15).max(1.0);
-
-                let x1 = (min_x as f32 - dist).max(0.0);
-                let y1 = (min_y as f32 - dist_y).max(0.0);
-                let x2 = (max_x as f32 + dist).min((SIZE - 1) as f32);
-                let y2 = (max_y as f32 + dist_y).min((SIZE - 1) as f32);
-
-                boxes.push(TextBox {
-                    x: x1,
-                    y: y1,
-                    w: x2 - x1,
-                    h: y2 - y1,
-                    text: String::new(),
-                });
-            }
-        }
-    }
-
-    boxes.sort_by(|a, b| {
-        ((a.y / 16.0) as i32)
-            .cmp(&((b.y / 16.0) as i32))
-            .then_with(|| a.x.total_cmp(&b.x))
-    });
-    boxes
-}
-
-fn preprocess_crop(rgba: &[u8], crop: &TextBox, rec_buf: &mut Vec<f32>) -> usize {
-    let (cw, ch) = (crop.w.max(1.0), crop.h.max(1.0));
-    let raw_w = (REC_H as f32 * (cw / ch)).round() as usize;
-    let target_w = (((raw_w + 31) / 32) * 32).clamp(32, 960);
-    let resized_w = raw_w.min(target_w).max(1);
-
-    let total = 3 * REC_H * target_w;
-    if rec_buf.len() < total {
-        rec_buf.resize(total, 0.0);
-    }
-    rec_buf[..total].fill(0.0);
-
-    let plane_stride = REC_H * target_w;
-    for dy in 0..REC_H {
-        let sy = (crop.y + (dy as f32 + 0.5) * (ch / REC_H as f32) - 0.5).round() as usize;
-        let sy_c = sy.clamp(0, SIZE - 1);
-
-        for dx in 0..resized_w {
-            let sx = (crop.x + (dx as f32 + 0.5) * (cw / resized_w as f32) - 0.5).round() as usize;
-            let sx_c = sx.clamp(0, SIZE - 1);
-
-            let src = (sy_c * SIZE + sx_c) * 4;
-            let dst = dy * target_w + dx;
-
-            rec_buf[dst] = rgba[src] as f32 / 127.5 - 1.0;
-            rec_buf[plane_stride + dst] = rgba[src + 1] as f32 / 127.5 - 1.0;
-            rec_buf[2 * plane_stride + dst] = rgba[src + 2] as f32 / 127.5 - 1.0;
-        }
-    }
-    target_w
-}
-
-// ----------------------------------------------------------------------------
-// Main
+// Main Loop
 // ----------------------------------------------------------------------------
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    // Load GNU Unifont from system font directory
-    //let font_bytes = std::fs::read("/usr/share/fonts/unifont/unifont.otf")
-    //    .expect("Failed to read /usr/share/fonts/unifont/unifont.otf");
-    //let font = load_ttf_font_from_bytes(&font_bytes)
-    //    .expect("Failed to parse unifont.otf");
     let font = load_ttf_font_from_bytes(UNIFONT_BYTES).expect("Failed to parse font");
-    let (conn, screen) = x11rb::connect(None).unwrap();
+    let (conn, screen) = x11rb::connect(None).expect("Failed to connect to X11");
     let root = conn.setup().roots[screen].root;
 
-    let mut det_session = Session::builder()
-        .unwrap()
-        .commit_from_memory(DET_BYTES)
-        .unwrap();
-    let det_in = det_session.inputs()[0].name().to_string();
-
-    let mut rec_session = Session::builder()
-        .unwrap()
-        .commit_from_memory(REC_BYTES)
-        .unwrap();
-    let rec_in = rec_session.inputs()[0].name().to_string();
-
-    let dict = load_dict(DICT_YAML);
-
+    let mut engine = OcrEngine::new();
     let mut img = Image::gen_image_color(SIZE as u16, SIZE as u16, BLACK);
     let tex = Texture2D::from_image(&img);
 
-    let mut det_input = vec![0.0f32; 3 * PLANE];
-    let mut rec_input = Vec::with_capacity(3 * REC_H * 960);
-    let mut visited = vec![0u32; PLANE];
-    let mut tag = 0u32;
+    // Frame cache & deduplication buffers
+    let mut prev_screen_bytes = Vec::new();
+    let mut prev_printed_lines: Vec<String> = Vec::new();
+    let mut cached_boxes: Vec<TextBox> = Vec::new();
+
+    let mut det_ms = 0.0;
+    let mut rec_ms = 0.0;
+    let mut is_idle = false;
 
     while !is_key_down(KeyCode::Escape) {
         let reply = xproto::get_image(
@@ -258,63 +352,57 @@ async fn main() {
         .reply()
         .unwrap();
 
-        // Convert X11 BGRA -> Planar RGB (normalized) & Texture RGBA
-        let (r_plane, rest) = det_input.split_at_mut(PLANE);
-        let (g_plane, b_plane) = rest.split_at_mut(PLANE);
-        for (i, px) in reply.data.chunks_exact(4).take(PLANE).enumerate() {
-            let (b, g, r) = (px[0], px[1], px[2]);
-            let off = i * 4;
-            img.bytes[off..off + 4].copy_from_slice(&[r, g, b, 255]);
+        // 1. Change Detector
+        // High-throughput raw slice equality (compiled down to SIMD memcmp)
+        let frame_changed = prev_screen_bytes != reply.data;
 
-            r_plane[i] = (r as f32 / 255.0 - 0.485) / 0.229;
-            g_plane[i] = (g as f32 / 255.0 - 0.456) / 0.224;
-            b_plane[i] = (b as f32 / 255.0 - 0.406) / 0.225;
+        if frame_changed {
+            is_idle = false;
+
+            // Convert X11 BGRA -> Planar RGB & RGBA texture
+            engine.prepare_inputs(&reply.data, &mut img.bytes);
+            tex.update(&img);
+
+            // Run detection
+            let t0 = Instant::now();
+            let mut boxes = engine.detect();
+            det_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+            // Run recognition
+            let t1 = Instant::now();
+            engine.recognize(&img.bytes, &mut boxes);
+            rec_ms = t1.elapsed().as_secs_f64() * 1000.0;
+
+            // 2. Print output without duplicates
+            let current_lines: Vec<String> = boxes
+                .iter()
+                .map(|b| b.text.trim())
+                .filter(|t| !t.is_empty())
+                .map(|t| t.to_string())
+                .collect();
+
+            if !current_lines.is_empty() && current_lines != prev_printed_lines {
+                println!("--- [{}] Detected ({} lines) ---", get_time() as u64, current_lines.len());
+                for line in &current_lines {
+                    println!("{line}");
+                }
+                prev_printed_lines = current_lines;
+            }
+
+            cached_boxes = boxes;
+            prev_screen_bytes = reply.data; // O(1) buffer move
+        } else {
+            is_idle = true;
         }
 
-        // 1. Detection
-        let t0 = Instant::now();
-        let det_outs = det_session
-            .run(inputs![
-                det_in.as_str() => TensorRef::from_array_view(([1, 3, SIZE, SIZE], &det_input[..])).unwrap()
-            ])
-            .unwrap();
-        let det_ms = t0.elapsed().as_secs_f64() * 1000.0;
-
-        tag = tag.wrapping_add(1);
-        if tag == 0 {
-            visited.fill(0);
-            tag = 1;
-        }
-
-        let (_, prob_map) = det_outs[0].try_extract_tensor::<f32>().unwrap();
-        let mut boxes = postprocess_dbnet(prob_map, &mut visited, tag);
-
-        // 2. Recognition
-        let t1 = Instant::now();
-        let rec_count = boxes.len().min(MAX_REC_LINES);
-        for b in boxes.iter_mut().take(rec_count) {
-            let target_w = preprocess_crop(&img.bytes, b, &mut rec_input);
-            let input_slice = &rec_input[..3 * REC_H * target_w];
-            let rec_outs = rec_session
-                .run(inputs![
-                    rec_in.as_str() => TensorRef::from_array_view(([1, 3, REC_H, target_w], input_slice)).unwrap()
-                ])
-                .unwrap();
-            let (shape, preds) = rec_outs[0].try_extract_tensor::<f32>().unwrap();
-            b.text = ctc_decode(preds, shape, &dict);
-        }
-        let rec_ms = t1.elapsed().as_secs_f64() * 1000.0;
-
-        // 3. Rendering
-        tex.update(&img);
+        // 3. Render
         clear_background(BLACK);
         draw_texture(&tex, 0.0, 0.0, WHITE);
 
-        for b in &boxes {
+        for b in &cached_boxes {
             draw_rectangle_lines(b.x, b.y, b.w, b.h, 2.0, GREEN);
 
             if !b.text.is_empty() {
-                // Measure text with unifont
                 let dims = measure_text(&b.text, Some(&font), 16, 1.0);
                 let (pad, bw, bh) = (3.0, dims.width + 6.0, dims.height + 6.0);
                 let bx = b.x.clamp(0.0, (SIZE as f32 - bw).max(0.0));
@@ -323,7 +411,6 @@ async fn main() {
                 draw_rectangle(bx, by, bw, bh, Color::new(0.0, 0.0, 0.0, 0.85));
                 draw_rectangle_lines(bx, by, bw, bh, 1.0, YELLOW);
 
-                // Draw text with unifont using draw_text_ex
                 draw_text_ex(
                     &b.text,
                     bx + pad,
@@ -338,15 +425,23 @@ async fn main() {
             }
         }
 
+        // HUD overlay
+        let status_color = if is_idle { Color::new(0.4, 0.8, 1.0, 1.0) } else { GREEN };
+        let status_text = if is_idle { "PAUSED (STATIC)" } else { "ACTIVE" };
+
         draw_rectangle(0.0, 0.0, SIZE as f32, 24.0, Color::new(0.0, 0.0, 0.0, 0.75));
         draw_text_ex(
-            &format!("Lines: {} | Det: {det_ms:.1}ms | Rec: {rec_ms:.1}ms | FPS: {}", boxes.len(), get_fps()),
+            &format!(
+                "[{status_text}] Lines: {} | Det: {det_ms:.1}ms | Rec: {rec_ms:.1}ms | FPS: {}",
+                cached_boxes.len(),
+                get_fps()
+            ),
             10.0,
             17.0,
             TextParams {
                 font: Some(&font),
                 font_size: 16,
-                color: GREEN,
+                color: status_color,
                 ..Default::default()
             },
         );
