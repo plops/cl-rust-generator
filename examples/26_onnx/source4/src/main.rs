@@ -190,13 +190,11 @@ fn postprocess_dbnet(
         }
     }
 
-    // Sort in natural reading order: top-to-bottom, left-to-right
+    // Sort in natural reading order: top-to-bottom, left-to-right (Strict Total Order)
     boxes.sort_by(|a, b| {
-        if (a.y - b.y).abs() < 12.0 {
-            a.x.partial_cmp(&b.x).unwrap()
-        } else {
-            a.y.partial_cmp(&b.y).unwrap()
-        }
+        let row_a = (a.y / 16.0) as i32;
+        let row_b = (b.y / 16.0) as i32;
+        row_a.cmp(&row_b).then_with(|| a.x.total_cmp(&b.x))
     });
 
     boxes
@@ -393,7 +391,7 @@ async fn main() {
                 let pad = 3.0;
                 let bg_w = dims.width + pad * 2.0;
                 let bg_h = dims.height + pad * 2.0;
-                let bg_x = b.x.clamp(0.0, SIZE as f32 - bg_w);
+                let bg_x = b.x.clamp(0.0, (SIZE as f32 - bg_w).max(0.0));
                 let bg_y = if b.y >= bg_h + 2.0 {
                     b.y - bg_h - 2.0
                 } else {
