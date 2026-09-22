@@ -1,0 +1,22 @@
+[package]
+name = "x11_yolo26"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# default-features = false removes audio and ALSA/C-sound dependencies
+macroquad = { version = "0.4.16", default-features = false }
+
+# Uses only core X11 protocol without extra X-extensions
+x11rb = "0.14.0"
+
+# Pure Rust neural-network inference engine on CPU (no C/C++ dylibs or runtime downloads)
+tract = { version = "0.23.9-pre", path = "/home/kiel/src/tract/api/rs" }
+ndarray = { version = "0.16", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
