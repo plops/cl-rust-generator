@@ -1,0 +1,4 @@
+source0 .. yolov11n
+source1 .. yolov11n + yolo26n, class labels, profiling
+source2 .. absolute minimum (initially in rust then converted to transpiler)
+source3 .. replace ort with tract
