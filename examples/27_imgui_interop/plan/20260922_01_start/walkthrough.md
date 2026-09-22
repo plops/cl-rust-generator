@@ -83,3 +83,45 @@ only benign `XDG_RUNTIME_DIR` warning on stderr, no panic).
 - Smoke: `xvfb` (+ `libxkbcommon0 libxi6 libx11-6 libgl1` if display or
   library errors appear). Everything else came from the existing
   toolchain (Rust 1.98.1, CMake 4.2.3, SBCL 2.6.0).
+
+
+# Token price:
+
+┌───────────────────────────────────────────────────────┐
+│  Session usage                                        │
+│                                                       │
+│    Input      10,735,516                              │
+│    Cached     10,464,586                              │
+│    Output         44,660                              │
+│    Total      10,780,176                              │
+│                                                       │
+│    Turns              107                             │
+│    Subagents         none                             │
+│                                                       │
+│  Subscription · Muse Code Everyday Usage              │
+│    Current        4% used · Resets at 4:59 PM         │
+│    Weekly         2% used · Resets Sep 28 at 12:00 AM │
+└───────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│  MUSE CODE 1.3.0                                                 COMPLETED │
+│                                                                            │
+│  MODEL          muse-spark-1.3-contributor · high                          │
+│                 meta · native-basic                                        │
+│                                                                            │
+│  WORKSPACE      /workspace/src/cl-rust-generator/examples/27_imgui_interop │
+│                 trusted · not found                                        │
+│  ACCESS         Unrestricted                                               │
+│                 sandbox disabled (--yolo)                                  │
+│                 Meta account                                               │
+│  ACCOUNT        Wol Pumba (wolpumba@gmail.com)                             │
+│                                                                            │
+│  USAGE          10,780,176 tokens · 107 turns · 0 subagents                │
+│  CONTEXT        86% left · 145K used / 1008K · normal                      │
+│                                                                            │
+│  SESSION        01a0c8fb-742e-7f71-8e09-a13233fc0323                       │
+│  ACTIVITY       no tasks                                                   │
+│                 0 terminals · inbox clear                                  │
+│                                                                            │
+│  BILLING        Subscription · Muse Code Everyday Usage                    │
+└────────────────────────────────────────────────────────────────────────────┘
