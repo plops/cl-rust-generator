@@ -4,7 +4,10 @@ do
     cat $i
 done
 
-echo "examples for converting Rust into cl-rust-generator's Lisp input language are:
+echo "
+your task is to convert src/main.rs into the lisp input language for the cl-rust-generator transpiler. if possible reduce repetition in the code by introducing lisp functions or using splicing like ,@(loop for e in ...) to emit the rust input code. try to make use of the various forms that the input language provides. if no specific form is available often it is possible to combine forms using (space ...) or emit raw code with explicit strings
+
+examples for converting Rust into cl-rust-generator's Lisp input language are:
 File	Role
 README.org	Quick-start, syntax rules, form catalog table, worked examples
 SUPPORTED_FORMS.md	Auto-generated, verified catalog of every supported form with Lisp→Rust pairs
