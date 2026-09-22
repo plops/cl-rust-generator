@@ -16,6 +16,7 @@ const UNCLIP_RATIO: f32 = 1.5;
 const DET_BYTES: &[u8] = include_bytes!("../PP-OCRv6_small_det.onnx");
 const REC_BYTES: &[u8] = include_bytes!("../PP-OCRv6_small_rec.onnx");
 const DICT_YAML: &str = include_str!("../inference.yml");
+const UNIFONT_BYTES: &[u8] = include_bytes!("/usr/share/fonts/unifont/unifont.otf");
 
 fn window_conf() -> Conf {
     Conf {
@@ -211,6 +212,12 @@ fn preprocess_crop(rgba: &[u8], crop: &TextBox, rec_buf: &mut Vec<f32>) -> usize
 
 #[macroquad::main(window_conf)]
 async fn main() {
+    // Load GNU Unifont from system font directory
+    //let font_bytes = std::fs::read("/usr/share/fonts/unifont/unifont.otf")
+    //    .expect("Failed to read /usr/share/fonts/unifont/unifont.otf");
+    //let font = load_ttf_font_from_bytes(&font_bytes)
+    //    .expect("Failed to parse unifont.otf");
+    let font = load_ttf_font_from_bytes(UNIFONT_BYTES).expect("Failed to parse font");
     let (conn, screen) = x11rb::connect(None).unwrap();
     let root = conn.setup().roots[screen].root;
 
@@ -307,24 +314,41 @@ async fn main() {
             draw_rectangle_lines(b.x, b.y, b.w, b.h, 2.0, GREEN);
 
             if !b.text.is_empty() {
-                let dims = measure_text(&b.text, None, 16, 1.0);
+                // Measure text with unifont
+                let dims = measure_text(&b.text, Some(&font), 16, 1.0);
                 let (pad, bw, bh) = (3.0, dims.width + 6.0, dims.height + 6.0);
                 let bx = b.x.clamp(0.0, (SIZE as f32 - bw).max(0.0));
                 let by = if b.y >= bh + 2.0 { b.y - bh - 2.0 } else { b.y + b.h + 2.0 };
 
                 draw_rectangle(bx, by, bw, bh, Color::new(0.0, 0.0, 0.0, 0.85));
                 draw_rectangle_lines(bx, by, bw, bh, 1.0, YELLOW);
-                draw_text(&b.text, bx + pad, by + bh - pad - 2.0, 16.0, WHITE);
+
+                // Draw text with unifont using draw_text_ex
+                draw_text_ex(
+                    &b.text,
+                    bx + pad,
+                    by + bh - pad - 2.0,
+                    TextParams {
+                        font: Some(&font),
+                        font_size: 16,
+                        color: WHITE,
+                        ..Default::default()
+                    },
+                );
             }
         }
 
         draw_rectangle(0.0, 0.0, SIZE as f32, 24.0, Color::new(0.0, 0.0, 0.0, 0.75));
-        draw_text(
+        draw_text_ex(
             &format!("Lines: {} | Det: {det_ms:.1}ms | Rec: {rec_ms:.1}ms | FPS: {}", boxes.len(), get_fps()),
             10.0,
             17.0,
-            15.0,
-            GREEN,
+            TextParams {
+                font: Some(&font),
+                font_size: 16,
+                color: GREEN,
+                ..Default::default()
+            },
         );
 
         next_frame().await;
