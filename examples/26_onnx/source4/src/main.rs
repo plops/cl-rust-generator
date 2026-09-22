@@ -14,7 +14,7 @@ const REC_W: usize = 320;
 const REC_PLANE: usize = REC_H * REC_W;
 
 // Maximum lines to recognize per frame to preserve real-time FPS
-const MAX_REC_LINES: usize = 16;
+const MAX_REC_LINES: usize = 32;
 
 // Embed both models directly into .rodata
 const DET_BYTES: &[u8] = include_bytes!("../PP-OCRv6_small_det.onnx");
@@ -36,6 +36,22 @@ pub struct TextBox {
     pub h: f32,
     pub text: String,
     pub score: f32,
+}
+
+pub struct DbNetConfig {
+    pub thresh: f32,
+    pub box_thresh: f32,
+    pub unclip_ratio: f32,
+}
+
+impl Default for DbNetConfig {
+    fn default() -> Self {
+        Self {
+            thresh: 0.3,
+            box_thresh: 0.6,
+            unclip_ratio: 1.5,
+        }
+    }
 }
 
 // ============================================================================
@@ -85,8 +101,8 @@ fn parse_yaml_dict(content: &str) -> Vec<String> {
             continue;
         }
         if in_dict {
-            if trimmed.starts_with('-') {
-                let raw = trimmed[1..].trim();
+            if let Some(stripped) = trimmed.strip_prefix('-') {
+                let raw = stripped.trim();
                 let val = if (raw.starts_with('\'') && raw.ends_with('\'') && raw.len() >= 2)
                     || (raw.starts_with('"') && raw.ends_with('"') && raw.len() >= 2)
                 {
@@ -111,9 +127,7 @@ fn postprocess_dbnet(
     prob_map: &[f32],
     w: usize,
     h: usize,
-    thresh: f32,
-    box_thresh: f32,
-    unclip_ratio: f32,
+    cfg: &DbNetConfig,
     visited: &mut [u32],
     tag: u32,
 ) -> Vec<TextBox> {
@@ -123,7 +137,7 @@ fn postprocess_dbnet(
     for y in 0..h {
         for x in 0..w {
             let idx = y * w + x;
-            if prob_map[idx] >= thresh && visited[idx] != tag {
+            if prob_map[idx] >= cfg.thresh && visited[idx] != tag {
                 visited[idx] = tag;
                 queue.clear();
                 queue.push((x, y));
@@ -153,7 +167,7 @@ fn postprocess_dbnet(
                         let ny = cy as isize + dy;
                         if nx >= 0 && nx < w as isize && ny >= 0 && ny < h as isize {
                             let n_idx = ny as usize * w + nx as usize;
-                            if visited[n_idx] != tag && prob_map[n_idx] >= thresh {
+                            if visited[n_idx] != tag && prob_map[n_idx] >= cfg.thresh {
                                 visited[n_idx] = tag;
                                 queue.push((nx as usize, ny as usize));
                             }
@@ -166,11 +180,11 @@ fn postprocess_dbnet(
                 let bh = (max_y - min_y + 1) as f32;
 
                 // Discard small noise artifacts
-                if count >= 16 && avg_score >= box_thresh && bw >= 8.0 && bh >= 6.0 {
+                if count >= 16 && avg_score >= cfg.box_thresh && bw >= 8.0 && bh >= 6.0 {
                     // Vatti Unclip formula: expand shrunk core back to full text line
                     let perimeter = 2.0 * (bw + bh);
                     let area = bw * bh;
-                    let distance = (area * unclip_ratio) / perimeter;
+                    let distance = (area * cfg.unclip_ratio) / perimeter;
 
                     let x1 = (min_x as f32 - distance).max(0.0);
                     let y1 = (min_y as f32 - distance).max(0.0);
@@ -303,6 +317,7 @@ async fn main() {
     let rec_in_name = rec_session.inputs()[0].name().to_string();
 
     let dict = load_dictionary();
+    let dbnet_cfg = DbNetConfig::default();
 
     let mut img = Image::gen_image_color(SIZE as u16, SIZE as u16, BLACK);
     let tex = Texture2D::from_image(&img);
@@ -358,7 +373,14 @@ async fn main() {
         }
 
         let (_, prob_map) = det_outs[0].try_extract_tensor::<f32>().unwrap();
-        let mut boxes = postprocess_dbnet(prob_map, SIZE, SIZE, 0.3, 0.6, 1.5, &mut visited, tag);
+        let mut boxes = postprocess_dbnet(
+            prob_map,
+            SIZE,
+            SIZE,
+            &dbnet_cfg,
+            &mut visited,
+            tag,
+        );
 
         // 4. Stage 2: Text Recognition (for each detected line)
         let t_rec0 = Instant::now();
@@ -371,7 +393,7 @@ async fn main() {
                 ])
                 .unwrap();
             let (shape, preds) = rec_outs[0].try_extract_tensor::<f32>().unwrap();
-            b.text = ctc_decode(preds, &shape, &dict);
+            b.text = ctc_decode(preds, shape, &dict);
         }
         let rec_ms = t_rec0.elapsed().as_secs_f64() * 1000.0;
 
@@ -407,7 +429,7 @@ async fn main() {
         // Top Status HUD
         draw_rectangle(0.0, 0.0, SIZE as f32, 24.0, Color::new(0.0, 0.0, 0.0, 0.75));
         draw_text(
-            &format!(
+            format!(
                 "Lines: {} | Det: {:.1}ms | Rec: {:.1}ms | FPS: {}",
                 boxes.len(),
                 det_ms,
