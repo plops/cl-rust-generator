@@ -60,13 +60,12 @@
      ;; 3. Window configuration
      (defun window_conf ()
        (declare (values Conf))
-       (return
-         (space Conf
-                (curly
-                 (space "window_title:" (dot (string ,*model-name*) (into)))
-                 ,@(loop for dim in '("window_width:" "window_height:")
-                         collect `(space ,dim (coerce SIZE i32)))
-                 "..Default::default()"))))
+       (space Conf
+              (curly
+               (space "window_title:" (dot (string ,*model-name*) (into)))
+               ,@(loop for dim in '("window_width:" "window_height:")
+                       collect `(space ,dim (coerce SIZE i32)))
+               "..Default::default()")))
 
      ;; 4. Main application entry point
      (attr "macroquad::main(window_conf)"
@@ -104,7 +103,7 @@
                (for ((paren i px) (dot reply data (chunks_exact 4) (take PLANE) (enumerate)))
                  (let (((paren b g r) (paren (aref px 0) (aref px 1) (aref px 2)))
                        (off (* i 4)))
-                   (dot (aref (dot img bytes) "off..off + 4")
+                   (dot (aref (dot img bytes) (range off (+ off 4)))
                         (copy_from_slice (ref (list r g b 255))))
                    ,@(emit-pixel-planes 'i '(r_plane r) '(g_plane g) '(b_plane b))))
 
@@ -115,7 +114,7 @@
                                                      "=>"
                                                      (dot (TensorRef--from_array_view
                                                            (paren (list 1 3 SIZE SIZE)
-                                                                  (ref (aref input ".."))))
+                                                                  (ref (aref input (range-full)))))
                                                           (unwrap)))))
                                    (unwrap)))
                      ((paren _ dets) (dot (aref outputs 0)
