@@ -4,21 +4,14 @@ use std::time::Instant;
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{self, ImageFormat};
 
-// Screen capture dimensions
 const SIZE: usize = 640;
 const PLANE: usize = SIZE * SIZE;
-
-// Recognition model dimensions
 const REC_H: usize = 48;
-const REC_W: usize = 320;
-const REC_PLANE: usize = REC_H * REC_W;
+const MAX_REC_LINES: usize = 16;
 
-// Maximum lines to recognize per frame to preserve real-time FPS
-const MAX_REC_LINES: usize = 32;
-
-// Embed both models directly into .rodata
 const DET_BYTES: &[u8] = include_bytes!("../PP-OCRv6_small_det.onnx");
 const REC_BYTES: &[u8] = include_bytes!("../PP-OCRv6_small_rec.onnx");
+
 
 fn window_conf() -> Conf {
     Conf {
@@ -55,13 +48,32 @@ impl Default for DbNetConfig {
 }
 
 // ============================================================================
-// 1. DICTIONARY LOADER
+// 1. DICTIONARY LOADER (Searches metadata, .yml, .json, and .txt)
 // ============================================================================
 
-fn load_dictionary() -> Vec<String> {
+fn load_dictionary(rec_session: &Session) -> (Vec<String>, bool) {
+    // 1. Check if ONNX model metadata contains character dict
+    if let Ok(meta) = rec_session.metadata() {
+        for key in ["character", "character_dict", "keys"] {
+            if let Some(val) = meta.custom(key) {
+                let lines: Vec<String> = val.lines().map(|s| s.to_string()).collect();
+                if lines.len() > 50 {
+                    eprintln!("Loaded {} characters from ONNX metadata '{}'", lines.len(), key);
+                    return (lines, true);
+                }
+            }
+        }
+    }
+
+    // 2. Search common paths for inference.yml, inference.json, ppocr_keys_v1.txt
     let candidate_paths = [
         "inference.yml",
         "../inference.yml",
+        "../../inference.yml",
+        "rec.yml",
+        "../rec.yml",
+        "inference.json",
+        "../inference.json",
         "ppocr_keys_v1.txt",
         "../ppocr_keys_v1.txt",
     ];
@@ -72,7 +84,13 @@ fn load_dictionary() -> Vec<String> {
                 let dict = parse_yaml_dict(&content);
                 if !dict.is_empty() {
                     eprintln!("Loaded {} characters from {}", dict.len(), path);
-                    return dict;
+                    return (dict, true);
+                }
+            } else if path.ends_with(".json") {
+                let dict = parse_json_dict(&content);
+                if !dict.is_empty() {
+                    eprintln!("Loaded {} characters from {}", dict.len(), path);
+                    return (dict, true);
                 }
             } else {
                 let lines: Vec<String> = content
@@ -81,14 +99,16 @@ fn load_dictionary() -> Vec<String> {
                     .collect();
                 if !lines.is_empty() {
                     eprintln!("Loaded {} characters from {}", lines.len(), path);
-                    return lines;
+                    return (lines, true);
                 }
             }
         }
     }
 
-    eprintln!("No dictionary file found. Using default ASCII dictionary.");
-    (32u8..=126u8).map(|b| (b as char).to_string()).collect()
+    eprintln!("⚠️ WARNING: No dictionary file found! OCR results will be incorrect.");
+    eprintln!("   Please copy 'inference.yml' or 'inference.json' next to the binary or in project root.");
+    let ascii: Vec<String> = (32u8..=126u8).map(|b| (b as char).to_string()).collect();
+    (ascii, false)
 }
 
 fn parse_yaml_dict(content: &str) -> Vec<String> {
@@ -119,8 +139,45 @@ fn parse_yaml_dict(content: &str) -> Vec<String> {
     dict
 }
 
+fn parse_json_dict(content: &str) -> Vec<String> {
+    let mut dict = Vec::new();
+    let key = match content.find("\"character_dict\"").or_else(|| content.find("\"character\"")) {
+        Some(idx) => idx,
+        None => return dict,
+    };
+
+    if let Some(start_bracket) = content[key..].find('[') {
+        let array_str = &content[key + start_bracket + 1..];
+        let mut in_quote = false;
+        let mut escaped = false;
+        let mut cur = String::new();
+        for c in array_str.chars() {
+            if c == ']' && !in_quote {
+                break;
+            }
+            if escaped {
+                cur.push(c);
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                if in_quote {
+                    dict.push(cur.clone());
+                    cur.clear();
+                    in_quote = false;
+                } else {
+                    in_quote = true;
+                }
+            } else if in_quote {
+                cur.push(c);
+            }
+        }
+    }
+    dict
+}
+
 // ============================================================================
-// 2. DETECTION POST-PROCESSING (DBNet Binarization & Expansion)
+// 2. DETECTION POST-PROCESSING (Controlled Expansion to Avoid Line Bleed)
 // ============================================================================
 
 fn postprocess_dbnet(
@@ -179,17 +236,20 @@ fn postprocess_dbnet(
                 let bw = (max_x - min_x + 1) as f32;
                 let bh = (max_y - min_y + 1) as f32;
 
-                // Discard small noise artifacts
                 if count >= 16 && avg_score >= cfg.box_thresh && bw >= 8.0 && bh >= 6.0 {
-                    // Vatti Unclip formula: expand shrunk core back to full text line
                     let perimeter = 2.0 * (bw + bh);
                     let area = bw * bh;
                     let distance = (area * cfg.unclip_ratio) / perimeter;
 
-                    let x1 = (min_x as f32 - distance).max(0.0);
-                    let y1 = (min_y as f32 - distance).max(0.0);
-                    let x2 = (max_x as f32 + distance).min((w - 1) as f32);
-                    let y2 = (max_y as f32 + distance).min((h - 1) as f32);
+                    // Expand horizontally to capture full letters,
+                    // but constrain vertical expansion to avoid capturing lines above/below.
+                    let dist_x = distance;
+                    let dist_y = (distance * 0.4).min(bh * 0.15).max(1.0);
+
+                    let x1 = (min_x as f32 - dist_x).max(0.0);
+                    let y1 = (min_y as f32 - dist_y).max(0.0);
+                    let x2 = (max_x as f32 + dist_x).min((w - 1) as f32);
+                    let y2 = (max_y as f32 + dist_y).min((h - 1) as f32);
 
                     boxes.push(TextBox {
                         x: x1,
@@ -204,7 +264,6 @@ fn postprocess_dbnet(
         }
     }
 
-    // Sort in natural reading order: top-to-bottom, left-to-right (Strict Total Order)
     boxes.sort_by(|a, b| {
         let row_a = (a.y / 16.0) as i32;
         let row_b = (b.y / 16.0) as i32;
@@ -215,7 +274,7 @@ fn postprocess_dbnet(
 }
 
 // ============================================================================
-// 3. RECOGNITION PREPROCESSING & CTC DECODER
+// 3. DYNAMIC-WIDTH RECOGNITION PREPROCESSING & DECODER
 // ============================================================================
 
 fn preprocess_crop(
@@ -223,22 +282,26 @@ fn preprocess_crop(
     frame_w: usize,
     frame_h: usize,
     crop: &TextBox,
-    rec_buf: &mut [f32],
-) {
-    rec_buf.fill(0.0);
+    rec_buf: &mut Vec<f32>,
+) -> usize {
     let cw = crop.w.max(1.0);
     let ch = crop.h.max(1.0);
 
     let ratio = cw / ch;
-    let mut resized_w = (REC_H as f32 * ratio).round() as usize;
-    if resized_w > REC_W {
-        resized_w = REC_W;
-    }
-    if resized_w == 0 {
-        resized_w = 1;
-    }
+    let raw_w = (REC_H as f32 * ratio).round() as usize;
 
-    // Nearest-neighbor scaling directly into [3, 48, 320] planar normalized [-1.0, 1.0]
+    // Align to multiple of 32 for CNN downsamplers; allow long lines up to 960px
+    let target_w = (((raw_w + 31) / 32) * 32).clamp(32, 960);
+    let resized_w = raw_w.min(target_w).max(1);
+
+    let total_elements = 3 * REC_H * target_w;
+    if rec_buf.len() < total_elements {
+        rec_buf.resize(total_elements, 0.0);
+    }
+    rec_buf[..total_elements].fill(0.0);
+
+    let plane_stride = REC_H * target_w;
+
     for dy in 0..REC_H {
         let sy = crop.y + (dy as f32 + 0.5) * (ch / REC_H as f32) - 0.5;
         let sy_c = (sy.round() as usize).clamp(0, frame_h - 1);
@@ -252,12 +315,14 @@ fn preprocess_crop(
             let g = rgba[src_idx + 1] as f32;
             let b = rgba[src_idx + 2] as f32;
 
-            let dst_idx = dy * REC_W + dx;
+            let dst_idx = dy * target_w + dx;
             rec_buf[dst_idx] = r / 127.5 - 1.0;
-            rec_buf[REC_PLANE + dst_idx] = g / 127.5 - 1.0;
-            rec_buf[2 * REC_PLANE + dst_idx] = b / 127.5 - 1.0;
+            rec_buf[plane_stride + dst_idx] = g / 127.5 - 1.0;
+            rec_buf[2 * plane_stride + dst_idx] = b / 127.5 - 1.0;
         }
     }
+
+    target_w
 }
 
 fn ctc_decode(data: &[f32], shape: &[i64], dict: &[String]) -> String {
@@ -281,7 +346,6 @@ fn ctc_decode(data: &[f32], shape: &[i64], dict: &[String]) -> String {
             }
         }
 
-        // 0 is CTC blank token in PaddleOCR
         if max_idx != 0 && max_idx != prev_idx {
             if (max_idx - 1) < dict.len() {
                 text.push_str(&dict[max_idx - 1]);
@@ -303,7 +367,6 @@ async fn main() {
     let (conn, screen) = x11rb::connect(None).unwrap();
     let root = conn.setup().roots[screen].root;
 
-    // Load both models
     let mut det_session = Session::builder()
         .unwrap()
         .commit_from_memory(DET_BYTES)
@@ -316,20 +379,18 @@ async fn main() {
         .unwrap();
     let rec_in_name = rec_session.inputs()[0].name().to_string();
 
-    let dict = load_dictionary();
+    let (dict, has_real_dict) = load_dictionary(&rec_session);
     let dbnet_cfg = DbNetConfig::default();
 
     let mut img = Image::gen_image_color(SIZE as u16, SIZE as u16, BLACK);
     let tex = Texture2D::from_image(&img);
 
-    // Preallocated buffers (zero per-frame allocations)
     let mut det_input = vec![0.0f32; 3 * PLANE];
-    let mut rec_input = vec![0.0f32; 3 * REC_PLANE];
+    let mut rec_input = Vec::with_capacity(3 * REC_H * 960);
     let mut visited = vec![0u32; PLANE];
     let mut tag = 0u32;
 
     while !is_key_down(KeyCode::Escape) {
-        // 1. Capture X11 root window
         let reply = xproto::get_image(
             &conn,
             ImageFormat::Z_PIXMAP,
@@ -344,7 +405,6 @@ async fn main() {
         .reply()
         .unwrap();
 
-        // 2. Preprocess full screenshot for Detection (ImageNet normalisation)
         let (r_plane, rest) = det_input.split_at_mut(PLANE);
         let (g_plane, b_plane) = rest.split_at_mut(PLANE);
         for (i, px) in reply.data.chunks_exact(4).take(PLANE).enumerate() {
@@ -357,7 +417,7 @@ async fn main() {
             b_plane[i] = (b as f32 / 255.0 - 0.406) / 0.225;
         }
 
-        // 3. Stage 1: Text Detection
+        // Detection
         let t_det0 = Instant::now();
         let det_outs = det_session
             .run(inputs![
@@ -373,23 +433,17 @@ async fn main() {
         }
 
         let (_, prob_map) = det_outs[0].try_extract_tensor::<f32>().unwrap();
-        let mut boxes = postprocess_dbnet(
-            prob_map,
-            SIZE,
-            SIZE,
-            &dbnet_cfg,
-            &mut visited,
-            tag,
-        );
+        let mut boxes = postprocess_dbnet(prob_map, SIZE, SIZE, &dbnet_cfg, &mut visited, tag);
 
-        // 4. Stage 2: Text Recognition (for each detected line)
+        // Recognition (dynamic width per text line)
         let t_rec0 = Instant::now();
         let rec_count = boxes.len().min(MAX_REC_LINES);
         for b in boxes.iter_mut().take(rec_count) {
-            preprocess_crop(&img.bytes, SIZE, SIZE, b, &mut rec_input);
+            let target_w = preprocess_crop(&img.bytes, SIZE, SIZE, b, &mut rec_input);
+            let input_slice = &rec_input[..3 * REC_H * target_w];
             let rec_outs = rec_session
                 .run(inputs![
-                    rec_in_name.as_str() => TensorRef::from_array_view(([1, 3, REC_H, REC_W], &rec_input[..])).unwrap()
+                    rec_in_name.as_str() => TensorRef::from_array_view(([1, 3, REC_H, target_w], input_slice)).unwrap()
                 ])
                 .unwrap();
             let (shape, preds) = rec_outs[0].try_extract_tensor::<f32>().unwrap();
@@ -397,16 +451,14 @@ async fn main() {
         }
         let rec_ms = t_rec0.elapsed().as_secs_f64() * 1000.0;
 
-        // 5. Render captured image and overlays
+        // Render
         tex.update(&img);
         clear_background(BLACK);
         draw_texture(&tex, 0.0, 0.0, WHITE);
 
         for b in &boxes {
-            // Draw detected box border
             draw_rectangle_lines(b.x, b.y, b.w, b.h, 2.0, GREEN);
 
-            // Draw recognized text pill
             if !b.text.is_empty() {
                 let font_size = 16.0;
                 let dims = measure_text(&b.text, None, font_size as u16, 1.0);
@@ -426,7 +478,7 @@ async fn main() {
             }
         }
 
-        // Top Status HUD
+        // Top HUD
         draw_rectangle(0.0, 0.0, SIZE as f32, 24.0, Color::new(0.0, 0.0, 0.0, 0.75));
         draw_text(
             format!(
@@ -441,6 +493,17 @@ async fn main() {
             15.0,
             GREEN,
         );
+
+        if !has_real_dict {
+            draw_rectangle(0.0, 24.0, SIZE as f32, 22.0, Color::new(0.8, 0.1, 0.1, 0.9));
+            draw_text(
+                "MISSING DICT: Copy 'inference.yml' to project folder to fix text!",
+                10.0,
+                40.0,
+                15.0,
+                WHITE,
+            );
+        }
 
         next_frame().await;
     }
