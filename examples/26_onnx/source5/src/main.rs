@@ -123,83 +123,9 @@ impl OcrEngine {
         }
 
         let (_, prob_map) = det_outs[0].try_extract_tensor::<f32>().unwrap();
-        self.postprocess_dbnet(prob_map)
-    }
 
-    /// Connected-components and unclip approximation
-    fn postprocess_dbnet(&mut self, prob: &[f32]) -> Vec<TextBox> {
-        let mut boxes = Vec::new();
-        let tag = self.tag;
-
-        for y in 0..SIZE {
-            for x in 0..SIZE {
-                let idx = y * SIZE + x;
-                if prob[idx] < DET_THRESH || self.visited[idx] == tag {
-                    continue;
-                }
-
-                self.visited[idx] = tag;
-                self.bfs_queue.clear();
-                self.bfs_queue.push((x, y));
-
-                let (mut min_x, mut max_x, mut min_y, mut max_y) = (x, x, y, y);
-                let mut score_sum = 0.0f32;
-                let mut head = 0;
-
-                while head < self.bfs_queue.len() {
-                    let (cx, cy) = self.bfs_queue[head];
-                    head += 1;
-
-                    min_x = min_x.min(cx);
-                    max_x = max_x.max(cx);
-                    min_y = min_y.min(cy);
-                    max_y = max_y.max(cy);
-                    score_sum += prob[cy * SIZE + cx];
-
-                    for (dx, dy) in [(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
-                        let nx = cx as isize + dx;
-                        let ny = cy as isize + dy;
-                        if nx >= 0 && nx < SIZE as isize && ny >= 0 && ny < SIZE as isize {
-                            let n_idx = ny as usize * SIZE + nx as usize;
-                            if self.visited[n_idx] != tag && prob[n_idx] >= DET_THRESH {
-                                self.visited[n_idx] = tag;
-                                self.bfs_queue.push((nx as usize, ny as usize));
-                            }
-                        }
-                    }
-                }
-
-                let bw = (max_x - min_x + 1) as f32;
-                let bh = (max_y - min_y + 1) as f32;
-                let avg_score = score_sum / self.bfs_queue.len() as f32;
-
-                if self.bfs_queue.len() >= 16 && avg_score >= BOX_THRESH && bw >= 8.0 && bh >= 6.0 {
-                    let dist = (bw * bh * UNCLIP_RATIO) / (2.0 * (bw + bh));
-                    let dist_y = (dist * 0.4).min(bh * 0.15).max(1.0);
-
-                    let x1 = (min_x as f32 - dist).max(0.0);
-                    let y1 = (min_y as f32 - dist_y).max(0.0);
-                    let x2 = (max_x as f32 + dist).min((SIZE - 1) as f32);
-                    let y2 = (max_y as f32 + dist_y).min((SIZE - 1) as f32);
-
-                    boxes.push(TextBox {
-                        x: x1,
-                        y: y1,
-                        w: x2 - x1,
-                        h: y2 - y1,
-                        text: String::new(),
-                    });
-                }
-            }
-        }
-
-        // Sort into natural reading order (lines top-to-bottom, then left-to-right)
-        boxes.sort_by(|a, b| {
-            ((a.y / 16.0) as i32)
-                .cmp(&((b.y / 16.0) as i32))
-                .then_with(|| a.x.total_cmp(&b.x))
-        });
-        boxes
+        // Pass disjoint fields to avoid borrowing all of `*self` while `det_outs` is alive
+        postprocess_dbnet(prob_map, &mut self.visited, self.tag, &mut self.bfs_queue)
     }
 
     /// Crops each bounding box and runs text recognition
@@ -254,8 +180,86 @@ impl OcrEngine {
 }
 
 // ----------------------------------------------------------------------------
-// Helpers
+// Post-Processing & Decoders
 // ----------------------------------------------------------------------------
+
+fn postprocess_dbnet(
+    prob: &[f32],
+    visited: &mut [u32],
+    tag: u32,
+    queue: &mut Vec<(usize, usize)>,
+) -> Vec<TextBox> {
+    let mut boxes = Vec::new();
+
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let idx = y * SIZE + x;
+            if prob[idx] < DET_THRESH || visited[idx] == tag {
+                continue;
+            }
+
+            visited[idx] = tag;
+            queue.clear();
+            queue.push((x, y));
+
+            let (mut min_x, mut max_x, mut min_y, mut max_y) = (x, x, y, y);
+            let mut score_sum = 0.0f32;
+            let mut head = 0;
+
+            while head < queue.len() {
+                let (cx, cy) = queue[head];
+                head += 1;
+
+                min_x = min_x.min(cx);
+                max_x = max_x.max(cx);
+                min_y = min_y.min(cy);
+                max_y = max_y.max(cy);
+                score_sum += prob[cy * SIZE + cx];
+
+                for (dx, dy) in [(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
+                    let nx = cx as isize + dx;
+                    let ny = cy as isize + dy;
+                    if nx >= 0 && nx < SIZE as isize && ny >= 0 && ny < SIZE as isize {
+                        let n_idx = ny as usize * SIZE + nx as usize;
+                        if visited[n_idx] != tag && prob[n_idx] >= DET_THRESH {
+                            visited[n_idx] = tag;
+                            queue.push((nx as usize, ny as usize));
+                        }
+                    }
+                }
+            }
+
+            let bw = (max_x - min_x + 1) as f32;
+            let bh = (max_y - min_y + 1) as f32;
+            let avg_score = score_sum / queue.len() as f32;
+
+            if queue.len() >= 16 && avg_score >= BOX_THRESH && bw >= 8.0 && bh >= 6.0 {
+                let dist = (bw * bh * UNCLIP_RATIO) / (2.0 * (bw + bh));
+                let dist_y = (dist * 0.4).min(bh * 0.15).max(1.0);
+
+                let x1 = (min_x as f32 - dist).max(0.0);
+                let y1 = (min_y as f32 - dist_y).max(0.0);
+                let x2 = (max_x as f32 + dist).min((SIZE - 1) as f32);
+                let y2 = (max_y as f32 + dist_y).min((SIZE - 1) as f32);
+
+                boxes.push(TextBox {
+                    x: x1,
+                    y: y1,
+                    w: x2 - x1,
+                    h: y2 - y1,
+                    text: String::new(),
+                });
+            }
+        }
+    }
+
+    boxes.sort_by(|a, b| {
+        ((a.y / 16.0) as i32)
+            .cmp(&((b.y / 16.0) as i32))
+            .then_with(|| a.x.total_cmp(&b.x))
+    });
+    boxes
+}
 
 fn load_dict(yaml: &'static str) -> Vec<&'static str> {
     let mut dict = Vec::new();
@@ -335,7 +339,6 @@ async fn main() {
 
     let mut det_ms = 0.0;
     let mut rec_ms = 0.0;
-    let mut is_idle = false;
 
     while !is_key_down(KeyCode::Escape) {
         let reply = xproto::get_image(
@@ -353,12 +356,11 @@ async fn main() {
         .unwrap();
 
         // 1. Change Detector
-        // High-throughput raw slice equality (compiled down to SIMD memcmp)
+        // High-throughput raw slice equality (SIMD-accelerated memcmp)
         let frame_changed = prev_screen_bytes != reply.data;
+        let is_idle = !frame_changed;
 
         if frame_changed {
-            is_idle = false;
-
             // Convert X11 BGRA -> Planar RGB & RGBA texture
             engine.prepare_inputs(&reply.data, &mut img.bytes);
             tex.update(&img);
@@ -382,7 +384,11 @@ async fn main() {
                 .collect();
 
             if !current_lines.is_empty() && current_lines != prev_printed_lines {
-                println!("--- [{}] Detected ({} lines) ---", get_time() as u64, current_lines.len());
+                println!(
+                    "--- [{}] Detected ({} lines) ---",
+                    get_time() as u64,
+                    current_lines.len()
+                );
                 for line in &current_lines {
                     println!("{line}");
                 }
@@ -391,8 +397,6 @@ async fn main() {
 
             cached_boxes = boxes;
             prev_screen_bytes = reply.data; // O(1) buffer move
-        } else {
-            is_idle = true;
         }
 
         // 3. Render
@@ -406,7 +410,11 @@ async fn main() {
                 let dims = measure_text(&b.text, Some(&font), 16, 1.0);
                 let (pad, bw, bh) = (3.0, dims.width + 6.0, dims.height + 6.0);
                 let bx = b.x.clamp(0.0, (SIZE as f32 - bw).max(0.0));
-                let by = if b.y >= bh + 2.0 { b.y - bh - 2.0 } else { b.y + b.h + 2.0 };
+                let by = if b.y >= bh + 2.0 {
+                    b.y - bh - 2.0
+                } else {
+                    b.y + b.h + 2.0
+                };
 
                 draw_rectangle(bx, by, bw, bh, Color::new(0.0, 0.0, 0.0, 0.85));
                 draw_rectangle_lines(bx, by, bw, bh, 1.0, YELLOW);
@@ -426,7 +434,11 @@ async fn main() {
         }
 
         // HUD overlay
-        let status_color = if is_idle { Color::new(0.4, 0.8, 1.0, 1.0) } else { GREEN };
+        let status_color = if is_idle {
+            Color::new(0.4, 0.8, 1.0, 1.0)
+        } else {
+            GREEN
+        };
         let status_text = if is_idle { "PAUSED (STATIC)" } else { "ACTIVE" };
 
         draw_rectangle(0.0, 0.0, SIZE as f32, 24.0, Color::new(0.0, 0.0, 0.0, 0.75));
