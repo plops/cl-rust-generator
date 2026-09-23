@@ -101,3 +101,44 @@ Tests: `xvfb`, `xdotool`, `xterm`, `x11-apps` (xwd), `scrot`, `netpbm`
 S2-Capture · `refactor(source5)` S3-Split · `feat(source5)` S4-Tasten
 (inkl. scripts/) · `docs(plan)` T2-Walkthrough (dieser Commit).
 Diese Sektion: Folge-Commit.
+
+# Kosten
+
+┌───────────────────────────────────────────────────────────────────┐
+│  MUSE CODE 1.3.0                                        COMPLETED │
+│                                                                   │
+│  MODEL          muse-spark-1.3-contributor · high                 │
+│                 meta · native-basic                               │
+│                                                                   │
+│  WORKSPACE      /workspace/src/cl-rust-generator/examples/26_onnx │
+│                 trusted · not found                               │
+│  ACCESS         Unrestricted                                      │
+│                 sandbox disabled (--yolo)                         │
+│                 Meta account                                      │
+│  ACCOUNT        Wol Pumba (wolpumba@gmail.com)                    │
+│                                                                   │
+│  USAGE          17,541,196 tokens · 122 turns · 0 subagents       │
+│  CONTEXT        77% left · 228K used / 1008K · normal             │
+│                                                                   │
+│  SESSION        01a0cee1-f6ca-7741-95f0-4455b8701ee8              │
+│  ACTIVITY       no tasks                                          │
+│                 0 terminals · inbox clear                         │
+│                                                                   │
+│  BILLING        Subscription · Muse Code Everyday Usage           │
+└───────────────────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────┐
+│  Session usage                                        │
+│                                                       │
+│    Input      17,456,457                              │
+│    Cached     17,029,338                              │
+│    Output         84,739                              │
+│    Total      17,541,196                              │
+│                                                       │
+│    Turns              122                             │
+│    Subagents         none                             │
+│                                                       │
+│  Subscription · Muse Code Everyday Usage              │
+│    Current        6% used · Resets at 8:29 PM         │
+│    Weekly         4% used · Resets Sep 28 at 12:00 AM │
+└───────────────────────────────────────────────────────┘
