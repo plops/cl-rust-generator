@@ -12,8 +12,9 @@ cd examples/26_onnx/source5
 ```
 
 Ohne Argument landen die Dateien in `source5/` (dort erwartet sie der Build
-per `include_bytes!`/`include_str!` — aktuell bereits im Repo committet;
-das Skript dient zum Nachladen/Reparieren). Die Schrift ist reine
+per `include_bytes!`/`include_str!`). Die `*.onnx`-Dateien stehen bewusst
+in `source5/.gitignore` und werden nie committet — frische Checkouts holen
+sie per Skript nach. Die Schrift ist reine
 Laufzeit-Abhängigkeit und wird an den Pfaden aus `05_overlay.rs` gesucht.
 
 ## smoke_xvfb.sh
