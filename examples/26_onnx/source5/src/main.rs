@@ -3,6 +3,11 @@
 #[path = "01_view.rs"]
 mod view;
 
+/// S2: Capture-Helfer; Verdrahtung in den Loop erfolgt in S4.
+#[allow(dead_code)]
+#[path = "02_capture.rs"]
+mod capture;
+
 use macroquad::prelude::*;
 use ort::{inputs, session::Session, value::TensorRef};
 use std::time::Instant;
