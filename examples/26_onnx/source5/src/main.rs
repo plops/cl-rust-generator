@@ -1,3 +1,8 @@
+/// S1: ROI-State; Verdrahtung in den Loop erfolgt in S4.
+#[allow(dead_code)]
+#[path = "01_view.rs"]
+mod view;
+
 use macroquad::prelude::*;
 use ort::{inputs, session::Session, value::TensorRef};
 use std::time::Instant;
@@ -113,7 +118,8 @@ impl OcrEngine {
         const B_SCALE: f32 = 1.0 / (255.0 * 0.225);
         const B_OFF: f32 = 0.406 / 0.225;
 
-        for (i, px) in bgra_src.chunks_exact(4).take(PLANE).enumerate() {
+        let (chunks, _) = bgra_src.as_chunks::<4>();
+        for (i, px) in chunks.iter().take(PLANE).enumerate() {
             let (b, g, r) = (px[0], px[1], px[2]);
             let off = i * 4;
             rgba_dst[off..off + 4].copy_from_slice(&[r, g, b, 255]);
@@ -181,7 +187,8 @@ impl OcrEngine {
             let sy_c = sy.clamp(0, SIZE - 1);
 
             for dx in 0..resized_w {
-                let sx = (crop.x + (dx as f32 + 0.5) * (cw / resized_w as f32) - 0.5).round() as usize;
+                let sx =
+                    (crop.x + (dx as f32 + 0.5) * (cw / resized_w as f32) - 0.5).round() as usize;
                 let sx_c = sx.clamp(0, SIZE - 1);
 
                 let src = (sy_c * SIZE + sx_c) * 4;
