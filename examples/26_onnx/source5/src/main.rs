@@ -16,7 +16,24 @@ const UNCLIP_RATIO: f32 = 1.5;
 const DET_BYTES: &[u8] = include_bytes!("../PP-OCRv6_small_det.onnx");
 const REC_BYTES: &[u8] = include_bytes!("../PP-OCRv6_small_rec.onnx");
 const DICT_YAML: &str = include_str!("../inference.yml");
-const UNIFONT_BYTES: &[u8] = include_bytes!("/usr/share/fonts/unifont/unifont.otf");
+/// Sucht die Unifont-Datei an den bekannten System-Pfaden (APT-Paket
+/// `fonts-unifont` installiert unter `opentype/`, nicht `unifont/`).
+fn load_font_bytes() -> Vec<u8> {
+    const CANDIDATES: &[&str] = &[
+        "/usr/share/fonts/opentype/unifont/unifont.otf",
+        "/usr/share/fonts/unifont/unifont.otf",
+        "/usr/share/fonts/truetype/unifont/unifont.ttf",
+    ];
+    for path in CANDIDATES {
+        if let Ok(bytes) = std::fs::read(path) {
+            return bytes;
+        }
+    }
+    panic!(
+        "GNU Unifont not found (tried: {}); install it via `apt-get install fonts-unifont`",
+        CANDIDATES.join(", ")
+    );
+}
 
 fn window_conf() -> Conf {
     Conf {
@@ -324,7 +341,8 @@ fn ctc_decode(data: &[f32], shape: &[i64], dict: &[&str]) -> String {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let font = load_ttf_font_from_bytes(UNIFONT_BYTES).expect("Failed to parse font");
+    let font_bytes = load_font_bytes();
+    let font = load_ttf_font_from_bytes(&font_bytes).expect("Failed to parse font");
     let (conn, screen) = x11rb::connect(None).expect("Failed to connect to X11");
     let root = conn.setup().roots[screen].root;
 
