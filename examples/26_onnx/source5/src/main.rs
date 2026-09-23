@@ -185,7 +185,7 @@ async fn main() {
         draw_boxes(
             &cached_boxes,
             &font,
-            view.display_scale(DISPLAY),
+            View::overlay_scale(DISPLAY),
             DISPLAY as f32,
         );
 

@@ -144,9 +144,10 @@ GPU-Skalierung mit Filter. Kein neues Crate, keine neue System-Abhängigkeit.
 5. **ROI-Wechsel invalidiert Caches.** Jede Änderung von `x`/`y`/`size`
    setzt `prev_screen_bytes`, `cached_boxes` und `prev_printed_lines` zurück:
    sonst vergleicht der `memcmp`-Detector Puffer verschiedener Größen und
-   der Druck zeigt Texte der alten Region. Box-Koordinaten bleiben
-   ROI-lokal (Detektion sieht immer ein 640×640-Bild), Anzeige-Koordinaten =
-   Box-Koordinaten × (`textur_size / 640`) — bei 1:1 Identität.
+   der Druck zeigt Texte der alten Region. Box-Koordinaten liegen immer im
+   640-Raum der Detektion; Anzeige-Koordinaten = Box × (`display / 640`) —
+   unabhängig von der ROI-Größe, da die Textur bereits aufs Fenster skaliert
+   wird (bei 1:1 Identität; `display/size` wäre doppelt skaliert).
 6. **Fenster: 640×640 fix, ROI-Bild per Nearest eingepasst.** `window_conf`
    bleibt 640×640 (kein Window-Recreate zur Laufzeit — macroquad-Fenster sind
    startup-fixiert); kleinere ROIs werden 1:1 mit schwarzem Rand zentriert

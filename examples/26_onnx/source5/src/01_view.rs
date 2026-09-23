@@ -80,10 +80,15 @@ impl View {
         self.size == MODEL_SIZE
     }
 
-    /// Skalierung ROI→Anzeige für `out`-px Ausgabegröße (1:1 = 1.0).
+    /// Skalierung Detektions-Koordinaten → Anzeige-Koordinaten.
+    ///
+    /// Boxen liegen immer im `MODEL_SIZE`-Raum der Detektion; die Textur wird
+    /// bereits per `dest_size` auf die Anzeige (`display`) skaliert, daher
+    /// hängt diese Abbildung NICHT von der ROI-Größe ab. Bei
+    /// `display == MODEL_SIZE` Identität (kein Versatz bei Zoom).
     #[must_use]
-    pub fn display_scale(&self, out: u32) -> f32 {
-        out as f32 / self.size as f32
+    pub fn overlay_scale(display: u32) -> f32 {
+        display as f32 / MODEL_SIZE as f32
     }
 
     fn step_index(&self) -> usize {
@@ -129,7 +134,20 @@ mod tests {
         assert_eq!(v.size, MODEL_SIZE);
         assert_eq!((v.x, v.y), (0, 0));
         assert!(v.is_native());
-        assert!((v.display_scale(640) - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn overlay_scale_is_roi_independent() {
+        // Regression: Boxen liegen im Detektions-Raum; die Abbildung auf die
+        // Anzeige darf NICHT von der ROI-Größe abhängen (alte Formel
+        // `display/size` versetzte Boxen bei jedem Zoom). Bei
+        // Anzeige == Modell-Input ist sie Identität — für jede ROI-Stufe.
+        for &size in ROI_STEPS {
+            let v = View { x: 0, y: 0, size };
+            let _ = v; // Skalierung hängt bewusst nicht an `v`.
+            assert!((View::overlay_scale(MODEL_SIZE) - 1.0).abs() < f32::EPSILON);
+        }
+        assert!((View::overlay_scale(320) - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]
