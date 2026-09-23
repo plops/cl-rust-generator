@@ -20,7 +20,7 @@ Prompt gelten ab der ersten angefassten Datei (`NN_name.rs`, ≤~300 Zeilen,
 - Gates: Dateien vorhanden, `cargo build` grün.
 - Commit: `chore(source5): procure pp-ocrv6 models and dict`.
 
-## S1 — `01_view.rs` (ROI-State, rein, ohne X11)
+## S1 ✅ — `01_view.rs` (ROI-State, rein, ohne X11)
 
 - `View { x, y, size }`, Stufen `[320, 480, 640, 960, 1280]`, Start
   `640×640 @ (0,0)`; `pan(dx, dy, screen)`, `zoom_in/out(screen)`,
@@ -32,7 +32,7 @@ Prompt gelten ab der ersten angefassten Datei (`NN_name.rs`, ≤~300 Zeilen,
   `cargo test` grün.
 - Commit: `feat(source5): roi view state with pan zoom clamp`.
 
-## S2 — `02_capture.rs` + Fast-Path-Trennung
+## S2 ✅ — `02_capture.rs` + Fast-Path-Trennung
 
 - x11rb-Setup-Größe lesen, `get_image` mit ROI-Offsets, `resize_nearest`
   NUR für `size != 640`; bei 640 heutige `prepare_inputs`-Schleife direkt
@@ -44,7 +44,7 @@ Prompt gelten ab der ersten angefassten Datei (`NN_name.rs`, ≤~300 Zeilen,
 - Gates analog S1.
 - Commit: `feat(source5): variable roi capture with 1x1 fast path`.
 
-## S3 — `03_detect.rs` / `04_recognize.rs` (Extraktion ohne Verhalten)
+## S3 ✅ — `03_detect.rs` / `04_recognize.rs` (Extraktion ohne Verhalten)
 
 - Unveränderten Code aus `main.rs` verschieben (Session-Aufbau, DBNet,
   Crop, CTC, Dict); Konstanten/Schwellen identisch.
@@ -53,7 +53,7 @@ Prompt gelten ab der ersten angefassten Datei (`NN_name.rs`, ≤~300 Zeilen,
 - Gates analog + vorher/nachher grün.
 - Commit: `refactor(source5): split detect and recognize modules`.
 
-## S4 — `05_overlay.rs` + Tasten + HUD + Font-Fallback
+## S4 ✅ — `05_overlay.rs` + Tasten + HUD + Font-Fallback
 
 - Box-/Label-Render mit ROI-Skalierung, `set_filter(Nearest)`,
   `draw_texture` bei 1:1 sonst `draw_texture_ex`; Tasten
@@ -64,14 +64,14 @@ Prompt gelten ab der ersten angefassten Datei (`NN_name.rs`, ≤~300 Zeilen,
 - Gates analog.
 - Commit: `feat(source5): pan zoom keys with nearest display`.
 
-## T1 — Härtung + E2E
+## T1 ✅ — Härtung + E2E
 
 - Dauerlauf-Smoke (Pan/Zoom-Spam, kein Drift), Fehlerpfade (X11 weg →
   Meldung + Exit ≠ 0), OCR-Plausibilität auf bekanntem Testbild unter Xvfb.
 - Gates: alle Gates S0–S4 erneut grün + E2E-Log für Walkthrough sichern.
 - Commit: `fix(source5): harden roi loop and error paths`.
 
-## T2 — Upgrade-Check + Deps + Abschluss
+## T2 ✅ — Upgrade-Check + Deps + Abschluss
 
 - Keine neue Dep eingeführt → `cargo upgrade`-Check entfällt (nur Verweis),
   `deps.md` final, `fmt`/`clippy`/`test` final grün.
