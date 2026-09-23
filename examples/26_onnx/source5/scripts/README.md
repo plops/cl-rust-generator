@@ -1,4 +1,20 @@
-# scripts/ — Test-Skripte für source5
+# scripts/ — Test- und Beschaffungs-Skripte für source5
+
+## fetch_assets.sh
+
+Lädt Detektions-/Erkennungs-Modell + `inference.yml` (mit SHA256-Prüfung,
+idempotent) und stellt die Unifont-Schrift sicher (per `apt-get install
+fonts-unifont` als root, sonst Hinweis).
+
+```sh
+cd examples/26_onnx/source5
+./scripts/fetch_assets.sh [ZIEL-VERZEICHNIS]
+```
+
+Ohne Argument landen die Dateien in `source5/` (dort erwartet sie der Build
+per `include_bytes!`/`include_str!` — aktuell bereits im Repo committet;
+das Skript dient zum Nachladen/Reparieren). Die Schrift ist reine
+Laufzeit-Abhängigkeit und wird an den Pfaden aus `05_overlay.rs` gesucht.
 
 ## smoke_xvfb.sh
 
