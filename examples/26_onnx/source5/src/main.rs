@@ -149,7 +149,7 @@ impl OcrEngine {
     fn preprocess_crop(&mut self, rgba: &[u8], crop: &TextBox) -> usize {
         let (cw, ch) = (crop.w.max(1.0), crop.h.max(1.0));
         let raw_w = (REC_H as f32 * (cw / ch)).round() as usize;
-        let target_w = (((raw_w + 31) / 32) * 32).clamp(32, 960);
+        let target_w = (raw_w.div_ceil(32) * 32).clamp(32, 960);
         let resized_w = raw_w.min(target_w).max(1);
 
         let total = 3 * REC_H * target_w;
@@ -443,7 +443,7 @@ async fn main() {
 
         draw_rectangle(0.0, 0.0, SIZE as f32, 24.0, Color::new(0.0, 0.0, 0.0, 0.75));
         draw_text_ex(
-            &format!(
+            format!(
                 "[{status_text}] Lines: {} | Det: {det_ms:.1}ms | Rec: {rec_ms:.1}ms | FPS: {}",
                 cached_boxes.len(),
                 get_fps()
