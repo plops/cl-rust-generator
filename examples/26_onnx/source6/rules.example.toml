@@ -1,0 +1,36 @@
+# rules.example.toml — Beispiel-Konfiguration für source6.
+#
+# Regeln (Substring -> Aktion) und Pan-/Zoom-Einstellungen in einer Datei.
+# Kopieren nach `rules.toml` und anpassen; die App startet ohne Datei mit
+# eingebauten Defaults (identisch zu den Werten hier).
+# Schema-Version: 1 (Feld `schema_version`, s. plan.md Key Decision 7c).
+
+schema_version = 1
+
+[pan]
+# Pan-Schritt = roi_größe / step_divisor, mindestens step_min_px.
+step_divisor = 16
+step_min_px = 8
+# Zoom-Stufen (ROI-Kanten in px); `1` = eine Stufe kleiner (hinein),
+# `2` = eine Stufe größer (heraus).
+roi_steps = [320, 480, 640, 960, 1280]
+# Start-ROI (muss in roi_steps enthalten sein).
+default_size = 640
+
+# --- Automations-Regeln (Substring, case-insensitiv) ---
+# action = "click" | "click_and_type" (braucht zusätzlich text;
+# press_enter ist optional, Default false).
+
+[[rule]]
+name = "Web Search"
+pattern = "Google Search"
+action = "click"
+cooldown_secs = 5
+
+[[rule]]
+name = "Sign In"
+pattern = "Sign In"
+action = "click_and_type"
+text = "my_user@example.com"
+press_enter = true
+cooldown_secs = 10
