@@ -1,0 +1,3 @@
+# Grosse Binär-Assets: nie committen (per scripts/fetch_assets.sh nachladbar).
+PP-OCRv6_small_det.onnx
+PP-OCRv6_small_rec.onnx

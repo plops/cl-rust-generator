@@ -1,0 +1,21 @@
+[package]
+name = "x11_ocr_automation"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "x11_ocr_automation"
+path = "src/main.rs"
+
+[dependencies]
+crossterm = "0.29"
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["download-binaries", "copy-dylibs", "tls-native"] }
+toml = "0.9"
+x11rb = { version = "0.14.0", features = ["xtest"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
