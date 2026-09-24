@@ -59,17 +59,21 @@ Dateiregeln aus dem Prompt gelten ab der ersten Datei (`NN_name.rs`,
 - Gates analog + vorher/nachher grün.
 - Commit: `refactor(source6): adopt capture detect recognize from source5`.
 
-## S4 — `06_rules.rs` (Regel-Engine, ohne X11)
+## S4 — `06_rules.rs` (Regel-Engine + TOML, ohne X11)
 
-- `Rule { name, pattern, action, cooldown }` (`Click` /
-  `ClickAndType { text, press_enter }`), case-insensitiver Substring,
-  `enabled`-Flag (Default aus), eine Aktion pro Zyklus, Log-Deckel 10,
-  Schema-Version `RULES_V1`.
-- Tests (ohne X11, injizierte Uhr + Fake-Input): Treffer → Aktion,
-  kein Treffer → keine Aktion, `enabled=false` → keine Aktion,
-  Cooldown blockt Zweit-Feuer, Log-Deckel hält.
+- TOML laden (`rules.toml`, Vorlage `rules.example.toml`, `schema_version`
+  prüfen; Parser-Dep `toml`, neueste Version per `cargo upgrade`):
+  `[pan]` (`step_divisor`, `step_min_px`, `roi_steps`, `default_size`) +
+  `[[rule]]` (`name`, `pattern`, `action = "click" | "click_and_type"`,
+  `text`, `press_enter`, `cooldown_secs`); ohne Datei eingebaute Defaults.
+- `Rule`-Engine: case-insensitiver Substring, `enabled`-Flag (Default aus),
+  eine Aktion pro Zyklus, Log-Deckel 10.
+- Tests (ohne X11, injizierte Uhr + Fake-Input): TOML-Parsen (Beispiel-Datei
+  + fehlende Datei → Defaults + falsche `schema_version` → Fehler),
+  Treffer → Aktion, kein Treffer → keine Aktion, `enabled=false` →
+  keine Aktion, Cooldown blockt Zweit-Feuer, Log-Deckel hält.
 - Gates analog.
-- Commit: `feat(source6): rule engine with cooldowns`.
+- Commit: `feat(source6): rule engine with toml config and cooldowns`.
 
 ## S5 — `07_tui.rs` (Dashboard, ohne Terminal testbar)
 
@@ -92,10 +96,12 @@ Dateiregeln aus dem Prompt gelten ab der ersten Datei (`NN_name.rs`,
 
 ## T1 — Härtung + E2E (Browser-Szenario im Xvfb)
 
-- Testseite mit bekanntem Button-Text → Regel feuert, Klick landet
-  (Seiten-Effekt als Orakel); Eingabefeld → getippter Text steht im Feld;
-  `--dry-run`-Lauf zeigt Log ohne Effekt; Cooldown: genau ein Feuer pro
-  Fenster; Skip-Zähler provoziert + geloggt.
+- Duck.ai-Szenario (`source6/scripts/test_duckai.sh`, bereits grün):
+  „Ask anything privately" → Frage tippen → „Ask" → Anonymitäts-Hinweis +
+  Witz in der Antwort; zusätzlich Testseite mit bekanntem Button-Text →
+  Regel feuert, Klick landet (Seiten-Effekt als Orakel); Eingabefeld →
+  getippter Text steht im Feld; `--dry-run`-Lauf zeigt Log ohne Effekt;
+  Cooldown: genau ein Feuer pro Fenster; Skip-Zähler provoziert + geloggt.
 - Fehlerpfade (X11 weg, XTEST fehlt, Modell fehlt → Meldung + Exit ≠ 0,
   Terminal restored); Dauerlauf (Pan/Zoom-Spam, kein Drift).
 - Gates: alle Gates S0–S6 erneut grün + E2E-Logs für Walkthrough sichern.

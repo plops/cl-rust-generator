@@ -148,10 +148,13 @@ minimalen Abhängigkeiten.
 5. **Regel-Engine: Substring (case-insensitiv) → `Click` /
    `ClickAndType { text, press_enter }`, pro Regel Cooldown, genau eine
    Aktion pro Zyklus, Log auf 10 Einträge gedeckelt.** Default AUS, `a`
-   schaltet scharf; `--dry-run` loggt ohne `fake_input`. Regeln vorerst als
-   Code-Konstanten (Version `RULES_V1`, s. Punkt 7); CLI-Flags nur für
-   `--dry-run`/`--help`. Verworfene Alternative: Regex/OCR-Fuzzy — mehr
-   Fehlerfläche ohne Nutzen im Prototyp-Stadium.
+   schaltet scharf; `--dry-run` loggt ohne `fake_input`. Regeln UND
+   Pan-Einstellungen werden als TOML-Datei eingegeben
+   (`source6/rules.example.toml` als Vorlage, Schema-Version im Feld
+   `schema_version`); ohne Datei gelten eingebaute Defaults. Dafür wird
+   genau eine Parser-Dep eingeführt (`toml`, s. `deps.md`).
+   Verworfene Alternative: Regex/OCR-Fuzzy — mehr Fehlerfläche ohne Nutzen
+   im Prototyp-Stadium.
 6. **Tastatur-Mapping: ASCII 0x20–0x7e aus `get_keyboard_mapping`
    (wie Prototyp), Shift/Return erkannt; alles andere wird übersprungen +
    gezählt (sichtbarer `skipped`-Zähler im Log).** Begründung: deterministisch
@@ -163,9 +166,9 @@ minimalen Abhängigkeiten.
    Kalibrier-Flag; Eichung per Referenzbild im Xvfb-Smoke. Referenzspannung/
    Quarz-Toleranz entfallen (keine ADC-Hardware). (b) 3,3-V-Limits →
    Ressourcen-Clamps: ROI/Screen-Clamp, `MAX_REC_LINES 64`, Log-Deckel,
-   kein OOM durch Riesen-ROI. (c) TUI-Protokoll-Versionierung → Regel-Schema
-   `RULES_V1` als einzige versionierte Größe (TUI-Layout selbst ist
-   unversioniert, stdout-Format stabil). (d) Modus-Wechsel während Messung →
+   kein OOM durch Riesen-ROI. (c) TUI-Protokoll-Versionierung → TOML-Schema
+   (`schema_version` in `rules.toml`) als einzige versionierte Größe
+   (TUI-Layout selbst ist unversioniert, stdout-Format stabil). (d) Modus-Wechsel während Messung →
    ROI-Wechsel invalidiert Caches + Automation pausiert einen Zyklus
    (frame-konsistente ROI-Kopie, kein Klick auf veraltete Box). (e)
    Persistente Konfiguration → keine (immer Default-Start 640 @ 0,0,
@@ -174,9 +177,12 @@ minimalen Abhängigkeiten.
    `to_screen_rect`), `02_capture.rs` (ROI-Capture + BGRA→Planar),
    `03_detect.rs` + `04_recognize.rs` (aus source5), `05_input.rs`
    (XTEST-Keymap + `click`/`type_text`, fehlerpropagierend), `06_rules.rs`
-   (Regeln, Cooldown, Engine — ohne X11 testbar per Fake-Clock/Injektion),
-   `07_tui.rs` (Dashboard-Render als reine String-Funktion + Event-Mapping,
-   ohne Terminal testbar), `main.rs` nur Verdrahtung. Jede Datei ≤~300 Zeilen.
+   (TOML-Laden + Regeln, Cooldown, Engine — ohne X11 testbar per
+   Fake-Clock/Injektion), `07_tui.rs` (Dashboard-Render als reine
+   String-Funktion + Event-Mapping, ohne Terminal testbar), `main.rs` nur
+   Verdrahtung. Jede Datei ≤~300 Zeilen. Pan-Einstellungen (`step_divisor`,
+   `step_min_px`, `roi_steps`, `default_size`) kommen aus derselben
+   TOML-Datei (`01_view` liest sie, Defaults bei fehlender Datei).
 
 ## Recommended Approach
 
@@ -263,15 +269,15 @@ Conventional Commit mit `Refs: …/task.md <ID>`.
 
 ## Open Questions
 
-1. Regel-Definition als Code-Konstanten (`RULES_V1`) ok, oder schon in S0
-   eine Regel-Datei (TOML o. ä.)? Default: Code (keine Parser-Dep).
+1. (entschieden 2026-09-24) Regeln + Pan-Einstellungen als TOML-Datei
+   (`rules.example.toml` liegt vor); Parser-Dep `toml`.
 2. Tasten `1` = hinein / `2` = heraus und `a` = scharf/unscharf wie im
    Prototyp angenommen — bestätigen oder tauschen?
 3. Click→Type-Delay 50 ms / Motion 20 ms / Key 15 ms als Startwerte ok?
 4. Pan-Schritt und ROI-Stufen aus source5 übernehmen (`max(8, size/16)`,
    `[320,480,640,960,1280]`)? Default: ja.
 5. Querschnitts-Defaults aus „Key Decisions" Punkt 7 (keine Persistenz,
-   `RULES_V1`-Versionierung, Nearest ohne Kalibrier-Flag) — bestätigen oder
+   TOML-`schema_version`, Nearest ohne Kalibrier-Flag) — bestätigen oder
    ändern?
 6. Fehlende Requirements, die ich ergänzt habe (bitte streichen, was nicht
    gewünscht ist): `--dry-run`-Flag, Skip-Zähler für nicht-typbare Zeichen,

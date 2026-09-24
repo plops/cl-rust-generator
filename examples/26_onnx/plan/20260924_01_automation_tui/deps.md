@@ -9,6 +9,7 @@ Nur direkt genutzte Deps. Stand: 2026-09-24; Versionen bei Einführung per
 | crossterm | crossterm-rs/crossterm | neueste (Prototyp: 0.28; docs.rs-Stand 0.29.0) | TUI: Raw-Mode, Events (Pfeile/`1`/`2`/`a`/`q`), Dashboard-Render, Terminal-Restore |
 | x11rb (+ Feature `xtest`) | psychon/x11rb | 0.14.0 | X11-Connect + `get_image` ZPixmap (ROI-Capture) + `xtest::fake_input` (Motion/Button/Key) |
 | ort | pykeio/ort | 2.0.0-rc.13 (RC — Drift einplanen) | PP-OCRv6 det-/rec-Sessions, `inputs!`, `TensorRef` |
+| toml | toml-rs/toml | neueste (bei Einführung per `cargo upgrade`) | Regeln + Pan-Einstellungen aus `rules.toml` laden (`schema_version`-Check) |
 | PP-OCRv6_small_det_onnx | PaddlePaddle/PP-OCRv6_small_det_onnx (HuggingFace, Apache-2.0) | `inference.onnx` (9,9 MB, aus source5) | DB-Detektionsmodell (`include_bytes!`) |
 | PP-OCRv6_small_rec_onnx | PaddlePaddle/PP-OCRv6_small_rec_onnx (HuggingFace, Apache-2.0) | `inference.onnx` (21 MB) + `inference.yml` (`character_dict`) | CTC-Erkennung + Wörterbuch (`include_bytes!`/`include_str!`) |
 | Xvfb | system (apt: `xvfb`) | system | Test-Display für Input-/E2E-Smoke (Klick-/Type-Orakel) |
