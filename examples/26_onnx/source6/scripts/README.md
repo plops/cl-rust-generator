@@ -67,6 +67,26 @@ Docker-Pakete fürs Image (werden im Walkthrough finalisiert):
 `xvfb`, Chrome-for-Testing (s. oben), `ca-certificates` (Modell-Download),
 `fonts-unifont` (nur für source5-Viewer nötig, nicht für source6/TUI).
 
+## smoke_xvfb.sh — Rauchtest für das source6-Binary
+
+Startet Xvfb + xterm mit Testtext und beweist in vier Stufen:
+
+1. XTEST-Pfad (ignorierter Rust-Test `xtest_path_against_real_server`).
+2. `--dry-run --headless-frames 1`: OCR-Nachweis im Klartext-Mitschrieb
+   (`HELLO`/`SECOND` müssen vorkommen; pty-frei, daher CI-geeignet).
+3. Fehlerpfade: `--help` → 0, kaputte TOML → 2, fehlendes Display → 1.
+4. Artefakte (`typescript`, `tui.png`).
+
+```sh
+cd examples/26_onnx/source6
+./scripts/smoke_xvfb.sh [BINARY] [OUT-DIR]
+```
+
+Hinweis: Das TUI selbst braucht ein Pty und läuft daher nicht in dieser
+Umgebung (Hintergrund-Sessions suspendieren Pty-Kinder per SIGTTOU);
+`--headless-frames` ist der pty-freie CI-Pfad, das TUI-Render decken
+Unit-Tests ab (`08_tui.rs`).
+
 ### Bekannte UI-Varianten (im Test abgefangen)
 
 - „Ask anything privately" ist der Platzhalter des Eingabefelds (kein
