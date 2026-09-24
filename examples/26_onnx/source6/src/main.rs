@@ -24,11 +24,15 @@ mod rules;
 #[path = "08_tui.rs"]
 mod tui;
 
+#[path = "09_canvas.rs"]
+mod canvas;
+
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event};
 use x11rb::connection::Connection;
 
+use canvas::{TuiGuard, render_frame};
 use capture::{
     ConvertPath, bgra_to_rgba, convert_path, prepare_native, resize_nearest_planar, screen_size,
     try_capture_roi, view_changed,
@@ -37,9 +41,7 @@ use detect::Detector;
 use input::{DrySink, X11Input};
 use recognize::Recognizer;
 use rules::{Automation, BoxHit, Sink};
-use tui::{
-    BatchDisplay, Dashboard, FrameDisplay, KeyAction, TableRow, TuiDisplay, TuiGuard, render,
-};
+use tui::{BatchDisplay, Dashboard, FrameDisplay, KeyAction, TableRow, TuiDisplay};
 use view::{MODEL_SIZE, ROI_STEPS, Screen, View};
 
 struct Args {
@@ -69,9 +71,8 @@ fn parse_args() -> Result<Args, String> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Aufruf: x11_ocr_automation [--dry-run] [--rules D] [--headless-frames N]"
+                    "Aufruf: x11_ocr_automation [--dry-run] [--rules D] [--headless-frames N], Tasten: Pfeile/1/2/a/q"
                 );
-                println!("Tasten: Pfeile = Pan, 1/2 = Zoom, a = scharf/unscharf, q/Esc = Ende");
                 std::process::exit(0);
             }
             other => return Err(format!("unbekanntes Argument: {other}")),
@@ -84,7 +85,6 @@ fn parse_args() -> Result<Args, String> {
     })
 }
 
-/// App-Zustand (bündelt Loop-Parameter).
 struct App {
     view: View,
     detector: Detector,
@@ -214,7 +214,9 @@ fn run_loop<C: Connection>(
             rows: &rows,
             log: app.automation.log(),
         };
-        display.show(&render(&dash), frame_changed)?;
+        let term = crossterm::terminal::size().unwrap_or((80, 24));
+        let text = render_frame(&dash, display.spatial(), term);
+        display.show(&text, frame_changed)?;
         if display.done() {
             return Ok(0);
         }
@@ -237,17 +239,14 @@ fn run() -> Result<i32, String> {
         h: size.h,
     };
 
-    let mut view = View::default();
-    if ROI_STEPS.contains(&cfg.pan.default_size) {
-        view.size = cfg.pan.default_size;
-    } else {
-        eprintln!(
-            "Hinweis: default_size {} nicht in Stufen — starte mit 640.",
-            cfg.pan.default_size
-        );
+    if !ROI_STEPS.contains(&cfg.pan.default_size) {
+        eprintln!("Hinweis: default_size ungültig — starte mit 640.");
     }
-    view.step_divisor = cfg.pan.step_divisor;
-    view.step_min_px = cfg.pan.step_min_px;
+    let view = View::from_pan(
+        cfg.pan.default_size,
+        cfg.pan.step_divisor,
+        cfg.pan.step_min_px,
+    );
 
     let app = App {
         view,

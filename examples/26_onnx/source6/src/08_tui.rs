@@ -125,9 +125,13 @@ pub trait FrameDisplay {
     fn interactive(&self) -> bool {
         true
     }
+    /// Wahr für räumliches Abbild statt Tabelle (nur Terminal-TUI).
+    fn spatial(&self) -> bool {
+        false
+    }
 }
 
-/// Terminal-Anzeige (Cursor positionieren + ab dort löschen).
+/// Terminal-Anzeige (Cursor positionieren + voll löschen).
 pub struct TuiDisplay {
     out: std::io::Stdout,
 }
@@ -141,13 +145,20 @@ impl TuiDisplay {
 }
 
 impl FrameDisplay for TuiDisplay {
+    fn spatial(&self) -> bool {
+        true
+    }
+
     fn show(&mut self, text: &str, _changed: bool) -> Result<(), String> {
         use crossterm::{cursor, execute, style, terminal};
+        // Voll löschen (nicht ab Cursor): Die Frame-Höhe variiert, Reste
+        // alter Frames würden sonst als Müll stehen bleiben.
         execute!(
             self.out,
             cursor::MoveTo(0, 0),
             style::Print(text),
-            terminal::Clear(terminal::ClearType::FromCursorDown)
+            terminal::Clear(terminal::ClearType::All),
+            cursor::MoveTo(0, 0)
         )
         .map_err(|e| format!("Terminal: {e}"))?;
         use std::io::Write;
@@ -176,29 +187,6 @@ impl FrameDisplay for BatchDisplay {
 
     fn interactive(&self) -> bool {
         false
-    }
-}
-
-/// Stellt das Terminal per `Drop` wieder her (Raw-Mode aus, Cursor an).
-pub struct TuiGuard;
-
-impl TuiGuard {
-    /// Schaltet Raw-Mode + Cursor aus; Rückkehr läuft per `Drop`.
-    pub fn enter() -> Result<Self, std::io::Error> {
-        use crossterm::{cursor, execute};
-        use std::io::stdout;
-        crossterm::terminal::enable_raw_mode()?;
-        execute!(stdout(), cursor::Hide)?;
-        Ok(Self)
-    }
-}
-
-impl Drop for TuiGuard {
-    fn drop(&mut self) {
-        use crossterm::{cursor, execute};
-        use std::io::stdout;
-        let _ = crossterm::terminal::disable_raw_mode();
-        let _ = execute!(stdout(), cursor::Show);
     }
 }
 

@@ -13,7 +13,7 @@ alle Gates grün, beide Smokes PASS.
 | S2 `05_input` (XTEST) | ✅ Keymap aus Server, `click`/`type_text` mit Delays als Konstanten, Skip-Zähler, alles `Result`; dazu Sink-Adapter (`DrySink`, `X11Input as Sink`) |
 | S3 Capture/Detect/Recognize | ✅ Byte-identisch aus source5 übernommen (`cmp`-belegt); dazu `try_capture_roi` für saubere X11-Fehler |
 | S4 TOML + Regel-Engine | ✅ `06_config` (händisches `Value`-Parsen ohne serde, `schema_version`-Check) + `07_rules` (Substring, Cooldown, 1 Aktion/Zyklus, Log-Deckel 10, Fehler ins Log) |
-| S5 TUI | ✅ `08_tui`: `render` als reine String-Funktion, `map_key`, `TuiGuard` (`Drop`-Restore), `FrameDisplay`-Trait (`TuiDisplay`/`BatchDisplay`) |
+| S5 TUI | ✅ `08_tui`: `render` als reine String-Funktion, `map_key`, `FrameDisplay`-Trait; `09_canvas`: räumliches Text-Abbild (`render_spatial`), `TuiGuard` (`Drop`-Restore), `render_frame`-Weiche, CJK-Doppelbreite ohne Extra-Dep |
 | S6 Loop | ✅ Capture → Inferenz → Engine → Anzeige; Change-Detect, ROI-Wechsel invalidiert Caches + pausiert Automation 1 Zyklus; `--dry-run`, `--rules`, `--help`, Exit-Codes 0/1/2 |
 | T1 Härtung + E2E | ✅ `smoke_xvfb.sh` PASS (XTEST-Test, OCR-Nachweis, Fehlerpfade); `test_duckai.sh` PASS (Anonymitäts-Hinweis + Witz) |
 | T2 Abschluss | ✅ Gates grün, `deps.md` final, dieser Walkthrough |
@@ -41,14 +41,25 @@ Neue Programme/Skripte in `source6/`: `scripts/fetch_assets.sh`,
    Python-CDP-Test relevant, dort per DOM-Domain gelöst).
 5. **`center()` aus S1 gestrichen:** Klick-Mitte rechnet die Engine
    (mit Clamp); kein toter Code für Clippy.
-6. **`main.rs` (303) / `main`-Verdrahtung:** eine Zuständigkeit
-   (Verdrahtung), drei Zeilen über „ca. 300" — bewusst akzeptiert statt
-   weiter zu kürzen (Lesbarkeit > Zeilen-Fetisch an dieser Stelle).
+6. **`main.rs` (~300) / `main`-Verdrahtung:** eine Zuständigkeit
+   (Verdrahtung: `App`-Bundle, `Box<dyn Sink>`, Display-Weiche); Restzähler
+   über „ca. 300" bewusst akzeptiert statt weiter zu kürzen. `View::default`
+   entfiel zugunsten von `View::from_pan` (TOML-Werte direkt), `Sink` ist
+   objekt-sicher (`InputError` statt assoziiertem Typ).
+7. **TUI-Umbau auf Nutzerwunsch (räumliches Abbild):** Die Box-Tabelle
+   produzierte bei variabler Zeilenzahl + Terminal-Umbruch Müll
+   (Fragment-Überlagerung). Jetzt malt `09_canvas::render_spatial` jeden
+   Text skaliert an seine Fensterposition (Kopf: 4 Zeilen, Rest Leinwand,
+   keine Überlappung, Clipping, kein Scrollen); `TuiDisplay` löscht voll
+   (`Clear::All`) statt ab Cursor. Tabelle bleibt für `--headless-frames`
+   (grepbar). CJK/Mathe-Zeichen bleiben erhalten (Unifont) und zählen als
+   zwei Zellen (hand-gerollte East-Asian-Width, kein Extra-Crate).
 
 ## Messungen / Nachweise
 
 - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
-  `cargo test`: **31 passed, 0 failed, 1 ignored** (XTEST-Test nur unter Xvfb).
+  `cargo test`: **36 passed, 0 failed, 1 ignored** (XTEST-Test nur unter Xvfb;
+  darunter 5 Canvas-Tests: Position, Clipping, Überlappung, Doppelbreite).
 - Xvfb-Smoke (`smoke_xvfb.sh`, Exit 0): XTEST-Test PASS; Batch-OCR auf
   xterm-Text: `HELT0 OCR WORLD 123`, `SECOND LINE ABC XVZ` (kleine
   OCR-Fehler wie in source5 bekannt), **102 ms** (Det 52.7 + Rec 49.3);

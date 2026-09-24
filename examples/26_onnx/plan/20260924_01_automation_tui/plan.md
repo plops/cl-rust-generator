@@ -179,11 +179,14 @@ minimalen Abhängigkeiten.
    `03_detect.rs` + `04_recognize.rs` (aus source5), `05_input.rs`
    (XTEST-Keymap + `click`/`type_text` + Sink-Adapter, fehlerpropagierend),
    `06_config.rs` (TOML-Laden + `load_from_file`, ohne serde),
-   `07_rules.rs` (Regeln, Cooldown, Engine + `Sink`-Trait — ohne X11 testbar
-   per Fake-Sink), `08_tui.rs` (Dashboard-Render als reine String-Funktion +
-   Event-Mapping + Restore-Guard, ohne Terminal testbar), `main.rs` nur
-   Deklaration + Loop-Verdrahtung. Jede Datei ≤~300 Zeilen (daher ist
-   `06_config`/`07_rules` getrennt). Pan-Einstellungen (`step_divisor`,
+   `07_rules.rs` (Regeln, Cooldown, Engine + objekt-sicheres `Sink`-Trait —
+   ohne X11 testbar per Fake-Sink), `08_tui.rs` (Tabellen-Render als reine
+   String-Funktion + Event-Mapping + `FrameDisplay`-Trait, ohne Terminal
+   testbar), `09_canvas.rs` (räumliches Text-Abbild + `TuiGuard` +
+   CJK-Doppelbreite hand-gerollt), `main.rs` nur Deklaration +
+   Loop-Verdrahtung. Jede Datei ≤~300 Zeilen (daher ist
+   `06_config`/`07_rules` getrennt; `main.rs` als reine Verdrahtung
+   minimal darüber). Pan-Einstellungen (`step_divisor`,
    `step_min_px`, `roi_steps`, `default_size`) kommen aus derselben
    TOML-Datei (`main` setzt die `View`-Felder, Defaults bei fehlender Datei).
 

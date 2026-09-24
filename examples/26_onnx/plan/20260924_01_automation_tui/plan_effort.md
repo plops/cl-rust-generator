@@ -159,3 +159,66 @@
 │                                                                   │
 │  BILLING        Subscription · Muse Code Everyday Usage           │
 └───────────────────────────────────────────────────────────────────┘
+◆ Fertig — der TUI-Müll ist weg, ersetzt durch ein räumliches Text-Abbild. Verifiziert: fmt ok, clippy sauber, 36 Tests grün (5 neue Canvas-Tests mit exakten Positions-Assertions), Smoke Exit 0.
+
+  Was sich ändert (source6/src/09_canvas.rs, neu):
+  • Jeder erkannte Text wird skaliert an seine Fensterposition gemalt — das Terminal zeigt ein Abbild des Browser-Fensters statt einer Tabelle. 4 Kopfzeilen (ROI, Zeiten, Tasten, letzte Aktion), darunter die Leinwand.
+  • Kein Überlappen (belegte Zellen werden übersprungen), Clipping am Rand, jede Zeile exakt Terminal-breite, kein Scrollen — plus Voll-Löschen pro Frame (Clear::All), was die Fragment-Reste aus deinem Paste verursacht hatte.
+  • CJK/Mathe bleiben erhalten (nichts wird gestrippt) und zählen als 2 Zellen (hand-gerollte East-Asian-Width, kein Extra-Crate) — passt zu alacritty + Unifont.
+  • Die Tabelle bleibt für --headless-frames (grepbar für Smokes).
+
+  Dateiregeln gehalten: Display-Typen nach 09_canvas verschoben (08_tui 285, 09 262, main ~300 als reine Verdrahtung). Plan und Walkthrough nachgezogen.
+
+  Probier es aus: Binary starten, der Frame sieht dann z. B. so aus (80×24, ROI 640):
+
+    OCR 640x640@(0,0) SUCHE AUS(a) 7 Boxen
+    Det 53ms Rec 49ms Skip 0
+    Pfeile=Pan 1/2=Zoom a=scharf q=Ende
+    [Regel X] Klick auf '...'
+            All chats are private
+           Ask anything privately
+                  Tools
+
+  Zwei ehrliche Einschränkungen: Bei winzigem Terminal kollabieren nahe Boxen auf dieselbe Zeile (Überlappung wird übersprungen, nicht gestapelt) — im Zweifel Terminal größer ziehen oder ROI per 1 verkleinern. Die TUI selbst konnte ich hier nicht eyeballen (braucht ein
+  Pty); der Beweis sind die exakten Unit-Assertions plus der grüne Smoke.
+
+◆ Worked for 6m 40s · 7:27 PM
+
+┌────────────────────────────────────────────────────────┐
+│  Session usage                                         │
+│                                                        │
+│    Input      74,383,204                               │
+│    Cached     72,443,884                               │
+│    Output        194,108                               │
+│    Total      74,577,312                               │
+│                                                        │
+│    Turns              300                              │
+│    Subagents         none                              │
+│                                                        │
+│  Subscription · Muse Code Everyday Usage               │
+│    Current        23% used · Resets at 8:56 PM         │
+│    Weekly         15% used · Resets Sep 28 at 12:00 AM │
+└────────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────────────────┐
+│  MUSE CODE 1.3.0                                        COMPLETED │
+│                                                                   │
+│  MODEL          muse-spark-1.3-contributor · high                 │
+│                 meta · native-basic                               │
+│                                                                   │
+│  WORKSPACE      /workspace/src/cl-rust-generator/examples/26_onnx │
+│                 trusted · not found                               │
+│  ACCESS         Unrestricted                                      │
+│                 sandbox disabled (--yolo)                         │
+│                 Meta account                                      │
+│  ACCOUNT        Wol Pumba (wolpumba@gmail.com)                    │
+│                                                                   │
+│  USAGE          74,577,312 tokens · 300 turns · 0 subagents       │
+│  CONTEXT        68% left · 327K used / 1008K · normal             │
+│                                                                   │
+│  SESSION        01a0d421-3fdd-7e03-9a11-841538ab3c00              │
+│  ACTIVITY       no tasks                                          │
+│                 0 terminals · inbox clear                         │
+│                                                                   │
+│  BILLING        Subscription · Muse Code Everyday Usage           │
+└───────────────────────────────────────────────────────────────────┘

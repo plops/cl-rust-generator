@@ -148,15 +148,18 @@ mod tests {
 
     #[test]
     fn path_is_native_at_640() {
-        assert_eq!(convert_path(&View::default()), ConvertPath::Native);
-        let mut v = View::default();
+        assert_eq!(
+            convert_path(&View::from_pan(640, 16, 8)),
+            ConvertPath::Native
+        );
+        let mut v = View::from_pan(640, 16, 8);
         v.size = 320;
         assert_eq!(convert_path(&v), ConvertPath::Scaled);
     }
 
     #[test]
     fn view_change_detection() {
-        let a = View::default();
+        let a = View::from_pan(640, 16, 8);
         assert!(!view_changed(&a, &a));
         let mut b = a;
         b.x += 1;

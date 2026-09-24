@@ -42,15 +42,21 @@ pub struct View {
 }
 
 impl View {
-    /// Start-ROI: 640×640 oben links (= source5-Verhalten).
+    /// Start-View aus `[pan]`-Werten (`default_size` muss aus `ROI_STEPS`
+    /// stammen — prüft der Aufrufer, sonst gilt `MODEL_SIZE`).
     #[must_use]
-    pub fn default() -> Self {
+    pub fn from_pan(default_size: u32, step_divisor: u32, step_min_px: u32) -> Self {
+        let size = if ROI_STEPS.contains(&default_size) {
+            default_size
+        } else {
+            MODEL_SIZE
+        };
         Self {
             x: 0,
             y: 0,
-            size: ROI_STEPS[DEFAULT_STEP_INDEX],
-            step_divisor: 16,
-            step_min_px: 8,
+            size,
+            step_divisor,
+            step_min_px,
         }
     }
 
@@ -148,7 +154,7 @@ mod tests {
 
     #[test]
     fn projection_is_identity_at_native() {
-        let v = View::default();
+        let v = View::from_pan(640, 16, 8);
         assert_eq!(
             v.to_screen_rect(10.0, 20.0, 100.0, 30.0, SCREEN),
             (10, 20, 100, 30)
@@ -157,23 +163,15 @@ mod tests {
 
     #[test]
     fn projection_scales_with_roi() {
-        let v = View {
-            x: 100,
-            y: 50,
-            size: 320,
-            ..View::default()
-        };
+        let mut v = View::from_pan(320, 16, 8);
+        v.x = 100;
+        v.y = 50;
         // scale 0.5: (200,100,60,40) -> (200,100,30,20).
         assert_eq!(
             v.to_screen_rect(200.0, 100.0, 60.0, 40.0, SCREEN),
             (200, 100, 30, 20)
         );
-        let v = View {
-            x: 0,
-            y: 0,
-            size: 1280,
-            ..View::default()
-        };
+        let v = View::from_pan(1280, 16, 8);
         // scale 2.0.
         assert_eq!(
             v.to_screen_rect(10.0, 20.0, 100.0, 30.0, SCREEN),
@@ -183,12 +181,9 @@ mod tests {
 
     #[test]
     fn projection_clamps_to_screen() {
-        let v = View {
-            x: 1800,
-            y: 1000,
-            size: 320,
-            ..View::default()
-        };
+        let mut v = View::from_pan(320, 16, 8);
+        v.x = 1800;
+        v.y = 1000;
         let (sx, sy, sw, sh) = v.to_screen_rect(600.0, 600.0, 200.0, 200.0, SCREEN);
         assert!(sx <= SCREEN.w && sy <= SCREEN.h);
         assert!(sw >= 1 && sh >= 1);
@@ -196,7 +191,7 @@ mod tests {
 
     #[test]
     fn pan_step_follows_toml_formula() {
-        let mut v = View::default();
+        let mut v = View::from_pan(640, 16, 8);
         assert_eq!(v.pan_step(), 640 / 16);
         v.step_divisor = 8;
         v.step_min_px = 100;
@@ -208,8 +203,16 @@ mod tests {
     }
 
     #[test]
+    fn from_pan_takes_valid_size_or_falls_back() {
+        let v = View::from_pan(320, 16, 8);
+        assert_eq!((v.size, v.step_divisor, v.step_min_px), (320, 16, 8));
+        let v = View::from_pan(999, 16, 8);
+        assert_eq!(v.size, MODEL_SIZE);
+    }
+
+    #[test]
     fn pan_and_zoom_match_source5() {
-        let mut v = View::default();
+        let mut v = View::from_pan(640, 16, 8);
         let step = v.pan_step();
         assert!(v.pan(1, 1, SCREEN));
         assert_eq!((v.x, v.y), (step, step));
