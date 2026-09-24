@@ -174,15 +174,18 @@ minimalen Abhängigkeiten.
    Persistente Konfiguration → keine (immer Default-Start 640 @ 0,0,
    Automation aus); Regeln sind Code, keine Config-Datei.
 8. **Modul-Schnitt (Zielbild `source6/src/`):** `01_view.rs` (ROI-State +
-   `to_screen_rect`), `02_capture.rs` (ROI-Capture + BGRA→Planar),
+   `to_screen_rect`, Pan-Formel aus `[pan]` via Struct-Felder),
+   `02_capture.rs` (ROI-Capture + BGRA→Planar, fallibel für T1),
    `03_detect.rs` + `04_recognize.rs` (aus source5), `05_input.rs`
-   (XTEST-Keymap + `click`/`type_text`, fehlerpropagierend), `06_rules.rs`
-   (TOML-Laden + Regeln, Cooldown, Engine — ohne X11 testbar per
-   Fake-Clock/Injektion), `07_tui.rs` (Dashboard-Render als reine
-   String-Funktion + Event-Mapping, ohne Terminal testbar), `main.rs` nur
-   Verdrahtung. Jede Datei ≤~300 Zeilen. Pan-Einstellungen (`step_divisor`,
+   (XTEST-Keymap + `click`/`type_text` + Sink-Adapter, fehlerpropagierend),
+   `06_config.rs` (TOML-Laden + `load_from_file`, ohne serde),
+   `07_rules.rs` (Regeln, Cooldown, Engine + `Sink`-Trait — ohne X11 testbar
+   per Fake-Sink), `08_tui.rs` (Dashboard-Render als reine String-Funktion +
+   Event-Mapping + Restore-Guard, ohne Terminal testbar), `main.rs` nur
+   Deklaration + Loop-Verdrahtung. Jede Datei ≤~300 Zeilen (daher ist
+   `06_config`/`07_rules` getrennt). Pan-Einstellungen (`step_divisor`,
    `step_min_px`, `roi_steps`, `default_size`) kommen aus derselben
-   TOML-Datei (`01_view` liest sie, Defaults bei fehlender Datei).
+   TOML-Datei (`main` setzt die `View`-Felder, Defaults bei fehlender Datei).
 
 ## Recommended Approach
 

@@ -98,3 +98,64 @@
 │                                                                   │
 │  BILLING        Subscription · Muse Code Everyday Usage           │
 └───────────────────────────────────────────────────────────────────┘
+
+
+◆ Ziel erreicht — alle Deliverables sind fertig und verifiziert:
+
+  source6/-Programm x11_ocr_automation (direkt Rust, nur ort + x11rb[xtest] + crossterm + toml):
+  • Module in Datenfluss-Reihenfolge, alle ≤300 Zeilen (01_view … 08_tui, main.rs nur Verdrahtung)
+  • OCR-Pipeline aus source5 (byte-identisch übernommen), TUI-Dashboard statt Fenster, Regel-Engine mit Cooldowns (Default AUS, --dry-run), Regeln + Pan-Einstellungen per TOML (rules.example.toml, schema_version-Check)
+  • Exit-Codes 0/1/2, Terminal-Restore per Guard, --headless-frames für pty-freie CI-Läufe
+
+  Nachweise (alle grün auf finalem Stand):
+  • cargo fmt --check, cargo clippy --all-targets -- -D warnings, cargo test: 31 passed, 1 ignored (XTEST-Test nur unter Xvfb)
+  • smoke_xvfb.sh Exit 0: XTEST-Pfad, Live-OCR (HELLO OCR WORLD, 102 ms), Fehlerpfade
+  • test_duckai.sh Exit 0: Frage getippt, „Ask" geklickt, Anonymitäts-Hinweis + Witz in der Antwort
+  • fetch_assets.sh: Gewichte + Vokabular per SHA-verifiziertem Download
+
+  Pläne/Doku: plan.md, task.md, deps.md (mit toml-rs/toml und gepinnten Versionen), walkthrough.md (Abweichungen, Messungen, Docker-Paketliste, Learnings) — alles unter plan/20260924_01_automation_tui/. Keine Commits angelegt (nichts
+  angefordert); fremde Dateien unangetastet.
+
+◆ Worked for 1h 24m 08s · 5:55 PM
+
+◆ Recap: Built source6 OCR automation with TUI and verified all gates. Everything passed so no further action is needed.
+
+┌───────────────────────────────────────────────────────┐
+│  Session usage                                        │
+│                                                       │
+│    Input      58,592,671                              │
+│    Cached     57,346,861                              │
+│    Output        165,350                              │
+│    Total      58,758,021                              │
+│                                                       │
+│    Turns              253                             │
+│    Subagents         none                             │
+│                                                       │
+│  Subscription · Muse Code Everyday Usage              │
+│    Current        4% used · Resets at 8:56 PM         │
+│    Weekly         9% used · Resets Sep 28 at 12:00 AM │
+│    as of 4:26 PM                                      │
+└───────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────────────────┐
+│  MUSE CODE 1.3.0                                        CANCELLED │
+│                                                                   │
+│  MODEL          muse-spark-1.3-contributor · high                 │
+│                 meta · native-basic                               │
+│                                                                   │
+│  WORKSPACE      /workspace/src/cl-rust-generator/examples/26_onnx │
+│                 trusted · not found                               │
+│  ACCESS         Unrestricted                                      │
+│                 sandbox disabled (--yolo)                         │
+│                 Meta account                                      │
+│  ACCOUNT        Wol Pumba (wolpumba@gmail.com)                    │
+│                                                                   │
+│  USAGE          58,758,021 tokens · 253 turns · 0 subagents       │
+│  CONTEXT        99% left · 12.4K used / 1008K · normal            │
+│                                                                   │
+│  SESSION        01a0d421-3fdd-7e03-9a11-841538ab3c00              │
+│  ACTIVITY       no tasks                                          │
+│                 0 terminals · inbox clear                         │
+│                                                                   │
+│  BILLING        Subscription · Muse Code Everyday Usage           │
+└───────────────────────────────────────────────────────────────────┘

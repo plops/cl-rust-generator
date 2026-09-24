@@ -25,15 +25,16 @@ Dateiregeln aus dem Prompt gelten ab der ersten Datei (`NN_name.rs`,
 
 ## S1 — `01_view.rs` (ROI-State + Screen-Projektion, rein, ohne X11)
 
-- `View { x, y, size }` + Stufen aus source5, `pan`/`zoom_in`/`zoom_out`
-  mit Screen-Clamp; neu: `to_screen_rect` (640-Raum → absolute Pixel),
-  `center`, Klick-Clamp auf Screen.
+- `View { x, y, size, step_divisor, step_min_px }` + Stufen aus source5,
+  `pan`/`zoom_in`/`zoom_out` mit Screen-Clamp; neu: `to_screen_rect`
+  (640-Raum → absolute Pixel, Klick-Clamp auf Screen); Pan-Formel aus
+  `[pan]` via Struct-Felder (Klick-Mitte rechnet die Engine).
 - Tests (ohne X11/Modell): Identität bei 640, Skalierung 320/960/1280,
-  Clamp am Rand, Mitte-in-Box. ≥5 Tests.
+  Clamp am Rand, TOML-Formel. ≥5 Tests.
 - Gates analog S0.
 - Commit: `feat(source6): roi view with screen projection`.
 
-## S2 — `05_input.rs` (XTEST-Input, ohne OCR)
+## S2 — `05_input.rs` (XTEST + Sink-Adapter, ohne OCR)
 
 - `X11Input`: Keymap aus `get_keyboard_mapping` (ASCII 0x20–0x7e,
   Shift/Return-Erkennung), `click(x, y)`, `type_text(text, hit_enter)`
@@ -51,7 +52,8 @@ Dateiregeln aus dem Prompt gelten ab der ersten Datei (`NN_name.rs`,
 ## S3 — `02/03/04_capture+detect+recognize` (Übernahme ohne Verhalten)
 
 - `01_view`-kompatibel aus source5 übernehmen: Capture (`get_image` mit
-  ROI-Offsets, 1:1-Fast-Path), DBNet-Detect (Schwellen identisch),
+  ROI-Offsets, 1:1-Fast-Path, plus `try_capture_roi` für saubere
+  X11-Fehler), DBNet-Detect (Schwellen identisch),
   CTC-Recognize (`load_dict`, `ctc_decode`); Change-Detect (`memcmp`) +
   ROI-Wechsel-Invalidierung wie source5.
 - Tests: mitgebrachte source5-Tests (Detect-Postprocessing, CTC, Dict,
@@ -59,7 +61,7 @@ Dateiregeln aus dem Prompt gelten ab der ersten Datei (`NN_name.rs`,
 - Gates analog + vorher/nachher grün.
 - Commit: `refactor(source6): adopt capture detect recognize from source5`.
 
-## S4 — `06_rules.rs` (Regel-Engine + TOML, ohne X11)
+## S4 — `06_config.rs` + `07_rules.rs` (TOML + Regel-Engine, ohne X11)
 
 - TOML laden (`rules.toml`, Vorlage `rules.example.toml`, `schema_version`
   prüfen; Parser-Dep `toml`, neueste Version per `cargo upgrade`):
@@ -75,7 +77,7 @@ Dateiregeln aus dem Prompt gelten ab der ersten Datei (`NN_name.rs`,
 - Gates analog.
 - Commit: `feat(source6): rule engine with toml config and cooldowns`.
 
-## S5 — `07_tui.rs` (Dashboard, ohne Terminal testbar)
+## S5 — `08_tui.rs` (Dashboard, ohne Terminal testbar)
 
 - Reine Render-Funktion (ROI/Status/Automation/ms/Boxen-Tabelle/Log als
   String) + Tasten-Mapping (Pfeile/`1`/`2`/`a`/`q`/Esc/Ctrl-C) +
