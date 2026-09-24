@@ -1,0 +1,35 @@
+# rules.duckai.toml — Duck.ai einen Programm-Witz fragen lassen.
+#
+# Ablauf (Browser mit https://duck.ai geöffnet, ROI auf das Fenster):
+#   1. Regel "Feld fokussieren" klickt auf "Ask anything privately".
+#   2. Regel "Frage stellen" klickt erneut, tippt die Frage und drückt Enter.
+#      (Gleiches Pattern: Regel 1 feuert zuerst, danach — während sie im
+#      Cooldown ist — Regel 2. Nach dem Absenden verschwindet der
+#      Platzhalter, also feuert nichts mehr.)
+# Automation startet AUS — erst Taste `a` schaltet scharf. Zum Ausprobieren
+# ohne echte Klicks: --dry-run (Aktionen nur im Log).
+#
+# Aufruf (aus dem source6-Verzeichnis):
+#   ./target/release/x11_ocr_automation --rules rules.duckai.toml [--dry-run]
+
+schema_version = 1
+
+[pan]
+step_divisor = 16
+step_min_px = 8
+roi_steps = [320, 480, 640, 960, 1280]
+default_size = 640
+
+[[rule]]
+name = "Feld fokussieren"
+pattern = "Ask anything privately"
+action = "click"
+cooldown_secs = 30
+
+[[rule]]
+name = "Frage stellen"
+pattern = "Ask anything privately"
+action = "click_and_type"
+text = "Tell me a joke about programming"
+press_enter = true
+cooldown_secs = 300
