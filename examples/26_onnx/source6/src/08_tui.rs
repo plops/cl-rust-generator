@@ -150,18 +150,11 @@ impl FrameDisplay for TuiDisplay {
     }
 
     fn show(&mut self, text: &str, _changed: bool) -> Result<(), String> {
-        use crossterm::{cursor, execute, style, terminal};
-        // Voll löschen (nicht ab Cursor): Die Frame-Höhe variiert, Reste
-        // alter Frames würden sonst als Müll stehen bleiben.
-        execute!(
-            self.out,
-            cursor::MoveTo(0, 0),
-            style::Print(text),
-            terminal::Clear(terminal::ClearType::All),
-            cursor::MoveTo(0, 0)
-        )
-        .map_err(|e| format!("Terminal: {e}"))?;
         use std::io::Write;
+        // Reihenfolge in `frame_bytes` (dort per Test fixiert).
+        self.out
+            .write_all(&crate::canvas::frame_bytes(text))
+            .map_err(|e| format!("Terminal: {e}"))?;
         self.out.flush().map_err(|e| format!("Terminal: {e}"))
     }
 }

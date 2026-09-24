@@ -40,6 +40,23 @@ pub fn render_frame(d: &Dashboard<'_>, spatial: bool, term: (u16, u16)) -> Strin
     }
 }
 
+/// Baut die Terminal-Bytefolge für einen Frame: erst voll löschen, dann
+/// malen. Reine Funktion, damit die Reihenfolge testbar bleibt —
+/// umgekehrt (malen, dann löschen) bliebe der Schirm schwarz.
+#[must_use]
+pub fn frame_bytes(text: &str) -> Vec<u8> {
+    use crossterm::{cursor, execute, style, terminal};
+    let mut buf = Vec::new();
+    execute!(
+        &mut buf,
+        terminal::Clear(terminal::ClearType::All),
+        cursor::MoveTo(0, 0),
+        style::Print(text)
+    )
+    .expect("in Speicher schreiben kann nicht fehlschlagen");
+    buf
+}
+
 /// Kopfzeilen über der Leinwand (Titel, Status, Tasten, letzte Aktion).
 pub const HEADER_ROWS: usize = 4;
 
@@ -242,6 +259,19 @@ mod tests {
         let s = render_spatial(&dash(&rows, &log), 64, 10);
         let first = canvas_lines(&s)[0];
         assert!(first.starts_with("AAAAB"));
+    }
+
+    #[test]
+    fn frame_clears_before_painting() {
+        let b = frame_bytes("AB");
+        let s = String::from_utf8_lossy(&b);
+        let clear = s.find("\u{1b}[2J").expect("Clear-All fehlt");
+        let home = s.find("\u{1b}[1;1H").expect("MoveTo fehlt");
+        let text = s.find("AB").expect("Text fehlt");
+        assert!(
+            clear < home && home < text,
+            "erst löschen, dann malen (sonst schwarzer Schirm)"
+        );
     }
 
     #[test]
