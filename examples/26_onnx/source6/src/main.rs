@@ -18,13 +18,16 @@ mod input;
 #[path = "06_config.rs"]
 mod config;
 
-#[path = "07_rules.rs"]
+#[path = "07_match.rs"]
+mod mtch;
+
+#[path = "08_rules.rs"]
 mod rules;
 
-#[path = "08_tui.rs"]
+#[path = "09_tui.rs"]
 mod tui;
 
-#[path = "09_canvas.rs"]
+#[path = "10_canvas.rs"]
 mod canvas;
 
 use std::time::{Duration, Instant};

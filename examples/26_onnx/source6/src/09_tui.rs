@@ -1,4 +1,4 @@
-//! `08_tui` — Terminal-Dashboard ohne Fenster (S5).
+//! `09_tui` — Terminal-Dashboard ohne Fenster (S5).
 //!
 //! `render` baut die komplette Anzeige als String (ohne Terminal testbar);
 //! `map_key` übersetzt Tastendrücke in Aktionen; `TuiGuard` stellt das

@@ -1,9 +1,9 @@
-//! `09_canvas` — räumliches Text-Abbild der ROI fürs Terminal (TUI).
+//! `10_canvas` — räumliches Text-Abbild der ROI fürs Terminal (TUI).
 //!
 //! Statt einer Box-Tabelle malt `render_spatial` jeden erkannten Text
 //! ungefähr dorthin, wo er im Fenster steht (skaliert auf die
 //! Terminal-Größe). Reine Funktion, ohne Terminal testbar. Die
-//! Tabellen-Form (`08_tui::render`) bleibt für den Batch-Modus.
+//! Tabellen-Form (`09_tui::render`) bleibt für den Batch-Modus.
 
 use crate::tui::{Dashboard, render};
 

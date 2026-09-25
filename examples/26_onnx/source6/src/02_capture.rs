@@ -78,16 +78,25 @@ pub fn bgra_to_rgba(bgra: &[u8], rgba: &mut [u8]) {
     }
 }
 
-/// Fusionierter 1:1-Pfad: BGRA (640²) → planar-normalisiert + RGBA-Textur
-/// in einem Durchgang (kein Resize, keine Interpolation).
-pub fn prepare_native(bgra: &[u8], planes: &mut [f32], rgba: &mut [u8]) {
+/// ImageNet-Normalisierung eines BGR-Pixels (eine Formel, ein Ort).
+#[inline(always)]
+fn norm_rgb(b: u8, g: u8, r: u8) -> (f32, f32, f32) {
     const R_SCALE: f32 = 1.0 / (255.0 * 0.229);
     const R_OFF: f32 = 0.485 / 0.229;
     const G_SCALE: f32 = 1.0 / (255.0 * 0.224);
     const G_OFF: f32 = 0.456 / 0.224;
     const B_SCALE: f32 = 1.0 / (255.0 * 0.225);
     const B_OFF: f32 = 0.406 / 0.225;
+    (
+        r as f32 * R_SCALE - R_OFF,
+        g as f32 * G_SCALE - G_OFF,
+        b as f32 * B_SCALE - B_OFF,
+    )
+}
 
+/// Fusionierter 1:1-Pfad: BGRA (640²) → planar-normalisiert + RGBA-Textur
+/// in einem Durchgang (kein Resize, keine Interpolation).
+pub fn prepare_native(bgra: &[u8], planes: &mut [f32], rgba: &mut [u8]) {
     let (r_plane, rest) = planes.split_at_mut(NATIVE_PLANE);
     let (g_plane, b_plane) = rest.split_at_mut(NATIVE_PLANE);
     let (src, _) = bgra.as_chunks::<4>();
@@ -101,9 +110,10 @@ pub fn prepare_native(bgra: &[u8], planes: &mut [f32], rgba: &mut [u8]) {
     {
         let (b, g, r) = (s[0], s[1], s[2]);
         d.copy_from_slice(&[r, g, b, 255]);
-        r_plane[i] = r as f32 * R_SCALE - R_OFF;
-        g_plane[i] = g as f32 * G_SCALE - G_OFF;
-        b_plane[i] = b as f32 * B_SCALE - B_OFF;
+        let (nr, ng, nb) = norm_rgb(b, g, r);
+        r_plane[i] = nr;
+        g_plane[i] = ng;
+        b_plane[i] = nb;
     }
 }
 
@@ -111,13 +121,6 @@ pub fn prepare_native(bgra: &[u8], planes: &mut [f32], rgba: &mut [u8]) {
 /// der Kantenlänge `dst_size` (für den echten Pfad: beliebig → 640).
 /// 1:1 (`src_size == dst_size`) ist exakt identisch zu `prepare_native`.
 pub fn resize_nearest_planar(bgra: &[u8], src_size: usize, dst: &mut [f32], dst_size: usize) {
-    const R_SCALE: f32 = 1.0 / (255.0 * 0.229);
-    const R_OFF: f32 = 0.485 / 0.229;
-    const G_SCALE: f32 = 1.0 / (255.0 * 0.224);
-    const G_OFF: f32 = 0.456 / 0.224;
-    const B_SCALE: f32 = 1.0 / (255.0 * 0.225);
-    const B_OFF: f32 = 0.406 / 0.225;
-
     let plane = dst_size * dst_size;
     let (r_plane, rest) = dst.split_at_mut(plane);
     let (g_plane, b_plane) = rest.split_at_mut(plane);
@@ -128,9 +131,10 @@ pub fn resize_nearest_planar(bgra: &[u8], src_size: usize, dst: &mut [f32], dst_
             let sx = (dx * src_size / dst_size).min(src_size - 1);
             let s = (sy * src_size + sx) * 4;
             let d = dy * dst_size + dx;
-            r_plane[d] = bgra[s + 2] as f32 * R_SCALE - R_OFF;
-            g_plane[d] = bgra[s + 1] as f32 * G_SCALE - G_OFF;
-            b_plane[d] = bgra[s] as f32 * B_SCALE - B_OFF;
+            let (nr, ng, nb) = norm_rgb(bgra[s], bgra[s + 1], bgra[s + 2]);
+            r_plane[d] = nr;
+            g_plane[d] = ng;
+            b_plane[d] = nb;
         }
     }
 }

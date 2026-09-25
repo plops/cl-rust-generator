@@ -1,0 +1,29 @@
+# rules.metaai.toml — Meta AI nach einem Red-Panda-Sticker-Prompt fragen.
+#
+# Ablauf (Browser mit Meta AI geöffnet, ROI auf das Fenster):
+#   Eine einzige `click_and_type`-Regel genügt: Der Klick aktiviert das
+#   Fenster vorher automatisch (`focus_at` in `05_input`), 100 ms später
+#   wird der Prompt getippt und mit Enter abgeschickt. Das Pattern steht
+#   in natürlicher Schreibweise — Glyph-Konfusion (`Al` statt `AI`) und
+#   fehlende Ellipsen-Punkte fängt der Fuzzy-Matcher (`07_match`) ab.
+# Automation startet AUS — erst Taste `a` schaltet scharf. Zum Ausprobieren
+# ohne echte Klicks: --dry-run (Aktionen nur im Log).
+#
+# Aufruf (aus dem source6-Verzeichnis):
+#   ./target/release/x11_ocr_automation --rules rules.metaai.toml [--dry-run]
+
+schema_version = 1
+
+[pan]
+step_divisor = 16
+step_min_px = 8
+roi_steps = [320, 480, 640, 960, 1280]
+default_size = 640
+
+[[rule]]
+name = "Frage stellen"
+pattern = "Ask Meta AI..."
+action = "click_and_type"
+text = "A cute 3D claymation-style sticker of a red panda cub fast asleep hugging a soft miniature pillow. Peaceful sleeping face with a subtle happy smile, dreamy pastel night tones, cute floating `Zzz` symbols. Smooth matte render, clean silhouette, bold white die-cut sticker outline, isolated on a clean white background, high contrast, readable at small icon scale."
+press_enter = true
+cooldown_secs = 5

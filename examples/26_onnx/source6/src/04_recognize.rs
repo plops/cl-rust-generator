@@ -112,15 +112,7 @@ pub fn load_dict(yaml: &'static str) -> Vec<&'static str> {
             in_dict = true;
         } else if in_dict {
             if let Some(item) = t.strip_prefix('-') {
-                let s = item.trim();
-                let clean = if (s.starts_with('\'') && s.ends_with('\''))
-                    || (s.starts_with('"') && s.ends_with('"'))
-                {
-                    &s[1..s.len().saturating_sub(1)]
-                } else {
-                    s
-                };
-                dict.push(clean);
+                dict.push(item.trim().trim_matches(['\'', '"']));
             } else if !t.is_empty() && !t.starts_with('#') {
                 break;
             }

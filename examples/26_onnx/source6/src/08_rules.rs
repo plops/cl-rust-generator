@@ -1,6 +1,6 @@
-//! `07_rules` — Regel-Engine: Match, Cooldown, Log (S4).
+//! `08_rules` — Regel-Engine: Match, Cooldown, Log (S4).
 //!
-//! Die Engine matcht Box-Texte per case-insensitivem Substring und feuert
+//! Die Engine matcht Box-Texte per Fuzzy-OCR (`07_match`) und feuert
 //! genau eine Aktion pro `evaluate`-Aufruf (Cooldown pro Regel, Log-Deckel).
 //! Aktionen laufen über das `Sink`-Trait — ohne X11 testbar (Fake-Sink),
 //! produktiv implementiert von `X11Input` (Verdrahtung in S6).
@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use crate::config::{Action, Config, Rule};
 use crate::input::InputError;
+use crate::mtch::fuzzy_ocr_match;
 
 /// Deckel für das Aktions-Log (Einträge).
 pub const LOG_CAP: usize = 10;
@@ -30,6 +31,23 @@ pub trait Sink {
     fn click(&mut self, x: i16, y: i16) -> Result<(), InputError>;
     /// Text tippen (+ optional Enter).
     fn type_text(&mut self, text: &str, press_enter: bool) -> Result<(), InputError>;
+
+    /// Klick, dann Fokus-Wechsel abwarten, dann tippen.
+    /// Die `FOCUS_SETTLE_MS`-Pause liegt garantiert DAZWISCHEN.
+    fn click_and_type(
+        &mut self,
+        x: i16,
+        y: i16,
+        text: &str,
+        press_enter: bool,
+    ) -> Result<(), InputError> {
+        self.click(x, y)?;
+        std::thread::sleep(std::time::Duration::from_millis(
+            crate::input::FOCUS_SETTLE_MS,
+        ));
+        self.type_text(text, press_enter)
+    }
+
     /// Übersprungene Zeichen (nur echte Eingaben zählen; Default 0).
     fn skipped(&self) -> u64 {
         0
@@ -100,7 +118,7 @@ impl Automation {
             // Treffer suchen (nur lesen); erst danach feuern (schreiben).
             let mut fire: Option<PendingFire> = None;
             for hit in hits {
-                if hit.text.to_lowercase().contains(&self.rules[i].pattern) {
+                if fuzzy_ocr_match(&self.rules[i].pattern, &hit.text) {
                     fire = Some(PendingFire {
                         name: self.rules[i].name.clone(),
                         htext: hit.text.clone(),
@@ -123,8 +141,7 @@ impl Automation {
                     .click(cx, cy)
                     .map(|()| format!("[{name}] Klick auf '{htext}' @ ({cx},{cy})")),
                 Action::ClickAndType { text, press_enter } => sink
-                    .click(cx, cy)
-                    .and_then(|()| sink.type_text(text, *press_enter))
+                    .click_and_type(cx, cy, text, *press_enter)
                     .map(|()| format!("[{name}] Klick + Eingabe in '{htext}'")),
             };
             match done {

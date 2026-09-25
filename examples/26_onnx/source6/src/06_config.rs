@@ -48,7 +48,7 @@ pub enum Action {
 pub struct Rule {
     /// Anzeigename (fürs Log).
     pub name: String,
-    /// Klein geschriebenes Match-Pattern.
+    /// Rohes Match-Pattern (Normalisierung macht `07_match` beim Match).
     pub pattern: String,
     /// Auszulösende Aktion.
     pub action: Action,
@@ -104,11 +104,10 @@ pub fn load_from_file(path: &str) -> Result<Config, String> {
 }
 
 fn as_u32(map: &toml::map::Map<String, toml::Value>, key: &str) -> Result<u32, ConfigError> {
-    let v = map
-        .get(key)
+    map.get(key)
         .and_then(toml::Value::as_integer)
-        .ok_or_else(|| ConfigError::Invalid(format!("`{key}` fehlt oder ist keine Zahl")))?;
-    u32::try_from(v).map_err(|_| ConfigError::Invalid(format!("`{key}` muss >= 0 sein")))
+        .and_then(|v| u32::try_from(v).ok())
+        .ok_or_else(|| ConfigError::Invalid(format!("`{key}` fehlt oder ist keine Zahl")))
 }
 
 impl Config {
@@ -207,7 +206,7 @@ impl Config {
                 })
         };
         let name = str_field("name")?;
-        let pattern = str_field("pattern")?.to_lowercase();
+        let pattern = str_field("pattern")?;
         if pattern.is_empty() {
             return Err(ConfigError::Invalid(format!(
                 "`rule[{i}].pattern` darf nicht leer sein"

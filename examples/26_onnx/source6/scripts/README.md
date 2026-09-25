@@ -85,7 +85,7 @@ cd examples/26_onnx/source6
 Hinweis: Das TUI selbst braucht ein Pty und läuft daher nicht in dieser
 Umgebung (Hintergrund-Sessions suspendieren Pty-Kinder per SIGTTOU);
 `--headless-frames` ist der pty-freie CI-Pfad, das TUI-Render decken
-Unit-Tests ab (`08_tui.rs`).
+Unit-Tests ab (`09_tui.rs`).
 
 ### Bekannte UI-Varianten (im Test abgefangen)
 

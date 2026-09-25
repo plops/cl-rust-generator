@@ -13,8 +13,8 @@ use std::time::Duration;
 
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{
-    self, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, KEY_PRESS_EVENT, KEY_RELEASE_EVENT, Keycode,
-    MOTION_NOTIFY_EVENT, Window,
+    self, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, CLIENT_MESSAGE_EVENT, KEY_PRESS_EVENT,
+    KEY_RELEASE_EVENT, Keycode, MOTION_NOTIFY_EVENT, Window,
 };
 use x11rb::protocol::xtest;
 
@@ -28,7 +28,8 @@ pub const KEY_SETTLE_MS: u64 = 15;
 /// Pause vor Enter (ms).
 pub const ENTER_SETTLE_MS: u64 = 30;
 /// Pause zwischen Klick und Tippen (ms, Fokus-Wechsel abwarten).
-pub const CLICK_TYPE_DELAY_MS: u64 = 50;
+/// Liegt garantiert DAZWISCHEN (in `Sink::click_and_type`), nicht danach.
+pub const FOCUS_SETTLE_MS: u64 = 100;
 
 /// Fehler im Input-Pfad (tragbar, ohne X11-Abhängigkeit im Typ).
 #[derive(Debug)]
@@ -120,8 +121,45 @@ impl<'a, C: Connection> X11Input<'a, C> {
         })
     }
 
-    /// Linksklick auf absolute Bildschirm-Pixel.
+    /// Hebt das Fenster unter `(x, y)` und gibt ihm den Fokus
+    /// (EWMH `_NET_ACTIVE_WINDOW` + Core-Fokus). Alles best-effort:
+    /// Fehler werden geschluckt, damit ein eigenwilliger WM nie einen
+    /// Klick verhindert (der XTEST-Klick selbst fokussiert meist eh).
+    pub fn focus_at(&self, x: i16, y: i16) {
+        let Ok(reply) = xproto::translate_coordinates(self.conn, self.root, self.root, x, y) else {
+            return;
+        };
+        let Ok(tr) = reply.reply() else { return };
+        let target = if tr.child != 0 { tr.child } else { self.root };
+        let _ = xproto::set_input_focus(self.conn, xproto::InputFocus::PARENT, target, NOW);
+
+        // EWMH-Meldung an den Window-Manager (Datenlayout `[Quelle, Zeit, …]`).
+        if let Ok(atom_cookie) = xproto::intern_atom(self.conn, false, b"_NET_ACTIVE_WINDOW")
+            && let Ok(atom) = atom_cookie.reply()
+        {
+            let ev = xproto::ClientMessageEvent {
+                response_type: CLIENT_MESSAGE_EVENT,
+                format: 32,
+                sequence: 0,
+                window: target,
+                type_: atom.atom,
+                data: xproto::ClientMessageData::from([1u32, NOW, 0, 0, 0]),
+            };
+            let _ = xproto::send_event(
+                self.conn,
+                false,
+                self.root,
+                xproto::EventMask::SUBSTRUCTURE_REDIRECT | xproto::EventMask::SUBSTRUCTURE_NOTIFY,
+                ev,
+            );
+        }
+        let _ = self.conn.flush();
+    }
+
+    /// Linksklick auf absolute Bildschirm-Pixel (mit Fokus vorher und
+    /// echten Koordinaten in den Button-Events).
     pub fn click(&self, x: i16, y: i16) -> Result<(), InputError> {
+        self.focus_at(x, y);
         let xt = |t: u8, d: u8, x: i16, y: i16| {
             xtest::fake_input(self.conn, t, d, NOW, self.root, x, y, 0)
                 .map_err(|e| InputError::X11(e.to_string()))?;
@@ -131,8 +169,9 @@ impl<'a, C: Connection> X11Input<'a, C> {
         };
         xt(MOTION_NOTIFY_EVENT, 0, x, y)?;
         sleep(Duration::from_millis(MOTION_SETTLE_MS));
-        xt(BUTTON_PRESS_EVENT, 1, 0, 0)?;
-        xt(BUTTON_RELEASE_EVENT, 1, 0, 0)?;
+        xt(BUTTON_PRESS_EVENT, 1, x, y)?;
+        sleep(Duration::from_millis(15));
+        xt(BUTTON_RELEASE_EVENT, 1, x, y)?;
         Ok(())
     }
 
@@ -203,7 +242,7 @@ impl crate::rules::Sink for DrySink {
 }
 
 /// `X11Input` als Regel-`Sink` (Fehler landen im Engine-Log).
-/// Das Trait ist in `07_rules` definiert (dort wird es verbraucht);
+/// Das Trait ist in `08_rules` definiert (dort wird es verbraucht);
 ///
 /// dieser Adapter hält die Verdrahtung in `main` schlank.
 impl<C: Connection> crate::rules::Sink for X11Input<'_, C> {
@@ -212,10 +251,7 @@ impl<C: Connection> crate::rules::Sink for X11Input<'_, C> {
     }
 
     fn type_text(&mut self, text: &str, press_enter: bool) -> Result<(), InputError> {
-        X11Input::type_text(self, text, press_enter)?;
-        // Fokus-Wechsel abwarten (T1-Tuning, s. Walkthrough).
-        sleep(Duration::from_millis(CLICK_TYPE_DELAY_MS));
-        Ok(())
+        X11Input::type_text(self, text, press_enter)
     }
 
     fn skipped(&self) -> u64 {
@@ -228,24 +264,28 @@ mod tests {
     use super::*;
 
     // Tippfehler-Schutz zur Compile-Zeit: Delays positiv,
-    // Click→Type am größten.
+    // Fokus-Pause am größten.
     const _: () = {
         assert!(MOTION_SETTLE_MS > 0);
         assert!(KEY_SETTLE_MS > 0);
-        assert!(CLICK_TYPE_DELAY_MS >= MOTION_SETTLE_MS);
+        assert!(FOCUS_SETTLE_MS >= MOTION_SETTLE_MS);
         assert!(ENTER_SETTLE_MS >= KEY_SETTLE_MS);
     };
 
     /// XTEST-Pfad gegen echten X-Server (nur unter Xvfb, s. smoke_xvfb.sh).
-    /// Beweist: Keymap-Aufbau, ASCII-Abdeckung, Klick + Tippen ohne Fehler.
+    /// Beweist über den neuen Pfad: Fokus-Sequenz, Klick mit Koordinaten,
+    /// `click_and_type` (Klick → 100 ms → Tippen) ohne Fehler, Skip 0.
     #[test]
     #[ignore = "braucht X-Server (Xvfb), kein Unit-Test"]
     fn xtest_path_against_real_server() {
         let (conn, screen) = x11rb::connect(None).expect("kein X11 (Xvfb läuft?)");
         let mut input =
             super::X11Input::new(&conn, screen).expect("XTEST-Init (XTEST im Server aktiv?)");
+        input.focus_at(100, 100);
         input.click(100, 100).expect("click");
         input.type_text("abc XYZ 123", false).expect("type_text");
+        crate::rules::Sink::click_and_type(&mut input, 100, 100, "ok", false)
+            .expect("click_and_type");
         assert_eq!(input.skipped_count(), 0);
     }
 
