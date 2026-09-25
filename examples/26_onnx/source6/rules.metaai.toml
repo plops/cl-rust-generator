@@ -27,3 +27,7 @@ action = "click_and_type"
 text = "A cute 3D claymation-style sticker of a lop-eared bunny fast asleep hugging a soft miniature pillow. Peaceful sleeping face with a subtle happy smile, dreamy pastel night tones, cute floating `Zzz` symbols. Smooth matte render, clean silhouette, bold white die-cut sticker outline, isolated on a clean white background, high contrast, readable at small icon scale."
 press_enter = true
 cooldown_secs = 5
+# Nur einmal pro Lauf: Nach dem Absenden kehrt der Platzhalter
+# "Ask Meta AI..." zurück — ohne `once` würde die Regel nach jedem
+# Cooldown erneut feuern und den Prompt mehrfach schicken.
+once = true

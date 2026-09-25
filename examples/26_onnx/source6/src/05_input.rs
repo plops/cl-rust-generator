@@ -121,16 +121,35 @@ impl<'a, C: Connection> X11Input<'a, C> {
         })
     }
 
-    /// Hebt das Fenster unter `(x, y)` und gibt ihm den Fokus
+    /// Top-Level-Fenster unter `(x, y)`: vom gefundenen Kind über
+    /// `query_tree` hochklettern bis zum direkten Kind von Root.
+    /// Fokus und WM-Aktivierung brauchen das Top-Level — ein tiefes
+    /// Unterfenster (z. B. Firefox-Content) nimmt keinen Fokus an.
+    fn toplevel_at(&self, x: i16, y: i16) -> Option<Window> {
+        let tr = xproto::translate_coordinates(self.conn, self.root, self.root, x, y)
+            .ok()?
+            .reply()
+            .ok()?;
+        let mut w = if tr.child != 0 { tr.child } else { self.root };
+        // Hochklettern (Deckel gegen Zyklen); Root selbst hat Parent 0.
+        for _ in 0..16 {
+            let parent = xproto::query_tree(self.conn, w).ok()?.reply().ok()?.parent;
+            if parent == self.root || parent == 0 {
+                break;
+            }
+            w = parent;
+        }
+        Some(w)
+    }
+
+    /// Hebt das Top-Level-Fenster unter `(x, y)` und gibt ihm den Fokus
     /// (EWMH `_NET_ACTIVE_WINDOW` + Core-Fokus). Alles best-effort:
     /// Fehler werden geschluckt, damit ein eigenwilliger WM nie einen
     /// Klick verhindert (der XTEST-Klick selbst fokussiert meist eh).
     pub fn focus_at(&self, x: i16, y: i16) {
-        let Ok(reply) = xproto::translate_coordinates(self.conn, self.root, self.root, x, y) else {
+        let Some(target) = self.toplevel_at(x, y) else {
             return;
         };
-        let Ok(tr) = reply.reply() else { return };
-        let target = if tr.child != 0 { tr.child } else { self.root };
         let _ = xproto::set_input_focus(self.conn, xproto::InputFocus::PARENT, target, NOW);
 
         // EWMH-Meldung an den Window-Manager (Datenlayout `[Quelle, Zeit, …]`).
@@ -156,33 +175,30 @@ impl<'a, C: Connection> X11Input<'a, C> {
         let _ = self.conn.flush();
     }
 
+    /// Ein XTEST-Event senden (Maus wie Taste, immer mit Koordinaten).
+    fn xt(&self, t: u8, d: Keycode, x: i16, y: i16) -> Result<(), InputError> {
+        xtest::fake_input(self.conn, t, d, NOW, self.root, x, y, 0)
+            .map_err(|e| InputError::X11(e.to_string()))?;
+        self.conn
+            .flush()
+            .map_err(|e| InputError::X11(e.to_string()))
+    }
+
     /// Linksklick auf absolute Bildschirm-Pixel (mit Fokus vorher und
     /// echten Koordinaten in den Button-Events).
     pub fn click(&self, x: i16, y: i16) -> Result<(), InputError> {
         self.focus_at(x, y);
-        let xt = |t: u8, d: u8, x: i16, y: i16| {
-            xtest::fake_input(self.conn, t, d, NOW, self.root, x, y, 0)
-                .map_err(|e| InputError::X11(e.to_string()))?;
-            self.conn
-                .flush()
-                .map_err(|e| InputError::X11(e.to_string()))
-        };
-        xt(MOTION_NOTIFY_EVENT, 0, x, y)?;
+        self.xt(MOTION_NOTIFY_EVENT, 0, x, y)?;
         sleep(Duration::from_millis(MOTION_SETTLE_MS));
-        xt(BUTTON_PRESS_EVENT, 1, x, y)?;
+        self.xt(BUTTON_PRESS_EVENT, 1, x, y)?;
         sleep(Duration::from_millis(15));
-        xt(BUTTON_RELEASE_EVENT, 1, x, y)?;
+        self.xt(BUTTON_RELEASE_EVENT, 1, x, y)?;
         Ok(())
     }
 
     /// Tippt ASCII-Text über das Server-Keymap; unbekannte Zeichen werden
     /// übersprungen und in `skipped()` gezählt. `hit_enter` drückt Return.
     pub fn type_text(&mut self, text: &str, hit_enter: bool) -> Result<(), InputError> {
-        let xt = |conn: &C, root: Window, t: u8, d: Keycode, x: i16, y: i16| {
-            xtest::fake_input(conn, t, d, NOW, root, x, y, 0)
-                .map_err(|e| InputError::X11(e.to_string()))?;
-            conn.flush().map_err(|e| InputError::X11(e.to_string()))
-        };
         for ch in text.chars() {
             let Some(&(kc, needs_shift)) = self.key_map.get(&ch) else {
                 self.skipped += 1;
@@ -193,12 +209,12 @@ impl<'a, C: Connection> X11Input<'a, C> {
                     self.skipped += 1;
                     continue;
                 }
-                xt(self.conn, self.root, KEY_PRESS_EVENT, self.shift_kc, 0, 0)?;
+                self.xt(KEY_PRESS_EVENT, self.shift_kc, 0, 0)?;
             }
-            xt(self.conn, self.root, KEY_PRESS_EVENT, kc, 0, 0)?;
-            xt(self.conn, self.root, KEY_RELEASE_EVENT, kc, 0, 0)?;
+            self.xt(KEY_PRESS_EVENT, kc, 0, 0)?;
+            self.xt(KEY_RELEASE_EVENT, kc, 0, 0)?;
             if needs_shift {
-                xt(self.conn, self.root, KEY_RELEASE_EVENT, self.shift_kc, 0, 0)?;
+                self.xt(KEY_RELEASE_EVENT, self.shift_kc, 0, 0)?;
             }
             sleep(Duration::from_millis(KEY_SETTLE_MS));
         }
@@ -207,15 +223,8 @@ impl<'a, C: Connection> X11Input<'a, C> {
                 return Err(InputError::NoKeycode("Return"));
             }
             sleep(Duration::from_millis(ENTER_SETTLE_MS));
-            xt(self.conn, self.root, KEY_PRESS_EVENT, self.return_kc, 0, 0)?;
-            xt(
-                self.conn,
-                self.root,
-                KEY_RELEASE_EVENT,
-                self.return_kc,
-                0,
-                0,
-            )?;
+            self.xt(KEY_PRESS_EVENT, self.return_kc, 0, 0)?;
+            self.xt(KEY_RELEASE_EVENT, self.return_kc, 0, 0)?;
         }
         Ok(())
     }

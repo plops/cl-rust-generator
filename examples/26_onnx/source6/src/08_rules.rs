@@ -109,6 +109,10 @@ impl Automation {
             return;
         }
         for i in 0..self.rules.len() {
+            // Einmal-Regel, die schon feuerte: nie wieder (Cooldown egal).
+            if self.rules[i].once && self.rules[i].last_fired.is_some() {
+                continue;
+            }
             let ready = self.rules[i]
                 .last_fired
                 .is_none_or(|t| t.elapsed() >= self.rules[i].cooldown);
@@ -227,6 +231,26 @@ mod tests {
         auto.evaluate(&hits, (800, 600), &mut sink);
         auto.evaluate(&hits, (800, 600), &mut sink);
         assert_eq!(sink.clicks.len(), 1);
+    }
+
+    #[test]
+    fn once_rule_fires_exactly_once() {
+        // Meta.ai-Fall: Platzhalter kehrt nach dem Absenden zurück —
+        // ohne `once` würde jeder abgelaufene Cooldown erneut feuern.
+        let cfg = Config::parse(
+            "schema_version = 1\n[[rule]]\nname = \"r\"\npattern = \"go\"\n\
+             action = \"click\"\ncooldown_secs = 0\nonce = true",
+        )
+        .unwrap();
+        let mut auto = Automation::from_config(&cfg);
+        auto.set_enabled(true);
+        let mut sink = FakeSink::default();
+        let hits = [hit("go button")];
+        auto.evaluate(&hits, (800, 600), &mut sink);
+        auto.evaluate(&hits, (800, 600), &mut sink);
+        auto.evaluate(&hits, (800, 600), &mut sink);
+        assert_eq!(sink.clicks.len(), 1);
+        assert_eq!(auto.log().len(), 1);
     }
 
     #[test]

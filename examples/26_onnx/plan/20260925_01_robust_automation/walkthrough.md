@@ -68,6 +68,37 @@ scrot, xdotool) — nichts Neues installiert, keine neue Cargo-Dep.
   einer Stelle; `FakeSink` erbt sie (Test dauert 100 ms länger, bleibt
   deterministisch ohne `Instant`-Warterei).
 
+## Nacharbeit: Meta.ai-Feldbericht (2026-09-25)
+
+Drei Probleme aus der Praxis, alle gefixt und verifiziert:
+
+1. **Fokus griff nicht ohne Maus im Fenster.** Ursache: `focus_at`
+   adressierte das von `translate_coordinates` gelieferte Kindfenster
+   direkt — bei Firefox ist das ein tiefes Content-Unterfenster, das
+   keinen Fokus annimmt. Fix: `toplevel_at` klettert per `query_tree`
+   (Deckel 16) zum direkten Root-Kind; Fokus + `_NET_ACTIVE_WINDOW`
+   gehen ans Top-Level. Nebenbei die doppelten `xt`-Closures in
+   `05_input` zu einer `xt`-Methode vereint.
+2. **Regel feuerte nach dem Absenden immer wieder.** Ursache: Der
+   Platzhalter `Ask Meta AI...` kehrt nach dem Absenden zurück, also
+   matcht die Regel nach jedem Cooldown erneut. Fix: optionales
+   TOML-Flag `once = true` (Default `false`, abwärtskompatibel) —
+   `evaluate` überspringt Einmal-Regeln nach dem ersten Feuer
+   dauerhaft; `rules.metaai.toml` nutzt es. Tests:
+   `once_defaults_to_false_and_parses_true`,
+   `once_rule_fires_exactly_once`.
+3. **Kein sichtbares Logging im Dry-Run.** Fix: `main.rs` schreibt jede
+   gefeuerte Aktion zusätzlich auf stderr — sichtbar ohne Dashboard,
+   in jedem Modus.
+
+Stand danach: `fmt`/`clippy -D warnings`/`cargo test` grün (**41
+passed, 1 ignored**), Ignored-XTEST-Test unter Xvfb ok (neuer
+Top-Level-Pfad), `smoke_xvfb.sh` PASS. `05_input` (308) und
+`06_config` (319) liegen knapp über ~300 Zeilen: bewusst in Kauf
+genommen — `cargo fmt` erzwingt Ketten-/Struct-Umbrüche
+(`struct_lit_width`), und Aufteilen oder Doku-Streichen wäre gegen
+die Lesbarkeit gegangen (kein Verhalten geändert, Tests beweisen es).
+
 ## Erweiterungen (offen, aus den Open Questions)
 
 1. Fokus-Erfolg im Dashboard sichtbar machen (Zähler wie `Skip`)?

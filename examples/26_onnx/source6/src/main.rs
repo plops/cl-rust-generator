@@ -194,7 +194,13 @@ fn run_loop<C: Connection>(
             if paused_once {
                 paused_once = false;
             } else {
+                let logged = app.automation.log().len();
                 app.automation.evaluate(&hits, (scr.w, scr.h), sink);
+                // Gefeuerte Aktionen auch auf stderr: sichtbar ohne
+                // Dashboard (z. B. --dry-run-Diagnose, Batch-Modus).
+                for line in &app.automation.log()[logged..] {
+                    eprintln!("{line}");
+                }
             }
             prev_bytes = bgra;
         }

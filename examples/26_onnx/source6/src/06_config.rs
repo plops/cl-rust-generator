@@ -54,6 +54,10 @@ pub struct Rule {
     pub action: Action,
     /// Mindestabstand zwischen zwei Feuern.
     pub cooldown: Duration,
+    /// Wahr: höchstens einmal pro Lauf feuern (danach nie wieder,
+    /// auch nach Cooldown-Ablauf — z. B. Einmal-Prompts, deren
+    /// Platzhalter nach dem Absenden wiederkehrt).
+    pub once: bool,
     pub(crate) last_fired: Option<Instant>,
 }
 
@@ -167,21 +171,17 @@ impl Config {
                 "`roi_steps` darf nicht leer sein".into(),
             ));
         }
-        let mut roi_steps = Vec::with_capacity(steps_val.len());
-        for v in steps_val {
-            let s = v
-                .as_integer()
-                .and_then(|n| u32::try_from(n).ok())
-                .ok_or_else(|| {
-                    ConfigError::Invalid("`roi_steps` braucht positive Zahlen".into())
-                })?;
-            if s == 0 {
-                return Err(ConfigError::Invalid(
-                    "`roi_steps` braucht positive Zahlen".into(),
-                ));
-            }
-            roi_steps.push(s);
-        }
+        let roi_steps: Vec<u32> = steps_val
+            .iter()
+            .map(|v| {
+                v.as_integer()
+                    .and_then(|n| u32::try_from(n).ok())
+                    .filter(|&n| n > 0)
+                    .ok_or_else(|| {
+                        ConfigError::Invalid("`roi_steps` braucht positive Zahlen".into())
+                    })
+            })
+            .collect::<Result<_, _>>()?;
         let default_size = as_u32(pan, "default_size")?;
         if !roi_steps.contains(&default_size) {
             return Err(ConfigError::Invalid(format!(
@@ -236,11 +236,16 @@ impl Config {
             .ok_or_else(|| {
                 ConfigError::Invalid(format!("`rule[{i}].cooldown_secs` fehlt oder ist ungültig"))
             })?;
+        let once = t
+            .get("once")
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(false);
         Ok(Rule {
             name,
             pattern,
             action,
             cooldown: Duration::from_secs(cooldown_secs),
+            once,
             last_fired: None,
         })
     }
@@ -261,6 +266,22 @@ mod tests {
         assert_eq!(cfg.rules.len(), 2);
         assert!(matches!(cfg.rules[0].action, Action::Click));
         assert!(matches!(cfg.rules[1].action, Action::ClickAndType { .. }));
+    }
+
+    #[test]
+    fn once_defaults_to_false_and_parses_true() {
+        let plain = Config::parse(
+            "schema_version = 1\n[[rule]]\nname = \"r\"\npattern = \"go\"\n\
+             action = \"click\"\ncooldown_secs = 1",
+        )
+        .unwrap();
+        assert!(!plain.rules[0].once);
+        let flagged = Config::parse(
+            "schema_version = 1\n[[rule]]\nname = \"r\"\npattern = \"go\"\n\
+             action = \"click\"\ncooldown_secs = 1\nonce = true",
+        )
+        .unwrap();
+        assert!(flagged.rules[0].once);
     }
 
     #[test]
