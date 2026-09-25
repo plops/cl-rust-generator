@@ -1,5 +1,8 @@
 //! main.rs — Deklaration + Verdrahtung (S6). Exit: 0/1/2 (Ende/X11/Konfig).
 
+#[path = "00_args.rs"]
+mod args;
+
 #[path = "01_view.rs"]
 mod view;
 
@@ -35,6 +38,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{self, Event};
 use x11rb::connection::Connection;
 
+use args::parse_args;
 use canvas::{TuiGuard, render_frame};
 use capture::{
     ConvertPath, bgra_to_rgba, convert_path, prepare_native, resize_nearest_planar, screen_size,
@@ -46,47 +50,6 @@ use recognize::Recognizer;
 use rules::{Automation, BoxHit, Sink};
 use tui::{BatchDisplay, Dashboard, FrameDisplay, KeyAction, TableRow, TuiDisplay};
 use view::{MODEL_SIZE, ROI_STEPS, Screen, View};
-
-struct Args {
-    dry_run: bool,
-    rules_path: String,
-    headless_frames: Option<u64>,
-}
-
-fn parse_args() -> Result<Args, String> {
-    let mut dry_run = false;
-    let mut rules_path = "rules.toml".to_string();
-    let mut headless_frames = None;
-    let mut it = std::env::args().skip(1);
-    while let Some(a) = it.next() {
-        match a.as_str() {
-            "--dry-run" => dry_run = true,
-            "--headless-frames" => {
-                let n: u64 = it
-                    .next()
-                    .ok_or("--headless-frames braucht eine Zahl")?
-                    .parse()
-                    .map_err(|_| "--headless-frames braucht eine Zahl")?;
-                headless_frames = Some(n);
-            }
-            "--rules" => {
-                rules_path = it.next().ok_or("--rules braucht einen Pfad")?;
-            }
-            "--help" | "-h" => {
-                println!(
-                    "Aufruf: x11_ocr_automation [--dry-run] [--rules D] [--headless-frames N], Tasten: Pfeile/1/2/a/q"
-                );
-                std::process::exit(0);
-            }
-            other => return Err(format!("unbekanntes Argument: {other}")),
-        }
-    }
-    Ok(Args {
-        dry_run,
-        rules_path,
-        headless_frames,
-    })
-}
 
 struct App {
     view: View,
@@ -257,12 +220,18 @@ fn run() -> Result<i32, String> {
         cfg.pan.step_min_px,
     );
 
-    let app = App {
+    let mut app = App {
         view,
         detector: Detector::new(),
         recognizer: Recognizer::new(),
         automation: Automation::from_config(&cfg),
     };
+    // `-a`/`--auto`: Automation startet scharf — kein Tastendruck nötig
+    // (für Skript-Läufe, die pro TOML-Regel einen frischen Prozess starten).
+    if args.auto_start {
+        app.automation.set_enabled(true);
+        eprintln!("Hinweis: Automation per -a/--auto scharf geschaltet.");
+    }
 
     let mut dry = DrySink;
     let mut live;
