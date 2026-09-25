@@ -1,0 +1,19 @@
+schema_version = 1
+
+[pan]
+step_divisor = 16
+step_min_px = 8
+roi_steps = [320, 480, 640, 960, 1280]
+default_size = 960
+
+[[rule]]
+name = "Reset URL"
+pattern = "meta.ai/prompt/"
+action = "click_and_type"
+text = "https://meta.ai"
+press_enter = true
+cooldown_secs = 5
+# Nur einmal pro Lauf: Nach dem Absenden kehrt der Platzhalter
+# "Ask Meta AI..." zurück — ohne `once` würde die Regel nach jedem
+# Cooldown erneut feuern und den Prompt mehrfach schicken.
+once = true
