@@ -30,18 +30,18 @@ STICKER_SECS=120
 URL_SECS=60
 DRY_RUN=()
 SUBJECTS=(
-  "baby otter"
-  "red panda cub"
-  "lop-eared bunny"
-  "fluffy calico kitten"
-  "golden retriever puppy"
-  "harp seal pup"
+#  "baby otter"
+#  "red panda cub"
+#  "lop-eared bunny"
+#  "fluffy calico kitten"
+#  "golden retriever puppy"
+#  "harp seal pup"
   "chubby baby panda"
-  "sleeping baby capybara"
-  "shiba inu puppy"
-  "tiny dormouse"
-  "baby sloth"
-  "curled-up hedgehog"
+#  "sleeping baby capybara"
+#  "shiba inu puppy"
+#  "tiny dormouse"
+#  "baby sloth"
+#  "curled-up hedgehog"
 )
 
 usage() {
@@ -146,7 +146,9 @@ TMPDIR_RUN="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_RUN"' EXIT
 run_step() { # secs toml beschreibung
   local code=0
-  timeout "$1" "$BIN" -a --rules "$2" "${DRY_RUN[@]}" || code=$?
+  echo timeout "$1" "$BIN" -a --rules "$2" "${DRY_RUN[@]}" || code=$?
+  #timeout "$1"
+  "$BIN" -a --rules "$2" "${DRY_RUN[@]}" || code=$?
   if [ "$code" -eq 124 ]; then
     echo "ok (einmal gefeuert, Timeout): $3"
   elif [ "$code" -eq 0 ]; then

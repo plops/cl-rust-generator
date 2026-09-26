@@ -61,12 +61,15 @@ grep -q '<placeholder>' "$TEMPLATE" || {
 }
 
 TMPDIR_RUN="$(mktemp -d)"
+echo $TMPDIR_RUN
 trap 'rm -rf "$TMPDIR_RUN"' EXIT
 sed "s|<placeholder>|$NAME|g" "$TEMPLATE" >"$TMPDIR_RUN/rules.toml"
 
 run_step() { # secs toml beschreibung
-  local code=0
-  timeout "$1" "$BIN" -a --rules "$2" "${DRY_RUN[@]}" || code=$?
+    local code=0
+    echo "$BIN" -a --rules "$2" "${DRY_RUN[@]}"
+    #timeout "$1"
+    "$BIN" -a --rules "$2" "${DRY_RUN[@]}" || code=$?
   if [ "$code" -eq 124 ]; then
     echo "ok (einmal gefeuert, Timeout): $3"
   elif [ "$code" -eq 0 ]; then

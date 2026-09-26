@@ -24,7 +24,7 @@ default_size = 640
 name = "Feld fokussieren"
 pattern = "Ask anything privately"
 action = "click"
-cooldown_secs = 30
+cooldown_secs = 1
 
 [[rule]]
 name = "Frage stellen"
@@ -32,4 +32,4 @@ pattern = "Ask anything privately"
 action = "click_and_type"
 text = "Tell me a joke about programming"
 press_enter = true
-cooldown_secs = 300
+cooldown_secs = 3

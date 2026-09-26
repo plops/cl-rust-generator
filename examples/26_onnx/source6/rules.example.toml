@@ -15,7 +15,7 @@ step_min_px = 8
 # `2` = eine Stufe größer (heraus).
 roi_steps = [320, 480, 640, 960, 1280]
 # Start-ROI (muss in roi_steps enthalten sein).
-default_size = 640
+default_size = 960
 
 # --- Automations-Regeln (Substring, case-insensitiv) ---
 # action = "click" | "click_and_type" (braucht zusätzlich text;
