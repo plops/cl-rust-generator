@@ -1,0 +1,28 @@
+[package]
+name = "x11_face_reid"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "x11_face_reid"
+path = "src/main.rs"
+
+[dependencies]
+# no-default: ohne Audio/ALSA-C-Abhängigkeiten
+macroquad = { version = "0.4.16", default-features = false }
+# CPU-Build per Default; Workstation baut mit --features cuda
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["download-binaries", "copy-dylibs", "tls-native"] }
+x11rb = "0.14.0"
+serde = { version = "1.0", features = ["derive"] }
+bincode = { version = "2.0", features = ["serde"] }
+
+[features]
+# Aktiviert CUDAExecutionProvider (braucht CUDA-Runtime + cuDNN am Host)
+cuda = ["ort/cuda"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
