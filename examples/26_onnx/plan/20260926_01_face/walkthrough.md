@@ -11,8 +11,12 @@ einen 512-dimensionalen Raum einbettet und Personen über Sitzungen hinweg
 wiedererkennt — alles in einem einzigen Rust-Binary mit fünf externen Crates
 und ohne eine einzige schwere Systemabhängigkeit. Auf einem AMD Threadripper
 PRO 7955WX läuft die komplette Schleife aus Capture, Inferenz und Rendering
-mit rund 96 Bildern pro Sekunde auf der CPU; ein CUDA-Pfad existiert, validiert
+mit über 100 Bildern pro Sekunde auf der CPU; ein CUDA-Pfad existiert, validiert
 sich selbst per Probe-Inferenz und fällt ohne cuDNN stabil auf CPU zurück.
+Nachtrag nach Container-Neubau *mit* cuDNN: CUDA-Inferenz läuft
+(`provider=CUDA`) und rechnet den Gesichts-Pfad in 3,34 ms statt 16,10 ms —
+4,8× schneller als CPU. End-to-end bleibt es dank X11- und Render-Dominanz
+ein Unentschieden bei gut 100 FPS (Details in Abschnitt 5).
 Die drei spannendsten Geschichten dieses Projekts: ein 4×4-Gauß-Trick, der eine
 komplette Mathe-Bibliothek ersetzt, winzige Geisterboxen, die einen fehlenden
 Multiplikationsfaktor verrieten, und eine ONNX-Runtime-Lüge, die erst beim
@@ -187,7 +191,10 @@ Gelingt sie, ist CUDA echt und die Session wird mit dem Label `"CUDA"`
 zusätzliche Inferenz beim Start, also Millisekunden. Der Lohn: Der CUDA-Build
 lief im cuDNN-losen Container mit `provider=CPU` und Exit-Code 0 durch den
 Xvfb-Smoke — ein Fallback, der seinen Namen verdient, inklusive ehrlicher
-Anzeige im HUD.
+Anzeige im HUD. Nach dem Container-Neubau mit cuDNN 9 drehte sich das Bild
+erwartungsgemäß um: Dieselbe Warmup-Prüfung gelingt nun und meldet
+`provider=CUDA` — der Ernstfall in beide Richtungen bestanden, ohne eine
+Zeile zu ändern.
 
 Zwei kleinere `ort`-Erkenntnisse fielen auf dem Weg ab und sind es wert,
 festgehalten zu werden: In `ort 2.0.0-rc.13` heißen die Provider-Typen
@@ -276,7 +283,10 @@ neu exportierten Modell mit stillschweigend vertauschten Outputs. Das dritte
 Stockwerk ist der E2E-Test `real_models_detect_and_reidentify_face`: echte
 Sessions, echtes Ross-Porträt als eingebettetes PPM-Asset, ein Frame durch
 die komplette Engine — und die harte Behauptung, dass genau ein Gesicht mit
-Person 0 herauskommt und der zweite Frame redundant wiedererkannt wird. Ganz
+Person 0 herauskommt und der zweite Frame redundant wiedererkannt wird. Per
+`FACE_BENCH_FRAMES=N` misst derselbe Test zusätzlich den Steady-State-
+Durchsatz des Gesichts-Pfads in Millisekunden pro Frame — so entstanden die
+CUDA-gegen-CPU-Zahlen in Abschnitt 5. Ganz
 oben schließlich der `xvfb-run`-Smoke des fertigen Binaries: fünf Frames unter
 virtuellem X-Server, Exit 0, Stats-Zeile auf stdout.
 
@@ -291,35 +301,76 @@ Anfang an recht. Tests, die den Autor belehren, sind die besten Tests.
 
 ## 5. Performance-Analyse & Hardware-Realität
 
-Die Zahlen, Release-Build auf dem Threadripper PRO 7955WX, CPU-Pfad: 100
-Frames aus Capture, Detektion und Rendering in 1036 Millisekunden Wandzeit
-einschließlich Startup — effektiv rund 96 FPS. Der E2E-Test mit Gesicht
-(zwei Sessions laden plus zwei volle Frames mit Alignment, Embedding und
-DB-Update) braucht 0,09 Sekunden. Das ist kein Messfehler, sondern die
-Konsequenz bewusster Modellwahl: `det_500m` trägt seinen Namen, weil es mit
-500 Mega-FLOPs auskommt — ein Federgewicht, das auf 32 Threads mit AVX2
-praktisch verfliegt — und das MobileFaceNet-Embedding auf 112×112 Pixeln ist
-kaum mehr als ein Husten. Der Engpass liegt längst nicht mehr in der
-Inferenz, sondern wie schon in `source2/doc.md` analysiert im synchronen
-X11-Grab und im V-Sync des Fensters.
+Alle Zahlen: Release-Builds auf Threadripper PRO 7955WX + RTX A4000,
+gemessen unter `xvfb-run` (ohne V-Sync-Bremse, dafür mit Software-GL).
 
-Ehrlichkeit verlangt das Eingeständnis: Eine CUDA-Messung gibt es nicht. Im
-Container fehlt `libcudnn.so`, der CUDA-EP scheitert reproduzierbar am ersten
-Faltungsknoten, und der Fallback greift — nachgewiesen, nicht vermutet
-(`provider=CPU` im Smoke des CUDA-Builds). Für die Workstation mit
-vollständigem CUDA-Stack genügt `--features cuda`, und die Erwartung lautet
-mehrere hundert FPS Inferenz — wobei dann erst recht X11 und V-Sync
-limitieren. Für den Ryzen-Laptop ist die Botschaft noch besser: Was hier auf
-der CPU 96 FPS schafft, braucht keine GPU, um flüssig zu sein. Die
+Zuerst die CPU-Baseline, die schon alles über diese Modelle verrät: 100
+Frames aus Capture, Detektion und Rendering in 1036 Millisekunden Wandzeit
+einschließlich Startup — rund 96 FPS. Über 600 Frames stabilisiert sich der
+Wert bei 5420 ms, also etwa 111 FPS. Der E2E-Test mit Gesicht (zwei Sessions
+laden plus zwei volle Frames mit Alignment, Embedding und DB-Update) braucht
+0,10 Sekunden. Das ist kein Messfehler, sondern die Konsequenz bewusster
+Modellwahl: `det_500m` trägt seinen Namen, weil es mit 500 Mega-FLOPs
+auskommt — ein Federgewicht, das auf 32 Threads mit AVX2 praktisch verfliegt —
+und das MobileFaceNet-Embedding auf 112×112 Pixeln ist kaum mehr als ein
+Husten. Der Engpass liegt längst nicht mehr in der Inferenz, sondern wie schon
+in `source2/doc.md` analysiert im synchronen X11-Grab und im Rendering.
+
+Dann kam der Container-Neubau mit cuDNN — und mit ihm die eigentliche
+Geschichte dieses Abschnitts. Derselbe CUDA-Build, der zuvor sauber auf CPU
+zurückgefallen war, meldet nun `provider=CUDA`: Die Warmup-Inferenz in
+`try_cuda` gelingt, beide Sessions rechnen auf der GPU. Der Beweis ist
+doppelt geführt. Erstens funktional: Ohne cuDNN scheiterte exakt diese
+Warmup-Inferenz am ersten Faltungsknoten, mit cuDNN gelingt sie — und da der
+CUDA-Pfad *keinen* CPU-Fallback-Provider registriert, kann ein gelungener
+Conv-Knoten nirgendwo anders als auf der GPU gelaufen sein (cuDNN existiert
+nur dort). Zweitens per Stoppuhr: Der Gesichts-Pfad — Detect, Align, Embed,
+DB-Update, ohne X11 und Rendering, 50 Frames im E2E-Test via
+`FACE_BENCH_FRAMES=50` — braucht auf CPU 16,10 ms pro Frame und auf CUDA
+3,34 ms, in sechs Wiederholungen stabil zwischen 3,05 und 3,34 ms. Das ist
+ein Faktor 4,8 zugunsten der GPU, gemessen an der Stelle, wo wirklich
+gerechnet wird.
+
+Und doch endet die Geschichte nicht mit einem klaren Sieg, sondern mit einer
+ehrlichen Zweiteilung. Misst man nämlich die komplette Produktschleife —
+Capture, Inferenz, Rendering — über 600 Frames, steht es 5420 ms (CPU) gegen
+5871 ms (CUDA): Die GPU ist end-to-end *langsamer*, wenn auch nur um acht
+Prozent. Der Grund ist kein Mysterium, sondern Amdahls Gesetz in Reinform:
+Bei leeren Frames ohne Gesicht dauert die Inferenz wenige Millisekunden, aber
+jeder CUDA-Frame zahlt Transfer- und Launch-Overhead (Host→Device→Host,
+Kernel-Starts für ein winziges Netz), während X11-Grab und Textur-Upload
+ohnehin dominieren. Sobald Gesichter im Bild sind und die Inferenzlast steigt,
+dreht sich das Bild zugunsten von CUDA — die 3,34 gegen 16,10 ms sind der
+Vorgeschmack. Dazu kommt ein einmaliger CUDA-Startpreis: Session-Aufbau plus
+Warmup mit GPU-Initialisierung kosten rund 0,7 Sekunden (E2E-Gesamt 0,82 s
+gegen 0,10 s CPU), für einen langlaufenden Prozess irrelevant, für
+Kurzläufer spürbar.
+
+Ein ehrlicher Absatz gehört noch der GPU-Beobachtung selbst. Wer während der
+CUDA-Läufe auf `nvidia-smi` starrte, sah fast nichts: 0–1 % SM-Last, keine
+Compute-Prozesse in der Liste, flacher Speicher. Kein Grund zur Panik, sondern
+Arithmetik: Bei 100 FPS und sub-Millisekunden-Kernen sieht ein 1-Hz-Sampling
+im Mittel genau diese 1 % (100 × 0,1 ms = 10 ms Rechenzeit pro Sekunde). Die
+fehlende Prozess-Zuordnung ist eine Container-Eigenheit der
+NVML-Attribution, kein Gegenbeweis — der Gegenbeweis wäre ein erfolgreicher
+Conv-Knoten ohne GPU, und den gibt es per Konstruktion nicht.
+
+Für den Ryzen-Laptop bleibt die Botschaft die beste des ganzen Berichts: Was
+auf der CPU über 100 FPS schafft, braucht keine GPU, um flüssig zu sein. Die
 Multi-Thread-Konfiguration (`available_parallelism` Intra-Op-Threads) nimmt
 mit, was der Laptop hergibt, und die Architektur — native 640 ohne Resize,
-keine Kopien, keine Wartezeiten — ist auf beiden Plattformen dieselbe.
+keine Kopien, keine Wartezeiten — ist auf beiden Plattformen dieselbe. CUDA
+ist der Turbo für gesichtsreiche Frames auf der Workstation; der CPU-Pfad ist
+kein Notnagel, sondern ein erstklassiger Standard.
 
 ## 6. Learnings & Ausblick für das Dockerfile
 
-Vier Lektionen bleiben, sortiert nach Bissigkeit. Erstens: *Traue keinem
+Fünf Lektionen bleiben, sortiert nach Bissigkeit. Erstens: *Traue keinem
 Commit.* Ob ein Execution Provider wirklich rechnen kann, beweist nur eine
-Probe-Inferenz — alles andere kracht im Hot-Path statt beim Start. Zweitens:
+Probe-Inferenz — alles andere kracht im Hot-Path statt beim Start. Dass
+dieselbe Warmup-Prüfung nach dem cuDNN-Nachrüsten plötzlich `provider=CUDA`
+meldet, ist die schönste Bestätigung dieser Regel: Der Code musste für den
+GPU-Erfolg nicht angefasst werden. Zweitens:
 *Der einzige ehrliche Decode-Test ist ein echtes Gesicht.* Synthetische
 Tensoren prüfen Arithmetik, aber erst ein Porträt mit bekannter Antwort
 prüft Semantik. Drittens: *Bei `ort` gilt die Registry-Quelle.* Typnamen und
@@ -327,25 +378,33 @@ Fehlertypen der Version 2.0.0-rc.13 waren nur im heruntergeladenen Quelltext
 verlässlich zu finden; die Web-Doku antwortete mit 404. Viertens, eher
 hausmeisterlich: Rust 1.98 will `as_chunks` statt `chunks_exact` mit
 Konstanten und `is_multiple_of` statt Modulo-Vergleich — Lints, die man einmal
-lernt und nie wieder sieht.
+lernt und nie wieder sieht. Fünftens: *Messe den Pfad, den du behauptest.*
+Der 4,8×-CUDA-Vorsprung gilt für die Inferenz, nicht für die Produktschleife —
+wer nur end-to-end misst, erklärt fälschlich ein Unentschieden zum Patt der
+Hardware statt zur Dominanz von Capture und Rendering.
 
 Für das Dockerfile fallen zwei Installationserinnerungen an. Zur Laufzeit
 braucht das miniquad-X11-Backend `libxkbcommon0`, `libgl1`, `libxi6` und
 `libxcursor1` (plus die mitgezogene `libxfixes3`) — ohne sie stirbt das Binary
 beim Start mit `DlOpenError`. Nur zur Test-Asset-Erzeugung diente `python3-pil`
 (PNG→PPM, wohlgemerkt über System-`/usr/bin/python3`, nicht das Workspace-
-venv); für Laufzeit-Images ist es optional. Bereits vorhanden und genutzt
-wurden `xvfb`/`xvfb-run`, die CUDA-Runtime-Libs der Version 13 (ohne Compiler
-und ohne cuDNN) sowie Rust 1.98.1. Die Modelle — `det_500m.onnx` (2,5 MB) und
+venv); für Laufzeit-Images ist es optional. Im neu gebauten Container
+kamen `xvfb` und die X11-Libs erneut per apt hinzu (sie gehören ins Dockerfile,
+nicht ins Gedächtnis), und entscheidend: cuDNN 9 (`libcudnn9`-Familie) ist nun
+Teil des Images — die Voraussetzung für `provider=CUDA`. Bereits vorhanden und
+genutzt wurden die CUDA-Runtime-Libs der Version 13 (ohne Compiler) sowie
+Rust 1.98.1. Die Modelle — `det_500m.onnx` (2,5 MB) und
 `w600k_mbf.onnx` (13,6 MB) aus dem Release v0.0.1 von
 `yakhyo/face-reidentification` — lädt `source7/download_models.sh` per curl
 mit Größenprüfung nach; im Git landen sie dank `.gitignore` nie, verifiziert
 per `git check-ignore`.
 
 Was bleibt? Ein System, das tut, was es verspricht, und verspricht, was es
-beweisen kann — vom Gauß-Fit über die Geisterboxen bis zum ehrlichen
-`provider=CPU`. Die Pipeline ist klein genug, um sie an einem Nachmittag zu
-lesen (1529 Zeilen über acht Module), und getestet genug, um sie anzufassen.
-Der nächste Schritt, wenn die Workstation cuDNN bekommt, ist ein Einzeiler:
-`--features cuda`. Und dann sehen wir, wie viele hundert FPS ein 500-MFLOP-
-Modell auf einer RTX A4000 wirklich schafft.
+beweisen kann — vom Gauß-Fit über die Geisterboxen bis zum ehrlichen Provider-
+Label, das ohne cuDNN `CPU` und mit cuDNN `CUDA` meldet, ohne dass sich eine
+Codezeile dazwischen geändert hätte. Die Pipeline ist klein genug, um sie an
+einem Nachmittag zu lesen (acht Module, größtes 270 Zeilen), und getestet
+genug, um sie anzufassen. Und die einstmals offene Frage ist beantwortet: Ein
+500-MFLOP-Modell schafft auf der RTX A4000 rund 300 FPS reine Inferenz —
+3,34 ms pro Gesichts-Frame — während die Produktschleife mit über 100 FPS
+daran erinnert, dass am Ende immer noch X11 das Sagen hat.

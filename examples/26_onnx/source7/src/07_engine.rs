@@ -190,6 +190,20 @@ mod tests {
         assert_eq!(again.len(), 1);
         assert_eq!(again[0].person_id, Some(0));
         assert_eq!(eng.db().exemplar_count(), 1);
+        // Optionaler Benchmark: FACE_BENCH_FRAMES=N misst N Gesichts-Frames
+        // (Detect+Align+Embed+DB, ohne X11/Render) und meldet ms/Frame.
+        let bench: usize = std::env::var("FACE_BENCH_FRAMES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2);
+        let t0 = std::time::Instant::now();
+        for _ in 2..bench.max(2) {
+            eng.process_frame(&rgb, 640, 640);
+        }
+        if bench > 2 {
+            let ms = t0.elapsed().as_secs_f64() * 1000.0 / (bench - 2) as f64;
+            eprintln!("bench: {bench} Gesichts-Frames, {ms:.2} ms/Frame (Provider: {prov})");
+        }
     }
 
     #[test]
