@@ -1,209 +1,120 @@
-du lauefst in einem docker image mit ubuntu 26 auf einem linux host
-und hast zugriff auf kernel messages vom host. falls dir packete
-fehlen installiere sie.  du arbeitest im auftrag von wol pumba
-(wolpumba@gmail.com)
+Du läufst in einem Docker-Container mit Ubuntu 26 auf einem Linux-Host und hast Zugriff auf Kernel-Messages des Hosts.
+Falls Systempakete oder Tools fehlen, installiere sie selbstständig via `apt` bzw. `cargo`.
+Auftraggeber: Wol Pumba (wolpumba@gmail.com).
 
-der ubuntu 26 docker container in dem du laeufst ist durch diese
-docker datei erzeugt:
+Docker-Referenz:
 /workspace/src/cl-cl-generator/example/05_dockerfile_meta/source01/examples/03_ai_env/Dockerfile
 
-InsightFace (ArcFace & SCRFD): This is the gold standard for
-open-source facial analysis. SCRFD is an incredibly fast, efficient
-face detector that handles severe occlusions and tiny faces
-effortlessly. ArcFace converts those faces into light embeddings for
-recognition. The entire suite is heavily optimized for onnxruntime.
+Hardware-Zielplattformen:
+1. Workstation: AMD Ryzen Threadripper PRO 7955WX 16-Cores + NVIDIA RTX A4000 (CUDA 13.3)
+2. Laptop: AMD Ryzen 7 7735HS mit Radeon Graphics (CPU-optimiert mit AVX2)
 
-Die folgenden repos haben auch eintraege im deepwiki mcp
-https://github.com/deepinsight/insightface
-https://github.com/yakhyo/face-reidentification Real-time face
-re-identification and face search with SCRFD detection, ArcFace
-embeddings and FAISS vector search on ONNX Runtime.
+Referenz-Repositories & DeepWiki MCP:
+- https://github.com/deepinsight/insightface
+- https://github.com/yakhyo/face-reidentification (Referenz für SCRFD Post-Processing & ArcFace Pipeline)
+- Nutze das DeepWiki MCP für 'plops/cl-rust-generator' und Abhängigkeiten.
 
-compare the two faiss rust bindings. faiss-rs has more github stars.
-https://github.com/Enet4/faiss-rs
-https://github.com/yexiangyu/faiss-next ich habe unten einen vergleich
-angehaengt. vielleicht ist eine vectordatenbank fuer dieses program
-jedoch zu aufwaendig. letzendlich moechte ich beim schauen alle neuen
-faces in eine persistente datenbank aufnehmen und mit einer nummer
-versehen. wenn ich z.b. auf netflix eine show schaue und eine woche
-spaeter wieder, dann moechte ich den vorher vorgekommenen gesichtern
-die gleichen nummern zuordnen. ausserdem den recognizer mit neuen
-examplen trainieren. es soll ein status ueber die anzahl eingetragener
-gesichter und bilder pro gesicht angezeigt werden.
-
-Bestimme 5-Point Landmark Alignment (Augen, Nase, Mundwinkel) so dass
-arcface gut funktioniert.
-
-Hier sind ein paar download links fuer weights
-https://github.com/deepinsight/insightface/blob/master/detection/scrfd/README.md
-
-basiere deinen code auf
+Basis-Code:
 cl-rust-generator/examples/26_onnx/source2/{Cargo.toml,src/main.rs}
 
-d.h. die input daten sollen als screenshots von x11 server abgezogen
-werden.  nutze dafuer zunaechst die standard eingabe groesse des
-netzes um den code performant und praegnant zu halten.
+WICHTIG – Code-Generierung:
+Erzeuge DIREKT nativen, modularen RUST-Code (KEINEN Lisp/Generator-Code).
+Ziel ist kleiner, übersichtlicher, hocheffizienter Code mit minimalen Abhängigkeiten.
 
-schreibe ein script um die gewichte (und moegliche
-zusatzinformationen) herunterzuladen. committe keine grossen dateien
-ins repo.  bevorzuge kleine performante gewichte, so dass wir eine
-schnelle ausfuehrung haben.
-
-ich moechte dass das programm sowohl auf meinem laptop AMD Ryzen 7
-7735HS with Radeon Graphics mit cpu und vulkan support. und auch auf
-diesem pc (wo der docker drin laeuft) mit
-
-```
-kiel@localhost ~ $ nvidia-smi
-Sat Sep 26 07:13:37 2026
-+-----------------------------------------------------------------------------------------+
-| NVIDIA-SMI 610.57.04              KMD Version: 610.57.04     CUDA UMD Version: 13.3     |
-+-----------------------------------------+------------------------+----------------------+
-| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
-| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
-|                                         |                        |               MIG M. |
-|=========================================+========================+======================|
-|   0  NVIDIA RTX A4000               Off |   00000000:01:00.0 Off |                  Off |
-| 41%   34C    P8             13W /  140W |     607MiB /  16376MiB |      0%      Default |
-|                                         |                        |                  N/A |
-+-----------------------------------------+------------------------+----------------------+
-
-+-----------------------------------------------------------------------------------------+
-| Processes:                                                                              |
-|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
-|        ID   ID                                                               Usage      |
-|=========================================================================================|
-|    0   N/A  N/A         1664415      G   alacritty                                10MiB |
-|    0   N/A  N/A         4083702      G   /usr/bin/X                              566MiB |
-+-----------------------------------------------------------------------------------------+
-kiel@localhost ~ $ cat /proc/cpuinfo |grep Threa
-model name	: AMD Ryzen Threadripper PRO 7955WX 16-Cores
-```
+Arbeitsverzeichnis:
+/workspace/src/cl-rust-generator/examples/26_onnx/source7
 
 
-ich moechte kleinen/uebersichtlichen und effizienten code und
-moeglichst wenig abhaengigkeiten.  du sollst in dieser aufgabe direkt
-rust code erzeugen (nicht den lisp-artigen input code fuer den
-cl-rust-generator transpiler)
+==============================================================================
+AUFGABE & FUNKTIONALE ANFORDERUNGEN
+==============================================================================
 
-fuers testen kannst du xvfb installiern, und beispiel bilder
-runterladen mit gesichtern
+Implementiere eine hochperformante Live-Gesichtserkennungs- und Re-ID-Pipeline in Rust:
 
-in deps.md sollst du die pfade der abhaengigkeiten auf github in der
-<organization>/<projekt> notation auflisten. dies kannst du benutzen
-um in deepwiki mcp nach weiteren informationen zu suchen / fragen.
+1. X11 Capture:
+   - Liest den Frame via `x11rb` direkt vom X11-Root-Window ab (Standardgröße 640x640 für maximale Effizienz).
 
-ordnerstruktur: arbeite im ordner
-/workspace/src/cl-rust-generator/examples/26../source7
+2. Face Detection (SCRFD):
+   - Modell: `det_500m.onnx` (kompakt und extrem schnell).
+   - Führt Multi-Stride Anchor Decoding (Strides 8, 16, 32), Distance2BBox, Distance2Landmarks und Greedy NMS aus.
+   - Liefert Bounding Boxes und 5 Gesichts-Landmarks (linkes/rechtes Auge, Nase, linker/rechter Mundwinkel).
 
-datei-aufteilung (neu, verbindlich): lange quelltext-dateien sind zu
-vermeiden. sobald eine datei mehr als eine klar abgrenzbare
-zustaendigkeit hat oder ca. 300 zeilen ueberschreitet, ist sie in
-semantisch getrennte einzelne dateien zu unterteilen. jede neue datei
-bekommt am anfang eine zweistellige nummer plus einen namen der
-widerspiegelt was darinsteht, z.b. `01_clock.rs`, `02_usb_cdc.rs`,
-`03_router.rs` in `firmware/src/` bzw. `01_types.rs`, `02_frame.rs` in
-`common/src/`. regeln: aufsteigende nummern folgen der
-initialisierungs-/datenfluss-reihenfolge (clock vor peripherie,
-transport vor protokoll, protokoll vor modus), zusammengehoeriges
-bleibt in einer datei (kein auseinanderreissen von zusammengehoerigen
-typen + ihren tests), `mod.rs`/`lib.rs`/`main.rs` enthalten nur
-modul-deklarationen und die oberste verdrahtung (init, spawn, join),
-kein verhalten. aufteilung immer ohne verhaltens-aenderung
-durchfuehren (vorher/nachher: alle tests plus smoke
-gruens). bestehende dateien (`main.rs`, `text.rs`, `frame.rs`,
-`router.rs`) bei bedarf nach diesen regeln umbauen, sobald du sie
-anfasst.
+3. 5-Point Landmark Alignment (Umeyama):
+   - Berechnet die 2x3 Ähnlichkeitstransformations-Matrix (Least-Squares / Umeyama) von den 5 erkannten Landmarks auf die offiziellen ArcFace-Referenzkoordinaten (112x112 Template).
+   - Warpt das Gesicht bilinear auf einen normalisierten 112x112 Bild-Crop.
 
-vorgehensweise: nutze tools um konsistenten und aufgeraeumten
-quellcode zu gewaehrleisten (also `cargo fmt` um formatierung zu
-normalisieren, `cargo clippy` um moegliche fehler oder verbesserungen
-zu finden, cargo-edit mit `cargo upgrade` um bei den abhaengigkeiten
-die neueste version zu verwenden, ...)
+4. Feature Extraction (ArcFace):
+   - Modell: `w600k_mbf.onnx` (MobileFaceNet, ~13 MB).
+   - Input: Normalisierter 112x112 Crop.
+   - Output: 512-dimensionaler Feature-Vektor, zwingend L2-normalisiert.
 
-Schaue dir den Quellcode an und die Architektur dieser Software. Nutze
-deepwiki mcp fuer plops/cl-rust-generator um dokumentation zu bekommen
-und fragen beantworten zu lassen. falls abhaengigkeiten eingefuehrt
-werden sind diese mitsamt ihrer github organisation in deps.md
-aufzuschreiben, so dass wir spaeter einfach die deepwiki abfragen
-konstruieren koennen. nutze rust tools um auf die neueste vorhandene
-version zu switchen (auch wenn vor kompatibilitaet gewarnt wird, wenn
-wir gerade eine dependency einfuehren ist es wichtig, die neueste
-version zu nehmen) und schon vorab usage examples in den plan
-aufzunehmen (mit deepwiki mcp zu erfragen)
+5. Re-ID, Online-Exemplar-Clustering & Persistenz:
+   - KEINE C++ Vektordatenbank (kein FAISS – zu fehleranfällig beim Kompilieren und Overkill für wenige tausend Vektoren).
+   - Nutze eine Pure-Rust Persistenz via `serde` und `bincode` (Datei: `faces_db.bin`).
+   - Da Vektoren L2-normalisiert sind, entspricht die Cosine-Similarity dem einfachen Dot-Product.
+   - Exemplar-Bank (Online-Clustering): Speichere pro Person bis zu 5 Repräsentanten (Exemplare). Jedes Exemplar enthält den 512D-Vektor UND das zugehörige 112x112 RGB-Thumbnail.
+   - Update-Logik:
+     * Match: Höchste Similarity S_max zu allen gespeicherten Exemplaren ermitteln.
+     * S_max >= 0.65: Bekannte Person wiedererkannt -> selbe Person-ID zuordnen.
+       - Falls 0.65 <= S_max <= 0.88: Neues, diversifiziertes Exemplar (z.B. anderer Blickwinkel) -> Thumbnail + Vektor zur Person hinzufügen (max. 5 Exemplare, bei Überlauf ältestes ersetzen).
+       - Falls S_max > 0.88: Bild ist redundant -> verwerfen.
+     * S_max < 0.45: Unbekannte Person -> Neue Person-ID vergeben und erstes Exemplar anlegen.
+     * 0.45 <= S_max < 0.65: Ambivalenz-Bereich -> Nur Bounding Box tracken, nicht in die DB einpflegen.
 
-du befindest dich in einem docker container, basierend auf ubuntu
-26. du darfst neue programme installieren, falls noetig.
+6. UI & Visualisierung (Macroquad):
+   - Fenstergröße z.B. 820x640:
+     * Links (640x640): Live-Feed mit Bounding Boxes, 5 Keypoints und Personen-IDs.
+     * Rechts (180px Sidebar):
+       - Live-Preview: Zeige den aktuell erkannten 112x112 Aligned-Crop in Echtzeit.
+       - Galerie: Zeige Thumbnails der gespeicherten Personen aus der Datenbank.
+       - Status-HUD: Anzahl erfasster Personen, Anzahl gespeicherter Exemplare, FPS, aktiver Execution Provider.
 
-Schlage vor, wie wir dieses Feature implementieren können. Habe ich
-alle Requirements aufgelistet, die wichtig sind, oder kannst du dir
-vorstellen, dass noch andere Dinge beruecksichtigt werden sollten?
-Liste mir diese auf Vorschlägen, was man am besten umsetzen könnte.
+7. Hardware-Strategie (ort Execution Provider):
+   - Initialisiere `ort` so, dass primär der `CUDAExecutionProvider` gewählt wird (für die RTX A4000).
+   - Bei Fehlschlag oder Fehlen der CUDA-Treiber fange den Fehler ab und falle sauber auf den multi-threaded `CPUExecutionProvider` zurück (für den Ryzen Laptop).
 
-Schreibe einen Implementierungsplan. Dieser Implementierungsplan soll
-einen unabhängigen AI-Agenten dazu befähigen, selbstständig einen
-Kontext aufzubauen, der die wesentlichen quellen beinhaltet.  Das
-heißt, der Implementierungsplan hat eine Liste von Dateien, die sich
-der Agent sich anschauen sollte, mit einer kurzen Beschreibung für
-jede Datei.  Erkläre darin auch, wie und wann Commits zu erstellen
-sind (Conventional Commits).
-
-Neue Unit-Tests und Integration-Tests sollen wie erforderlich
-eingeführt werden.  Diese sollen auch ausgeführt werden.
-
-schreibe task.md wo du die implementierungs und test schritte
-aufeinander abfolgen laesst, so dass ein agent die tasks seriell
-abarbeiten kann und die arbeit in jedem schritt getested und validiert
-wird. 
-
-Nach der vollständigen Implementierung, wenn alle Tests abgeschlossen
-sind und alles committed ist, soll auch ein Walkthrough-Dokument
-geschrieben werden und in plan/2026.../walkthrough.md (im ordner wo du
-diese prompt.txt datei findest) abgelegt werden. Dieses soll
-zusammenfassen, was wirklich implementiert wurde, welche Stellen
-aufgrund der Tests oder wie auch immer gemacht wurden, sowie Learnings
-und mögliche Erweiterungen. liste auch die neuen programme die mit in
-den docker container aufgenommen werden sollten
-
-schreibe diese dokumente mit einleitung und hole den leser ab und nimm
-ihn mit, indem du beispiele verwendest, begruendungen fuer
-entscheidungen lieferst und argumentierst
+8. Model-Download:
+   - Schreibe ein Skript `download_models.sh`, welches `det_500m.onnx` und `w600k_mbf.onnx` via `curl` aus verlässlicher Quelle (z.B. yakhyo/face-reidentification Releases) herunterlädt.
+   - Committe KEINE Binärmodelle ins Git!
 
 
-# About faiss bindings
+==============================================================================
+DATEI-AUFTEILUNG & QUALITÄTSREGELN (VERBINDLICH)
+==============================================================================
 
-When choosing between faiss-rs and faiss-next for Rust bindings to
-Meta's [Faiss vector search
-library](https://github.com/facebookresearch/faiss), the choice comes
-down to historical maturity versus modern Windows/cross-platform
-support.  Here is a direct comparison of the two projects:
-
-| Feature / Aspect      | Enet4/faiss-rs[](https://github.com/enet4/faiss-rs)           | yexiangyu/faiss-next[](https://github.com/yexiangyu/faiss-next)     |
-|-----------------------+---------------------------------------------------------------+---------------------------------------------------------------------|
-| Project Status        | Passively maintained (explicitly marked in Cargo.toml)        | Actively maintained (recent releases extending into 2026)           |
-| Primary Focus         | Standard Linux/macOS high-level safe API                      | Better developer ergonomics and robust Windows support              |
-| Crate Name            | faiss                                                         | faiss-next                                                          |
-| GPU / Static Features | Supported via faiss-sys features                              | Supported, explicitly accommodating GPU configurations              |
-| Build Configuration   | Relies on a system-installed Faiss C API (FAISS_ENABLE_C_API) | Provides explicit documentation and setups for vcpkg/Windows builds |
-
-## Key Differences to Consider
-
-* 
-* Maintenance & Recency: Enet4/faiss-rs is the original, widely recognized Rust wrapper cited in the [official Faiss wiki](https://github.com/facebookresearch/faiss/wiki/Related-projects). However, its author has officially designated it as passively maintained. On the other hand, yexiangyu/faiss-next is a newer fork/evolution created to address compilation bottlenecks and modernise the API. [1, 2, 3] 
-* Windows Support: Compiling the Faiss C API on Windows can be notoriously difficult. faiss-next provides tailored support, environment variables (FAISS_INCLUDE_DIR, FAISS_LIB_DIR), and even a pre-configured branch to make Windows builds straightforward. [4] 
-* API Similarities: Both libraries expose a safe Rust interface over the C API. They support standard features like IndexFlat, index_factory configurations, and training indices. [2, 3, 5] 
-* 
-
-## Recommendation
-
-* 
-* Choose faiss-next if you are starting a new project, require reliable Windows cross-compilation, or want a crate that is actively being kept up-to-date with newer upstream Faiss variations.
-* Choose faiss-rs only if you are maintaining legacy codebases that already rely deeply on its specific version pin of faiss-sys.
-* 
+- Max. ~300 Zeilen pro Quelltext-Datei. Jede Datei hat genau eine semantische Zuständigkeit.
+- Nummerierte Präfixe gemäß Datenfluss und Initialisierung:
+  * `01_types.rs`: Schemata für BBox, Landmarks5, Embedding512, Exemplar, PersonRecord.
+  * `02_screen_capture.rs`: X11-Root-Grab via x11rb (640x640 Z-Pixmap -> RGB Buffer).
+  * `03_alignment.rs`: Umeyama 5-Punkt Ähnlichkeitstransformation und Bilinear-Warp auf 112x112.
+  * `04_scrfd_detector.rs`: ONNX Session SCRFD, Preprocessing, Anchor-Decoding, NMS.
+  * `05_arcface_embed.rs`: ONNX Session ArcFace, 112x112 Preprocessing, 512D L2-Norm Embedding.
+  * `06_face_database.rs`: Exemplar-Store, Dot-Product Similarity, Online-Clustering, Bincode I/O.
+  * `07_engine.rs`: Pipeline-Orchestrierung (Capture -> Detect -> Align -> Match -> DB-Update).
+  * `main.rs`: CLI-Args, Macroquad-Setup, Event-Loop und UI/Sidebar-Rendering.
+- `deps.md`: Liste alle externen GitHub-Dependencies im `<organization>/<projekt>` Format auf.
+- Code-Hygiene: `cargo fmt` und `cargo clippy -- -D warnings` müssen ausnahmslos fehlerfrei durchlaufen.
+- Tests: Headless-Tests mit `xvfb-run`.
 
 
-[1] [https://github.com](https://github.com/facebookresearch/faiss/wiki/Related-projects)
-[2] [https://github.com](https://github.com/Enet4/faiss-rs/blob/master/Cargo.toml)
-[3] [https://crates.io](https://crates.io/crates/faiss-next)
-[4] [https://docs.rs](https://docs.rs/crate/faiss-next/latest)
-[5] [https://github.com](https://github.com/yexiangyu/faiss-next)
+==============================================================================
+DELIVERABLES
+==============================================================================
+
+1. Implementierungsplan (`plan/implementation_plan.md`):
+   - Hole den Leser mit einer Einleitung ab.
+   - Liste relevanter Dateien mit Begründung.
+   - Detaillierte Commit-Strategie nach Conventional Commits (`feat`, `fix`, `refactor`, `test`, `perf`).
+
+2. Aufgabenliste (`task.md`):
+   - Serialisierte, schrittweise Task-Liste für einen autonomen Agenten.
+   - Jeder Task muss Implementierung, Host-Tests und Validierungsschritte enthalten.
+
+3. Quellcode in `/workspace/src/cl-rust-generator/examples/26_onnx/source7`:
+   - Vollständige, lauffähige Rust-Implementierung inklusive Unit- und Integrationstests.
+
+4. Walkthrough-Dokumentation (`plan/walkthrough.md`):
+   - Nach erfolgreicher Implementierung und Bestehen aller Tests:
+   - Zusammenfassung des Systems, Code-Entscheidungen, Testergebnisse, Performance CUDA vs. CPU, aufgetretene Learnings und Liste neu installierter Systempakete für das Dockerfile.
+
+
