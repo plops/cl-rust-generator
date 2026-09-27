@@ -1,0 +1,191 @@
+du lauefst in einem docker image mit ubuntu 26 auf einem linux host
+und hast zugriff auf kernel messages vom host und auch die usb
+geraete. falls dir packete fehlen installiere sie.  du arbeitest im
+auftrag von wol pumba (wolpumba@gmail.com)
+
+
+You are an expert systems engineer and principal Rust developer specializing in scientific computing, computer graphics, and physics simulations. 
+
+I want to build a headless, high-performance, differentiable 3D optical ray tracing engine in Rust, inspired by industry tools like Zemax. Instead of a desktop GUI, this tool will use a TOML configuration file for input, run optimizations using Automatic Differentiation (AD), and output results via a Terminal User Interface (TUI) or export clean JSON for a Three.js web viewer.
+
+Please generate the complete core architecture for this project following the specifications below.
+
+### 1. Architecture & Design Principles
+- **No Heavy GUI:** Separate the math engine completely from the presentation layer.
+- **Idiomatic Rust:** Enforce strict type safety, maximize zero-cost abstractions, avoid `unsafe` unless strictly needed for raw performance benchmarks, and leverage `serde` for serialization.
+- **Differentiable Physics:** Implement forward-mode automatic differentiation using Dual Numbers. Every geometric calculation (ray-surface intersection, Snell's law refraction) must preserve gradients relative to optimization variables (e.g., lens radius of curvature, thickness, position).
+
+### 2. Theoretical & Mathematical Foundations
+- **Dual Numbers:** A dual number is represented as \(f(x) + \epsilon f'(x)\), where \(\epsilon^2 = 0\). For any operation, track both the value and its exact partial derivative.
+- **Ray Representation:** A ray consists of an origin point \(\vec{o} = (x, y, z)\) and a normalized direction vector \(\vec{d} = (dx, dy, dz)\), where all components are Dual numbers.
+- **Spherical Surface Intersection:** A spherical surface is defined by its radius of curvature \(R\) and its vertex position \(z_0\) along the optical axis. Find the intersection distance \(t\) by solving the quadratic equation:
+  \[\Vert{}\vec{o} + t\vec{d} - \vec{c}\Vert{}^2 = R^2\] 
+  where \(\vec{c} = (0, 0, z_0 + R)\) is the center of curvature.
+- **Snell's Law in Vector Form:** Given an incident ray direction \(\vec{d}\), a surface normal \(\vec{n}\), and refractive indices \(n_1\) and \(n_2\):
+  \[\mu = \frac{n_1}{n_2}\]
+  \[\cos(\theta_1) = -\vec{n} \cdot \vec{d}\]
+  \[\vec{d}_{\text{refracted}} = \mu \vec{d} + \left(\mu \cos(\theta_1) - \sqrt{1 - \mu^2 (1 - \cos^2(\theta_1))}\right) \vec{n}\]
+
+### 3. Step 1: Core Mathematical Engine
+Provide the structural implementation for the Auto-Diff layer using `nalgebra`. 
+
+```rust
+use std::ops::{Add, Sub, Mul, Div, Neg};
+use nalgebra::{Vector3, Point3};
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Dual {
+    pub v: f64, // Value
+    pub d: f64, // Derivative
+}
+
+impl Dual {
+    pub fn new(v: f64, d: f64) -> Self { Self { v, d } }
+    pub fn constant(v: f64) -> Self { Self { v, d: 0.0 } }
+    pub fn variable(v: f64) -> Self { Self { v, d: 1.0 } }
+    
+    // Implement math operations: sin, cos, sqrt, powf, etc.
+    pub fn sqrt(self) -> Self {
+        let s = self.v.sqrt();
+        Self { v: s, d: if s == 0.0 { 0.0 } else { self.d / (2.0 * s) } }
+    }
+}
+
+// TODO: Provide full Add, Sub, Mul, Div, Neg implementations for Dual and &Dual.
+
+pub struct Ray {
+    pub origin: Point3<Dual>,
+    pub direction: Vector3<Dual>,
+}
+```
+
+### 4. Step 2: System Data Structures & TOML Parsing
+Define the system state layout matching this sample TOML structure. Ensure fields can be designated as static constants or active optimization variables.
+
+```toml
+[source]
+ray_count = 10
+grid_radius = 5.0
+
+[[surfaces]]
+name = "Front Element"
+radius = 50.0
+thickness = 5.0
+material = 1.5168 # N-BK7 index
+optimize = ["radius"]
+
+[[surfaces]]
+name = "Back Element"
+radius = -100.0
+thickness = 40.0
+material = 1.0 # Air
+optimize = []
+```
+
+Generate the corresponding Rust structs using `serde::Deserialize`. Write a trace loop function `pub fn trace_system(surfaces: &[Surface], setup: &OpticalSetup) -> Vec<IntersectionResult>` that steps a bundle of rays sequentially through the surface array.
+
+### 5. Step 3: Optimization & Loss Function
+Implement an optimization loop using an RMS Spot Size objective function. The loss function calculates the spread of rays at the final image plane:
+\[\text{Loss} = \sum_{i=1}^{N} (x_i^2 + y_i^2)\]
+Using the derivatives automatically calculated by the `Dual` fields at the image plane, write a simple gradient descent update step that adjusts the designated `optimize` variables across iterations.
+
+### 6. Step 4: Web (Three.js JSON) and TUI Layout Layouts
+- **JSON Export:** Provide a schema and serialization code to output a structural `system.json` file. This payload must include the computed 3D positions of the lens profiles (for `THREE.LatheGeometry`) and the full array of tracked 3D ray segment paths (`THREE.LineSegments`).
+- **TUI Architecture:** Sketch out a text-based telemetry layout using `ratatui`. Show how to divide the screen into a live variable inspector panel, a running line graph for the loss function reduction, and a text status display.
+
+Please output clean, well-documented, compilable Rust code for the `Dual` implementation, the ray-surface interaction mathematics, and the global optimization loop. Include inline documentation detailing how the forward-mode automatic differentiation ripples from the input lens parameters down to the final ray error vector.
+
+
+ich moechte kleinen/uebersichtlichen und effizienten code und
+moeglichst wenig abhaengigkeiten.  du sollst in dieser aufgabe direkt
+rust code erzeugen (nicht den lisp-artigen input code fuer den
+cl-rust-generator transpiler)
+
+fuers testen kannst du xvfb oder pupetteer installiern. es gibt `uv`
+fuer python dependencies
+
+in deps.md sollst du die pfade der abhaengigkeiten auf github in der
+<organization>/<projekt> notation auflisten. dies kannst du benutzen
+um in deepwiki mcp nach weiteren informationen zu suchen / fragen.
+
+ordnerstruktur: arbeite im ordner
+/workspace/src/cl-rust-generator/examples/25../source6
+
+
+datei-aufteilung (neu, verbindlich): lange quelltext-dateien sind zu
+vermeiden. sobald eine datei mehr als eine klar abgrenzbare
+zustaendigkeit hat oder ca. 300 zeilen ueberschreitet, ist sie in
+semantisch getrennte einzelne dateien zu unterteilen. jede neue datei
+bekommt am anfang eine zweistellige nummer plus einen namen der
+widerspiegelt was darinsteht, z.b. `01_clock.rs`, `02_usb_cdc.rs`,
+`03_router.rs` in `firmware/src/` bzw. `01_types.rs`, `02_frame.rs` in
+`common/src/`. regeln: aufsteigende nummern folgen der
+initialisierungs-/datenfluss-reihenfolge (clock vor peripherie,
+transport vor protokoll, protokoll vor modus), zusammengehoeriges
+bleibt in einer datei (kein auseinanderreissen von zusammengehoerigen
+typen + ihren tests), `mod.rs`/`lib.rs`/`main.rs` enthalten nur
+modul-deklarationen und die oberste verdrahtung (init, spawn, join),
+kein verhalten. aufteilung immer ohne verhaltens-aenderung
+durchfuehren (vorher/nachher: alle tests plus smoke
+gruens). bestehende dateien (`main.rs`, `text.rs`, `frame.rs`,
+`router.rs`) bei bedarf nach diesen regeln umbauen, sobald du sie
+anfasst.
+
+vorgehensweise: nutze tools um konsistenten und aufgeraeumten
+quellcode zu gewaehrleisten (also `cargo fmt` um formatierung zu
+normalisieren, `cargo clippy` um moegliche fehler oder verbesserungen
+zu finden, cargo-edit mit `cargo upgrade` um bei den abhaengigkeiten
+die neueste version zu verwenden, ...)
+
+Schaue dir den Quellcode an und die Architektur dieser Software. Nutze
+deepwiki mcp fuer plops/cl-rust-generator um dokumentation zu bekommen
+und fragen beantworten zu lassen. falls abhaengigkeiten eingefuehrt
+werden sind diese mitsamt ihrer github organisation in deps.md
+aufzuschreiben, so dass wir spaeter einfach die deepwiki abfragen
+konstruieren koennen. nutze rust tools um auf die neueste vorhandene
+version zu switchen (auch wenn vor kompatibilitaet gewarnt wird, wenn
+wir gerade eine dependency einfuehren ist es wichtig, die neueste
+version zu nehmen) und schon vorab usage examples in den plan
+aufzunehmen (mit deepwiki mcp zu erfragen)
+
+du befindest dich in einem docker container, basierend auf ubuntu
+26. du darfst neue programme installieren, falls noetig.
+
+Schlage vor, wie wir dieses Feature implementieren können. Habe ich
+alle Requirements aufgelistet, die wichtig sind, oder kannst du dir
+vorstellen, dass noch andere Dinge werden sollen? Liste mir diese auf
+Vorschlägen, was man am besten umsetzen könnte. beruecksichtige dabei:
+messgenauigkeit und kalibrierung (referenzspannung, quarz-toleranz),
+schutzbeschaltung/limits aus spec §4 (max. 3,3 V an analogen pins),
+TUI-protokoll-versionierung, fehlerverhalten bei modus-wechsel
+waehrend laufender messung, sowie persistente konfiguration (soll die
+firmware einstellungen behalten?).
+
+Schreibe einen Implementierungsplan. Dieser Implementierungsplan soll
+einen unabhängigen AI-Agenten dazu befähigen, selbstständig einen
+Kontext aufzubauen, der die wesentlichen quellen beinhaltet.  Das
+heißt, der Implementierungsplan hat eine Liste von Dateien, die sich
+der Agent sich anschauen sollte, mit einer kurzen Beschreibung für
+jede Datei.  Weiterhin soll der Implementierungsplan eine Erklärung
+Commit Messages sendet werden sollen. Und zwar sollen diese mit einer
+umfassenden Beschreibung und als Conventional Commit format ausgeführt
+werden.
+
+Neue Unit-Tests und Integration-Tests sollen wie erforderlich
+eingeführt werden.  Diese sollen auch ausgeführt werden.
+
+schreibe task.md wo du die implementierungs und test schritte
+aufeinander abfolgen laesst, so dass ein agent die tasks seriell
+abarbeiten kann und die arbeit in jedem schritt getested und validiert
+wird. jeder modus bekommt eigene tasks (implementierung, host-tests,
+HIL-nachweis), danach erst die TUI-tasks.
+
+Nach der vollständigen Implementierung, wenn alle Tests abgeschlossen
+sind und alles committed ist, soll auch ein Walkthrough-Dokument
+entgeschrieben werden und in plan/2026.../walkthrough.md (im ordner wo
+du diese prompt.txt datei findest) abgelegt werden. Dieses soll
+zusammenfassen, was wirklich implementiert wurde, welche Stellen
+aufgrund der Tests oder wie auch immer gemacht wurden, als im
+Untergrund auch Learnings und mögliche Erweiterungen. liste auch die
+neuen programme die mit in den docker container aufgenommen werden
+sollten
