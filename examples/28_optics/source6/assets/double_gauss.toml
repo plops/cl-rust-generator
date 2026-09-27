@@ -1,0 +1,73 @@
+# Double Gauss, US Patent 4,123,144 example 1 (100 mm nominal).
+# Transcribed from plan/20260927_01_optics/integration_tests.md section 3
+# (plus `stop = true` on surface 6).
+[source]
+ray_count = 5
+aperture_diameter = 20.0
+
+[[surfaces]]
+name = "L1 Front"
+radius = 63.8
+thickness = 7.5
+material = 1.620
+
+[[surfaces]]
+name = "L1 Back"
+radius = 231.0
+thickness = 0.2
+material = 1.0
+
+[[surfaces]]
+name = "L2 Front"
+radius = 38.5
+thickness = 9.0
+material = 1.623
+
+[[surfaces]]
+name = "L2 Back"
+radius = 100.0
+thickness = 3.5
+material = 1.0
+
+[[surfaces]]
+name = "L3 Front"
+radius = 200.0
+thickness = 2.5
+material = 1.613
+
+[[surfaces]]
+name = "L3 Back / Aperture Stop"
+radius = 26.1
+thickness = 14.5
+material = 1.0
+stop = true
+
+[[surfaces]]
+name = "L4 Front"
+radius = -28.2
+thickness = 3.0
+material = 1.618
+
+[[surfaces]]
+name = "L4 Back"
+radius = 34.5
+thickness = 10.5
+material = 1.620
+
+[[surfaces]]
+name = "L5 Front"
+radius = -42.0
+thickness = 0.2
+material = 1.0
+
+[[surfaces]]
+name = "L5 Back"
+radius = 180.0
+thickness = 5.5
+material = 1.623
+
+[[surfaces]]
+name = "L6 Front"
+radius = -70.4
+thickness = 74.0
+material = 1.0

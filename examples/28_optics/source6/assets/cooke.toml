@@ -1,0 +1,40 @@
+# Cooke triplet, 100 mm nominal EFL patent-style prescription.
+# Transcribed from plan/20260927_01_optics/integration_tests.md section 2
+# (plus `stop = true` on L2 front; omitted materials default to air).
+[source]
+aperture_diameter = 20.0
+wavelengths = [0.4861, 0.5876, 0.6563]
+
+[[surfaces]]
+name = "L1 Front"
+radius = 40.1
+thickness = 6.0
+material = 1.617
+
+[[surfaces]]
+name = "L1 Back"
+radius = -400.0
+thickness = 10.0
+
+[[surfaces]]
+name = "L2 Front (Stop)"
+radius = -74.3
+thickness = 2.5
+material = 1.620
+stop = true
+
+[[surfaces]]
+name = "L2 Back"
+radius = 38.2
+thickness = 12.0
+
+[[surfaces]]
+name = "L3 Front"
+radius = 120.0
+thickness = 4.5
+material = 1.617
+
+[[surfaces]]
+name = "L3 Back"
+radius = -52.4
+thickness = 88.2

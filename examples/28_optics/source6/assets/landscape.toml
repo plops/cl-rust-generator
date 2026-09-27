@@ -1,0 +1,25 @@
+# Landscape (Wollaston/Chevalier) meniscus with remote stop.
+# Transcribed from plan/20260927_01_optics/integration_tests.md section 1
+# (plus `stop = true` on the aperture plane).
+[source]
+ray_count = 1
+aperture_diameter = 10.0
+
+[[surfaces]]
+name = "Aperture Stop"
+radius = 0.0
+thickness = 15.0
+material = 1.0
+stop = true
+
+[[surfaces]]
+name = "Lens Front"
+radius = -35.2
+thickness = 4.5
+material = 1.5168
+
+[[surfaces]]
+name = "Lens Back"
+radius = -22.1
+thickness = 92.5
+material = 1.0
