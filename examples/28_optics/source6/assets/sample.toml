@@ -1,0 +1,21 @@
+[source]
+ray_count = 10
+grid_radius = 5.0
+
+[optimize]
+learning_rate = 0.001
+iters = 20
+
+[[surfaces]]
+name = "Front Element"
+radius = 50.0
+thickness = 5.0
+material = 1.5168 # N-BK7 index
+optimize = ["radius"]
+
+[[surfaces]]
+name = "Back Element"
+radius = -100.0
+thickness = 40.0
+material = 1.0 # Air
+optimize = []
