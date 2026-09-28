@@ -1157,6 +1157,18 @@ for tokio/axum handlers."
      :item t
      :tags (:function))
 
+    (:name "defun-docstring"
+     :description "A leading Common Lisp docstring is ignored, so declarations
+that follow it still type the emitted Rust function."
+     :lisp (defun documented (x)
+             "Return x."
+             (declare (type i32 x)
+                      (values i32))
+             (return x))
+     :rust "fn documented(x: i32) -> i32 { return x }"
+     :item t
+     :tags (:function))
+
     (:name "await"
      :description "(await expr) appends .await; outer parentheses are
 stripped like in return and conditions."
@@ -1215,6 +1227,17 @@ do0 adds no stray semicolon after attributed items."
      :description "(lambda (args) body) emits a Rust closure.  Declared
 parameter types and return values are honoured."
      :lisp (lambda (x)
+             (declare (type i32 x)
+                      (values i32))
+             (return x))
+     :rust "|x: i32| -> i32 { return x }"
+     :tags (:function))
+
+    (:name "lambda-docstring"
+     :description "A leading docstring is ignored for lambda bodies too, so it
+does not leak into generated Rust and does not block declarations."
+     :lisp (lambda (x)
+             "Return x."
              (declare (type i32 x)
                       (values i32))
              (return x))

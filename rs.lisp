@@ -86,8 +86,6 @@ rustfmt.  Returns the pathname that was written, or NIL when nothing changed."
   ;; (declare (values int &optional))
   ;; (declare (values int float &optional))
 
-  ;; FIXME doesnt handle documentation strings
-
 (defstruct type-definition
   (declaration)
   (mutable)
@@ -152,7 +150,11 @@ rustfmt.  Returns the pathname that was written, or NIL when nothing changed."
 (defun consume-declare (body &optional (mutable-default nil))
   "take a list of instructions from body, parse type declarations,
 return the body without them and a hash table with an environment. the
-entry return-values contains a list of return values"
+entry return-values contains a list of return values.
+
+CALLERS are responsible for stripping an optional leading Common Lisp
+documentation string first; a plain string is otherwise a legitimate Rust
+escape hatch form and must stay visible here."
   (let ((env (make-hash-table :test #'equalp))
 	(looking-p t)
 	(new-body nil))
@@ -202,6 +204,19 @@ entry return-values contains a list of return values"
 		   (push e new-body)))
 	     (push e new-body)))
     (values (reverse new-body) env)))
+
+(defun split-leading-docstring (body)
+  "Split an optional Common Lisp documentation string from BODY.
+
+Returns (values BODY-WITHOUT-DOCSTRING DOCSTRING).  Only a leading string
+with at least one following form counts as a docstring; a lone string stays
+part of the body so the Rust escape hatch still works in expression
+position."
+  (if (and (consp body)
+		   (stringp (car body))
+		   (cdr body))
+      (values (cdr body) (car body))
+      (values body nil)))
 
 (defun remove-ampersand (rname)
   "Split a leading & off a variable or parameter name.  Returns (values NAME
@@ -346,22 +361,24 @@ behaviour."
   ;; defun function-name lambda-list [declaration*] form*
   ;; with ASYNC non-nil emit "async fn" (used by DEFUN-ASYNC).
   (destructuring-bind (name lambda-list &rest body) (cdr code)
-    (multiple-value-bind (body env) (consume-declare body)
-      (let ((req-param lambda-list))
-	(with-output-to-string (s)
-	  (format s "~:[fn ~;async fn ~]~a~a~@[ -> ~a~]"
-		  async
-		  (funcall emit name)
-		  (funcall emit `(paren
-				  ,@(loop for rp in req-param collect
-					  (render-parameter rp env emit))))
-		  (let ((r (gethash 'return-values env)))
-		    (if (< 1 (length r))
-			(funcall emit `(paren ,@r))
-			(when (car r)
-			 (funcall emit (car r))))))
-	  (unless header-only
-	    (format s " ~a" (emit-body-block body emit))))))))
+    (multiple-value-bind (body docstring) (split-leading-docstring body)
+      (declare (ignorable docstring))
+      (multiple-value-bind (body env) (consume-declare body)
+	(let ((req-param lambda-list))
+	  (with-output-to-string (s)
+	    (format s "~:[fn ~;async fn ~]~a~a~@[ -> ~a~]"
+		    async
+		    (funcall emit name)
+		    (funcall emit `(paren
+				    ,@(loop for rp in req-param collect
+					    (render-parameter rp env emit))))
+		    (let ((r (gethash 'return-values env)))
+		      (if (< 1 (length r))
+			  (funcall emit `(paren ,@r))
+			  (when (car r)
+			    (funcall emit (car r))))))
+	    (unless header-only
+	      (format s " ~a" (emit-body-block body emit)))))))))
 
 (defun parse-lambda (code emit)
   ;;  lambda lambda-list [declaration*] form*
@@ -372,19 +389,21 @@ behaviour."
   ;; captures are not modelled; use the `move' escape hatch by writing the
   ;; whole closure head as a string if you need it.
   (destructuring-bind (lambda-list &rest body) (cdr code)
-    (multiple-value-bind (body env) (consume-declare body)
-      (let ((req-param lambda-list))
-	(with-output-to-string (s)
-	  (format s "|~a|~@[ -> ~a~]"
-		  (funcall emit `(comma
-				  ,@(loop for rp in req-param collect
-					  (render-parameter rp env emit))))
-		  (let ((r (gethash 'return-values env)))
-		    (if (< 1 (length r))
-			(funcall emit `(paren ,@r))
-			(when (car r)
-			  (funcall emit (car r))))))
-	  (format s " ~a" (emit-body-block body emit)))))))
+    (multiple-value-bind (body docstring) (split-leading-docstring body)
+      (declare (ignorable docstring))
+      (multiple-value-bind (body env) (consume-declare body)
+	(let ((req-param lambda-list))
+	  (with-output-to-string (s)
+	    (format s "|~a|~@[ -> ~a~]"
+		    (funcall emit `(comma
+				    ,@(loop for rp in req-param collect
+					    (render-parameter rp env emit))))
+		    (let ((r (gethash 'return-values env)))
+		      (if (< 1 (length r))
+			  (funcall emit `(paren ,@r))
+			  (when (car r)
+			    (funcall emit (car r))))))
+	    (format s " ~a" (emit-body-block body emit))))))))
 
 
 

@@ -1317,6 +1317,29 @@ async fn fetch_summary(identifier: i64) -> String {
 }
 ```
 
+### `(defun documented (x)
+       "Return x."
+       (declare (type i32 x)
+                (values i32))
+       (return x))`
+
+A leading Common Lisp docstring is ignored, so declarations
+that follow it still type the emitted Rust function.
+
+```lisp
+(defun documented (x)
+  "Return x."
+  (declare (type i32 x)
+           (values i32))
+  (return x))
+```
+
+```rust
+fn documented(x: i32) -> i32 {
+    return x
+}
+```
+
 ### `(lambda (x)
        (declare (type i32 x)
                 (values i32))
@@ -1327,6 +1350,29 @@ parameter types and return values are honoured.
 
 ```lisp
 (lambda (x)
+  (declare (type i32 x)
+           (values i32))
+  (return x))
+```
+
+```rust
+|x: i32| -> i32 {
+    return x
+}
+```
+
+### `(lambda (x)
+       "Return x."
+       (declare (type i32 x)
+                (values i32))
+       (return x))`
+
+A leading docstring is ignored for lambda bodies too, so it
+does not leak into generated Rust and does not block declarations.
+
+```lisp
+(lambda (x)
+  "Return x."
   (declare (type i32 x)
            (values i32))
   (return x))

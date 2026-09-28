@@ -114,6 +114,11 @@ by-value parameter is `mut x: T`, a mutable reference is `x: &mut T`. A leading
 ;; fn f(a: &mut i32, mut b: i32) { return 0 }
 ```
 
+A leading string in a `defun`, `defun-async` or `lambda` body is treated as a
+Common Lisp docstring and ignored rather than emitted into Rust. If you really
+need a raw leading string statement there, force statement/expression position
+explicitly with `stmt` or `expr`.
+
 ### Parentheses
 
 Operators parenthesise both their operands and their result, so grouping is
