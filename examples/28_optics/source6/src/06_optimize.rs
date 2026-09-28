@@ -1,11 +1,10 @@
-//! RMS spot-size objective with seeded forward-mode gradients.
+//! Centroid-based squared spot-size objective with seeded forward-mode gradients.
 //!
-//! Loss is `sum(x_i^2 + y_i^2)` over arrived image points (all
-//! wavelengths). Each gradient component comes from one trace seeded with
-//! that variable as [`Dual::variable`]: with the image point `(x, y)` as
-//! dual numbers, `dLoss/dp = sum(2*(x*dx/dp + y*dy/dp))` is just the `.d`
-//! field of the accumulated loss. [`descend`] runs plain gradient descent
-//! and returns the loss history for the TUI graph.
+//! Loss sums squared distances from each wavelength/field group's centroid
+//! over arrived image points. Each gradient component comes from one trace
+//! seeded with that variable as [`Dual::variable`], and is the `.d` field
+//! of the accumulated loss. [`descend`] uses backtracking gradient descent
+//! without accepting steps that discard previously arrived rays.
 
 use crate::dual::Dual;
 use crate::system::{OpticalSetup, Surface};
@@ -38,7 +37,7 @@ pub struct Var {
     pub key: VarKey,
 }
 
-/// Collect optimization variables; errors on unknown keys.
+/// Collect optimization variables; errors on unknown or duplicate keys.
 pub fn variables(setup: &OpticalSetup) -> Result<Vec<Var>, String> {
     let mut out = Vec::new();
     for (i, s) in setup.surfaces.iter().enumerate() {
@@ -55,7 +54,14 @@ pub fn variables(setup: &OpticalSetup) -> Result<Vec<Var>, String> {
                     ));
                 }
             };
-            out.push(Var { surface: i, key: k });
+            let var = Var { surface: i, key: k };
+            if out.contains(&var) {
+                return Err(format!(
+                    "surface {i} ({}): duplicate optimize key '{key}'",
+                    s.name
+                ));
+            }
+            out.push(var);
         }
     }
     Ok(out)
@@ -188,6 +194,10 @@ pub const CONVERGENCE_TOL: f64 = 1e-12;
 /// the loss (learning rate too large for the local curvature), the step is
 /// halved up to a few times, and if it still fails to improve, descent stops
 /// with the last improving parameters rather than diverging.
+/// Previously arrived rays must still arrive after each accepted step.
+///
+/// Returns an error for an invalid learning rate, an empty/non-finite initial
+/// spot, or non-finite gradients.
 ///
 /// # Examples
 ///
@@ -223,12 +233,25 @@ pub const CONVERGENCE_TOL: f64 = 1e-12;
 /// ```
 pub fn descend(setup: &OpticalSetup) -> Result<(OpticalSetup, Vec<f64>), String> {
     let vars = variables(setup)?;
+    let base_lr = setup.optimize.learning_rate;
+    if !base_lr.is_finite() || base_lr <= 0.0 {
+        return Err("learning_rate must be finite and positive".into());
+    }
     let mut cur = setup.clone();
-    let mut loss = loss_for(&cur);
+    let mut paths = crate::trace::trace_system(&cur.surfaces, &cur);
+    if !paths.iter().any(|p| p.image().is_some()) {
+        return Err("cannot optimize: no rays reached the image plane".into());
+    }
+    let mut loss = spot_loss(&paths).v;
+    if !loss.is_finite() {
+        return Err("cannot optimize: initial spot loss is not finite".into());
+    }
     let mut history = vec![loss];
-    let base_lr = cur.optimize.learning_rate;
     for _ in 0..setup.optimize.iters {
         let g = gradient(&cur, &vars);
+        if g.iter().any(|value| !value.is_finite()) {
+            return Err("cannot optimize: gradient is not finite".into());
+        }
         // Backtracking line search: shrink the step until it improves.
         let mut lr = base_lr;
         let mut stepped = false;
@@ -238,9 +261,15 @@ pub fn descend(setup: &OpticalSetup) -> Result<(OpticalSetup, Vec<f64>), String>
                 let v = get_var(&trial.surfaces, *w) - lr * step;
                 set_var(&mut trial.surfaces, *w, v);
             }
-            let trial_loss = loss_for(&trial);
-            if trial_loss.is_finite() && trial_loss < loss {
+            let trial_paths = crate::trace::trace_system(&trial.surfaces, &trial);
+            let trial_loss = spot_loss(&trial_paths).v;
+            let preserves_rays = paths
+                .iter()
+                .zip(&trial_paths)
+                .all(|(before, after)| before.image().is_none() || after.image().is_some());
+            if preserves_rays && trial_loss.is_finite() && trial_loss < loss {
                 cur = trial;
+                paths = trial_paths;
                 history.push(trial_loss);
                 let improved = loss - trial_loss;
                 loss = trial_loss;
@@ -372,6 +401,74 @@ mod tests {
         )
         .expect("must parse");
         assert!(variables(&setup).is_err());
+    }
+
+    #[test]
+    fn duplicate_optimize_keys_are_rejected() {
+        let mut setup = sample();
+        setup.surfaces[0].optimize = vec!["radius".into(), "radius".into()];
+        assert!(variables(&setup).unwrap_err().contains("duplicate"));
+    }
+
+    #[test]
+    fn descent_cannot_improve_by_losing_rays() {
+        let mut setup = sample();
+        setup.surfaces[0].optimize = vec!["material".into()];
+        setup.optimize.learning_rate = 1e6;
+        let initial = crate::trace::trace_system(&setup.surfaces, &setup);
+        assert!(initial.iter().all(|p| p.image().is_some()));
+        let (opt, history) = descend(&setup).expect("descent");
+        let final_paths = crate::trace::trace_system(&opt.surfaces, &opt);
+        for (before, after) in initial.iter().zip(&final_paths) {
+            assert!(
+                before.image().is_none() || after.image().is_some(),
+                "descent lost an initially arrived ray: {:?}",
+                after.end
+            );
+        }
+        assert!(history.iter().all(|loss| loss.is_finite()));
+    }
+
+    #[test]
+    fn descent_still_improves_a_partially_vignetted_bundle() {
+        let mut setup = sample();
+        setup.surfaces[0].stop = true;
+        let initial = crate::trace::trace_system(&setup.surfaces, &setup);
+        assert!(initial.iter().any(|p| p.image().is_none()));
+        assert!(initial.iter().any(|p| p.image().is_some()));
+        let (opt, history) = descend(&setup).expect("descent");
+        assert!(history.last().unwrap() < history.first().unwrap());
+        assert_eq!(*history.last().unwrap(), loss_for(&opt));
+        let final_paths = crate::trace::trace_system(&opt.surfaces, &opt);
+        assert!(
+            initial
+                .iter()
+                .zip(&final_paths)
+                .all(|(before, after)| before.image().is_none() || after.image().is_some())
+        );
+    }
+
+    #[test]
+    fn descent_rejects_empty_or_nonfinite_initial_spots() {
+        let mut setup = sample();
+        setup.source.ray_count = 0;
+        assert!(descend(&setup).is_err());
+        let mut setup = sample();
+        setup.surfaces[0].stop = true;
+        setup.surfaces[0].diameter = Some(0.01);
+        assert!(descend(&setup).is_err());
+        let mut setup = sample();
+        setup.surfaces[1].thickness = f64::NAN;
+        assert!(descend(&setup).is_err());
+    }
+
+    #[test]
+    fn descent_rejects_invalid_learning_rates() {
+        for lr in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let mut setup = sample();
+            setup.optimize.learning_rate = lr;
+            assert!(descend(&setup).is_err(), "learning rate {lr}");
+        }
     }
 
     #[test]

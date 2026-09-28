@@ -25,12 +25,21 @@ fn main() {
 }
 
 /// Value of `--name <value>`, if present.
-fn flag(args: &[String], name: &str) -> Option<String> {
-    args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone())
+fn flag(args: &[String], name: &str) -> Result<Option<String>, String> {
+    let Some(index) = args.iter().position(|arg| arg == name) else {
+        return Ok(None);
+    };
+    let value = args
+        .get(index + 1)
+        .filter(|value| !value.starts_with("--"));
+    value
+        .cloned()
+        .map(Some)
+        .ok_or_else(|| format!("missing value for {name}"))
 }
 
 fn load_config(args: &[String]) -> Result<OpticalSetup, String> {
-    let path = flag(args, "--config").unwrap_or_else(|| "assets/sample.toml".into());
+    let path = flag(args, "--config")?.unwrap_or_else(|| "assets/sample.toml".into());
     let text = fs::read_to_string(&path).map_err(|e| format!("read {path}: {e}"))?;
     load_toml(&text).map_err(|e| format!("parse {path}: {e}"))
 }
@@ -39,6 +48,21 @@ fn run(args: &[String]) -> Result<(), String> {
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
         println!("{HELP}");
         return Ok(());
+    }
+    let allowed: &[&str] = match args[0].as_str() {
+        "trace" | "efl" | "sensitivity" | "tui" => &["--config"],
+        "optimize" => &["--config", "--iters", "--lr", "--write-back"],
+        "export" => &["--config", "--out"],
+        other => return Err(format!("unknown command '{other}' (see --help)")),
+    };
+    for pair in args[1..].chunks(2) {
+        let name = &pair[0];
+        if !allowed.contains(&name.as_str()) {
+            return Err(format!("unknown option '{name}' (see --help)"));
+        }
+        if pair.get(1).is_none_or(|value| value.starts_with("--")) {
+            return Err(format!("missing value for {name}"));
+        }
     }
     match args[0].as_str() {
         "trace" => {
@@ -76,10 +100,10 @@ fn run(args: &[String]) -> Result<(), String> {
         }
         "optimize" => {
             let mut setup = load_config(args)?;
-            if let Some(n) = flag(args, "--iters") {
+            if let Some(n) = flag(args, "--iters")? {
                 setup.optimize.iters = n.parse().map_err(|_| "bad --iters".to_string())?;
             }
-            if let Some(lr) = flag(args, "--lr") {
+            if let Some(lr) = flag(args, "--lr")? {
                 setup.optimize.learning_rate = lr.parse().map_err(|_| "bad --lr".to_string())?;
             }
             let vars = variables(&setup)?;
@@ -101,7 +125,7 @@ fn run(args: &[String]) -> Result<(), String> {
                     get_var(&opt.surfaces, *w)
                 );
             }
-            if let Some(path) = flag(args, "--write-back") {
+            if let Some(path) = flag(args, "--write-back")? {
                 let text = to_toml(&opt).map_err(|e| e.to_string())?;
                 fs::write(&path, text).map_err(|e| format!("write {path}: {e}"))?;
             }
@@ -136,13 +160,14 @@ fn run(args: &[String]) -> Result<(), String> {
         }
         "export" => {
             let setup = load_config(args)?;
-            let out = flag(args, "--out").ok_or("missing --out <file>".to_string())?;
+            let out = flag(args, "--out")?.ok_or("missing --out <file>".to_string())?;
             let paths = trace_system(&setup.surfaces, &setup);
             let nseg: usize = paths.iter().map(|p| p.points.len().saturating_sub(1)).sum();
             fs::write(&out, to_json(&setup, &paths)).map_err(|e| format!("write {out}: {e}"))?;
             println!("wrote {out} ({nseg} segments)");
             Ok(())
         }
+
         "tui" => {
             let setup = load_config(args)?;
             let (opt, history) = descend(&setup).unwrap_or_else(|_| {
@@ -166,5 +191,99 @@ fn run(args: &[String]) -> Result<(), String> {
             run_tui(&state).map_err(|e| e.to_string())
         }
         other => Err(format!("unknown command '{other}' (see --help)")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn flag_distinguishes_absent_and_present_values() {
+        assert_eq!(flag(&args(&["trace"]), "--config"), Ok(None));
+        assert_eq!(
+            flag(&args(&["trace", "--config", "lens.toml"]), "--config"),
+            Ok(Some("lens.toml".into()))
+        );
+        assert_eq!(
+            flag(&args(&["optimize", "--lr", "-0.1"]), "--lr"),
+            Ok(Some("-0.1".into()))
+        );
+    }
+
+    #[test]
+    fn flag_rejects_missing_values_and_following_options() {
+        for name in ["--config", "--iters", "--lr", "--write-back", "--out"] {
+            let expected = Err(format!("missing value for {name}"));
+            assert_eq!(flag(&args(&["optimize", name]), name), expected);
+            assert_eq!(
+                flag(&args(&["optimize", name, "--config", "lens.toml"]), name),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn missing_config_does_not_fall_back_to_sample() {
+        assert_eq!(
+            run(&args(&["trace", "--config"])),
+            Err("missing value for --config".into())
+        );
+    }
+
+    #[test]
+    fn unknown_options_are_rejected_before_dispatch() {
+        for command in ["trace", "efl", "optimize", "sensitivity", "export", "tui"] {
+            assert_eq!(
+                run(&args(&[command, "--confg", "lens.toml"])),
+                Err("unknown option '--confg' (see --help)".into())
+            );
+        }
+        assert_eq!(
+            run(&args(&["trace", "--iters", "1"])),
+            Err("unknown option '--iters' (see --help)".into())
+        );
+    }
+
+    #[test]
+    fn documented_options_succeed() {
+        assert_eq!(
+            run(&args(&["trace", "--config", "assets/sample.toml"])),
+            Ok(())
+        );
+        assert_eq!(
+            run(&args(&[
+                "optimize", "--config", "assets/sample.toml", "--iters", "0", "--lr", "0.1",
+            ])),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn negative_numeric_values_reach_numeric_validation() {
+        assert_eq!(
+            run(&args(&["optimize", "--lr", "-0.1"])),
+            Err("learning_rate must be finite and positive".into())
+        );
+        assert_eq!(
+            run(&args(&["optimize", "--iters", "-1"])),
+            Err("bad --iters".into())
+        );
+    }
+
+    #[test]
+    fn missing_values_are_rejected_before_dispatch() {
+        assert_eq!(
+            run(&args(&["optimize", "--write-back"])),
+            Err("missing value for --write-back".into())
+        );
+        assert_eq!(
+            run(&args(&["optimize", "--lr", "--iters", "1"])),
+            Err("missing value for --lr".into())
+        );
     }
 }

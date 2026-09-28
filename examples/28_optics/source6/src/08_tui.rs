@@ -3,7 +3,7 @@
 //! [`render`] is pure over [`AppState`] and tested headless via
 //! `TestBackend` (no display needed). Only [`run_tui`] touches a real
 //! terminal, and it restores cooked mode plus the main screen on exit
-//! (also on draw errors).
+//! (also on initialization, draw, and event errors).
 
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
@@ -90,23 +90,36 @@ pub fn run_tui(state: &AppState) -> io::Result<()> {
     use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 
     terminal::enable_raw_mode()?;
-    let mut out = io::stdout();
-    out.execute(EnterAlternateScreen)?;
-    let mut term = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-    let rc = (|| -> io::Result<()> {
-        loop {
-            term.draw(|f| render(f, state))?;
-            if let Event::Key(k) = event::read()?
-                && matches!(k.code, KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter)
-            {
-                break;
+    restore_terminal_after(
+        || {
+            let mut out = io::stdout();
+            out.execute(EnterAlternateScreen)?;
+            let mut term = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+            loop {
+                term.draw(|f| render(f, state))?;
+                if let Event::Key(k) = event::read()?
+                    && matches!(k.code, KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter)
+                {
+                    break;
+                }
             }
-        }
-        Ok(())
-    })();
-    terminal::disable_raw_mode()?;
-    io::stdout().execute(LeaveAlternateScreen)?;
-    rc
+            Ok(())
+        },
+        terminal::disable_raw_mode,
+        || io::stdout().execute(LeaveAlternateScreen).map(|_| ()),
+    )
+}
+
+fn restore_terminal_after(
+    run: impl FnOnce() -> io::Result<()>,
+    disable_raw_mode: impl FnOnce() -> io::Result<()>,
+    leave_screen: impl FnOnce() -> io::Result<()>,
+) -> io::Result<()> {
+    let result = run();
+    // Attempt both restorations, retaining the original failure when present.
+    let raw_result = disable_raw_mode();
+    let screen_result = leave_screen();
+    result.and(raw_result).and(screen_result)
 }
 
 #[cfg(test)]
@@ -151,5 +164,62 @@ mod tests {
             .expect("draw");
         let text = screen_text(&term);
         assert!(text.contains("Variables") && text.contains("Status"));
+    }
+
+    #[test]
+    fn restores_terminal_on_startup_or_event_error() {
+        use std::cell::RefCell;
+
+        for fails in [false, true] {
+            let calls = RefCell::new(Vec::new());
+            let result = restore_terminal_after(
+                || {
+                    calls.borrow_mut().push("run");
+                    if fails {
+                        Err(io::Error::other("terminal failed"))
+                    } else {
+                        Ok(())
+                    }
+                },
+                || {
+                    calls.borrow_mut().push("disable");
+                    Ok(())
+                },
+                || {
+                    calls.borrow_mut().push("leave");
+                    Ok(())
+                },
+            );
+            assert_eq!(result.is_err(), fails);
+            assert_eq!(*calls.borrow(), ["run", "disable", "leave"]);
+        }
+    }
+
+    #[test]
+    fn attempts_screen_cleanup_even_when_raw_cleanup_fails() {
+        use std::cell::Cell;
+
+        for fails in [false, true] {
+            let left_screen = Cell::new(false);
+            let result = restore_terminal_after(
+                || {
+                    if fails {
+                        Err(io::Error::other("original error"))
+                    } else {
+                        Ok(())
+                    }
+                },
+                || Err(io::Error::other("raw cleanup error")),
+                || {
+                    left_screen.set(true);
+                    Err(io::Error::other("screen cleanup error"))
+                },
+            );
+            assert!(left_screen.get());
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                if fails { "original error" } else { "raw cleanup error" }
+            );
+        }
     }
 }

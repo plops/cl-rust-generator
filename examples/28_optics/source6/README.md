@@ -1,8 +1,8 @@
 # optics
 
 A headless, differentiable 3D optical ray tracer. It traces a bundle of rays
-through a sequence of spherical/planar refracting surfaces, measures the RMS
-spot size on the image plane, and optimizes lens parameters (radius, thickness,
+through a sequence of spherical/planar refracting surfaces, measures the summed
+squared spot size on the image plane, and optimizes lens parameters (radius, thickness,
 material index) by exact gradient descent. Gradients are computed with
 forward-mode automatic differentiation (dual numbers), not finite differences.
 
@@ -28,7 +28,9 @@ optics tui      [--config <toml>]                            telemetry (q/Esc qu
 optics --help
 ```
 
-`--config` defaults to `assets/sample.toml` when omitted.
+`--config` defaults to `assets/sample.toml` when omitted. Unknown options,
+options unsupported by the selected command, and value-taking options without
+a value produce errors rather than silently using defaults.
 
 ### Examples
 
@@ -58,6 +60,14 @@ cargo run -- optimize --config assets/sample.toml --iters 50 --lr 0.002 \
     --write-back optimized.toml
 ```
 
+The loss is the sum of squared distances from the centroid of each
+(wavelength, field angle) group, in mm^2; it is not a normalized RMS value.
+Only rays reaching the image plane contribute. To prevent artificial
+improvement by dropping rays, the optimizer rejects any step that loses a
+previously arrived ray. It reports an error if no rays initially arrive,
+the initial loss or a gradient is non-finite, or the learning rate is not
+finite and positive. Optimization keys must be unique within each surface.
+
 Export a traced system to JSON for the viewer:
 
 ```sh
@@ -70,6 +80,9 @@ variable inspector and loss curve; press `q`, `Esc`, or `Enter` to exit):
 ```sh
 cargo run -- tui --config assets/sample.toml
 ```
+
+The TUI attempts to restore raw mode and the alternate screen even when
+terminal initialization, drawing, or event handling fails.
 
 ## TOML configuration schema
 
@@ -93,7 +106,7 @@ falls back to a built-in default (`5.0` mm).
 
 | Key             | Type    | Default | Meaning |
 |-----------------|---------|---------|---------|
-| `learning_rate` | float   | `0.001` | Gradient-descent step size (starting step; the optimizer backtracks if a step would raise the loss). |
+| `learning_rate` | float   | `0.001` | Finite, positive starting step size; the optimizer backtracks if a step does not reduce loss or loses a previously arrived ray. |
 | `iters`         | integer | `20`    | Maximum descent iterations. Descent stops early once the loss change drops below the convergence tolerance. |
 
 ### `[[surfaces]]`
@@ -120,6 +133,9 @@ at `z = 0`; each `thickness` is the axial gap to the next vertex, and the
 - Rays start collimated along `+z`, launched from `z0[0] - 10` mm, sampled
   across the pupil grid.
 - A `radius` of `0` is intersected as the plane `z = vertex`.
+- A spherical surface uses only the hemisphere containing its vertex, not
+  the opposite side of the complete sphere. If that cap is behind the ray,
+  the surface is missed rather than replaced by a rear-hemisphere hit.
 - Refraction returns no ray on total internal reflection; such rays are
   reported as `Tir` rather than producing NaNs.
 
@@ -189,7 +205,7 @@ a Three.js viewer:
 ```jsonc
 {
   "version": 1,
-  "loss": 0.1234,                       // RMS spot loss of the traced system
+  "loss": 0.1234,                       // summed squared centroid distances (mm^2)
   "wavelengths": [0.5876],              // echoed in config order, for coloring
   "variables": [                        // optimized parameter snapshot
     { "surface": "Front Element", "key": "radius", "value": 50.12 }
@@ -239,7 +255,7 @@ Data flows `dual -> linalg -> ray -> system -> trace -> optimize -> export/tui`:
 - **`system`** — TOML schema, vertex layout from thicknesses, pupil sampling,
   and Cauchy dispersion.
 - **`trace`** — sequential tracing per wavelength; marginal-ray EFL/back-focus.
-- **`optimize`** — RMS spot loss, exact per-variable gradients (one seeded
-  trace each), and guarded gradient descent with early stop.
+- **`optimize`** — summed squared centroid distances, per-variable gradients
+  (one seeded trace each), and guarded gradient descent with early stop.
 - **`export` / `tui`** — `system.json` for Three.js and a `ratatui` telemetry
   view.

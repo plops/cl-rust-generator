@@ -9,9 +9,9 @@
 
 use crate::dual::Dual;
 use crate::linalg::{Point3, Vec3};
+use crate::ray::{PLANAR_EPS, T_EPS, on_vertex_cap};
 use crate::ray::{Ray, intersect_plane_z, intersect_surface, point_at, refract};
-use crate::system::{D_LINE, OpticalSetup, Surface, SourceCfg, bundle, index_at, pupil_radius};
-use crate::ray::{PLANAR_EPS, T_EPS};
+use crate::system::{D_LINE, OpticalSetup, SourceCfg, Surface, bundle, index_at, pupil_radius};
 
 /// Surface with differentiable parameters at one wavelength.
 #[derive(Debug, Clone)]
@@ -199,13 +199,9 @@ fn primal_intersect(r: &PRay, vertex_z: f64, radius: f64) -> Option<(f64, f64, f
     let two_a = 2.0 * a;
     let t0 = (-b - root) / two_a;
     let t1 = (-b + root) / two_a;
-    let t = if t0 > T_EPS {
-        t0
-    } else if t1 > T_EPS {
-        t1
-    } else {
-        return None;
-    };
+    let t = [t0, t1].into_iter().find(|t| {
+        t.is_finite() && *t > T_EPS && on_vertex_cap(r.oz + r.dz * t, vertex_z, radius)
+    })?;
     let p = [r.ox + r.dx * t, r.oy + r.dy * t, r.oz + r.dz * t];
     let mut n = [p[0] - 0.0, p[1] - 0.0, p[2] - cz];
     let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
@@ -452,11 +448,7 @@ pub fn trace_dual(
             let ox = *x0 * aim.fan_scale;
             let oy = *y0 * aim.fan_scale + aim.chief_ey;
             let ray = Ray {
-                origin: Point3::new(
-                    Dual::constant(ox),
-                    Dual::constant(oy),
-                    start_z,
-                ),
+                origin: Point3::new(Dual::constant(ox), Dual::constant(oy), start_z),
                 direction: Vec3::constant(0.0, sin_a, cos_a),
             };
             let mut res = trace_ray(surfs, &ray, image_z, pupil_r, wavelength);
@@ -622,6 +614,22 @@ mod tests {
 
     fn sample() -> OpticalSetup {
         load_toml(SAMPLE).expect("parse")
+    }
+
+    #[test]
+    fn primal_intersection_uses_same_vertex_cap_as_dual_trace() {
+        let ray = PRay {
+            ox: 0.5,
+            oy: 0.0,
+            oz: -10.0,
+            dx: 0.0,
+            dy: 0.0,
+            dz: 1.0,
+        };
+        let (_, _, z, _) = primal_intersect(&ray, 0.0, -2.0).expect("cap hit");
+        assert!((z - (-2.0 + 3.75_f64.sqrt())).abs() < 1e-12);
+        let inside = PRay { oz: 1.0, ..ray };
+        assert!(primal_intersect(&inside, 0.0, 2.0).is_none());
     }
 
     #[test]

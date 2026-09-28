@@ -52,7 +52,8 @@ fn plane_normal(dir: &Vec3) -> Vec3 {
 }
 
 /// Intersect a spherical surface (`vertex_z`, `radius`) or a plane when
-/// `radius == 0`. Returns the nearest positive hit, `None` on miss.
+/// `radius == 0`. Returns the nearest positive hit on the hemisphere
+/// containing the vertex, `None` on miss.
 pub fn intersect_surface(ray: &Ray, vertex_z: Dual, radius: Dual) -> Option<Hit> {
     if radius.v.abs() < PLANAR_EPS {
         let t = intersect_plane_z(ray, vertex_z)?;
@@ -78,19 +79,20 @@ pub fn intersect_surface(ray: &Ray, vertex_z: Dual, radius: Dual) -> Option<Hit>
     let root = disc.sqrt();
     let t0 = (-b - root) / two_a;
     let t1 = (-b + root) / two_a;
-    let t = if t0.v > T_EPS {
-        t0
-    } else if t1.v > T_EPS {
-        t1
-    } else {
-        return None;
-    };
+    let t = [t0, t1].into_iter().find(|t| {
+        t.v.is_finite() && t.v > T_EPS && on_vertex_cap(point_at(ray, *t).z.v, vertex_z.v, radius.v)
+    })?;
     let point = point_at(ray, t);
     let mut normal = (point - center).normalize();
     if normal.dot(ray.direction).v > 0.0 {
         normal = -normal;
     }
     Some(Hit { t, point, normal })
+}
+
+/// A prescription describes the vertex-side cap, not the whole sphere.
+pub(crate) fn on_vertex_cap(z: f64, vertex_z: f64, radius: f64) -> bool {
+    (z - vertex_z - radius) / radius <= 0.0
 }
 
 /// Vector-form Snell law; `None` on total internal reflection.
@@ -155,6 +157,35 @@ mod tests {
     fn sphere_miss_returns_none() {
         let ray = axial_ray(60.0, 0.0);
         assert!(intersect_surface(&ray, Dual::constant(0.0), Dual::constant(50.0)).is_none());
+    }
+
+    #[test]
+    fn negative_radius_hits_vertex_cap_not_rear_hemisphere() {
+        let ray = axial_ray(0.0, 0.0);
+        let hit =
+            intersect_surface(&ray, Dual::constant(0.0), Dual::constant(-2.0)).expect("cap hit");
+        assert!(close(hit.point.z.v, 0.0, 1e-12));
+        assert!(close(hit.t.v, 10.0, 1e-12));
+    }
+
+    #[test]
+    fn rear_hemisphere_is_not_a_fallback_when_vertex_cap_is_behind_ray() {
+        let ray = Ray {
+            origin: Point3::constant(0.0, 0.0, 1.0),
+            direction: Vec3::constant(0.0, 0.0, 1.0),
+        };
+        assert!(intersect_surface(&ray, Dual::constant(0.0), Dual::constant(2.0)).is_none());
+    }
+
+    #[test]
+    fn negative_radius_cap_preserves_hit_derivative() {
+        let ray = axial_ray(0.5, 0.0);
+        let radius = -2.0;
+        let root = (radius * radius - 0.25_f64).sqrt();
+        let hit =
+            intersect_surface(&ray, Dual::constant(0.0), Dual::variable(radius)).expect("cap hit");
+        assert!(close(hit.point.z.v, radius + root, 1e-12));
+        assert!(close(hit.point.z.d, 1.0 + radius / root, 1e-12));
     }
 
     #[test]
