@@ -1,18 +1,19 @@
 //! optics CLI - argument parsing plus dispatch only (no behavior).
 
 use optics::{
-    AppState, OpticalSetup, RayEnd, back_focal_z, descend, efl, get_var, image_z, load_toml,
-    loss_for, run_tui, to_json, to_toml, trace_system, variables,
+    AppState, OpticalSetup, RayEnd, back_focal_z, descend, efl, get_var, gradient, image_z,
+    load_toml, loss_for, run_tui, to_json, to_toml, trace_system, variables,
 };
 use std::fs;
 
 const HELP: &str = "optics - differentiable ray tracer
 usage:
-  optics trace    --config <toml>                 trace bundle, print spots
-  optics efl      --config <toml>                 effective focal length (mm)
-  optics optimize --config <toml> [--iters N] [--lr F] [--write-back <toml>]
-  optics export   --config <toml> --out <json>     three.js system.json
-  optics tui      [--config <toml>]                telemetry (q/Esc quits)
+  optics trace       --config <toml>              trace bundle, print spots
+  optics efl         --config <toml>              effective focal length (mm)
+  optics optimize    --config <toml> [--iters N] [--lr F] [--write-back <toml>]
+  optics sensitivity --config <toml>              exact dLoss/dp per optimize var
+  optics export      --config <toml> --out <json>  three.js system.json
+  optics tui         [--config <toml>]             telemetry (q/Esc quits)
   optics --help";
 
 fn main() {
@@ -103,6 +104,33 @@ fn run(args: &[String]) -> Result<(), String> {
             if let Some(path) = flag(args, "--write-back") {
                 let text = to_toml(&opt).map_err(|e| e.to_string())?;
                 fs::write(&path, text).map_err(|e| format!("write {path}: {e}"))?;
+            }
+            Ok(())
+        }
+        "sensitivity" => {
+            let setup = load_config(args)?;
+            let vars = variables(&setup)?;
+            if vars.is_empty() {
+                return Err("no optimize variables in config \
+                            (flag tolerance parameters with `optimize = [...]`)"
+                    .into());
+            }
+            let grad = gradient(&setup, &vars);
+            let loss = loss_for(&setup);
+            // High precision: downstream finite-difference cross-checks need
+            // far more than the 6 decimals used for human-facing trace output.
+            println!("loss = {loss:.12e}");
+            // One line per variable: name, key, value and exact dLoss/dp.
+            // `sensitivity` is the raw gradient; downstream tools rank by
+            // its magnitude to find the tightest tolerances.
+            for (w, s) in vars.iter().zip(grad.iter()) {
+                println!(
+                    "sensitivity {} {} value={:.6} dloss_dp={:.9e}",
+                    setup.surfaces[w.surface].name,
+                    w.key.key(),
+                    get_var(&setup.surfaces, *w),
+                    s
+                );
             }
             Ok(())
         }

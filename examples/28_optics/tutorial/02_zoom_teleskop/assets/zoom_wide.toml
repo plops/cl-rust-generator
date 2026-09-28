@@ -1,0 +1,66 @@
+# Vierteiliges Zoom-Teleskop — Zoom-Stellung "Weitwinkel" (kurze Brennweite).
+#
+# Identisch zu zoom_mid.toml bis auf die drei beweglichen Luftspalte g1/g2/g3.
+# In Weitwinkel steht der Variator vorn (kleines g1); der Kompensator sitzt
+# hinten (grosses g3). Fokus (letzter Spalt) fest -> parfokal. EFL ~ 41.7 mm.
+
+[source]
+aperture_diameter = 12.0
+wavelengths = [0.4861, 0.5876, 0.6563]
+
+[[surfaces]]
+name = "Front Vorderseite"
+radius = 62.0
+thickness = 6.0
+material = 1.6170
+cauchy_b = 0.00420
+optimize = ["radius", "thickness", "material"]
+
+[[surfaces]]
+name = "Front Rueckseite"
+radius = -180.0
+thickness = 8.0    # g1 (klein: Weitwinkel)
+optimize = ["radius", "thickness"]
+
+[[surfaces]]
+name = "Variator Vorderseite"
+radius = -90.0
+thickness = 3.0
+material = 1.6200
+cauchy_b = 0.00450
+optimize = ["radius", "thickness", "material"]
+
+[[surfaces]]
+name = "Variator Rueckseite"
+radius = 46.0
+thickness = 20.5190    # g2
+optimize = ["radius", "thickness"]
+
+[[surfaces]]
+name = "Kompensator Vorderseite (Blende)"
+radius = 55.0
+thickness = 5.0
+material = 1.6170
+cauchy_b = 0.00420
+stop = true
+optimize = ["radius", "thickness", "material"]
+
+[[surfaces]]
+name = "Kompensator Rueckseite"
+radius = -70.0
+thickness = 25.7432    # g3 (gross: Weitwinkel)
+optimize = ["radius", "thickness"]
+
+[[surfaces]]
+name = "Relais Vorderseite"
+radius = 48.0
+thickness = 5.0
+material = 1.6170
+cauchy_b = 0.00420
+optimize = ["radius", "thickness", "material"]
+
+[[surfaces]]
+name = "Relais Rueckseite"
+radius = -120.0
+thickness = 18.774    # Fokus (fest = parfokal)
+optimize = ["radius", "thickness"]

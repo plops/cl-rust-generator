@@ -1,0 +1,87 @@
+# Vierteiliges Zoom-Teleskop — Zoom-Stellung "Mitte".
+#
+# Aufbau (mechanisch kompensiertes Zoom, vgl. Bericht Abschnitt 3):
+#   Front    (fest)       — Sammelgruppe, positiv.
+#   Variator (beweglich)  — negativ; verschiebt sich, aendert die Vergroesserung.
+#   Kompensator (bewegl.) — positiv; wird nachgefuehrt, haelt die Bildlage.
+#   Relais   (fest)       — bildet auf die Kamera (Bildebene) ab.
+#
+# Die "Bewegung" einer Gruppe wird ueber die Luftspalte (thickness) davor und
+# dahinter abgebildet. Die drei Zoom-TOMLs (zoom_wide/zoom_mid/zoom_tele)
+# unterscheiden sich NUR in drei Luftspalten:
+#   g1 = "Front Rueckseite".thickness       (Zoom-Stellhebel: bewegt Variator)
+#   g2 = "Variator Rueckseite".thickness    (Kompensator-Vorderspalt)
+#   g3 = "Kompensator Rueckseite".thickness (Kompensator-Hinterspalt)
+# Der letzte Spalt (Fokus) bleibt fest (Kamera bewegt sich nicht) -> parfokal.
+# Radien, Linsendicken und Glaeser sind ueber alle Stellungen identisch.
+#
+# Die g2/g3-Werte wurden per exaktem Gradientenabstieg des Solvers so gesucht,
+# dass jede Stellung bei fester Kamera scharf abbildet (loss ~ 0.013..0.028).
+#
+# Toleranzparameter (optimize = [...]) sind die fertigungskritischen Groessen,
+# deren Empfindlichkeit dLoss/dp der Treiber per Autodiff ausliest.
+
+[source]
+aperture_diameter = 12.0
+wavelengths = [0.4861, 0.5876, 0.6563]
+
+# --- Frontgruppe (fest) --------------------------------------------------
+[[surfaces]]
+name = "Front Vorderseite"
+radius = 62.0
+thickness = 6.0
+material = 1.6170
+cauchy_b = 0.00420
+optimize = ["radius", "thickness", "material"]
+
+[[surfaces]]
+name = "Front Rueckseite"
+radius = -180.0
+thickness = 17.0    # g1 (Zoom-Stellhebel)
+optimize = ["radius", "thickness"]
+
+# --- Variator (beweglich): negative Gruppe -------------------------------
+[[surfaces]]
+name = "Variator Vorderseite"
+radius = -90.0
+thickness = 3.0
+material = 1.6200
+cauchy_b = 0.00450
+optimize = ["radius", "thickness", "material"]
+
+[[surfaces]]
+name = "Variator Rueckseite"
+radius = 46.0
+thickness = 19.9908    # g2 (Kompensator-Vorderspalt)
+optimize = ["radius", "thickness"]
+
+# --- Kompensator (beweglich): positive Gruppe ----------------------------
+[[surfaces]]
+name = "Kompensator Vorderseite (Blende)"
+radius = 55.0
+thickness = 5.0
+material = 1.6170
+cauchy_b = 0.00420
+stop = true
+optimize = ["radius", "thickness", "material"]
+
+[[surfaces]]
+name = "Kompensator Rueckseite"
+radius = -70.0
+thickness = 17.7046    # g3 (Kompensator-Hinterspalt)
+optimize = ["radius", "thickness"]
+
+# --- Relaisgruppe (fest): Abbildung auf die Kamera -----------------------
+[[surfaces]]
+name = "Relais Vorderseite"
+radius = 48.0
+thickness = 5.0
+material = 1.6170
+cauchy_b = 0.00420
+optimize = ["radius", "thickness", "material"]
+
+[[surfaces]]
+name = "Relais Rueckseite"
+radius = -120.0
+thickness = 18.774    # letzter Luftspalt -> Bildebene (Fokus, fest = parfokal)
+optimize = ["radius", "thickness"]
