@@ -10,8 +10,18 @@ use serde::{Deserialize, Serialize};
 pub const THRESH_KNOWN: f32 = 0.65;
 /// Darunter wird eine neue Person angelegt.
 pub const THRESH_NEW: f32 = 0.45;
-/// Darüber ist das Bild redundant (kein neues Exemplar).
+/// Darüber ist das Bild praktisch identisch (obere Grenze der Bekanntheit).
+/// Da [`THRESH_NOVELTY`] (0.82) strenger ist, entscheidet in der Praxis die
+/// Novelty-Schwelle über die Aufnahme; diese Konstante dokumentiert die obere
+/// Grenze der Schwellen-Hierarchie und dient externen Konsumenten/Tests.
+#[allow(dead_code)]
 pub const THRESH_REDUNDANT: f32 = 0.88;
+/// Novelty-Admission: ein neues Exemplar wird nur aufgenommen, wenn seine
+/// Ähnlichkeit zum ähnlichsten vorhandenen Exemplar **unter** dieser Schwelle
+/// liegt — d.h. es bringt echte neue Information (andere Pose/Licht/Ausdruck).
+/// Liegt sie darüber (aber unter [`THRESH_REDUNDANT`]), ist der Bank-Inhalt
+/// bereits abgedeckt und wir sparen uns die Redundanz.
+pub const THRESH_NOVELTY: f32 = 0.82;
 
 /// Ergebnis eines DB-Updates für ein Embedding.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -103,19 +113,30 @@ impl FaceDatabase {
     }
 
     /// Ordnet ein Embedding zu und pflegt ggf. ein Exemplar ein.
+    ///
+    /// Bei bekannter Person entscheidet **Novelty-Admission**, ob das Exemplar
+    /// überhaupt gespeichert wird: nur wenn seine beste Ähnlichkeit unter
+    /// [`THRESH_NOVELTY`] liegt, bringt es echte neue Information
+    /// (andere Pose/Licht/Ausdruck). Läuft die Bank über [`MAX_EXEMPLARS`],
+    /// wird per **Diversitäts-Verdrängung** das *redundanteste* Exemplar
+    /// entfernt (nicht das älteste), damit die verbleibende Menge den
+    /// Erscheinungsraum der Person möglichst breit abdeckt.
     pub fn update(&mut self, emb: &Embedding512, thumbnail: Vec<u8>) -> MatchResult {
         let (pi, sim) = self.best_match(emb).unwrap_or((0, f32::NEG_INFINITY));
         if sim >= THRESH_KNOWN {
             let id = self.persons[pi].id;
-            let added = if sim <= THRESH_REDUNDANT {
+            // Nur echt neuartige Exemplare aufnehmen (zwischen "bekannt" und
+            // Novelty-Schwelle). Redundante (sim ≥ THRESH_NOVELTY) fallen raus.
+            let added = if sim < THRESH_NOVELTY {
                 let ex = &mut self.persons[pi].exemplars;
-                if ex.len() >= MAX_EXEMPLARS {
-                    ex.remove(0); // FIFO: ältestes Exemplar verdrängen
-                }
                 ex.push(Exemplar {
                     embedding: *emb,
                     thumbnail,
                 });
+                if ex.len() > MAX_EXEMPLARS {
+                    let victim = most_redundant_index(ex);
+                    ex.remove(victim);
+                }
                 true
             } else {
                 false
@@ -175,6 +196,35 @@ impl FaceDatabase {
     }
 }
 
+/// Index des redundantesten Exemplars: jenes, dessen ähnlichster Nachbar in
+/// der Bank am ähnlichsten ist (höchste Nearest-Neighbor-Similarity). Dieses
+/// Exemplar trägt am wenigsten zur Abdeckung des Erscheinungsraums bei, sein
+/// Entfernen reduziert die Diversität am wenigsten (Max-Min-Diversität).
+///
+/// `O(k²·d)` für `k` Exemplare — bei `k ≤ MAX_EXEMPLARS` vernachlässigbar.
+/// Bank mit `< 2` Exemplaren: Index 0 (kein sinnvoller Vergleich).
+fn most_redundant_index(ex: &[Exemplar]) -> usize {
+    if ex.len() < 2 {
+        return 0;
+    }
+    let mut worst_sim = f32::NEG_INFINITY;
+    let mut worst_idx = 0;
+    for i in 0..ex.len() {
+        // Ähnlichkeit von Exemplar i zu seinem nächsten Nachbarn (j != i).
+        let mut nn = f32::NEG_INFINITY;
+        for (j, e) in ex.iter().enumerate() {
+            if j != i {
+                nn = nn.max(ex[i].embedding.dot(&e.embedding));
+            }
+        }
+        if nn > worst_sim {
+            worst_sim = nn;
+            worst_idx = i;
+        }
+    }
+    worst_idx
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,17 +267,65 @@ mod tests {
     }
 
     #[test]
-    fn fifo_caps_at_five_exemplars() {
+    fn novelty_admission_skips_near_duplicates() {
+        // Baut Person 0, dann ein sim≈0.85-Exemplar (> THRESH_NOVELTY 0.82,
+        // aber < REDUNDANT 0.88) → bekannt, aber NICHT gespeichert.
         let mut db = FaceDatabase::new();
         db.update(&v4(1.0, 0.0, 0.0, 0.0), vec![0u8; THUMB_BYTES]);
-        for k in 2..9 {
-            // sim 0.7 zu a, 0.49 untereinander → jeweils neues Exemplar.
+        // cos = 0.85 zu (1,0,0,0): v=(0.85, sqrt(1-0.85²), 0, 0).
+        let s = (1.0f32 - 0.85 * 0.85).sqrt();
+        let r = db.update(&v4(0.85, s, 0.0, 0.0), vec![1u8; THUMB_BYTES]);
+        assert!(matches!(r, MatchResult::Known { added: false, .. }));
+        assert_eq!(db.persons()[0].exemplars.len(), 1);
+        // cos = 0.70 (< 0.82) → neuartig, wird gespeichert.
+        let r = db.update(&v4(0.7, 0.0, 0.714, 0.0), vec![2u8; THUMB_BYTES]);
+        assert!(matches!(r, MatchResult::Known { added: true, .. }));
+        assert_eq!(db.persons()[0].exemplars.len(), 2);
+    }
+
+    #[test]
+    fn diversity_eviction_caps_and_keeps_spread() {
+        // Füllt die Bank über MAX_EXEMPLARS hinaus mit paarweise diversen
+        // Exemplaren (sim 0.7 zum Anker, ~0.49 untereinander) und prüft, dass
+        // (a) die Kappung greift und (b) ein danach eingefügtes, stark
+        // redundantes Paar den redundanten Partner verdrängt.
+        let mut db = FaceDatabase::new();
+        db.update(&v4(1.0, 0.0, 0.0, 0.0), vec![0u8; THUMB_BYTES]);
+        for k in 1..=(MAX_EXEMPLARS + 4) {
             let mut v = [0.0; 512];
             v[0] = 0.7;
-            v[k] = 0.714;
+            v[(k % 400) + 2] = 0.714; // je eigene Achse → paarweise ~0.49
             db.update(&Embedding512 { v }, vec![k as u8; THUMB_BYTES]);
         }
         assert_eq!(db.persons()[0].exemplars.len(), MAX_EXEMPLARS);
+    }
+
+    #[test]
+    fn most_redundant_index_picks_closest_pair_member() {
+        // Drei Exemplare: zwei fast identisch (a, a'), eines weit weg (b).
+        // Der redundanteste Index muss einer der beiden nahen sein.
+        let mut a = Embedding512::zeros();
+        a.v[0] = 1.0;
+        let mut a2 = Embedding512::zeros();
+        a2.v[0] = 0.999;
+        a2.v[1] = (1.0f32 - 0.999 * 0.999).sqrt();
+        let mut b = Embedding512::zeros();
+        b.v[5] = 1.0;
+        let ex = vec![
+            Exemplar {
+                embedding: a,
+                thumbnail: vec![],
+            },
+            Exemplar {
+                embedding: a2,
+                thumbnail: vec![],
+            },
+            Exemplar {
+                embedding: b,
+                thumbnail: vec![],
+            },
+        ];
+        assert!(most_redundant_index(&ex) < 2); // 0 oder 1, nie der ferne b
     }
 
     #[test]

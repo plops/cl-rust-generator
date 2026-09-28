@@ -71,10 +71,16 @@ struct Args {
 fn parse_args() -> Result<Args, String> {
     let mut a = Args {
         db_path: "faces_db.bin".into(),
-        n_neighbors: 15,
-        min_cluster_size: 4,
-        min_samples: 3,
-        cluster_dim: 6,
+        // Validiert via cuML-Sweep + LFW-Benchmark (siehe cl-py-generator/
+        // example/174_autocluster): kleines n_neighbors macht die echten
+        // Same-Person-Mikrocluster im 2D-Layout sichtbar (Same-Person-kNN
+        // 0.87 bei nn=5 vs 0.61 bei nn=20). min_dist=0 (in umap-rs default)
+        // zieht Cluster fester zusammen. Clustern in 8D (statt 6D) mit
+        // min_cluster_size=2/min_samples=2 -> ARI 0.74 auf der DB.
+        n_neighbors: 8,
+        min_cluster_size: 3,
+        min_samples: 2,
+        cluster_dim: 8,
         frames: 0,
         live: false,
         models: "models".into(),

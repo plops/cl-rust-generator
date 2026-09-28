@@ -15,6 +15,10 @@ path = "src/latent_viz.rs"
 name = "doe"
 path = "src/doe.rs"
 
+[[bin]]
+name = "export"
+path = "src/export.rs"
+
 [dependencies]
 # no-default: ohne Audio/ALSA-C-Abhängigkeiten
 macroquad = { version = "0.4.16", default-features = false }

@@ -41,6 +41,8 @@ pub struct TrackedFace {
     pub sim: f32,
     /// Alignter 112×112-RGB-Crop.
     pub crop: Vec<u8>,
+    /// L2-normiertes Embedding (für Latent-Space-Projektion).
+    pub embedding: Embedding512,
 }
 
 /// Pipeline-Orchestrierung mit DB und Provider-Name.
@@ -91,6 +93,7 @@ impl<D: Detector, E: Embedder> Engine<D, E> {
                 person_id,
                 sim,
                 crop,
+                embedding: emb,
             });
         }
         out

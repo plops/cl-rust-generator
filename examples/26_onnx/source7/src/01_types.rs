@@ -11,8 +11,8 @@ pub const CROP_SIZE: usize = 112;
 pub const THUMB_BYTES: usize = CROP_SIZE * CROP_SIZE * 3;
 /// Dimension des ArcFace-Embeddings.
 pub const EMBED_DIM: usize = 512;
-/// Max. Exemplare pro Person (FIFO bei Überlauf).
-pub const MAX_EXEMPLARS: usize = 5;
+/// Max. Exemplare pro Person (Diversitäts-Verdrängung bei Überlauf).
+pub const MAX_EXEMPLARS: usize = 12;
 
 /// Achsenparallele Box mit Konfidenz im Detektor-Koordinatensystem.
 #[derive(Debug, Clone, Copy, PartialEq)]
