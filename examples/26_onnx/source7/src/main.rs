@@ -39,6 +39,12 @@ const WIN_W: i32 = 820;
 const WIN_H: i32 = 640;
 /// Sidebar-Breite.
 const SIDE_W: f32 = 180.0;
+/// Galerie: Kantenlänge eines Thumbnails in px.
+const GAL_CELL: usize = 40;
+/// Galerie: obere Kante (unter dem Live-Preview).
+const GAL_TOP: f32 = 176.0;
+/// Galerie: Zeilenhöhe (Thumbnail + Label + Abstand).
+const GAL_ROW: f32 = 56.0;
 
 /// CLI-Konfiguration (Handparse, kein clap).
 struct Args {
@@ -163,9 +169,9 @@ async fn main() {
     let preview_tex = Texture2D::from_image(&preview);
     preview_tex.set_filter(FilterMode::Nearest);
     let mut gal = Image {
-        width: 56,
-        height: 56,
-        bytes: vec![0; 56 * 56 * 4],
+        width: GAL_CELL as u16,
+        height: GAL_CELL as u16,
+        bytes: vec![0; GAL_CELL * GAL_CELL * 4],
     };
     let gal_tex = Texture2D::from_image(&gal);
     gal_tex.set_filter(FilterMode::Nearest);
@@ -173,6 +179,7 @@ async fn main() {
     let mut fps = 60.0f32;
     let mut frame = 0usize;
     let mut faces_total = 0usize;
+    let mut gal_scroll = 0.0f32;
     loop {
         if is_key_down(KeyCode::Escape) || (args.max_frames > 0 && frame >= args.max_frames) {
             break;
@@ -220,16 +227,58 @@ async fn main() {
             draw_text("live", sx + 8.0, 16.0, 16.0, WHITE);
             draw_texture(&preview_tex, sx + 34.0, 24.0, WHITE);
         }
-        draw_text("galerie", sx + 8.0, 160.0, 16.0, WHITE);
-        for (i, p) in eng.db().persons().iter().take(6).enumerate() {
-            if let Some(ex) = p.exemplars.first() {
-                gal.bytes = thumb_scaled(&ex.thumbnail, 56);
+        // Galerie: alle Personen + alle Exemplare, scrollbar (Mausrad).
+        let hud_top = WIN_H as f32 - 84.0;
+        draw_text("galerie", sx + 8.0, GAL_TOP - 12.0, 16.0, WHITE);
+        // Scroll-Offset aus dem Mausrad (nur wenn Cursor über der Sidebar).
+        let (_, wheel_y) = mouse_wheel();
+        let (mx, _) = mouse_position();
+        if mx >= sx {
+            gal_scroll -= wheel_y * 24.0;
+        }
+        let persons = eng.db().persons();
+        let total_h = persons.len() as f32 * GAL_ROW;
+        let view_h = hud_top - GAL_TOP;
+        let max_scroll = (total_h - view_h).max(0.0);
+        gal_scroll = gal_scroll.clamp(0.0, max_scroll);
+        for (i, p) in persons.iter().enumerate() {
+            let row_y = GAL_TOP + i as f32 * GAL_ROW - gal_scroll;
+            // Zeilen außerhalb des sichtbaren Bereichs überspringen.
+            if row_y + GAL_CELL as f32 <= GAL_TOP || row_y >= hud_top {
+                continue;
+            }
+            draw_text(
+                format!("ID {} ({})", p.id, p.exemplars.len()),
+                sx + 8.0,
+                row_y - 2.0,
+                14.0,
+                LIGHTGRAY,
+            );
+            for (k, ex) in p.exemplars.iter().enumerate() {
+                let tx = sx + 8.0 + k as f32 * (GAL_CELL as f32 + 2.0);
+                if tx + GAL_CELL as f32 > sx + SIDE_W {
+                    break; // Zeile voll
+                }
+                gal.bytes = thumb_scaled(&ex.thumbnail, GAL_CELL);
                 gal_tex.update(&gal);
-                let gy = 170.0 + i as f32 * 62.0;
-                draw_texture(&gal_tex, sx + 12.0, gy, WHITE);
-                draw_text(format!("ID {}", p.id), sx + 74.0, gy + 32.0, 16.0, WHITE);
+                draw_texture(&gal_tex, tx, row_y + 2.0, WHITE);
             }
         }
+        // Sidebar-Ränder überzeichnen (einfaches Clipping oben/unten).
+        draw_rectangle(
+            sx,
+            GAL_TOP - 28.0,
+            SIDE_W,
+            16.0,
+            Color::from_rgba(20, 20, 28, 255),
+        );
+        draw_rectangle(
+            sx,
+            hud_top,
+            SIDE_W,
+            WIN_H as f32 - hud_top,
+            Color::from_rgba(20, 20, 28, 255),
+        );
         let hud_y = WIN_H as f32 - 76.0;
         for (i, line) in [
             format!("personen: {}", eng.db().persons().len()),

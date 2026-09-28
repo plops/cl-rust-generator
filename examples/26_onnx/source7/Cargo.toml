@@ -7,6 +7,14 @@ edition = "2024"
 name = "x11_face_reid"
 path = "src/main.rs"
 
+[[bin]]
+name = "latent_viz"
+path = "src/latent_viz.rs"
+
+[[bin]]
+name = "doe"
+path = "src/doe.rs"
+
 [dependencies]
 # no-default: ohne Audio/ALSA-C-Abhängigkeiten
 macroquad = { version = "0.4.16", default-features = false }
@@ -15,6 +23,11 @@ ort = { version = "2.0.0-rc.13", default-features = false, features = ["download
 x11rb = "0.14.0"
 serde = { version = "1.0", features = ["derive"] }
 bincode = { version = "2.0", features = ["serde"] }
+# Latent-Space-Visualisierung: UMAP-Reduktion 512D -> 2D
+umap-rs = "0.4.5"
+ndarray = "0.17"
+# Dichtebasiertes Clustering der Embeddings (Rausch-tolerant, ohne k)
+hdbscan = { version = "0.12.0", features = ["parallel"] }
 
 [features]
 # Aktiviert CUDAExecutionProvider (braucht CUDA-Runtime + cuDNN am Host)

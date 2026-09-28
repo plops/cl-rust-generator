@@ -75,6 +75,13 @@ impl FaceDatabase {
         &self.persons
     }
 
+    /// Ersetzt den kompletten Personen-Bestand (für Tests/Import via latent_viz).
+    #[allow(dead_code)] // im x11_face_reid-Binary ungenutzt, in 08_latent-Tests genutzt
+    pub fn replace_persons(&mut self, persons: Vec<PersonRecord>, next_id: u32) {
+        self.persons = persons;
+        self.next_id = next_id;
+    }
+
     /// Anzahl gespeicherter Exemplare insgesamt.
     #[must_use]
     pub fn exemplar_count(&self) -> usize {
@@ -147,15 +154,24 @@ impl FaceDatabase {
         )
     }
 
-    /// Speichert die DB atomar-via-Tempfile (einfach: direkt schreiben).
+    /// Speichert die DB atomar: erst in `<path>.tmp` schreiben + `sync`, dann
+    /// per `rename` über das Ziel schieben (POSIX-atomar auf gleichem FS).
+    /// Ein Absturz während des Schreibens lässt so die alte DB intakt.
     pub fn save(&self, path: &str) -> std::io::Result<()> {
+        use std::io::Write;
         let file = DbFile {
             persons: self.persons.clone(),
             next_id: self.next_id,
         };
         let bytes = bincode::serde::encode_to_vec(&file, bincode::config::standard())
             .map_err(std::io::Error::other)?;
-        std::fs::write(path, bytes)
+        let tmp = format!("{path}.tmp");
+        {
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(&bytes)?;
+            f.sync_all()?;
+        }
+        std::fs::rename(&tmp, path)
     }
 }
 

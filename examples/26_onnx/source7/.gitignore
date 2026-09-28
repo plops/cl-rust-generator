@@ -1,0 +1,7 @@
+*.onnx
+faces_db.bin
+doe_results*.csv
+/target/
+
+# Große Test-Fixtures nicht einchecken (E2E-Test lädt sie lokal / via Skript).
+tests/assets/*.ppm
