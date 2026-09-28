@@ -94,6 +94,11 @@ pub fn intersect_surface(ray: &Ray, vertex_z: Dual, radius: Dual) -> Option<Hit>
 }
 
 /// Vector-form Snell law; `None` on total internal reflection.
+///
+/// The result is renormalized: the inputs are unit-length in exact
+/// arithmetic, but successive refractions accumulate floating-point
+/// magnitude drift that would otherwise bias `direction.z`-based plane
+/// intersection and the marginal-ray slope used for EFL.
 pub fn refract(dir: &Vec3, normal: &Vec3, n1: Dual, n2: Dual) -> Option<Vec3> {
     let mu = n1 / n2;
     let cos1 = -normal.dot(*dir);
@@ -102,7 +107,7 @@ pub fn refract(dir: &Vec3, normal: &Vec3, n1: Dual, n2: Dual) -> Option<Vec3> {
     if k.v < 0.0 {
         return None;
     }
-    Some(*dir * mu + *normal * (mu * cos1 - k.sqrt()))
+    Some((*dir * mu + *normal * (mu * cos1 - k.sqrt())).normalize())
 }
 
 #[cfg(test)]
@@ -169,6 +174,18 @@ mod tests {
             .expect("no TIR at normal incidence");
         let v = out.values();
         assert!(close(v[0], 0.0, 1e-12) && close(v[2], 1.0, 1e-12));
+    }
+
+    #[test]
+    fn refracted_direction_is_unit_length() {
+        // Oblique incidence at an air/glass boundary: the bent ray must
+        // stay unit-length so downstream z-slope math is unbiased.
+        let a = 30.0f64.to_radians();
+        let dir = Vec3::constant(a.sin(), 0.0, a.cos());
+        let n = Vec3::constant(0.0, 0.0, -1.0);
+        let out = refract(&dir, &n, Dual::constant(1.0), Dual::constant(1.5168))
+            .expect("no TIR at 30 deg");
+        assert!(close(out.norm().v, 1.0, 1e-12), "norm = {}", out.norm().v);
     }
 
     #[test]

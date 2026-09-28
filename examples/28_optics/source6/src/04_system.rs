@@ -111,6 +111,30 @@ pub struct OpticalSetup {
 }
 
 /// Parse a TOML document into a setup.
+///
+/// # Examples
+///
+/// ```
+/// use optics::load_toml;
+///
+/// let setup = load_toml(
+///     "[source]\n\
+///      ray_count = 4\n\
+///      grid_radius = 5.0\n\
+///      [[surfaces]]\n\
+///      name = \"Front\"\n\
+///      radius = 50.0\n\
+///      thickness = 5.0\n\
+///      material = 1.5168\n\
+///      [[surfaces]]\n\
+///      name = \"Back\"\n\
+///      radius = -100.0\n\
+///      thickness = 40.0\n",
+/// )
+/// .expect("valid config");
+/// assert_eq!(setup.surfaces.len(), 2);
+/// assert_eq!(setup.source.ray_count, 4);
+/// ```
 pub fn load_toml(text: &str) -> Result<OpticalSetup, toml::de::Error> {
     toml::from_str(text)
 }

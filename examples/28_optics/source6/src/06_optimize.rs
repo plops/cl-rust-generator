@@ -145,19 +145,86 @@ pub fn gradient(setup: &OpticalSetup, vars: &[Var]) -> Vec<f64> {
         .collect()
 }
 
+/// Convergence tolerance: stop when `|loss - prev_loss|` falls below this.
+pub const CONVERGENCE_TOL: f64 = 1e-12;
+
 /// Gradient descent over the setup's `optimize` variables.
-/// Returns the updated setup plus the loss history (initial first).
+///
+/// Returns the updated setup plus the loss history (initial loss first).
+/// The loop stops early once the loss change between iterations drops below
+/// [`CONVERGENCE_TOL`]. Each step is guarded: if a full step would *increase*
+/// the loss (learning rate too large for the local curvature), the step is
+/// halved up to a few times, and if it still fails to improve, descent stops
+/// with the last improving parameters rather than diverging.
+///
+/// # Examples
+///
+/// ```
+/// use optics::{load_toml, descend};
+///
+/// let setup = load_toml(
+///     "[source]\n\
+///      ray_count = 10\n\
+///      grid_radius = 5.0\n\
+///      [optimize]\n\
+///      learning_rate = 0.001\n\
+///      iters = 20\n\
+///      [[surfaces]]\n\
+///      name = \"Front\"\n\
+///      radius = 50.0\n\
+///      thickness = 5.0\n\
+///      material = 1.5168\n\
+///      optimize = [\"radius\"]\n\
+///      [[surfaces]]\n\
+///      name = \"Back\"\n\
+///      radius = -100.0\n\
+///      thickness = 40.0\n",
+/// )
+/// .unwrap();
+///
+/// let (optimized, history) = descend(&setup).expect("has optimize vars");
+/// // The loss history never increases and ends below where it started.
+/// assert!(history.windows(2).all(|w| w[1] <= w[0]));
+/// assert!(history.last().unwrap() < history.first().unwrap());
+/// // The optimized radius has moved away from its initial value.
+/// assert_ne!(optimized.surfaces[0].radius, setup.surfaces[0].radius);
+/// ```
 pub fn descend(setup: &OpticalSetup) -> Result<(OpticalSetup, Vec<f64>), String> {
     let vars = variables(setup)?;
     let mut cur = setup.clone();
-    let mut history = vec![loss_for(&cur)];
+    let mut loss = loss_for(&cur);
+    let mut history = vec![loss];
+    let base_lr = cur.optimize.learning_rate;
     for _ in 0..setup.optimize.iters {
         let g = gradient(&cur, &vars);
-        for (w, step) in vars.iter().zip(g.iter()) {
-            let v = get_var(&cur.surfaces, *w) - cur.optimize.learning_rate * step;
-            set_var(&mut cur.surfaces, *w, v);
+        // Backtracking line search: shrink the step until it improves.
+        let mut lr = base_lr;
+        let mut stepped = false;
+        for _ in 0..8 {
+            let mut trial = cur.clone();
+            for (w, step) in vars.iter().zip(g.iter()) {
+                let v = get_var(&trial.surfaces, *w) - lr * step;
+                set_var(&mut trial.surfaces, *w, v);
+            }
+            let trial_loss = loss_for(&trial);
+            if trial_loss.is_finite() && trial_loss < loss {
+                cur = trial;
+                history.push(trial_loss);
+                let improved = loss - trial_loss;
+                loss = trial_loss;
+                stepped = true;
+                if improved < CONVERGENCE_TOL {
+                    return Ok((cur, history));
+                }
+                break;
+            }
+            lr *= 0.5;
         }
-        history.push(loss_for(&cur));
+        if !stepped {
+            // No step size improved the loss: at a local minimum or the
+            // gradient is uninformative. Stop with the best parameters.
+            break;
+        }
     }
     Ok((cur, history))
 }
@@ -229,7 +296,15 @@ mod tests {
     fn descend_lowers_loss() {
         let setup = sample();
         let (opt, history) = descend(&setup).expect("descent");
-        assert_eq!(history.len(), setup.optimize.iters + 1);
+        // Backtracking + early-stop may end before `iters`, but never after.
+        assert!(history.len() >= 2);
+        assert!(history.len() <= setup.optimize.iters + 1);
+        // Loss history is monotonically non-increasing (guarded steps only
+        // ever accept an improving trial).
+        assert!(
+            history.windows(2).all(|w| w[1] <= w[0]),
+            "history not monotone: {history:?}"
+        );
         assert!(
             history.last().unwrap() < history.first().unwrap(),
             "history = {history:?}"
@@ -237,6 +312,23 @@ mod tests {
         assert!(
             (opt.surfaces[0].radius - setup.surfaces[0].radius).abs() > 0.0,
             "radius must move"
+        );
+    }
+
+    #[test]
+    fn descend_does_not_diverge_with_large_lr() {
+        // A wildly oversized learning rate would blow up plain descent;
+        // the backtracking guard must keep the loss non-increasing.
+        let mut setup = sample();
+        setup.optimize.learning_rate = 1e6;
+        let (_opt, history) = descend(&setup).expect("descent");
+        assert!(
+            history.iter().all(|l| l.is_finite()),
+            "history has non-finite loss: {history:?}"
+        );
+        assert!(
+            history.last().unwrap() <= history.first().unwrap(),
+            "loss increased: {history:?}"
         );
     }
 

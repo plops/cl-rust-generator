@@ -118,6 +118,37 @@ pub fn to_document(setup: &OpticalSetup, paths: &[IntersectionResult]) -> System
 }
 
 /// Pretty JSON document (serialization is infallible for this schema).
+///
+/// # Examples
+///
+/// ```
+/// use optics::{load_toml, trace_system, to_json, SystemJson, SCHEMA_VERSION};
+///
+/// let setup = load_toml(
+///     "[source]\n\
+///      ray_count = 4\n\
+///      grid_radius = 5.0\n\
+///      [[surfaces]]\n\
+///      name = \"Front\"\n\
+///      radius = 50.0\n\
+///      thickness = 5.0\n\
+///      material = 1.5168\n\
+///      [[surfaces]]\n\
+///      name = \"Back\"\n\
+///      radius = -100.0\n\
+///      thickness = 40.0\n",
+/// )
+/// .unwrap();
+///
+/// let paths = trace_system(&setup.surfaces, &setup);
+/// let json = to_json(&setup, &paths);
+///
+/// // The output round-trips back into the typed document.
+/// let doc: SystemJson = serde_json::from_str(&json).unwrap();
+/// assert_eq!(doc.version, SCHEMA_VERSION);
+/// assert_eq!(doc.surfaces.len(), 2);
+/// assert!(!doc.segments.is_empty());
+/// ```
 #[must_use]
 pub fn to_json(setup: &OpticalSetup, paths: &[IntersectionResult]) -> String {
     serde_json::to_string_pretty(&to_document(setup, paths)).expect("SystemJson serializes")

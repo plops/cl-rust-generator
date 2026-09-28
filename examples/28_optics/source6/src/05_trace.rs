@@ -166,6 +166,32 @@ pub fn layout_for(surfaces: &[Surface], lambda_um: f64) -> (Vec<DualSurface>, Du
 
 /// Trace the bundle through `surfaces` at every configured wavelength.
 /// `setup` provides source, vertices context and image gaps.
+///
+/// # Examples
+///
+/// ```
+/// use optics::{load_toml, trace_system, RayEnd};
+///
+/// let setup = load_toml(
+///     "[source]\n\
+///      ray_count = 4\n\
+///      grid_radius = 5.0\n\
+///      [[surfaces]]\n\
+///      name = \"Front\"\n\
+///      radius = 50.0\n\
+///      thickness = 5.0\n\
+///      material = 1.5168\n\
+///      [[surfaces]]\n\
+///      name = \"Back\"\n\
+///      radius = -100.0\n\
+///      thickness = 40.0\n",
+/// )
+/// .unwrap();
+///
+/// let paths = trace_system(&setup.surfaces, &setup);
+/// assert_eq!(paths.len(), 4); // one path per bundle ray, single wavelength
+/// assert!(paths.iter().all(|p| p.end == RayEnd::Image));
+/// ```
 pub fn trace_system(surfaces: &[Surface], setup: &OpticalSetup) -> Vec<IntersectionResult> {
     let mut paths = Vec::new();
     for lambda in &setup.source.wavelengths {
@@ -219,6 +245,32 @@ fn marginal_ray(setup: &OpticalSetup) -> Option<Ray> {
 
 /// Effective focal length: `EFL = h / |u'|` with marginal-ray output
 /// slope `u' = dy/dz`. `None` when the marginal ray is lost.
+///
+/// # Examples
+///
+/// ```
+/// use optics::{load_toml, efl};
+///
+/// // Symmetric biconvex, R = +/-100, d = 2, n = 1.5: EFL ~ 100.33 mm.
+/// let setup = load_toml(
+///     "[source]\n\
+///      ray_count = 1\n\
+///      grid_radius = 1.0\n\
+///      [[surfaces]]\n\
+///      name = \"L1\"\n\
+///      radius = 100.0\n\
+///      thickness = 2.0\n\
+///      material = 1.5\n\
+///      [[surfaces]]\n\
+///      name = \"L2\"\n\
+///      radius = -100.0\n\
+///      thickness = 90.0\n",
+/// )
+/// .unwrap();
+///
+/// let f = efl(&setup).expect("marginal ray reaches image");
+/// assert!((f - 100.33).abs() < 0.05, "EFL = {f}");
+/// ```
 pub fn efl(setup: &OpticalSetup) -> Option<f64> {
     let ray = marginal_ray(setup)?;
     let slope = (ray.direction.y / ray.direction.z).v.abs();
