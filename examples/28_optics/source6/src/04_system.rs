@@ -34,6 +34,10 @@ fn default_wavelengths() -> Vec<f64> {
     vec![D_LINE]
 }
 
+fn default_field_angles() -> Vec<f64> {
+    vec![0.0]
+}
+
 fn air() -> f64 {
     1.0
 }
@@ -53,6 +57,11 @@ pub struct SourceCfg {
     /// Wavelengths in um, traced independently (polychromatic loss).
     #[serde(default = "default_wavelengths")]
     pub wavelengths: Vec<f64>,
+    /// Field angles in degrees, traced independently. Each entry tilts the
+    /// input bundle in the y-z plane. Default `[0.0]` reproduces the legacy
+    /// on-axis-only behavior exactly.
+    #[serde(default = "default_field_angles")]
+    pub field_angles_deg: Vec<f64>,
 }
 
 /// One optical surface; `radius = 0` is a plane.

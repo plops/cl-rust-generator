@@ -76,29 +76,37 @@ ZOOM_POSITIONS = [
 # sinnvolle Einheit gebracht: die erwartete Loss-Aenderung bei einer typischen
 # Abweichung. (Quelle: uebliche Feinoptik-Werkstattgenauigkeiten, bewusst
 # konservativ; der Bericht erlaeutert die Wahl.)
+#
+# WICHTIG — Massstab: das Patent US 5,146,366 ist auf F = 1.0 normiert
+# (dimensionslos), die Radien/Dicken tragen also KEINE Millimeter, sondern
+# Vielfache der Systembrennweite. Die Toleranzen sind entsprechend in dieser
+# normierten Einheit angesetzt: ~1 % des vorderen Krummungsradius fuer den
+# Schliff, ~0,3 % der Systembrennweite fuer Dicken/Abstaende bei der Montage,
+# und die uebliche Glas-Chargenstreuung fuer die Brechzahl.
 DEFAULT_TOLERANCES = {
-    "radius": 0.10,     # mm   Krummungsradius-Fehler beim Schleifen
-    "thickness": 0.02,  # mm   Dicken-/Abstandstoleranz bei Montage
-    "material": 0.0010, # -    Brechzahl-Streuung der Glascharge
+    "radius": 0.010,    # norm. Krummungsradius-Fehler beim Schleifen
+    "thickness": 0.003, # norm. Dicken-/Abstandstoleranz bei Montage
+    "material": 0.0010, # -     Brechzahl-Streuung der Glascharge
 }
 
 # Freie Designvariablen fuer die Robustheits-Verbesserung (Abschnitt 3 im
-# Prompt): die beiden Kompensator-Luftspalte g2 und g3, die pro Zoom-Stellung
-# die Montage-/Nachfuehrlage des Kompensators festlegen. Sie lassen sich in der
-# Fertigung tatsaechlich justieren und beeinflussen die Empfindlichkeit stark,
-# ohne die Kamera (letzter Spalt) zu verschieben. Wir sweepen NUR diese und
-# messen die Kennzahl an jedem Punkt per Gradient.
+# Prompt): die beiden beweglichen Kompensator-/Variator-Luftspalte D10 und
+# D12, die pro Zoom-Stellung die Montage-/Nachfuehrlage festlegen. Sie lassen
+# sich in der Fertigung tatsaechlich justieren und beeinflussen die
+# Empfindlichkeit stark, ohne die Kamera (letzter Spalt, per Solver gefixt)
+# zu verschieben. Wir sweepen NUR diese und messen die Kennzahl an jedem
+# Punkt per Gradient.
 FREE_GAP_VARS = [
-    ("Variator Rueckseite", "thickness"),      # g2
-    ("Kompensator Rueckseite", "thickness"),   # g3
+    ("G2 L6 back (D10 variable -> G3)", "thickness"),  # D10
+    ("G3 L7 back (D12 variable -> G4)", "thickness"),  # D12
 ]
 
 # "Naiver Entwurf": ein noch nicht auf Herstellbarkeit gepruefter erster Wurf.
-# Er verschiebt die beiden Kompensator-Spalte g2/g3 gegenlaeufig um diesen
-# Betrag (mm) aus der spaeter gefundenen guten Lage heraus -- so, wie ein
-# Konstrukteur die Nachfuehrung zunaechst grob ansetzt. Das ist der "Vorher"-
-# Zustand, den die gradientengefuehrte Rastersuche dann verbessert.
-DRAFT_OFFSET_MM = 2.5
+# Er verschiebt die beiden beweglichen Spalte D10/D12 gegenlaeufig um diesen
+# Betrag (normierte Patenteinheiten) aus der spaeter gefundenen guten Lage
+# heraus -- so, wie ein Konstrukteur die Nachfuehrung zunaechst grob ansetzt.
+# Klein gewaehlt, weil die Patent-Spalte selbst im Bereich ~0,1..2 liegen.
+DRAFT_OFFSET_MM = 0.12
 
 
 # --------------------------------------------------------------------------
@@ -309,17 +317,42 @@ class FdCheck:
     rel_error: float
 
 
+def _force_on_axis(toml_text: str) -> str:
+    """Setze `field_angles_deg = [0.0]` (on-axis only) fuer die FD-Gegenprobe.
+
+    Das Pupil-Aiming ist ein bewusst PRIMALER (nicht-differenzierbarer)
+    geometrischer Setup-Schritt pro Auswertung: der Autodiff-Gradient laeuft
+    NICHT durch das Aiming (siehe Solver, `aim_pupil`). Eine Finite-Differenz
+    ueber einen Linsenparameter wuerde das Aiming dagegen bei jeder Stoerung neu
+    loesen und damit eine andere Groesse messen. Fuer eine saubere Gegenprobe
+    des Autodiff-KERNS schalten wir die schraegen Felder ab; on-axis ist das
+    Aiming die Identitaet, und Analytik und Finite Differenz muessen exakt
+    uebereinstimmen. (Die Ranking-Sensitivitaeten selbst bleiben voll-feldrig.)
+    """
+    pat = re.compile(r'^\s*field_angles_deg\s*=.*$', re.MULTILINE)
+    if pat.search(toml_text):
+        return pat.sub("field_angles_deg = [0.0]", toml_text)
+    # Kein Feld gesetzt -> im [source]-Block ergaenzen.
+    return toml_text.replace("[source]", "[source]\nfield_angles_deg = [0.0]", 1)
+
+
 def finite_difference_check(binary: Path, config: Path,
                             sens: list[Sensitivity],
                             n_check: int = 6) -> list[FdCheck]:
     """Zentrale Finite Differenzen der loss-Ausgabe gegen die Autodiff-Gradienten.
 
-    Wir pruefen die (nach Betrag) groessten Sensitivitaeten -- dort ist die
-    Gegenprobe am aussagekraeftigsten. Schrittweite je Parametertyp gewaehlt.
+    Validiert den differenzierbaren KERN des Solvers on-axis (wo das primale
+    Pupil-Aiming die Identitaet ist), damit Analytik und Finite Differenz
+    dieselbe Groesse messen. Geprueft werden die (nach Betrag) groessten
+    on-axis-Sensitivitaeten. Schrittweite je Parametertyp gewaehlt.
     """
     steps = {"radius": 1e-4, "thickness": 1e-4, "material": 1e-6}
-    text = config.read_text(encoding="utf-8")
-    ranked = sorted(sens, key=lambda s: -abs(s.dloss_dp))[:n_check]
+    text = _force_on_axis(config.read_text(encoding="utf-8"))
+    base_cfg = config.with_name("_fd_base.toml")
+    base_cfg.write_text(text, encoding="utf-8")
+    # On-axis analytische Sensitivitaeten (Aiming = Identitaet).
+    _, on_axis_sens = read_sensitivities(binary, base_cfg)
+    ranked = sorted(on_axis_sens, key=lambda s: -abs(s.dloss_dp))[:n_check]
     checks: list[FdCheck] = []
     for s in ranked:
         e = steps[s.key]
@@ -338,6 +371,7 @@ def finite_difference_check(binary: Path, config: Path,
                               numeric=numeric, rel_error=rel))
         p_cfg.unlink(missing_ok=True)
         m_cfg.unlink(missing_ok=True)
+    base_cfg.unlink(missing_ok=True)
     return checks
 
 
@@ -377,7 +411,7 @@ def metric_of_text(binary: Path, text: str, tolerances: dict[str, float],
 
 
 def improve_position(binary: Path, base_path: Path, tolerances: dict[str, float],
-                     work: Path, span: float = 3.0, levels: int = 13
+                     work: Path, span: float = 0.15, levels: int = 13
                      ) -> tuple[GapSolution, GapSolution, list[GapSolution]]:
     """Fuer EINE Zoom-Stellung: ausgehend von einem naiven Entwurf (Kompensator-
     Spalte g2/g3 gegenlaeufig verstellt) ein 2D-DoE-Raster ueber (g2, g3)
@@ -418,16 +452,16 @@ def improve_position(binary: Path, base_path: Path, tolerances: dict[str, float]
     cands: list[GapSolution] = []
     for i, g2 in enumerate(g2_levels):
         for j, g3 in enumerate(g3_levels):
-            if g3 <= 1.0:      # Luftspalt muss positiv/montierbar bleiben
+            if g2 <= 0.02 or g3 <= 0.02:   # Luftspalt muss positiv/montierbar bleiben
                 continue
-            t = set_surface_field(base, *FREE_GAP_VARS[0], round(g2, 4))
-            t = set_surface_field(t, *FREE_GAP_VARS[1], round(g3, 4))
+            t = set_surface_field(base, *FREE_GAP_VARS[0], round(g2, 5))
+            t = set_surface_field(t, *FREE_GAP_VARS[1], round(g3, 5))
             m, lo, arrived = metric_of_text(binary, t, tolerances, work,
                                             f"{base_path.stem}_{i}_{j}")
             if arrived < arrived_ref:   # keine "Verbesserung" durch Abschattung
                 continue
-            cands.append(GapSolution(base_path.stem, round(g2, 4),
-                                     round(g3, 4), m, lo))
+            cands.append(GapSolution(base_path.stem, round(g2, 5),
+                                     round(g3, 5), m, lo))
     best = min(cands, key=lambda c: c.metric)
     return draft, best, cands
 

@@ -4,16 +4,16 @@
 # G4 positive relay (fixed). Variable-power ratio ~5.7x, FNO 2.0-2.3.
 # Source: https://patents.google.com/patent/US5146366A/en (expired).
 #
-# ---- TELEPHOTO END: F = 5.70, FNO = 2.3, 2w = 8.36 deg ----
+# ---- MIDDLE ZOOM: F = 2.50, FNO ~2.1, 2w between wide and tele ----
 # Only the three variable air spaces differ from the wide config:
-#   D5=1.94, D10=0.29, D12=0.14 (patent units, F=1.0 normalization).
+#   D5=1.32, D10=0.63, D12=0.42 (patent units, F=1.0 normalization).
 
 [source]
 grid_radius = 0.15
 ray_count = 25
 wavelengths = [0.4861, 0.5876, 0.6563]
-# Patent tele 2w = 8.36 deg -> half-field ~4.2 deg. Sampled 0 / 2 / 4 deg.
-field_angles_deg = [0.0, 2.0, 4.0]
+# Middle zoom: half-field between wide (~22.6 deg) and tele (~4.2 deg).
+field_angles_deg = [0.0, 6.0, 12.0]
 
 # ---- Group 1: positive, fixed during zooming (front) ----
 [[surfaces]]
@@ -21,27 +21,29 @@ name = "G1 L1 front"
 radius = 12.783
 thickness = 0.139
 material = 1.80518 # vd 25.4
-optimize = ["radius", "thickness", "material"]
+
 [[surfaces]]
 name = "G1 L1/L2 cemented"
 radius = 3.398
 thickness = 0.597
 material = 1.62299 # vd 58.1
+
 [[surfaces]]
 name = "G1 L2 back"
 radius = -8.323
 thickness = 0.027
 material = 1.0
+
 [[surfaces]]
 name = "G1 L3 front"
 radius = 2.444
 thickness = 0.375
 material = 1.69680 # vd 55.5
-optimize = ["radius", "material"]
+
 [[surfaces]]
 name = "G1 L3 back (D5 variable -> G2)"
 radius = 6.501
-thickness = 1.94 # D5 variable: tele=1.94
+thickness = 1.32 # D5 variable: mid=1.32
 material = 1.0
 
 # ---- Group 2: negative variator, moves for zooming ----
@@ -50,55 +52,57 @@ name = "G2 L4 front"
 radius = 5.728
 thickness = 0.111
 material = 1.77250 # vd 49.6
-optimize = ["radius", "thickness", "material"]
+
 [[surfaces]]
 name = "G2 L4 back"
 radius = 1.050
 thickness = 0.271
 material = 1.0
+
 [[surfaces]]
 name = "G2 L5 front"
 radius = -1.301
 thickness = 0.097
 material = 1.77250 # vd 49.6
-optimize = ["radius", "material"]
+
 [[surfaces]]
 name = "G2 L5/L6 cemented"
 radius = 1.302
 thickness = 0.291
 material = 1.80518 # vd 25.4
+
 [[surfaces]]
 name = "G2 L6 back (D10 variable -> G3)"
 radius = -7.266
-thickness = 0.29 # D10 variable: tele=0.29
+thickness = 0.63 # D10 variable: mid=0.63
 material = 1.0
 
 # ---- Group 3: negative compensator, moves to hold image plane ----
-optimize = ["thickness"]
 [[surfaces]]
 name = "G3 L7 front"
 radius = -2.342
 thickness = 0.111
 material = 1.69680 # vd 55.5
-optimize = ["radius", "thickness"]
+
 [[surfaces]]
 name = "G3 L7 back (D12 variable -> G4)"
 radius = -182.651
-thickness = 0.14 # D12 variable: tele=0.14
+thickness = 0.42 # D12 variable: mid=0.42
 material = 1.0
 
 # ---- Group 4: positive relay, fixed during zooming ----
-optimize = ["thickness"]
 [[surfaces]]
 name = "G4 L8 front"
 radius = 5.105
 thickness = 0.319
 material = 1.69680 # vd 55.5
+
 [[surfaces]]
 name = "G4 L8 back"
 radius = -2.243
 thickness = 0.458
 material = 1.0
+
 [[surfaces]]
 name = "Aperture stop"
 radius = 0.0
@@ -106,54 +110,61 @@ thickness = 0.305
 material = 1.0
 stop = true
 diameter = 3.0
+
 [[surfaces]]
 name = "G4 L9 front"
 radius = 3.732
 thickness = 0.319
 material = 1.51742 # vd 52.4
-optimize = ["radius", "material"]
+
 [[surfaces]]
 name = "G4 L9 back"
 radius = -7.501
 thickness = 0.187
 material = 1.0
+
 [[surfaces]]
 name = "G4 L10 front"
 radius = -1.324
 thickness = 0.111
 material = 1.80518 # vd 25.4
+
 [[surfaces]]
 name = "G4 L10 back"
 radius = -2.072
 thickness = 0.020
 material = 1.0
+
 [[surfaces]]
 name = "G4 L11 front"
 radius = 1.592
 thickness = 0.403
 material = 1.58913 # vd 61.2
-optimize = ["radius", "material"]
+
 [[surfaces]]
 name = "G4 L11 back"
 radius = -14.002
 thickness = 0.404
 material = 1.0
+
 [[surfaces]]
 name = "G4 L12 front"
 radius = 3.594
 thickness = 0.111
 material = 1.80518 # vd 25.4
+
 [[surfaces]]
 name = "G4 L12 back"
 radius = 1.043
 thickness = 0.101
 material = 1.0
+
 [[surfaces]]
 name = "G4 L13 front"
 radius = 2.245
 thickness = 0.347
 material = 1.56732 # vd 42.8
-optimize = ["radius", "thickness"]
+
 [[surfaces]]
 name = "G4 L13 back"
 radius = -2.247
@@ -166,8 +177,9 @@ name = "Cover glass front"
 radius = 0.0
 thickness = 0.639
 material = 1.51633 # vd 64.1
+
 [[surfaces]]
 name = "Cover glass back -> image"
 radius = 0.0
-thickness = 0.599941 # back focus, solved by gradient descent (parfocal)
+thickness = 0.709114 # back focus, solved by gradient descent (parfocal)
 material = 1.0

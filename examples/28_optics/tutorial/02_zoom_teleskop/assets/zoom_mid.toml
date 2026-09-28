@@ -1,87 +1,173 @@
-# Vierteiliges Zoom-Teleskop — Zoom-Stellung "Mitte".
+# Canon four-group zoom (US 5,146,366 A, Mukaiya), Numerical Example 1.
+# Classic mechanically-compensated zoom: G1 positive (fixed for zoom) /
+# G2 negative variator (moves) / G3 negative compensator (moves) /
+# G4 positive relay (fixed). Variable-power ratio ~5.7x, FNO 2.0-2.3.
+# Source: https://patents.google.com/patent/US5146366A/en (expired).
 #
-# Aufbau (mechanisch kompensiertes Zoom, vgl. Bericht Abschnitt 3):
-#   Front    (fest)       — Sammelgruppe, positiv.
-#   Variator (beweglich)  — negativ; verschiebt sich, aendert die Vergroesserung.
-#   Kompensator (bewegl.) — positiv; wird nachgefuehrt, haelt die Bildlage.
-#   Relais   (fest)       — bildet auf die Kamera (Bildebene) ab.
-#
-# Die "Bewegung" einer Gruppe wird ueber die Luftspalte (thickness) davor und
-# dahinter abgebildet. Die drei Zoom-TOMLs (zoom_wide/zoom_mid/zoom_tele)
-# unterscheiden sich NUR in drei Luftspalten:
-#   g1 = "Front Rueckseite".thickness       (Zoom-Stellhebel: bewegt Variator)
-#   g2 = "Variator Rueckseite".thickness    (Kompensator-Vorderspalt)
-#   g3 = "Kompensator Rueckseite".thickness (Kompensator-Hinterspalt)
-# Der letzte Spalt (Fokus) bleibt fest (Kamera bewegt sich nicht) -> parfokal.
-# Radien, Linsendicken und Glaeser sind ueber alle Stellungen identisch.
-#
-# Die g2/g3-Werte wurden per exaktem Gradientenabstieg des Solvers so gesucht,
-# dass jede Stellung bei fester Kamera scharf abbildet (loss ~ 0.013..0.028).
-#
-# Toleranzparameter (optimize = [...]) sind die fertigungskritischen Groessen,
-# deren Empfindlichkeit dLoss/dp der Treiber per Autodiff ausliest.
+# ---- MIDDLE ZOOM: F = 2.50, FNO ~2.1, 2w between wide and tele ----
+# Only the three variable air spaces differ from the wide config:
+#   D5=1.32, D10=0.63, D12=0.42 (patent units, F=1.0 normalization).
 
 [source]
-aperture_diameter = 12.0
+grid_radius = 0.15
+ray_count = 25
 wavelengths = [0.4861, 0.5876, 0.6563]
+# Middle zoom: half-field between wide (~22.6 deg) and tele (~4.2 deg).
+field_angles_deg = [0.0, 6.0, 12.0]
 
-# --- Frontgruppe (fest) --------------------------------------------------
+# ---- Group 1: positive, fixed during zooming (front) ----
 [[surfaces]]
-name = "Front Vorderseite"
-radius = 62.0
-thickness = 6.0
-material = 1.6170
-cauchy_b = 0.00420
+name = "G1 L1 front"
+radius = 12.783
+thickness = 0.139
+material = 1.80518 # vd 25.4
 optimize = ["radius", "thickness", "material"]
-
 [[surfaces]]
-name = "Front Rueckseite"
-radius = -180.0
-thickness = 17.0    # g1 (Zoom-Stellhebel)
-optimize = ["radius", "thickness"]
-
-# --- Variator (beweglich): negative Gruppe -------------------------------
+name = "G1 L1/L2 cemented"
+radius = 3.398
+thickness = 0.597
+material = 1.62299 # vd 58.1
 [[surfaces]]
-name = "Variator Vorderseite"
-radius = -90.0
-thickness = 3.0
-material = 1.6200
-cauchy_b = 0.00450
+name = "G1 L2 back"
+radius = -8.323
+thickness = 0.027
+material = 1.0
+[[surfaces]]
+name = "G1 L3 front"
+radius = 2.444
+thickness = 0.375
+material = 1.69680 # vd 55.5
+optimize = ["radius", "material"]
+[[surfaces]]
+name = "G1 L3 back (D5 variable -> G2)"
+radius = 6.501
+thickness = 1.32 # D5 variable: mid=1.32
+material = 1.0
+
+# ---- Group 2: negative variator, moves for zooming ----
+[[surfaces]]
+name = "G2 L4 front"
+radius = 5.728
+thickness = 0.111
+material = 1.77250 # vd 49.6
 optimize = ["radius", "thickness", "material"]
-
 [[surfaces]]
-name = "Variator Rueckseite"
-radius = 46.0
-thickness = 19.9908    # g2 (Kompensator-Vorderspalt)
+name = "G2 L4 back"
+radius = 1.050
+thickness = 0.271
+material = 1.0
+[[surfaces]]
+name = "G2 L5 front"
+radius = -1.301
+thickness = 0.097
+material = 1.77250 # vd 49.6
+optimize = ["radius", "material"]
+[[surfaces]]
+name = "G2 L5/L6 cemented"
+radius = 1.302
+thickness = 0.291
+material = 1.80518 # vd 25.4
+[[surfaces]]
+name = "G2 L6 back (D10 variable -> G3)"
+radius = -7.266
+thickness = 0.63 # D10 variable: mid=0.63
+material = 1.0
+
+# ---- Group 3: negative compensator, moves to hold image plane ----
+optimize = ["thickness"]
+[[surfaces]]
+name = "G3 L7 front"
+radius = -2.342
+thickness = 0.111
+material = 1.69680 # vd 55.5
 optimize = ["radius", "thickness"]
-
-# --- Kompensator (beweglich): positive Gruppe ----------------------------
 [[surfaces]]
-name = "Kompensator Vorderseite (Blende)"
-radius = 55.0
-thickness = 5.0
-material = 1.6170
-cauchy_b = 0.00420
+name = "G3 L7 back (D12 variable -> G4)"
+radius = -182.651
+thickness = 0.42 # D12 variable: mid=0.42
+material = 1.0
+
+# ---- Group 4: positive relay, fixed during zooming ----
+optimize = ["thickness"]
+[[surfaces]]
+name = "G4 L8 front"
+radius = 5.105
+thickness = 0.319
+material = 1.69680 # vd 55.5
+[[surfaces]]
+name = "G4 L8 back"
+radius = -2.243
+thickness = 0.458
+material = 1.0
+[[surfaces]]
+name = "Aperture stop"
+radius = 0.0
+thickness = 0.305
+material = 1.0
 stop = true
-optimize = ["radius", "thickness", "material"]
-
+diameter = 3.0
 [[surfaces]]
-name = "Kompensator Rueckseite"
-radius = -70.0
-thickness = 17.7046    # g3 (Kompensator-Hinterspalt)
+name = "G4 L9 front"
+radius = 3.732
+thickness = 0.319
+material = 1.51742 # vd 52.4
+optimize = ["radius", "material"]
+[[surfaces]]
+name = "G4 L9 back"
+radius = -7.501
+thickness = 0.187
+material = 1.0
+[[surfaces]]
+name = "G4 L10 front"
+radius = -1.324
+thickness = 0.111
+material = 1.80518 # vd 25.4
+[[surfaces]]
+name = "G4 L10 back"
+radius = -2.072
+thickness = 0.020
+material = 1.0
+[[surfaces]]
+name = "G4 L11 front"
+radius = 1.592
+thickness = 0.403
+material = 1.58913 # vd 61.2
+optimize = ["radius", "material"]
+[[surfaces]]
+name = "G4 L11 back"
+radius = -14.002
+thickness = 0.404
+material = 1.0
+[[surfaces]]
+name = "G4 L12 front"
+radius = 3.594
+thickness = 0.111
+material = 1.80518 # vd 25.4
+[[surfaces]]
+name = "G4 L12 back"
+radius = 1.043
+thickness = 0.101
+material = 1.0
+[[surfaces]]
+name = "G4 L13 front"
+radius = 2.245
+thickness = 0.347
+material = 1.56732 # vd 42.8
 optimize = ["radius", "thickness"]
-
-# --- Relaisgruppe (fest): Abbildung auf die Kamera -----------------------
 [[surfaces]]
-name = "Relais Vorderseite"
-radius = 48.0
-thickness = 5.0
-material = 1.6170
-cauchy_b = 0.00420
-optimize = ["radius", "thickness", "material"]
+name = "G4 L13 back"
+radius = -2.247
+thickness = 0.750
+material = 1.0
 
+# ---- Cover glass / filter (R26, R27 planes) ----
 [[surfaces]]
-name = "Relais Rueckseite"
-radius = -120.0
-thickness = 18.774    # letzter Luftspalt -> Bildebene (Fokus, fest = parfokal)
-optimize = ["radius", "thickness"]
+name = "Cover glass front"
+radius = 0.0
+thickness = 0.639
+material = 1.51633 # vd 64.1
+[[surfaces]]
+name = "Cover glass back -> image"
+radius = 0.0
+thickness = 0.709114 # back focus, solved by gradient descent (parfocal)
+material = 1.0

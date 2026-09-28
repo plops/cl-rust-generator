@@ -83,12 +83,44 @@ pub fn set_var(surfaces: &mut [Surface], var: Var, value: f64) {
 }
 
 /// Spot loss over arrived rays (value + seeded derivative).
+///
+/// Rays are grouped by (wavelength, field angle); the loss is the sum of
+/// squared distances of each arrived ray from the centroid of its group. An
+/// off-axis field lands beside the axis by design, so this measures spot
+/// *size* (aberration), not field position. For a single on-axis field the
+/// centroid is ~0 and this reduces to the legacy `sum(x^2 + y^2)`.
 #[must_use]
 pub fn spot_loss(paths: &[IntersectionResult]) -> Dual {
+    use std::collections::BTreeMap;
+    // Group arrived rays by (wavelength bits, field bits).
+    let mut groups: BTreeMap<(u64, u64), Vec<usize>> = BTreeMap::new();
+    for (i, p) in paths.iter().enumerate() {
+        if p.image().is_some() {
+            let key = (p.wavelength.to_bits(), p.field_deg.to_bits());
+            groups.entry(key).or_default().push(i);
+        }
+    }
     let mut loss = Dual::constant(0.0);
-    for p in paths {
-        if let Some(img) = p.image() {
-            loss = loss + img.x * img.x + img.y * img.y;
+    for idxs in groups.values() {
+        let n = idxs.len() as f64;
+        if n == 0.0 {
+            continue;
+        }
+        // Group centroid (Dual, so gradients flow through it).
+        let mut cx = Dual::constant(0.0);
+        let mut cy = Dual::constant(0.0);
+        for &i in idxs {
+            let img = paths[i].image().expect("grouped ray arrived");
+            cx = cx + img.x;
+            cy = cy + img.y;
+        }
+        cx = cx / n;
+        cy = cy / n;
+        for &i in idxs {
+            let img = paths[i].image().expect("grouped ray arrived");
+            let dx = img.x - cx;
+            let dy = img.y - cy;
+            loss = loss + dx * dx + dy * dy;
         }
     }
     loss
@@ -349,5 +381,31 @@ mod tests {
         let back = load_toml(&text).expect("reparse");
         assert!((back.surfaces[0].radius - 50.0).abs() < 1e-12);
         assert_eq!(back.surfaces[0].optimize, vec!["radius".to_string()]);
+    }
+
+    #[test]
+    fn on_axis_loss_matches_legacy_sum_of_squares() {
+        // With a single on-axis field AND a symmetric (full-grid) bundle the
+        // group centroid is ~0, so the new group-centroid loss equals the
+        // legacy sum(x^2 + y^2). This guards backward compatibility of the
+        // loss definition on the symmetric case the plan calls out.
+        // ray_count = 9 fills a 3x3 grid exactly (no asymmetric truncation).
+        let setup = load_toml(
+            "[source]\nray_count = 9\ngrid_radius = 5.0\n\
+             [[surfaces]]\nname = \"L1\"\nradius = 50.0\nthickness = 5.0\nmaterial = 1.5168\n\
+             [[surfaces]]\nname = \"L2\"\nradius = -100.0\nthickness = 40.0\n",
+        )
+        .expect("parse");
+        let paths = crate::trace::trace_system(&setup.surfaces, &setup);
+        let legacy: f64 = paths
+            .iter()
+            .filter_map(|p| p.image())
+            .map(|img| img.x.v * img.x.v + img.y.v * img.y.v)
+            .sum();
+        let grouped = spot_loss(&paths).v;
+        assert!(
+            (legacy - grouped).abs() < 1e-9,
+            "legacy {legacy} vs grouped {grouped}"
+        );
     }
 }
