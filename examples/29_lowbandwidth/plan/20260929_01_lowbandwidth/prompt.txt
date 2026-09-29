@@ -34,6 +34,20 @@ Keys.
 4. **Bandbreite:** Text-Prioritäts-Queue (Text hat absolute Priorität
 vor AV1-Bildkacheln, um unter den 6 kB/s zu bleiben).
 
+## Bildaufloesung und Bildrate
+
+Fuer die erste MVP implementierung moechte ich nur 640x640 bilder
+aufnehmen. dies soll die implementierung vereinfachen, denn sowohl der
+text als auch der gui detektor koennen genau mit dieser aufloesung
+arbeiten. es ist aber wichtig, dass neue bilder nur gesendet (und
+prozessiert) werden wenn sich wirklich was geandert hat.
+
+Wenn die Bildrate adaptiv and die bandbreite angepasst werden koennte,
+waere das prima (d.h. wenn wir wissen dass wir mit dem aktuellen bild
+nur etwa 0.5fps durch die verbindung bringen, brauchen wir auch nicht
+schneller screenshots aufnehmen und prozessieren).
+
+
 ## Was passiert mit Hintergrundbild oder wenn text ueberlappt bild?
 Text-Masking (Inpainting/Solid Fill): Sobald das NN Textboxen erkennt
 und deren Text extrahiert, übermalt der Server diese Bounding Boxes im
@@ -52,6 +66,7 @@ alles einfarbig weiß rendern muss.
 
 Die Bilder (mit AV1 zu kodierende bildbereiche) sollen wie in 
 /workspace/src/cl-rust-generator/examples/26_onnx/source8/
+(dem programm gui_detect)
 demonstriert mit dem modell
 
 /workspace/src/cl-rust-generator/examples/26_onnx/source8/models/gpa_640_int8.onnx
@@ -135,7 +150,11 @@ Um Hänger zu vermeiden:
     Text-/Bild-Versionsnummer, und der Server schickt sofort einen
     vollständigen Keyframe-Refresh.
 
+## Text Auswahl
 
+Es waere nice to have, wenn wir text copy und pasten koennen. Ich bin
+aber nicht sicher, ob das sich mit den gewuenschten kleinen
+dependencies im clienten implementieren laesst.
 
 ## Code Anforderungen
 
