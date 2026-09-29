@@ -25,7 +25,11 @@ dass https://huggingface.co/Salesforce/GPA-GUI-Detector anwendet
 
 installiere python dependencies mit `uv`. schreibe scripte um die
 assets runterzuladen.  committe keine assets ins repo. nutze python um
-eine optimierte onnx datei zu erstellen.
+eine optimierte onnx datei zu erstellen. benchmarke in
+rust. vergleiche cpu und gpu performance (dieses docker image gibt dir
+zugriff auf eine nvidia karte). koennen wir das modell quantisieren um
+die groesse der binaerdatei zu reduzieren und die framerate zu
+erhoehen?
 
 ## Model Card
 hier ist information von hugging face model card:
