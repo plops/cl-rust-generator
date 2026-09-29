@@ -54,7 +54,6 @@ val hostLibDir = rootProject.file("../../target/debug").absolutePath
 tasks.withType<Test>().configureEach {
     systemProperty("java.library.path", hostLibDir)
     systemProperty("lbw.hostLib", hostLibDir)
-    environment("LBW_SSHD_PORT", System.getenv("LBW_SSHD_PORT") ?: "")
     testLogging {
         events("passed", "skipped", "failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL

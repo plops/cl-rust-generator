@@ -116,8 +116,11 @@ Ergänzt (vorgeschlagen und umgesetzt, sofern nicht anders markiert):
   ist in AndroidX deprecated und würde eine Abhängigkeit bringen.
 - **abiFilters** `arm64-v8a`, `x86_64` (Geräte + Emulator);
   32-Bit (`armeabi-v7a`, `x86`) optional, spart CI-Zeit und APK-Größe.
+- **Host-Key-Pinning (TOFU)**: SHA256-Fingerprint (Format wie
+  `ssh-keygen -lf`) wird beim ersten Verbinden gespeichert und danach im
+  Schlüsseltausch geprüft — vor dem Senden von Passwort/Schlüssel.
 - Nicht umgesetzt (Erweiterungen): Foreground-Service für Hintergrund,
-  Host-Key-Pinning (TOFU), MediaCodec-Hardware-Dekodierung, Profile-Liste.
+  MediaCodec-Hardware-Dekodierung, Profile-Liste.
 
 ## 4. Werkzeuge und Versionen (neueste stabile, 2026-09)
 

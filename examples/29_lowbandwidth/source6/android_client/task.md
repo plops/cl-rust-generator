@@ -38,8 +38,10 @@ UI, Tunnel), *Host-Tests* = `cargo test` / JVM-Unit-Tests,
 - [x] A4.3 `scripts/build_android.sh` (Font kopieren, cargo-ndk, `assembleDebug`). Validierung: APK enthält `lib/*/liblbw_core.so` und `assets/fonts/unifont.otf`.
 
 ## A5 SSH-Tunnel (Modus „Tunnel“)
-- [ ] A5.1 `02_SshTunnel.kt` (JSch, Passwort oder Schlüssel, Keepalive, Watchdog mit festem lokalem Port).
-- [ ] A5.2 Host-Test: JVM-Test gegen lokalen `sshd` (übersprungen, wenn keiner läuft).
+- [x] A5.1 `02_SshTunnel.kt` (JSch, Passwort oder Schlüssel, Keepalive, Watchdog mit festem lokalem Port).
+- [x] A5.2 Host-Test: JVM-Test gegen lokalen `sshd` (übersprungen, wenn keiner läuft).
+  `eval "$(LBW_SSHD_PASSWORD=pw scripts/test_sshd.sh start)"; LBW_SSHD_PASSWORD=pw ./gradlew testDebugUnitTest`
+- [x] A5.3 (ergänzt) Host-Key-Pinning „Trust on first use“: SHA256-Fingerprint wird im KEX geprüft, vor der Authentisierung.
 
 ## A6 CI
 - [ ] A6.1 `.github/workflows/android-lbw.yml` (Pfadfilter, feste NDK-Version, Rust-Host-Tests, cargo-ndk, Gradle-Tests, APK-Artefakt).
