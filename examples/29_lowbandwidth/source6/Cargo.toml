@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["common", "server", "client", "throttle"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Wol Pumba <wolpumba@gmail.com>"]
+license = "MIT"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Kleinstes Client-Binary: `cargo build --profile min -p lbw-client`.
+[profile.min]
+inherits = "release"
+opt-level = "s"
+
+# Debug-Builds: Abhängigkeiten optimieren (Inferenz/Encoder/Decoder sonst ~20x langsamer).
+[profile.dev.package."*"]
+opt-level = 3
