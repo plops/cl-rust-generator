@@ -37,6 +37,8 @@ Bewusst **nicht** verwendet: `androidx/androidx` (Compose, AppCompat),
 | `Swatinem/rust-cache` | v2 | `Swatinem/rust-cache` | CI (Cargo-Cache inkl. `cargo-ndk`) |
 | `actionlint` | 1.7.12 (lokal) | `rhysd/actionlint` | Workflow-Prüfung vor dem Push |
 | OpenSSH-Server | Ubuntu-Paket | `openssh/openssh-portable` | Test-`sshd` für Tunnel-Tests (`scripts/test_sshd.sh`) |
+| Android Emulator + `system-images;android-36;default;x86_64` | SDK-Paket | (Google, `aosp`) | HIL-Test `scripts/emulator_e2e.sh` (KVM, headless) |
+| Xvfb, xterm, xdotool, ImageMagick | Ubuntu-Pakete | `freedesktop/xorg-xserver`, `jordansissel/xdotool`, `ImageMagick/ImageMagick` | „Entfernter“ X11-Rechner und Zeiger-/Screenshot-Nachweise im HIL-Test |
 
 ## Schrift
 

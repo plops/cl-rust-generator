@@ -64,4 +64,4 @@ UI, Tunnel), *Host-Tests* = `cargo test` / JVM-Unit-Tests,
 
 ## A9 Abschluss
 - [x] A9.1 `cargo upgrade` (alles aktuell; AGP 9.4.1, Kotlin 2.4.20, JSch 2.28.7, Gradle 9.8.0 = neueste stabile), fmt, clippy, alle Tests; README-Abschnitt Android; `09_MainActivity` (319 Zeilen) in `09_ConnectForm` + `10_MainActivity` geteilt, danach JVM-Tests, Lint und `emulator_e2e.sh` grün.
-- [ ] A9.2 `plan/20260929_03_android/walkthrough.md` (Regeln plan.md §8), Commit.
+- [x] A9.2 `plan/20260929_03_android/walkthrough.md` (Regeln plan.md §8), Commit.
