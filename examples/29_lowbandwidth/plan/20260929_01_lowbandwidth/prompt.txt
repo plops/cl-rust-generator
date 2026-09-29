@@ -71,7 +71,13 @@ demonstriert mit dem modell
 
 /workspace/src/cl-rust-generator/examples/26_onnx/source8/models/gpa_640_int8.onnx
 
-erkannt werden
+erkannt werden.
+
+Bemerkung: Leider sucht dieses modell nicht nur nach icons und
+bildern. Dieses Modell erkennt alle GUI elemente mit denen man
+interagieren koennte. d.h. wenn eines der output rechtecke diese
+modells mit dem der paddlepaddle text detektion uebereinstimmt, dann
+wissen wir, dass darin kein bild sondern nur text ist.
 
 ## Framerate
 
