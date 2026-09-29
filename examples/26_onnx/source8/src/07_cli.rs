@@ -6,7 +6,7 @@ use crate::detector::Detector;
 use crate::image::Rgb;
 use crate::session::{Device, Model};
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Write};
 
 pub const USAGE: &str = "\
 gui_detect grab <out.ppm>
@@ -138,13 +138,19 @@ fn save(img: &Rgb, out: &str) -> Result<(), String> {
         .map_err(|e| format!("{out}: {e}"))
 }
 
+/// Eine Zeile nach stdout. Anders als `println!` wird ein geschlossener
+/// Pipe (`| head`) zum Fehler statt zur Panik (panic=abort → Exit 134).
+fn emit(line: &str) -> Result<(), String> {
+    writeln!(std::io::stdout(), "{line}").map_err(|e| format!("stdout: {e}"))
+}
+
 /// Führt ein Kommando aus.
 pub fn run(cmd: Command) -> Result<(), String> {
     match cmd {
         Command::Grab { out } => {
             let img = Screen::open()?.grab()?;
             save(&img, &out)?;
-            println!("grab {}x{} -> {out}", img.w, img.h);
+            emit(&format!("grab {}x{} -> {out}", img.w, img.h))?;
         }
         Command::Detect { model, input, opts } => {
             let (mut img, _) = load_input(&input)?;
@@ -153,10 +159,10 @@ pub fn run(cmd: Command) -> Result<(), String> {
             (det.conf, det.iou) = (opts.conf, opts.iou);
             let (dets, t) = det.detect(&img)?;
             for d in &dets {
-                println!(
+                emit(&format!(
                     "{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.3}",
                     d.b[0], d.b[1], d.b[2], d.b[3], d.score
-                );
+                ))?;
             }
             eprintln!(
                 "{} boxen, provider {}, pre {:.1} ms, infer {:.1} ms, post {:.1} ms",
@@ -179,7 +185,7 @@ pub fn run(cmd: Command) -> Result<(), String> {
             opts,
         } => {
             let (img, screen) = load_input(&input)?;
-            println!("{}", bench::HEADER);
+            emit(bench::HEADER)?;
             for path in models {
                 let bytes = model_bytes(&path)?;
                 let mut det = Detector::new(Model::load(&bytes, opts.device, opts.threads)?);
@@ -192,7 +198,7 @@ pub fn run(cmd: Command) -> Result<(), String> {
                     .into();
                 row.threads = opts.threads;
                 row.mbytes = bytes.len() as f64 / 1e6;
-                println!("{}", row.tsv());
+                emit(&row.tsv())?;
             }
         }
     }
