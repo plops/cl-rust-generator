@@ -1,4 +1,4 @@
-//! `06_select` — Text kopieren/einfügen ohne zusätzliche Dependency.
+//! `07_select` — Text kopieren/einfügen ohne zusätzliche Dependency.
 //!
 //! Da Text als Vektordaten ankommt, ist „Kopieren“ trivial: alle
 //! Textelemente, die das Auswahlrechteck schneiden, in Lesereihenfolge

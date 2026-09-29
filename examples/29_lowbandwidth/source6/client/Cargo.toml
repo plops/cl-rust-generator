@@ -7,5 +7,15 @@ license.workspace = true
 
 [dependencies]
 lbw-common = { version = "0.1.0", path = "../common" }
-macroquad = { version = "0.4.16", default-features = false }
+macroquad = { version = "0.4.16", default-features = false, optional = true }
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8"] }
+
+[features]
+default = ["desktop"]
+# Fenster, Rendering und Tastatur über macroquad (Desktop-Binary).
+desktop = ["dep:macroquad"]
+
+[[bin]]
+name = "lbw-client"
+path = "src/main.rs"
+required-features = ["desktop"]

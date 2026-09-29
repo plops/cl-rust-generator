@@ -1,6 +1,6 @@
 //! `04_scene` — Client-Modell des entfernten Bildschirms: RGBA-Canvas
 //! (aus AV1-Kacheln) plus Textelemente (aus Text-Deltas). Rein, ohne
-//! Grafik-Kontext testbar; `07_render` zeichnet daraus.
+//! Grafik-Kontext testbar; `08_render` zeichnet daraus.
 
 use std::collections::BTreeMap;
 use std::time::Instant;

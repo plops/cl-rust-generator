@@ -1,4 +1,4 @@
-//! `08_app` — Hauptschleife: Netz-Ereignisse anwenden, Eingaben senden,
+//! `09_app` — Hauptschleife: Netz-Ereignisse anwenden, Eingaben senden,
 //! lokale Tasten (F1 HUD, F2 Auswahl, F3 Einfügen), zeichnen.
 
 use std::time::{Duration, Instant};
@@ -7,7 +7,8 @@ use lbw_common::Input;
 use macroquad::prelude::*;
 
 use crate::config::Config;
-use crate::input::{MouseThrottle, char_input, key_input, mod_bits, special_keysym};
+use crate::input::{MouseThrottle, char_input, mod_bits};
+use crate::keycode::{key_input, special_keysym};
 use crate::net::{Event, Net, NetCfg, spawn};
 use crate::render::{Renderer, load_font};
 use crate::scene::Scene;

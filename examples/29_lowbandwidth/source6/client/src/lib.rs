@@ -1,5 +1,7 @@
-//! `lbw-client` — schlanker Macroquad-Client: Empfang, AV1-Dekodierung,
+//! `lbw-client` — schlanker Client: Empfang, AV1-Dekodierung,
 //! Szenen-Zusammenbau mit Unifont-Text, Eingabe-Weiterleitung.
+//! Ohne Feature `desktop` (macroquad) bleibt der plattformneutrale Kern,
+//! den auch der Android-Client (`android_client/rust-core`) nutzt.
 //! Nur Modul-Deklarationen.
 
 #[path = "01_config.rs"]
@@ -17,11 +19,17 @@ pub mod scene;
 #[path = "05_input.rs"]
 pub mod input;
 
-#[path = "06_select.rs"]
+#[cfg(feature = "desktop")]
+#[path = "06_keycode.rs"]
+pub mod keycode;
+
+#[path = "07_select.rs"]
 pub mod select;
 
-#[path = "07_render.rs"]
+#[cfg(feature = "desktop")]
+#[path = "08_render.rs"]
 pub mod render;
 
-#[path = "08_app.rs"]
+#[cfg(feature = "desktop")]
+#[path = "09_app.rs"]
 pub mod app;

@@ -1,4 +1,4 @@
-//! `07_render` — Zeichnen: Canvas-Textur, Text in GNU Unifont exakt in die
+//! `08_render` — Zeichnen: Canvas-Textur, Text in GNU Unifont exakt in die
 //! Server-Boxen eingepasst, Auswahlrahmen und HUD.
 
 use macroquad::prelude::*;
