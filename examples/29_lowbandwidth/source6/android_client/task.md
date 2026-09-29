@@ -32,10 +32,10 @@ UI, Tunnel), *Host-Tests* = `cargo test` / JVM-Unit-Tests,
 - [ ] A3.2 Cross-Build: `cargo ndk -t arm64-v8a -t x86_64 -P 26 build --release -p lbw-core`; `.so`-Größe notieren.
 
 ## A4 Android-App Grundgerüst (Modus „App“)
-- [ ] A4.1 Gradle-Projekt `android-app` (AGP 9.4.1, Wrapper 9.8.0, Kotlin eingebaut), Manifest mit `INTERNET`.
-- [ ] A4.2 `01_CoreBridge.kt`, `03_TextItems.kt`, `04_Viewport.kt` + JVM-Tests; `CoreBridgeHostTest` lädt die Host-`.so`.
+- [x] A4.1 Gradle-Projekt `android-app` (AGP 9.4.1, Wrapper 9.8.0, Kotlin eingebaut), Manifest mit `INTERNET`.
+- [x] A4.2 `01_CoreBridge.kt`, `03_TextItems.kt`, `04_Viewport.kt` + JVM-Tests; `CoreBridgeHostTest` lädt die Host-`.so`.
   Validierung: `./gradlew testDebugUnitTest`.
-- [ ] A4.3 `scripts/build_android.sh` (Font kopieren, cargo-ndk, `assembleDebug`). Validierung: APK enthält `lib/*/liblbw_core.so` und `assets/fonts/unifont.otf`.
+- [x] A4.3 `scripts/build_android.sh` (Font kopieren, cargo-ndk, `assembleDebug`). Validierung: APK enthält `lib/*/liblbw_core.so` und `assets/fonts/unifont.otf`.
 
 ## A5 SSH-Tunnel (Modus „Tunnel“)
 - [ ] A5.1 `02_SshTunnel.kt` (JSch, Passwort oder Schlüssel, Keepalive, Watchdog mit festem lokalem Port).

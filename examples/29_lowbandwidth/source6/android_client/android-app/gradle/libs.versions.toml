@@ -1,0 +1,13 @@
+[versions]
+agp = "9.4.1"
+kotlin = "2.4.20"
+jsch = "2.28.7"
+junit = "4.13.2"
+
+[libraries]
+jsch = { module = "com.github.mwiede:jsch", version.ref = "jsch" }
+junit = { module = "junit:junit", version.ref = "junit" }
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
