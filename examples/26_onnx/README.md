@@ -6,3 +6,4 @@ source4 .. version of source2 with paddle paddle ocr support
 source5 .. paddle paddle (like source 4) but with gnu unifont, screen diffing, deduplicated console output
 source6 .. text detection, TUI display, automation (in particular browser)
 source7 .. face detection and recognition
+source8 .. detect icons and images

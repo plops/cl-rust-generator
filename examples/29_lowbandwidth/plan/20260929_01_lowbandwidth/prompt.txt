@@ -48,11 +48,22 @@ Server sollte zusätzlich mit 2–3 Zeilen Code die dominante Textfarbe
 (Vordergrund) und Hintergrundfarbe sampeln, damit der Client nicht
 alles einfarbig weiß rendern muss.
 
+## Bild und Icon Erkennung
+
+Die Bilder (mit AV1 zu kodierende bildbereiche) sollen wie in 
+/workspace/src/cl-rust-generator/examples/26_onnx/source8/
+demonstriert mit dem modell
+
+/workspace/src/cl-rust-generator/examples/26_onnx/source8/models/gpa_640_int8.onnx
+
+erkannt werden
+
 ## Framerate
 
 OCR laeuft mit etwa 1fps und bild uebertragung von AV1
 wird auch nur 1 fps schaffen. das ist okay um die informative
 webseiten bedienen zu koennen.
+
 
 
 ## Client
