@@ -507,4 +507,4 @@ Export allerdings rund 1 GB Download.
 | `4573a14` fix(source8) | EPIPE-Fehler statt Abort, README |
 | `0fe3323` docs(plan) | dieser Walkthrough |
 | `c991861` docs(plan) | plan_effort.md (Credit-Verbrauch) |
-| (folgt) feat(source8) | Browser-Kalibrierung, getrenntes Testset |
+| `fd59d01` feat(source8) | Browser-Kalibrierung, getrenntes Testset |
