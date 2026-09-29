@@ -1,0 +1,23 @@
+[package]
+name = "x11_ppocrv6"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# default-features = false removes audio, ALSA, and sound dependencies
+macroquad = { version = "0.4.16", default-features = false }
+
+# default-features = false drops tracing and ndarray for a lean binary
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["download-binaries", "copy-dylibs", "tls-native"] }
+
+# Uses only the core X11 protocol without extra X-extensions
+x11rb = "0.14.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+
