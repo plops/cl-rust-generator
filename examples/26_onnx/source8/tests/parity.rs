@@ -26,7 +26,10 @@ fn reference(tag: &str) -> Vec<([f32; 4], f32)> {
 }
 
 fn check(tag: &str) {
-    let img = Rgb::read_ppm(BufReader::new(File::open(models().join("example_input.ppm")).unwrap())).unwrap();
+    let img = Rgb::read_ppm(BufReader::new(
+        File::open(models().join("example_input.ppm")).unwrap(),
+    ))
+    .unwrap();
     let bytes = std::fs::read(models().join(format!("gpa_{tag}_fp32.onnx"))).unwrap();
     let mut det = Detector::new(Model::load(&bytes, Device::Cpu, 0).unwrap());
     let (got, _) = det.detect(&img).unwrap();
@@ -35,11 +38,21 @@ fn check(tag: &str) {
     // Jede Referenzbox braucht ein Gegenstück mit IoU ≥ 0.9 und ähnlichem Score.
     let matched = refs
         .iter()
-        .filter(|(b, s)| got.iter().any(|d| iou(b, &d.b) >= 0.9 && (d.score - s).abs() < 0.02))
+        .filter(|(b, s)| {
+            got.iter()
+                .any(|d| iou(b, &d.b) >= 0.9 && (d.score - s).abs() < 0.02)
+        })
         .count();
     let ratio = matched as f64 / refs.len() as f64;
-    eprintln!("{tag}: {matched}/{} Referenzboxen getroffen, Rust {} Boxen", refs.len(), got.len());
-    assert!(ratio >= 0.95, "{tag}: nur {ratio:.3} der Referenzboxen getroffen");
+    eprintln!(
+        "{tag}: {matched}/{} Referenzboxen getroffen, Rust {} Boxen",
+        refs.len(),
+        got.len()
+    );
+    assert!(
+        ratio >= 0.95,
+        "{tag}: nur {ratio:.3} der Referenzboxen getroffen"
+    );
     assert!((got.len() as i64 - refs.len() as i64).abs() <= refs.len() as i64 / 20);
 }
 
