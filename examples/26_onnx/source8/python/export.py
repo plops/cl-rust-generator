@@ -111,13 +111,19 @@ def iou(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return torchvision.ops.box_iou(torch.from_numpy(a[:, :4]), torch.from_numpy(b[:, :4])).numpy()
 
 
-def agreement(ref: np.ndarray, got: np.ndarray, thr: float = 0.25) -> tuple[float, float]:
-    """Recall/Präzision bei conf≥thr, IoU≥0.5 (fp32 = Referenz)."""
-    r, g = ref[ref[:, 4] >= thr], got[got[:, 4] >= thr]
+def agreement(ref: np.ndarray, got: np.ndarray, thr: float = 0.25, tol: float = 0.15) -> np.ndarray:
+    """Zähler für Recall/Präzision bei conf≥thr, IoU≥0.5 (fp32 = Referenz).
+
+    Liefert [Treffer_ref, n_ref, Treffer_got, n_got, Treffer_ref_tolerant];
+    „tolerant“ lässt in der Variante conf≥tol zu (zeigt, ob Verluste nur
+    Grenzfälle knapp unter der Schwelle sind).
+    """
+    r, g, gt = ref[ref[:, 4] >= thr], got[got[:, 4] >= thr], got[got[:, 4] >= tol]
     if len(r) == 0 or len(g) == 0:
-        return float(len(r) == len(g)), float(len(r) == len(g))
+        return np.array([0, len(r), 0, len(g), 0], float)
     m = iou(r, g) >= 0.5
-    return m.any(1).mean(), m.any(0).mean()
+    mt = (iou(r, gt) >= 0.5).any(1).sum() if len(gt) else 0
+    return np.array([m.any(1).sum(), len(r), m.any(0).sum(), len(g), mt], float)
 
 
 def main() -> None:
@@ -132,7 +138,7 @@ def main() -> None:
     evals = [load_rgb(p) for p in sorted(glob.glob(str(models / "screens" / "*.ppm")))] + [example]
     print(f"kalibrierung: {len(cal)} bilder, evaluierung: {len(evals)} bilder")
 
-    report = ["variant\tbytes\trecall_vs_fp32\tprecision_vs_fp32\tboxes_example"]
+    report = ["variant\tbytes\trecall_vs_fp32\tprecision_vs_fp32\trecall_tol0.15\tboxes_example"]
     for tag, hw in SHAPES.items():
         f32, f16, i8 = (models / f"gpa_{tag}_{p}.onnx" for p in ("fp32", "fp16", "int8"))
         export_fp32(pt, hw, f32)
@@ -154,8 +160,11 @@ def main() -> None:
             out = s.get_outputs()[0].shape
             assert out[:2] == [1, 5], out
             dets = [detect(s, x) for x in xs]
-            rp = np.array([agreement(b, d) for b, d in zip(base_dets, dets)]).mean(0)
-            row = f"{f.stem}\t{f.stat().st_size}\t{rp[0]:.3f}\t{rp[1]:.3f}\t{len(dets[-1])}"
+            # Mikro-Mittel über alle Bilder (nicht pro Bild: Szenen mit 3
+            # Boxen würden sonst einen einzelnen Grenzfall zu −33 % aufblähen).
+            c = np.sum([agreement(b, d) for b, d in zip(base_dets, dets)], 0)
+            rec, prec, rec_tol = c[0] / c[1], c[2] / c[3], c[4] / c[1]
+            row = f"{f.stem}\t{f.stat().st_size}\t{rec:.3f}\t{prec:.3f}\t{rec_tol:.3f}\t{len(dets[-1])}"
             report.append(row)
             print(row)
     (models / "export_report.tsv").write_text("\n".join(report) + "\n")
