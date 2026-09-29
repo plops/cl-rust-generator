@@ -1,0 +1,332 @@
+die schrift im client ist bei 1:1 darstellung schwer lesbar (16
+aliasing, 9 besser).  ich wuerde gern 2:1 zoom als option haben (der
+client sollte mit 2:1 per default starten vielleicht nennen wir sie
+--no-zoom)
+
+hier sind vorschlaege fuer die aendreungen
+
+Hier sind alle nötigen Änderungen in den **4 betroffenen Dateien**, um das Flag `--zoom` sauber zu implementieren:
+
+---
+
+### 1. `src/01_config.rs`
+Konfigurations-Struktur und CLI-Parser um das Flag erweitern.
+
+```rust
+// In USAGE-String ergänzen:
+pub const USAGE: &str = "\
+lbw-client — Low-Bandwidth-Remote-Desktop-Client
+
+  --connect ADDR    Server (Default 127.0.0.1:7878, typ. Ende von ssh -L)
+  --size N          Fenstergröße = Capture-Größe (Default 640)
+  --zoom            2:1-Skalierung (Fenster 2x, Fontgröße 16 statt 9)
+  --font PATH       Schrift (Default GNU Unifont aus fonts-unifont)
+  --dead-after S    Verbindung neu aufbauen nach S s ohne Daten (Default 90)
+  --dump-text       Text-Deltas auf stdout protokollieren
+  -v, --verbose     Netz-Log
+
+Tasten: F1 HUD, F2 Text auswählen → Zwischenablage, F3 Zwischenablage tippen.
+";
+
+#[derive(Clone, Debug)]
+pub struct Config {
+    pub connect: String,
+    pub size: usize,
+    pub zoom: bool, // <-- NEU
+    pub font: Option<String>,
+    pub dead_after: Duration,
+    pub dump_text: bool,
+    pub verbose: bool,
+}
+
+impl Config {
+    pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
+        let mut c = Config {
+            connect: format!("127.0.0.1:{DEFAULT_PORT}"),
+            size: 640,
+            zoom: false, // <-- NEU
+            font: None,
+            dead_after: Duration::from_secs(90),
+            dump_text: false,
+            verbose: false,
+        };
+        let mut it = args.into_iter();
+        let num = |v: Option<String>, f: &str| -> Result<u64, String> {
+            v.and_then(|v| v.parse().ok())
+                .ok_or_else(|| format!("{f}: Zahl erwartet"))
+        };
+        while let Some(a) = it.next() {
+            match a.as_str() {
+                "--connect" => c.connect = it.next().ok_or("--connect: Adresse fehlt")?,
+                "--size" => c.size = num(it.next(), "--size")? as usize,
+                "--zoom" => c.zoom = true, // <-- NEU
+                "--font" => c.font = it.next(),
+                "--dead-after" => {
+                    c.dead_after = Duration::from_secs(num(it.next(), "--dead-after")?)
+                }
+                "--dump-text" => c.dump_text = true,
+                "-v" | "--verbose" => c.verbose = true,
+                "-h" | "--help" => return Err(USAGE.into()),
+                _ => return Err(format!("unbekannte Option {a}\n\n{USAGE}")),
+            }
+        }
+        if !(64..=4096).contains(&c.size) {
+            return Err("--size außerhalb 64..4096".into());
+        }
+        Ok(c)
+    }
+}
+```
+
+---
+
+### 2. `src/main.rs`
+Fenstergröße abhängig vom Zoom-Flag setzen (bei `--zoom` Verdopplung auf z. B. 1280×1280).
+
+```rust
+fn window_conf() -> Conf {
+    let c = config();
+    let scale = if c.zoom { 2 } else { 1 }; // <-- NEU
+    Conf {
+        window_title: "lbw-client".into(),
+        window_width: (c.size * scale) as i32,  // <-- NEU
+        window_height: (c.size * scale) as i32, // <-- NEU
+        window_resizable: false,
+        ..Default::default()
+    }
+}
+```
+
+---
+
+### 3. `src/07_render.rs`
+`Renderer` merkt sich `zoom`. Bei `--zoom` wird das Bild 2:1 skaliert gezeichnet, die Textboxen verdoppelt und die Schriftgröße auf 16 ohne horizontales Stauchen (`font_scale_aspect: 1.0`) gesetzt. Ohne `--zoom` bleibt es bei 1:1 und Schriftgröße 9.
+
+```rust
+pub struct Renderer {
+    img: Image,
+    tex: Texture2D,
+    font: Option<Font>,
+    zoom: bool, // <-- NEU
+}
+
+impl Renderer {
+    #[must_use]
+    pub fn new(w: usize, h: usize, font: Option<Font>, zoom: bool) -> Self { // <-- zoom übergeben
+        let img = Image::gen_image_color(w as u16, h as u16, BLACK);
+        let tex = Texture2D::from_image(&img);
+        tex.set_filter(FilterMode::Nearest);
+        Self { img, tex, font, zoom }
+    }
+
+    fn text(&self, t: &TextItem) {
+        let scale = if self.zoom { 2.0 } else { 1.0 };
+        let rx = (t.rect.x as f32 * scale).round();
+        let ry = (t.rect.y as f32 * scale).round();
+        let rw = (t.rect.w as f32 * scale).round();
+        let rh = (t.rect.h as f32 * scale).round();
+
+        draw_rectangle(rx, ry, rw, rh, rgb(t.bg));
+
+        // Bei Zoom: native 16px ohne Stauchen.
+        // Ohne Zoom: kompakte 9px wie bisher.
+        let size = if self.zoom { 16 } else { 9 };
+        let font = self.font.as_ref();
+        let d = measure_text(&t.text, font, size, 1.0);
+        if d.width <= 0.0 {
+            return;
+        }
+
+        let pad = 1.0 * scale;
+        let aspect = if self.zoom {
+            1.0 // Kein horizontales Zerren bei Zoom!
+        } else {
+            ((rw - 2.0 * pad) / d.width).clamp(0.4, 2.5)
+        };
+
+        let y = (ry + (rh - d.height) / 2.0 + d.offset_y).round();
+        draw_text_ex(
+            &t.text,
+            rx + pad,
+            y,
+            TextParams {
+                font,
+                font_size: size,
+                font_scale: 1.0,
+                font_scale_aspect: aspect,
+                color: rgb(t.fg),
+                ..Default::default()
+            },
+        );
+    }
+
+    pub fn draw(&mut self, s: &mut Scene, sel: Option<Rect>, hud: bool) {
+        let scale = if self.zoom { 2.0 } else { 1.0 };
+
+        if s.dirty {
+            self.img.bytes.copy_from_slice(&s.canvas);
+            self.tex.update(&self.img);
+            s.dirty = false;
+        }
+        clear_background(BLACK);
+
+        // Canvas (Hintergrund) skaliert zeichnen
+        draw_texture_ex(
+            &self.tex,
+            0.0,
+            0.0,
+            WHITE,
+            DrawTextureParams {
+                dest_size: Some(vec2(s.w as f32 * scale, s.h as f32 * scale)),
+                ..Default::default()
+            },
+        );
+
+        for t in s.texts.values() {
+            self.text(t);
+        }
+
+        if let Some(r) = sel {
+            draw_rectangle(
+                r.x as f32 * scale,
+                r.y as f32 * scale,
+                r.w as f32 * scale,
+                r.h as f32 * scale,
+                Color::new(0.2, 0.5, 1.0, 0.25),
+            );
+            draw_rectangle_lines(
+                r.x as f32 * scale,
+                r.y as f32 * scale,
+                r.w as f32 * scale,
+                r.h as f32 * scale,
+                2.0,
+                BLUE,
+            );
+        }
+        let stale = s.last_rx.elapsed().as_secs();
+        let down = !matches!(s.link, Link::Up);
+        if hud || down || stale >= 5 {
+            self.hud(s, stale);
+        }
+    }
+    // ... hud() bleibt unverändert ...
+}
+```
+
+---
+
+### 4. `src/08_app.rs`
+Mausposition und Text-Auswahl umrechnen (Fensterkoordinaten $\div 2$, damit Klicks und der Auswahlrahmen exakt die Serverkoordinaten treffen).
+
+```rust
+struct Ui {
+    hud: bool,
+    select: bool,
+    drag: Option<(f32, f32)>,
+    mouse: MouseThrottle,
+    held: Option<(KeyCode, Instant)>,
+    zoom: bool, // <-- NEU
+}
+
+impl Ui {
+    // ... keys() bleibt unverändert ...
+
+    fn mouse(&mut self, net: &Net, s: &Scene) -> Option<lbw_common::Rect> {
+        let scale = if self.zoom { 2.0 } else { 1.0 }; // <-- NEU
+        let (mx, my) = mouse_position();
+        
+        // Bildschirmkoordinaten zurück auf Server-Raum (0..640) rechnen:
+        let x = mx / scale;
+        let y = my / scale;
+
+        let (cx, cy) = (
+            x.clamp(0.0, s.w as f32 - 1.0) as u16,
+            y.clamp(0.0, s.h as f32 - 1.0) as u16,
+        );
+
+        if self.select {
+            if is_mouse_button_pressed(MouseButton::Left) {
+                self.drag = Some((x, y));
+            }
+            let start = self.drag?;
+            let r = drag_rect(start, (x, y)); // Bleibt in 640er-Koordinaten
+            if is_mouse_button_released(MouseButton::Left) {
+                let txt = selected_text(r, s.texts.values());
+                if !txt.is_empty() {
+                    miniquad::window::clipboard_set(&txt);
+                    eprintln!("[client] kopiert: {} Zeichen", txt.chars().count());
+                }
+                self.select = false;
+                self.drag = None;
+            }
+            return Some(r);
+        }
+
+        let now = Instant::now();
+        let buttons = [
+            (MouseButton::Left, 1),
+            (MouseButton::Middle, 2),
+            (MouseButton::Right, 3),
+        ];
+        let click = buttons
+            .iter()
+            .any(|(b, _)| is_mouse_button_pressed(*b) || is_mouse_button_released(*b));
+        if let Some(i) = self.mouse.update(cx, cy, now, click) {
+            net.send(i);
+        }
+        for (b, n) in buttons {
+            if is_mouse_button_pressed(b) {
+                net.send(Input::Button {
+                    button: n,
+                    down: true,
+                });
+            }
+            if is_mouse_button_released(b) {
+                net.send(Input::Button {
+                    button: n,
+                    down: false,
+                });
+            }
+        }
+        let wheel = mouse_wheel().1;
+        if wheel != 0.0 {
+            net.send(Input::Wheel {
+                dy: wheel.signum() as i8,
+            });
+        }
+        None
+    }
+}
+
+pub async fn run(cfg: Config) {
+    let net = spawn(NetCfg {
+        addr: cfg.connect.clone(),
+        dead_after: cfg.dead_after,
+        verbose: cfg.verbose,
+    });
+    let mut scene = Scene::new(cfg.size, cfg.size);
+    // Renderer und Ui mit cfg.zoom initialisieren:
+    let mut r = Renderer::new(cfg.size, cfg.size, load_font(cfg.font.as_deref()), cfg.zoom);
+    let mut ui = Ui {
+        hud: false,
+        select: false,
+        drag: None,
+        mouse: MouseThrottle::new(30),
+        held: None,
+        zoom: cfg.zoom, // <-- NEU
+    };
+    let t0 = Instant::now();
+    loop {
+        while let Ok(e) = net.events.try_recv() {
+            if cfg.dump_text {
+                log_event(&e, t0);
+            }
+            scene.apply(e);
+        }
+        ui.keys(&net, &scene);
+        let sel = ui.mouse(&net, &scene);
+        r.draw(&mut scene, sel, ui.hud);
+        next_frame().await;
+    }
+}
+```
