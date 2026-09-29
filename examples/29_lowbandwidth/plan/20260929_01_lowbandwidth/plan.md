@@ -50,7 +50,7 @@ flowchart LR
     Q[12 scheduler: Text vor Bild, Token-Bucket, Ack-Fenster] --> NET[14 session TCP]
     NET --> INP[13 xtest input]
   end
-  NET <== ssh -L / -R ==> CN
+  NET <==>|"ssh -L / -R"| CN
   subgraph C[lbw-client]
     CN[03 net: Reconnect, Ack, Ping] --> DEC[02 rav1d decode]
     DEC --> SC[04 scene: Canvas + Textmap]
