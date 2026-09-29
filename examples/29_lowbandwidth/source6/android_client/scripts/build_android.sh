@@ -4,7 +4,7 @@
 #   1. Unifont → assets            (fetch_font.sh)
 #   2. liblbw_core.so per ABI       (cargo ndk → app/src/main/jniLibs)
 #   3. host liblbw_core.so          (cargo build -p lbw-core, for JVM JNI tests)
-#   4. JVM unit tests + debug APK   (gradlew testDebugUnitTest assembleDebug)
+#   4. JVM unit tests + debug APK   (gradlew testDebugUnitTest lintDebug assembleDebug)
 #   5. APK check: both .so and the font are packaged
 #
 # Call (from anywhere): android_client/scripts/build_android.sh
@@ -19,7 +19,7 @@ export ANDROID_NDK_HOME="${LBW_NDK_HOME:-$ANDROID_HOME/ndk/$NDK_VERSION}"
 [ -d "$ANDROID_NDK_HOME" ] || { echo "NDK $NDK_VERSION fehlt: sdkmanager \"ndk;$NDK_VERSION\"" >&2; exit 1; }
 ABIS="${ABIS:-arm64-v8a x86_64}"
 PROFILE="${PROFILE:-release}"
-GRADLE_TASKS="${GRADLE_TASKS:-testDebugUnitTest assembleDebug}"
+GRADLE_TASKS="${GRADLE_TASKS:-testDebugUnitTest lintDebug assembleDebug}"
 APP=android-app
 
 ./scripts/fetch_font.sh

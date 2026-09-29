@@ -77,7 +77,7 @@ class SshTunnel(
             jsch.addIdentity("key", it.trim().toByteArray(), null, cfg.passphrase?.toByteArray())
         }
         val s = jsch.getSession(cfg.user, cfg.host, cfg.port)
-        cfg.password?.takeIf { it.isNotEmpty() }?.let { s.setPassword(it) }
+        cfg.password?.takeIf { it.isNotEmpty() }?.let { s.setPassword(it.toByteArray()) }
         s.userInfo = NoPrompt
         // "yes": the repository decides; unknown keys are accepted there (TOFU)
         s.setConfig("StrictHostKeyChecking", "yes")

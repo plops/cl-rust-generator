@@ -48,10 +48,11 @@ UI, Tunnel), *Host-Tests* = `cargo test` / JVM-Unit-Tests,
   Validierung: YAML parsen; alle Schritte lokal mit denselben Befehlen (`scripts/ci_local.sh`).
 
 ## A7 TUI (Touch-Oberfläche)
-- [ ] A7.1 `07_ScreenView.kt`: Bitmap (Nearest), Unifont-Text in Boxen, Cursor, Auswahlrahmen, HUD, IME-`InputConnection`, Hardware-Tasten.
-- [ ] A7.2 `05_TouchInput.kt`: Trackpad (Tap=Links, 2-Finger-Tap=Rechts, 2-Finger-Scroll=Rad, Doppeltap-Halten=Ziehen), Direkt, Auswahl; Pinch-Zoom/Pan.
-- [ ] A7.3 `06_VirtualKeybar.kt`: ⌨ Esc Tab Ctrl Alt ← ↑ ↓ → PgUp PgDn Home End F1..F12, Modus, Auswahl, Einfügen, HUD.
-- [ ] A7.4 `08_MainActivity.kt`: Formular (direkt/SSH), Prefs ohne Passwort, `onStart/onStop`, Zurück = trennen.
+- [x] A7.1 `08_ScreenView.kt`: Bitmap (Nearest), Unifont-Text in Boxen, Cursor, Auswahlrahmen, HUD; `07_KeyInput.kt`: IME-`InputConnection` (ohne Vorschläge), Hardware-Tasten.
+- [x] A7.2 `05_TouchInput.kt`: Trackpad (Tap=Links, 2-Finger-Tap=Rechts, 2-Finger-Scroll=Rad, Lang-Drücken=Ziehen), Direkt (Lang-Drücken=Rechts), Auswahl; Pinch-Zoom/Pan. `TouchInputTest` (11 Fälle).
+- [x] A7.3 `06_VirtualKeybar.kt`: ⌨ Modus Esc Tab Ctrl Alt ⇧ ❖ ← ↑ ↓ → Rad Fn(F1..F12) Pos1 Ende Bild↑/↓ Einf Entf, Einfügen, Einpassen, HUD; Sticky-Modifier (`StickyModsTest`).
+- [x] A7.4 `09_MainActivity.kt`: Formular (direkt/SSH), Prefs ohne Passwort, `onStart/onStop`, Zurück = trennen (OnBackInvokedDispatcher ab API 33), Intent-Extras für Skripttests.
+- [x] A7.5 `lintDebug` im Build (0 Fehler); Backup schließt Prefs (Host-Key-Pins) aus.
 
 ## A8 HIL-Nachweis (Emulator)
 - [ ] A8.1 `scripts/emulator_e2e.sh`: Xvfb :99 + xterm + `lbw-server`, Emulator (KVM, headless), APK installieren, per Intent-Extras verbinden (direkt `10.0.2.2`).

@@ -36,13 +36,14 @@ Abhängigkeiten (GitHub `org/projekt`): `source6/android_client/deps.md`.
 ```text
 Kotlin (android-app, ohne AndroidX/Compose)          Rust (rust-core → liblbw_core.so)
 ┌──────────────────────────────────────────┐          ┌─────────────────────────────────────┐
-│ 08_MainActivity  Formular, Lebenszyklus   │          │ 01_engine  Net + Scene, Größe, Flags │
+│ 09_MainActivity  Formular, Lebenszyklus   │          │ 01_engine  Net + Scene, Größe, Flags │
 │ 02_SshTunnel     JSch -L 0:127.0.0.1:7878 │  JNI     │ 02_blob    Texte → Binärblob, HUD    │
-│ 07_ScreenView    Bitmap+Unifont, IME      │◄───────► │ 03_keymap  Android-KeyCode → Keysym  │
+│ 08_ScreenView    Bitmap+Unifont, HUD      │◄───────► │ 03_keymap  Android-KeyCode → Keysym  │
 │ 05_TouchInput    Trackpad/Direkt/Auswahl  │ jni-sys  │ 04_jni     extern "system"-Exporte   │
 │ 06_VirtualKeybar Esc Tab Ctrl Alt F1..F12 │          │   ↳ lbw-client (ohne macroquad):     │
-│ 04_Viewport      Zoom/Pan (rein, getestet)│          │     net, av1(rav1d), scene, select   │
-│ 03_TextItems     Blob-Parser, Schriftgröße│          │   ↳ lbw-common: Protokoll, Framing   │
+│ 07_KeyInput      IME + Hardware-Tasten    │          │     net, av1(rav1d), scene, select   │
+│ 04_Viewport      Zoom/Pan (rein, getestet)│          │   ↳ lbw-common: Protokoll, Framing   │
+│ 03_TextItems     Blob-Parser, Schriftgröße│          │                                     │
 └──────────────────────────────────────────┘          └─────────────────────────────────────┘
 ```
 
