@@ -1,0 +1,470 @@
+**Rolle & Umgebung:**
+
+Du läufst in einem Docker-Image mit Ubuntu 26 auf einem Linux-Host. Du
+hast Zugriff auf Kernel-Messages vom Host und auf USB-Geräte.
+Docker-Referenz:
+`/workspace/src/cl-cl-generator/example/05_dockerfile_meta/source01/examples/03_ai_env/Dockerfile`
+Falls dir Pakete fehlen, installiere sie selbstständig. Du arbeitest
+im Auftrag von wol pumba (wolpumba@gmail.com).
+
+
+Das Ziel ist eine Android version des Clienten
+in ../../source6/client zu implementieren und mit einer github action zu bauen.
+
+## Vorschlaege fuer die Portierung
+
+### 1. Rust vs. Kotlin: Keep Parts or Rewrite?
+
+**Recommendation: Use a Hybrid Architecture (Rust Core + Kotlin UI).**
+
+Here is why a 100% pure Kotlin reimplementation is problematic:
+
+1. **AV1 Decoding is the primary bottleneck:**
+   * There is **no mature, pure-Kotlin/Java AV1 software decoder**. 
+   * On Android, while `MediaCodec` supports AV1 (API 29+), feeding it individual chunked still-picture OBUs per tile is notoriously brittle and adds buffer latency compared to `dav1d`/`rav1d`.
+   * On Desktop JVM, you would need native C/Rust bindings (`dav1d` or FFmpeg) anyway.
+2. **Protocol drift:**
+   * The server and protocol types (`lbw-common`) are written in Rust. Sharing or binding the Rust types ensures you never have subtle serialization bugs, endianness mismatches, or YUV-to-RGBA conversion inaccuracies.
+3. **Threading & Performance:**
+   * Tile assembly, AV1 decoding, and pixel blitting onto a shared frame buffer run exceptionally well in native Rust without triggering JVM Garbage Collection pauses.
+
+---
+
+### 2. Recommended Architecture
+
+```text
+┌────────────────────────────────────────────────────────┐
+│                      Kotlin UI                         │
+│  (Compose Multiplatform / Jetpack Compose for Android) │
+│  - Virtual Trackpad / Gestures / Keyboard              │
+│  - System Clipboard integration                        │
+│  - Optional: Embedded SSH Client (JSch / Apache Mina)   │
+└───────────────────────────▲────────────────────────────┘
+                            │ JNI / UniFFI
+┌───────────────────────────▼────────────────────────────┐
+│                      Rust Core                         │
+│  - 02_av1: rav1d / dav1d tile decoding                 │
+│  - 03_net: TCP loop, Ack flow control, Assembler       │
+│  - 04_scene: RGBA frame buffer + Text layout           │
+│  - lbw-common: Framing & data structures               │
+└────────────────────────────────────────────────────────┘
+```
+
+#### Dividing the Responsibilities
+
+* **Keep in Rust:**
+  * `02_av1.rs` (AV1 decoder).
+  * `03_net.rs` & `lbw-common` (protocol framing, packet assembly, TCP handling, ACK pacing).
+  * `04_scene.rs` (RGBA pixel buffer management; write directly into a direct `ByteBuffer` / native memory pointer shared with Kotlin).
+* **Write in Kotlin:**
+  * **UI & Rendering:** Use **Compose Multiplatform** (supports Android and Desktop JVM). Draw the scene bitmap and overlay the text strings using `Canvas`.
+  * **Input handling:** Intercept touch/mouse/keyboard and convert to an enum/event passed into Rust.
+  * **SSH Tunneling:** Either bind SSH inside Kotlin or connect through local port forwards.
+
+---
+
+### 3. Step-by-Step Porting Guide
+
+#### Step A: Generating the Rust ↔ Kotlin Bridge (UniFFI)
+Instead of hand-writing raw JNI C bindings, use [**UniFFI**](https://mozilla.github.io/uniffi-rs/) (developed by Mozilla) or `android-ndk` with `uniffi`. UniFFI generates type-safe Kotlin bindings (`.kt`) directly from your Rust code.
+
+Define an interface in Rust:
+
+```rust
+// In your rust wrapper crate (e.g. lbw_core)
+pub struct LbwEngine {
+    // holds Net, Scene, Decoder
+}
+
+pub trait LbwCallback: Send + Sync {
+    fn on_frame_ready(&self);
+    fn on_text_updated(&self);
+    fn on_disconnected(&self, reason: String);
+}
+
+impl LbwEngine {
+    pub fn new(host: String, port: u16, cb: Box<dyn LbwCallback>) -> Self { ... }
+    pub fn send_key(&self, keysym: u32, mods: u8) { ... }
+    pub fn send_char(&self, ch: u32) { ... }
+    pub fn send_mouse(&self, x: u16, y: u16) { ... }
+    pub fn send_button(&self, button: u8, down: bool) { ... }
+    pub fn copy_rgba_to(&self, target_buffer: &mut [u8]) { ... }
+}
+```
+
+#### Step B: Scene Rendering in Kotlin (Jetpack Compose / Compose Multiplatform)
+In Compose, you can blit the frame buffer onto a `Bitmap` and draw the texts cleanly in the UI pass:
+
+```kotlin
+@Composable
+fun RemoteDesktopScreen(engine: LbwEngine, sceneState: SceneState) {
+    var bitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    
+    // Canvas drawing
+    Canvas(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = { offset ->
+                        engine.sendMouse(offset.x.toInt(), offset.y.toInt())
+                        engine.sendButton(1, true)
+                        tryAwaitRelease()
+                        engine.sendButton(1, false)
+                    }
+                )
+            }
+    ) {
+        // 1. Draw rasterized video canvas
+        bitmap?.let { drawImage(it) }
+
+        // 2. Overlay server text items on top with crisp rendering
+        for (item in sceneState.texts.values) {
+            drawRect(
+                color = Color(item.bg[0], item.bg[1], item.bg[2]),
+                topLeft = Offset(item.rect.x.toFloat(), item.rect.y.toFloat()),
+                size = Size(item.rect.w.toFloat(), item.rect.h.toFloat())
+            )
+            // Draw text via DrawScope.drawText or standard TextLayout
+        }
+    }
+}
+```
+
+#### Step C: Input Mapping for Mobile & Desktop
+In the original Rust client, Macroquad assumes keyboard and physical mouse:
+* **Desktop (Kotlin):** Map Compose `KeyEvent` to `keysym` values (using `05_input.rs`'s table: `K::Enter -> 0xff0d`, etc.).
+* **Mobile (Android Touch):** 
+  * Direct taps often obscure small remote desktop UI elements. Implement a **trackpad mode** (relative mouse delta with a visible cursor) or **direct tap mode**.
+  * Use a floating virtual key toolbar (for Ctrl, Alt, Esc, Tab, Arrow keys).
+
+#### Step D: Text Selection and Clipboard (`06_select.rs`)
+Because the server provides text boxes with coordinates (`TextItem`), you can implement native selection in Kotlin:
+1. Collect all `TextItem`s intersecting your selection bounding box.
+2. Sort them by vertical midpoint ($y + h/2$), then by $x$.
+3. Join them into lines with `\n` and push to the Android/system clipboard:
+   ```kotlin
+   val clipboard = LocalClipboardManager.current
+   clipboard.setText(AnnotatedString(selectedText))
+   ```
+
+---
+
+### 4. Handling the SSH Tunnel in Kotlin
+
+If you do not want the user to run an external terminal app (like Termux, ConnectBot, or OpenSSH), you can establish the SSH tunnel directly inside the Kotlin application before connecting `lbw-client`.
+
+Using **Apache MINA SSHD** or **JSch**:
+
+```kotlin
+// Example using JSch for local port forwarding
+import com.jcraft.jsch.JSch
+import com.jcraft.jsch.Session
+
+class SshTunnel(
+    private val user: String,
+    private val host: String,
+    private val sshPort: Int = 22,
+    private val remoteLbwPort: Int = 7878
+) {
+    private var session: Session? = null
+
+    fun connect(privateKey: ByteArray?, password: String?): Int {
+        val jsch = JSch()
+        privateKey?.let { jsch.addIdentity("key", it, null, null) }
+        
+        session = jsch.getSession(user, host, sshPort).apply {
+            password?.let { setPassword(it) }
+            setConfig("StrictHostKeyChecking", "no")
+            connect(10000)
+            
+            // Assign a local dynamic port (0 = pick any free port)
+            // Forwards localhost:<assignedPort> -> server:remoteLbwPort
+            val localAssignedPort = setPortForwardingL(0, "127.0.0.1", remoteLbwPort)
+            return localAssignedPort
+        }
+        return -1
+    }
+
+    fun disconnect() {
+        session?.disconnect()
+    }
+}
+```
+
+**Lifecycle Flow:**
+1. App launches $\to$ user enters SSH credentials/key and server host.
+2. Kotlin starts the SSH tunnel, binding remote port `7878` to local port `X`.
+3. Kotlin starts the `LbwEngine` targeting `127.0.0.1:X`.
+4. If the tunnel disconnects, Kotlin alerts the engine and attempts an exponential backoff reconnect.
+
+---
+
+### Summary Checklist
+
+| Task                  | Language                       | Strategy                                                                                                         |
+| :---                  | :---                           | :---                                                                                                             |
+| **Network & Packets** | Rust                           | Keep existing `03_net.rs` and `lbw-common` (saves writing custom binary packet parsers and ACK loops).           |
+| **AV1 Decoder**       | Rust                           | Keep `02_av1.rs` via `rav1d` (compiles to ARM64 and x86_64 for Android/Desktop without external C dependencies). |
+| **Scene/Buffer**      | Rust                           | Keep blitting logic and RGBA array in Rust.                                                                      |
+| **Bridge**            | UniFFI mozilla/uniffi-rs / JNI | Export simple lifecycle methods (`start`, `stop`, `send_input`, `get_frame`).                                    |
+| **UI / Display**      | Kotlin                         | Compose Multiplatform (Desktop) or Jetpack Compose (Android).                                                    |
+| **SSH Tunnel**        | Kotlin                         | Pure JVM SSH library (e.g. JSch / Apache Mina SSHD).                                                             |
+
+### SSH Clients
+
+
+https://github.com/mwiede/jsch
+
+JSch, a pure Java implementation of the SSH2 protocol that enables
+secure network communications from Java applications. This wiki covers
+the fundamental concepts, core components, and key features of the
+JSch library maintained in this fork.
+
+
+https://deepwiki.com/apache/mina-sshd
+
+Apache MINA SSHD is a pure Java implementation of the SSH (Secure
+Shell) protocol that provides both client and server-side
+functionality. It is designed to enable Java applications to support
+SSH communication without relying on native SSH implementations. This
+library does not aim to replace Unix SSH clients or servers but
+instead serves as an embeddable SSH framework for Java-based
+applications.
+
+
+## Vorschlaege zur Github Action
+
+Here is a complete GitHub Actions workflow (`.github/workflows/build.yml`) to build the **hybrid Android application** (compiling the Rust native libraries for Android architectures with `cargo-ndk`, packaging them with Gradle, and uploading the generated APK as an artifact).
+
+---
+
+### `.github/workflows/build.yml`
+
+```yaml
+name: Build Android Client
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # 1. Set up JDK for Gradle
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      # 2. Set up Android NDK (Ubuntu runners have Android SDK pre-installed)
+      - name: Set up Android NDK
+        id: setup-ndk
+        run: |
+          # Pick the latest LTS NDK available on the GitHub runner
+          NDK_PATH=$(ls -d $ANDROID_SDK_ROOT/ndk/* | sort -V | tail -n 1)
+          echo "Using NDK at $NDK_PATH"
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
+          echo "NDK_PATH=$NDK_PATH" >> $GITHUB_ENV
+
+      # 3. Set up Rust toolchain and Android targets
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          targets: |
+            aarch64-linux-android
+            armv7-linux-androideabi
+            x86_64-linux-android
+            i686-linux-android
+          cache-work-dir: rust-core
+
+      # 4. Install cargo-ndk to handle cross-compilation & toolchain binding
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      # 5. Build Rust shared libraries directly into app's jniLibs directory
+      - name: Build Rust core (.so)
+        run: |
+          mkdir -p androidApp/src/main/jniLibs
+          cd rust-core
+          cargo ndk \
+            -t arm64-v8a \
+            -t armeabi-v7a \
+            -t x86_64 \
+            -t x86 \
+            -o ../androidApp/src/main/jniLibs \
+            build --release
+
+      # 6. Grant execute permission for gradlew
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # 7. Build Android APK (assembleDebug or assembleRelease)
+      - name: Build with Gradle
+        run: ./gradlew assembleDebug --stacktrace
+
+      # 8. Upload the built APK as a GitHub Action artifact
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: lbw-client-debug.apk
+          path: androidApp/build/outputs/apk/debug/*.apk
+```
+
+---
+
+### Project Directory Layout Expected by this Workflow
+
+```text
+├── .github/
+│   └── workflows/
+│       └── build.yml
+├── androidApp/               <-- Your Kotlin / Compose project
+│   ├── build.gradle.kts
+│   └── src/main/
+│       ├── java/ (or kotlin/)
+│       └── jniLibs/          <-- Populated automatically by cargo-ndk
+├── rust-core/                <-- Your Rust core (02_av1, 03_net, lbw-common, etc.)
+│   ├── Cargo.toml
+│   └── src/
+├── gradlew
+└── settings.gradle.kts
+```
+
+---
+
+### Key Details in This Setup
+
+1. **`cargo-ndk` Output Flag (`-o`)**:
+   Running `cargo ndk ... -o ../androidApp/src/main/jniLibs build --release` automatically maps the target Rust architecture folders to the ABI names expected by Android:
+   * `aarch64-linux-android` $\rightarrow$ `jniLibs/arm64-v8a/liblbw_core.so`
+   * `x86_64-linux-android` $\rightarrow$ `jniLibs/x86_64/liblbw_core.so`
+   * `armv7-linux-androideabi` $\rightarrow$ `jniLibs/armeabi-v7a/liblbw_core.so`
+
+2. **Android NDK Detection**:
+   GitHub's standard `ubuntu-latest` runner comes with the Android SDK and multiple NDK versions pre-installed under `$ANDROID_SDK_ROOT/ndk/`. Step 2 detects the latest one and sets `ANDROID_NDK_HOME`, which `cargo-ndk` uses to find the cross-compiler toolchains.
+
+3. **Caches**:
+   * `actions/setup-java` caches Gradle dependencies automatically.
+   * `actions-rust-lang/setup-rust-toolchain` caches `~/.cargo` and build targets.
+
+4. **Release Builds**:
+   If building for production release instead of debug, replace `./gradlew assembleDebug` with `./gradlew assembleRelease` and configure signing credentials via GitHub Secrets (`SIGNING_KEY`, `KEY_ALIAS`, `KEY_PASSWORD`).
+
+## Code Anforderungen
+
+ich moechte kleinen/uebersichtlichen und effizienten code und
+moeglichst wenig abhaengigkeiten.  du sollst in dieser aufgabe direkt
+rust code erzeugen (nicht den lisp-artigen input code fuer den
+cl-rust-generator transpiler)
+
+fuers testen kannst du xvfb installiern
+
+in deps.md sollst du die pfade der abhaengigkeiten auf github in der
+<organization>/<projekt> notation auflisten. dies kannst du benutzen
+um in deepwiki mcp nach weiteren informationen zu suchen / fragen.
+
+ordnerstruktur: arbeite im ordner
+/workspace/src/cl-rust-generator/examples/29../source6/android_client
+
+
+datei-aufteilung (neu, verbindlich): lange quelltext-dateien sind zu
+vermeiden. sobald eine datei mehr als eine klar abgrenzbare
+zustaendigkeit hat oder ca. 300 zeilen ueberschreitet, ist sie in
+semantisch getrennte einzelne dateien zu unterteilen. jede neue datei
+bekommt am anfang eine zweistellige nummer plus einen namen der
+widerspiegelt was darinsteht, z.b. `01_clock.rs`, `02_usb_cdc.rs`,
+`03_router.rs` in `firmware/src/` bzw. `01_types.rs`, `02_frame.rs` in
+`common/src/`. regeln: aufsteigende nummern folgen der
+initialisierungs-/datenfluss-reihenfolge (clock vor peripherie,
+transport vor protokoll, protokoll vor modus), zusammengehoeriges
+bleibt in einer datei (kein auseinanderreissen von zusammengehoerigen
+typen + ihren tests), `mod.rs`/`lib.rs`/`main.rs` enthalten nur
+modul-deklarationen und die oberste verdrahtung (init, spawn, join),
+kein verhalten. aufteilung immer ohne verhaltens-aenderung
+durchfuehren (vorher/nachher: alle tests plus smoke
+gruens). bestehende dateien (`main.rs`, `text.rs`, `frame.rs`,
+`router.rs`) bei bedarf nach diesen regeln umbauen, sobald du sie
+anfasst.
+
+
+
+vorgehensweise: arbeite mit dem neuesten rust (2024). nutze tools um
+konsistenten und aufgeraeumten quellcode zu gewaehrleisten (also
+`cargo fmt` um formatierung zu normalisieren, `cargo clippy` um
+moegliche fehler oder verbesserungen zu finden, cargo-edit mit `cargo
+upgrade` um bei den abhaengigkeiten die neueste version zu verwenden,
+...)
+
+Schaue dir den Quellcode an und die Architektur dieser Software. Nutze
+deepwiki mcp fuer plops/cl-rust-generator um dokumentation zu bekommen
+und fragen beantworten zu lassen. falls abhaengigkeiten eingefuehrt
+werden sind diese mitsamt ihrer github organisation in deps.md
+aufzuschreiben, so dass wir spaeter einfach die deepwiki abfragen
+konstruieren koennen. nutze rust tools um auf die neueste vorhandene
+version zu switchen (auch wenn vor kompatibilitaet gewarnt wird, wenn
+wir gerade eine dependency einfuehren ist es wichtig, die neueste
+version zu nehmen) und schon vorab usage examples in den plan
+aufzunehmen (mit deepwiki mcp zu erfragen)
+
+
+Schlage vor, wie wir dieses Feature implementieren können. Habe ich
+alle Requirements aufgelistet, die wichtig sind, oder kannst du dir
+vorstellen, dass noch andere Dinge werden sollen? Liste mir diese auf
+Vorschlägen, was man am besten umsetzen könnte.
+
+
+
+Schreibe einen Implementierungsplan. Dieser Implementierungsplan soll
+einen unabhängigen AI-Agenten dazu befähigen, selbstständig einen
+Kontext aufzubauen, der die wesentlichen quellen beinhaltet.  Das
+heißt, der Implementierungsplan hat eine Liste von Dateien, die sich
+der Agent sich anschauen sollte, mit einer kurzen Beschreibung für
+jede Datei.  Weiterhin soll der Implementierungsplan eine Erklärung
+Commit Messages sendet werden sollen. Und zwar sollen diese mit einer
+umfassenden Beschreibung und als Conventional Commit format ausgeführt
+werden.
+
+Neue Unit-Tests und Integration-Tests sollen wie erforderlich
+eingeführt werden.  Diese sollen auch ausgeführt werden.
+
+schreibe task.md wo du die implementierungs und test schritte
+aufeinander abfolgen laesst, so dass ein agent die tasks seriell
+abarbeiten kann und die arbeit in jedem schritt getested und validiert
+wird. jeder modus bekommt eigene tasks (implementierung, host-tests,
+HIL-nachweis), danach erst die TUI-tasks.
+
+Nach der vollständigen Implementierung, wenn alle Tests abgeschlossen
+sind und alles committed ist, soll auch ein Walkthrough-Dokument
+entgeschrieben werden und in plan/2026.../walkthrough.md (im ordner wo
+du diese prompt.txt datei findest) abgelegt werden. Dieses soll
+zusammenfassen, was wirklich implementiert wurde, welche Stellen
+aufgrund der Tests oder wie auch immer gemacht wurden, als im
+Untergrund auch Learnings und mögliche Erweiterungen. liste auch die
+neuen programme die mit in den docker container aufgenommen werden
+sollten
+
+Lege für den ausführenden Agenten folgende strikte Regeln für das Schreiben dieses Dokume
+nts fest:
+- **Sprache und Stil:** Das Dokument *muss zwingend auf Deutsch* verfasst sein. Es soll den Leser didaktisch gut abholen, mitnehmen und flüssig lesbar sein.
+- **Erklärungen:** Fachbegriffe müssen kurz und verständlich erklärt werden.
+- **Visualisierung:** Verwende reichlich Code-Beispiele und nutze **Mermaid-Diagramme**, um die Architektur, den Datenfluss und komplexe Konzepte visuell zu veranschaulichen.
+- **Inhaltliche Struktur:**
+  1. Was exakt implementiert wurde.
+  2. Welche Architektur-Entscheidungen aufgrund von Tests spontan geändert werden mussten.
+  3. Learnings und mögliche zukünftige Erweiterungen.
+  4. Eine Liste der neuen Programme/Pakete, die dauerhaft in das Dockerfile aufgenommen werden sollten.
+
