@@ -97,7 +97,7 @@ class ScreenView(ctx: Context, private val font: Typeface, private val mods: Sti
         }
         if (f and CoreBridge.TEXT != 0) {
             texts = c.texts()
-            Log.i(TAG, "texts ${texts.size}: ${texts.take(3).joinToString(" | ") { it.text.take(40) }}")
+            Log.i(TAG, "texts ${texts.size}: ${texts.take(20).joinToString(" | ") { it.text.take(40) }}")
             changed = true
         }
         val up = f and CoreBridge.UP != 0
@@ -117,6 +117,11 @@ class ScreenView(ctx: Context, private val font: Typeface, private val mods: Sti
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         core?.let { vp.setSizes(w, h, it.width, it.height) }
+        // Screen position for scripted taps (scripts/emulator_e2e.sh)
+        post {
+            val loc = IntArray(2).also { getLocationOnScreen(it) }
+            Log.i(TAG, "view ${w}x$h@${loc[0]},${loc[1]}")
+        }
     }
 
     override fun onDraw(canvas: Canvas) {

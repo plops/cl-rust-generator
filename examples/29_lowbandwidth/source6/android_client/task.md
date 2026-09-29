@@ -55,9 +55,12 @@ UI, Tunnel), *Host-Tests* = `cargo test` / JVM-Unit-Tests,
 - [x] A7.5 `lintDebug` im Build (0 Fehler); Backup schließt Prefs (Host-Key-Pins) aus.
 
 ## A8 HIL-Nachweis (Emulator)
-- [ ] A8.1 `scripts/emulator_e2e.sh`: Xvfb :99 + xterm + `lbw-server`, Emulator (KVM, headless), APK installieren, per Intent-Extras verbinden (direkt `10.0.2.2`).
-  Nachweise: (1) Server-Log „verbunden“, (2) Screenshot enthält xterm-Text-Pixel, (3) Tap im Emulator bewegt Zeiger auf :99, (4) Tippen per `adb shell input text` landet im xterm (OCR → Text zurück).
-- [ ] A8.2 Gleiches über SSH-Tunnel (lokaler `sshd`, Passwort-Login eines Test-Users).
+- [x] A8.1 `scripts/emulator_e2e.sh`: Xvfb :99 + xterm + `lbw-server`, Emulator (KVM, headless, AVD `lbw36` wird angelegt), APK installieren, per Intent-Extras verbinden (direkt `10.0.2.2`). 19 Nachweise, ~55 s ab Kaltstart:
+  (1) „link up“ + OCR-Text in der App, (2) Tap (Direkt) auf Szene (200,150) → Zeiger auf :99 exakt dort,
+  (3) `adb input text` und Bildschirmtastatur (commitText) → xterm → OCR → App, (4) Trackpad-Tap/-Wischen,
+  (6) HOME → onStop trennt, Neustart → onStart verbindet neu, (7) Tastatur startet verborgen, ein Zurück → Formular.
+- [x] A8.2 Gleiches über SSH-Tunnel (5): JSch auf Android handelt ECDSA aus (Ed25519 fehlt dort), Fingerabdruck = `ssh-keygen -lf`, Pin in den Prefs, Passwort nicht.
+- [x] A8.3 Befunde behoben: Modifier-Tasten weiß (Theme-Tint geht bei `backgroundTintList` verloren → eigene Drawables); IME öffnete sich beim Start und verschluckte das erste Zurück (`stateHidden`); Emulator-Hardware-Tastatur unterdrückt IME (`show_ime_with_hard_keyboard=1` im Skript).
 
 ## A9 Abschluss
 - [ ] A9.1 `cargo upgrade` (cargo-edit), fmt, clippy, alle Tests; README-Abschnitt Android.

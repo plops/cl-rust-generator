@@ -6,7 +6,10 @@
 package de.lbw.client
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -150,11 +153,13 @@ class VirtualKeybar(ctx: Context, private val mods: StickyMods, private val act:
             textSize = 14f
             gravity = Gravity.CENTER
             setPadding(dp(10), dp(6), dp(10), dp(6))
+            setTextColor(Color.WHITE)
+            background = keyBackground(KEY_COLOR)
             // Keep the IME open: the bar must never take the focus
             isFocusable = false
             setOnClickListener { onClick() }
         }
-        row.addView(b, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(44)))
+        row.addView(b, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40)).apply { setMargins(dp(2), dp(3), dp(2), dp(3)) })
         return b
     }
 
@@ -170,14 +175,27 @@ class VirtualKeybar(ctx: Context, private val mods: StickyMods, private val act:
     /** Updates modifier highlighting (armed = blue, locked = orange). */
     fun refresh() {
         for ((b, bit) in modButtons) {
-            val c = when {
-                mods.locked and bit != 0 -> Color.rgb(230, 140, 20)
-                mods.armed and bit != 0 -> Color.rgb(40, 110, 230)
-                else -> Color.LTGRAY
-            }
-            b.backgroundTintList = android.content.res.ColorStateList.valueOf(c)
+            b.background = keyBackground(
+                when {
+                    mods.locked and bit != 0 -> Color.rgb(230, 140, 20)
+                    mods.armed and bit != 0 -> Color.rgb(40, 110, 230)
+                    else -> KEY_COLOR
+                },
+            )
         }
     }
 
+    // Explicit drawable: theme button tints live inside the default drawable and
+    // are lost as soon as backgroundTintList is touched (blank white keys).
+    private fun keyBackground(color: Int) = RippleDrawable(
+        ColorStateList.valueOf(Color.argb(90, 255, 255, 255)),
+        GradientDrawable().apply { cornerRadius = dp(4).toFloat(); setColor(color) },
+        null,
+    )
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    private companion object {
+        val KEY_COLOR = Color.rgb(70, 70, 78)
+    }
 }

@@ -86,6 +86,7 @@ class MainActivity : Activity() {
 
     private fun back() {
         if (active != null) {
+            Log.i(ScreenView.TAG, "back: session closed")
             disconnect()
             active = null
             showForm()
