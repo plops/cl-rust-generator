@@ -1,0 +1,243 @@
+**Rolle & Umgebung:**
+
+Du läufst in einem Docker-Image mit Ubuntu 26 auf einem Linux-Host. Du
+hast Zugriff auf Kernel-Messages vom Host und auf USB-Geräte.
+Docker-Referenz:
+`/workspace/src/cl-cl-generator/example/05_dockerfile_meta/source01/examples/03_ai_env/Dockerfile`
+Falls dir Pakete fehlen, installiere sie selbstständig. Du arbeitest
+im Auftrag von wol pumba (wolpumba@gmail.com).
+
+
+Ich baue eine Remote-Desktop-Anwendung in Rust, die über eine extrem schmale Bandbreite (ca. 6 kB/s) Screenshots von einem X11-Server an einen Client übertragen soll.
+
+Anforderungen:
+1. Geringe Bandbreite & Latenz: 6 kB/s entspricht Modem-Geschwindigkeit. Ein Vollbild-Screenshot via AV1/AVIF ist dafür zu groß.
+2. Bild/Text-Trennung: Ein neuronales Netz (ONNX-Inferenz auf CPU via ort / onnxruntime in Rust) soll auf dem Screenshot Bild-Bereiche (Fotos, Grafiken, Diagramme, Icons) und Text-Bereiche trennen.
+3. Rekonstruktion:
+   - Text-Regionen sollen ausgelesen und als Vektordaten (Bounding Box + UTF-8-String + Farbe) übertragen werden. Der Client rendert diese scharf mit einer Bitmap-Schriftart (GNU Unifont).
+   - Echte Grafik-/Bild-Regionen sollen als Bounding Boxes ausgeschnitten, per AV1 Still-Picture (rav1e) stark komprimiert und als kleine Kacheln übertragen werden.
+   - Einfache Hintergründe (Fensterflächen, Terminal-Hintergründe) sollen idealerweise gar nicht per AV1 übertragen werden, sondern nur als Farbwerte.
+
+
+../../source5 enthaelt code der bildschirmfotos aufnimmt und ocr ueber
+den text ausfuehrt.  schreibe in ../../source8 ein proof of concept in rust,
+dass https://huggingface.co/Salesforce/GPA-GUI-Detector anwendet
+
+installiere python dependencies mit `uv`. schreibe scripte um die
+assets runterzuladen.  committe keine assets ins repo. nutze python um
+eine optimierte onnx datei zu erstellen.
+
+## Model Card
+hier ist information von hugging face model card:
+
+
+GPA-GUI-Detector
+
+A YOLO-based GUI element detection model for detecting interactive UI elements (icons, buttons, etc.) on screen for GUI Process Automation. This model is finetuned from the OmniParser ecosystem.
+Model
+
+The model weight file is model.pt. It is a YOLO model trained with the Ultralytics framework.
+Installation
+
+pip install ultralytics
+
+Usage
+Basic Inference
+
+from ultralytics import YOLO
+
+model = YOLO("model.pt")
+results = model("screenshot.png")
+
+Detection with Custom Parameters
+
+from ultralytics import YOLO
+from PIL import Image
+
+# Load the model
+model = YOLO("model.pt")
+
+# Run inference with custom confidence and image size
+results = model.predict(
+    source="screenshot.png",
+    conf=0.05,        # confidence threshold
+    imgsz=640,        # input image size
+    iou=0.7,          # NMS IoU threshold
+)
+
+# Parse results
+boxes = results[0].boxes.xyxy.cpu().numpy()   # bounding boxes in [x1, y1, x2, y2]
+scores = results[0].boxes.conf.cpu().numpy()  # confidence scores
+
+# Draw results on image
+img = Image.open("screenshot.png")
+for box, score in zip(boxes, scores):
+    x1, y1, x2, y2 = box
+    print(f"Detected UI element at [{x1:.0f}, {y1:.0f}, {x2:.0f}, {y2:.0f}] (conf: {score:.2f})")
+
+# Or save the annotated image directly
+results[0].save("result.png")
+
+Integration with OmniParser
+
+import sys
+sys.path.append("/path/to/OmniParser")
+
+from util.utils import get_yolo_model, predict_yolo
+from PIL import Image
+
+model = get_yolo_model("model.pt")
+image = Image.open("screenshot.png")
+
+boxes, confidences, phrases = predict_yolo(
+    model=model,
+    image=image,
+    box_threshold=0.05,
+    imgsz=640,
+    scale_img=False,
+    iou_threshold=0.7,
+)
+
+for i, (box, conf) in enumerate(zip(boxes, confidences)):
+    print(f"Element {i}: box={box.tolist()}, confidence={conf:.2f}")
+
+
+
+## ONNX Preparation
+
+Why GPA-GUI-Detector Fits Your Rust Pipeline
+
+    Lightweight & CPU-Ready: The model weights clock in at roughly ~40–44 MB. It was fine-tuned out of the heavy OmniParser ecosystem specifically to act as a lightweight, localized bounding-box predictor that bypasses cloud-VLM latency completely. 
+    Hugging Face +3
+    True Screen Focus: Unlike document or generic object datasets, this was trained on modern operating system screenshots (macOS/Linux/Windows desktop states). It isolates interactive buttons, application docks, text blocks, and graphical components with clean geometric accuracy. 
+    Hugging Face +2
+
+Converting it to a YOLOv26 ONNX Pipeline
+Because Salesforce natively distributed the GPA-GUI-Detector weights as a standard PyTorch/Ultralytics .pt model checkpoint, you can easily ingest its trained features and repackage them into a lightning-fast, NMS-free YOLOv26 ONNX deployment block. 
+Hugging Face +1
+To convert these weights into a tight format for your Rust application:
+python
+
+from ultralytics import YOLO
+
+# 1. Load the specialized Salesforce GUI Detector weights
+# (Ultralytics handles pulling the checkpoint directly from HF)
+base_gui_model = YOLO.from_pretrained("Salesforce/GPA-GUI-Detector")
+
+# 2. Export to an end-to-end NMS-free ONNX file
+# This optimizes it for 'ort' inside your Rust server loop
+base_gui_model.export(
+    format="onnx", 
+    nms=False,        # Strips out sequential NMS code for 40%+ faster CPU loops
+    simplify=True,    # Optimizes ONNX computational graphs
+    imgsz=640         # Anchor dimension matching standard screenshot scaling
+)
+
+Use code with caution.
+Running this Python snippet leaves you with a compact GPA-GUI-Detector.onnx file that runs in milliseconds on a standard CPU core. Inside your Rust server, you can map its class IDs directly to your network router: Text regions get peeled away for the Unifont vector layer, while non-homogenous Icon/Button/Graphic regions get processed by your rav1e AV1 encoder snippet. 
+
+
+## Code Anforderungen
+
+ich moechte kleinen/uebersichtlichen und effizienten code und
+moeglichst wenig abhaengigkeiten.  du sollst in dieser aufgabe direkt
+rust code erzeugen (nicht den lisp-artigen input code fuer den
+cl-rust-generator transpiler)
+
+fuers testen kannst du xvfb installiern
+
+in deps.md sollst du die pfade der abhaengigkeiten auf github in der
+<organization>/<projekt> notation auflisten. dies kannst du benutzen
+um in deepwiki mcp nach weiteren informationen zu suchen / fragen.
+
+ordnerstruktur: arbeite im ordner
+/workspace/src/cl-rust-generator/examples/25../source6
+
+
+datei-aufteilung (neu, verbindlich): lange quelltext-dateien sind zu
+vermeiden. sobald eine datei mehr als eine klar abgrenzbare
+zustaendigkeit hat oder ca. 300 zeilen ueberschreitet, ist sie in
+semantisch getrennte einzelne dateien zu unterteilen. jede neue datei
+bekommt am anfang eine zweistellige nummer plus einen namen der
+widerspiegelt was darinsteht, z.b. `01_clock.rs`, `02_usb_cdc.rs`,
+`03_router.rs` in `firmware/src/` bzw. `01_types.rs`, `02_frame.rs` in
+`common/src/`. regeln: aufsteigende nummern folgen der
+initialisierungs-/datenfluss-reihenfolge (clock vor peripherie,
+transport vor protokoll, protokoll vor modus), zusammengehoeriges
+bleibt in einer datei (kein auseinanderreissen von zusammengehoerigen
+typen + ihren tests), `mod.rs`/`lib.rs`/`main.rs` enthalten nur
+modul-deklarationen und die oberste verdrahtung (init, spawn, join),
+kein verhalten. aufteilung immer ohne verhaltens-aenderung
+durchfuehren (vorher/nachher: alle tests plus smoke
+gruens). bestehende dateien (`main.rs`, `text.rs`, `frame.rs`,
+`router.rs`) bei bedarf nach diesen regeln umbauen, sobald du sie
+anfasst.
+
+
+
+vorgehensweise: arbeite mit dem neuesten rust (2024). nutze tools um
+konsistenten und aufgeraeumten quellcode zu gewaehrleisten (also
+`cargo fmt` um formatierung zu normalisieren, `cargo clippy` um
+moegliche fehler oder verbesserungen zu finden, cargo-edit mit `cargo
+upgrade` um bei den abhaengigkeiten die neueste version zu verwenden,
+...)
+
+Schaue dir den Quellcode an und die Architektur dieser Software. Nutze
+deepwiki mcp fuer plops/cl-rust-generator um dokumentation zu bekommen
+und fragen beantworten zu lassen. falls abhaengigkeiten eingefuehrt
+werden sind diese mitsamt ihrer github organisation in deps.md
+aufzuschreiben, so dass wir spaeter einfach die deepwiki abfragen
+konstruieren koennen. nutze rust tools um auf die neueste vorhandene
+version zu switchen (auch wenn vor kompatibilitaet gewarnt wird, wenn
+wir gerade eine dependency einfuehren ist es wichtig, die neueste
+version zu nehmen) und schon vorab usage examples in den plan
+aufzunehmen (mit deepwiki mcp zu erfragen)
+
+
+Schlage vor, wie wir dieses Feature implementieren können. Habe ich
+alle Requirements aufgelistet, die wichtig sind, oder kannst du dir
+vorstellen, dass noch andere Dinge werden sollen? Liste mir diese auf
+Vorschlägen, was man am besten umsetzen könnte.
+
+
+
+Schreibe einen Implementierungsplan. Dieser Implementierungsplan soll
+einen unabhängigen AI-Agenten dazu befähigen, selbstständig einen
+Kontext aufzubauen, der die wesentlichen quellen beinhaltet.  Das
+heißt, der Implementierungsplan hat eine Liste von Dateien, die sich
+der Agent sich anschauen sollte, mit einer kurzen Beschreibung für
+jede Datei.  Weiterhin soll der Implementierungsplan eine Erklärung
+Commit Messages sendet werden sollen. Und zwar sollen diese mit einer
+umfassenden Beschreibung und als Conventional Commit format ausgeführt
+werden.
+
+Neue Unit-Tests und Integration-Tests sollen wie erforderlich
+eingeführt werden.  Diese sollen auch ausgeführt werden.
+
+schreibe task.md wo du die implementierungs und test schritte
+aufeinander abfolgen laesst, so dass ein agent die tasks seriell
+abarbeiten kann und die arbeit in jedem schritt getested und validiert
+wird. jeder modus bekommt eigene tasks (implementierung, host-tests,
+HIL-nachweis), danach erst die TUI-tasks.
+
+Nach der vollständigen Implementierung, wenn alle Tests abgeschlossen
+sind und alles committed ist, soll auch ein Walkthrough-Dokument
+entgeschrieben werden und in plan/2026.../walkthrough.md (im ordner wo
+du diese prompt.txt datei findest) abgelegt werden. Dieses soll
+zusammenfassen, was wirklich implementiert wurde, welche Stellen
+aufgrund der Tests oder wie auch immer gemacht wurden, als im
+Untergrund auch Learnings und mögliche Erweiterungen. liste auch die
+neuen programme die mit in den docker container aufgenommen werden
+sollten
+
+Lege für den ausführenden Agenten folgende strikte Regeln für das Schreiben dieses Dokume
+nts fest:
+- **Sprache und Stil:** Das Dokument *muss zwingend auf Deutsch* verfasst sein. Es soll den Leser didaktisch gut abholen, mitnehmen und flüssig lesbar sein.
+- **Erklärungen:** Fachbegriffe müssen kurz und verständlich erklärt werden.
+- **Visualisierung:** Verwende reichlich Code-Beispiele und nutze **Mermaid-Diagramme**, um die Architektur, den Datenfluss und komplexe Konzepte visuell zu veranschaulichen.
+- **Inhaltliche Struktur:**
+  1. Was exakt implementiert wurde.
+  2. Welche Architektur-Entscheidungen aufgrund von Tests spontan geändert werden mussten.
+  3. Learnings und mögliche zukünftige Erweiterungen.
+  4. Eine Liste der neuen Programme/Pakete, die dauerhaft in das Dockerfile aufgenommen werden sollten.
+
