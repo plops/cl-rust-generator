@@ -5,6 +5,7 @@
 //! zusammen, dekodiert AV1 und reicht fertige Ereignisse an die UI.
 //! Acks gehen alle ≥ 512 Byte bzw. 100 ms zurück (Flusskontrolle des
 //! Servers). Stille wird bis `dead_after` (Default 90 s) toleriert.
+//! `drop(Net)` beendet Thread und Verbindung binnen ~100 ms.
 
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -59,6 +60,13 @@ pub struct NetCfg {
 pub struct Net {
     pub events: Receiver<Event>,
     out: Sender<ClientMsg>,
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for Net {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
 }
 
 impl Net {
@@ -115,12 +123,26 @@ pub fn spawn(cfg: NetCfg) -> Net {
     let (out, out_rx) = channel();
     let out_rx = Arc::new(Mutex::new(out_rx));
     let ack_tx = out.clone();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_t = stop.clone();
     std::thread::spawn(move || {
         let mut dec = Decoder::new(1).expect("rav1d");
         let mut resume = Resume::default();
         let mut backoff = Duration::from_millis(500);
         loop {
-            match session(&cfg, &mut resume, &mut dec, &ev_tx, &ack_tx, &out_rx) {
+            let r = session(
+                &cfg,
+                &mut resume,
+                &mut dec,
+                &ev_tx,
+                &ack_tx,
+                &out_rx,
+                &stop_t,
+            );
+            if stop_t.load(Ordering::Relaxed) {
+                return;
+            }
+            match r {
                 Ok(()) => return, // UI beendet
                 Err((e, was_up)) => {
                     if ev_tx.send(Event::Disconnected(e.clone())).is_err() {
@@ -132,13 +154,16 @@ pub fn spawn(cfg: NetCfg) -> Net {
                     if was_up {
                         backoff = Duration::from_millis(500);
                     }
-                    std::thread::sleep(backoff);
+                    let until = Instant::now() + backoff;
+                    while Instant::now() < until && !stop_t.load(Ordering::Relaxed) {
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
                     backoff = (backoff * 2).min(Duration::from_secs(5));
                 }
             }
         }
     });
-    Net { events, out }
+    Net { events, out, stop }
 }
 
 type SessErr = (String, bool);
@@ -160,6 +185,7 @@ fn session(
     ev: &Sender<Event>,
     ack_tx: &Sender<ClientMsg>,
     out_rx: &Arc<Mutex<Receiver<ClientMsg>>>,
+    stop: &Arc<AtomicBool>,
 ) -> Result<(), SessErr> {
     let down = |e: String| (e, false);
     let mut s = connect(&cfg.addr).map_err(down)?;
@@ -177,9 +203,9 @@ fn session(
     while out_rx.lock().unwrap().try_recv().is_ok() {}
     let alive = Arc::new(AtomicBool::new(true));
     let mut ws = s.try_clone().map_err(|e| down(e.to_string()))?;
-    let (alive_w, rx_w) = (alive.clone(), out_rx.clone());
+    let (alive_w, rx_w, stop_w) = (alive.clone(), out_rx.clone(), stop.clone());
     let writer = std::thread::spawn(move || {
-        while alive_w.load(Ordering::Relaxed) {
+        while alive_w.load(Ordering::Relaxed) && !stop_w.load(Ordering::Relaxed) {
             let m = rx_w
                 .lock()
                 .unwrap()
@@ -330,6 +356,27 @@ fn read_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drop_closes_the_connection_promptly() {
+        use std::io::Read;
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let net = spawn(NetCfg {
+            addr: l.local_addr().unwrap().to_string(),
+            dead_after: Duration::from_secs(90),
+            verbose: false,
+        });
+        let (mut c, _) = l.accept().unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let mut hello = [0u8; 64];
+        assert!(c.read(&mut hello).unwrap() > 0, "Hello kommt an");
+        let t = Instant::now();
+        drop(net);
+        let mut rest = Vec::new();
+        let n = c.read_to_end(&mut rest).expect("EOF statt Timeout");
+        assert_eq!(n, 0);
+        assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+    }
 
     #[test]
     fn assembler_joins_chunks_and_drops_gaps() {
