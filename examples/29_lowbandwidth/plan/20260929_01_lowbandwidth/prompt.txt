@@ -16,9 +16,46 @@ Mausklicks zum Server weiterleiten.
 
 Der Server soll screenshots aufnehmen, und nur bei Aenderung Daten
 Uebertragen.  Bilddaten und Textdaten sollen durch ein Neuronales Netz
-getrennt werden (weil Text wichtiger ist).
+getrennt werden weil Text wichtiger ist. Fuer die Textdetektion und OCR erkennung habe ich bereits ein auf paddlepaddleocrv6 basierendes proof of concept. dieses ist schnell genug.
+
+## Konzept
+
+1. **Pipeline:** Server nutzt `PP-OCRv6` Detektion + Erkennung $\to$
+Text als Vektordaten (Text + Box + Farbe) $\to$ Textstellen im Bitmap
+maskieren $\to$ verbleibendes Bitmap via `rav1e` (AVIF) kodieren.
+
+2. **Netzwerk:** Schlankes Binär-Framing über Standard-TCP (kompatibel
+mit `ssh -L` / `ssh -R`), kein schweres Tonic/gRPC, um Macroquad klein
+zu halten.
+
+3. **Input:** `x11rb::protocol::xtest` auf Server-Seite für Klicks und
+Keys.
+
+4. **Bandbreite:** Text-Prioritäts-Queue (Text hat absolute Priorität
+vor AV1-Bildkacheln, um unter den 6 kB/s zu bleiben).
+
+## Was passiert mit Hintergrundbild oder wenn text ueberlappt bild?
+Text-Masking (Inpainting/Solid Fill): Sobald das NN Textboxen erkennt
+und deren Text extrahiert, übermalt der Server diese Bounding Boxes im
+AV1-Frame mit der lokalen Hintergrundfarbe.
+
+Vorteil: AV1 verschwendet keine Bits an scharfe Textkanten (hohe
+Frequenzen), was die Dateigröße massiv senkt. Der Client zeichnet das
+AV1-Hintergrundbild und platziert die Unifont-Glyphen exakt darüber.
+
+Farb- & Schriftgrößenextraktion: Das NN liefert Box + String. Der
+Server sollte zusätzlich mit 2–3 Zeilen Code die dominante Textfarbe
+(Vordergrund) und Hintergrundfarbe sampeln, damit der Client nicht
+alles einfarbig weiß rendern muss.
+
+## Framerate
+
+OCR laeuft mit etwa 1fps und bild uebertragung von AV1
+wird auch nur 1 fps schaffen. das ist okay um die informative
+webseiten bedienen zu koennen.
 
 
+## Client
 Auf der Client Seite sollen die Bilder und Text ungefaehr wieder so
 zusammengesetzt werden, wie sie im screenshot waren.  Der Text soll
 mit gnu unifont gerendert werden.
@@ -37,6 +74,7 @@ Besonders die Client Binary soll moeglichst klein sein, d.h. ich
 moechte moeglichst wenige Rust Dependencies hineinziehen. Deshalb
 wuerde ich Macroquad favorisieren.
 
+## Encoding
 
 For single screenshots over a ~6 kB/s link, AV1 still-picture mode
 (i.e., the AVIF image format) is the best choice — it typically beats
@@ -51,7 +89,44 @@ Du kannst dir
 (aber ich moechte nicht den browser remote steuern, sondern einfach
 nur bilder ueber x11 capturen)
 
+## Datenprotokoll
+Da die Verbindung ohnehin durch einen SSH-Tunnel (ssh -L / ssh -R) geleitet wird (Port-Forwarding erledigt Verschlüsselung und NAT-Traversal), sollte kein gRPC verwendet werden.
 
+Empfehlung: Ein schlankes, maßgeschneidertes Binärprotokoll über Standard-TCP (std::net::TcpStream oder minimale Framed-Sockets).
+
+Paketformat:
+
+    Packet::Text { x, y, size, fg_color, text }
+
+    Packet::ImageTile { x, y, w, h, av1_payload }
+
+    Packet::Input { kind } (Client->    Server)
+
+## Remote Input Injection im Server
+
+Da der Server bereits x11rb für den Screen-Capture verwendet, sollte
+für Maus und Tastatur die X11-Erweiterung x11rb::protocol::xtest
+(xtest::fake_input) genutzt werden. Damit sind keine externen C-Tools
+(wie xdotool) oder zusätzlichen Crates nötig.
+
+##  Mosh-ähnliche Robustheit über TCP/SSH
+
+Mosh setzt auf UDP mit State-Synchronisation. Über einen SSH-Tunnel
+läuft jedoch TCP.
+
+Um Hänger zu vermeiden:
+
+    TCP-Keepalive im Socket aktivieren.
+
+    Client implementiert eine automatische Reconnect-Schleife mit
+    Frame-Acks / Sequenznummern: Nach einem Tunnel-Abbruch verbindet
+    sich der Client neu, sendet seine letzte empfangene
+    Text-/Bild-Versionsnummer, und der Server schickt sofort einen
+    vollständigen Keyframe-Refresh.
+
+
+
+## Code Anforderungen
 
 ich moechte kleinen/uebersichtlichen und effizienten code und
 moeglichst wenig abhaengigkeiten.  du sollst in dieser aufgabe direkt
