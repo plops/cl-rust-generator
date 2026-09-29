@@ -28,7 +28,7 @@ from ultralytics.data.augment import LetterBox
 
 SHAPES = {"640": (640, 640), "384x640": (384, 640)}  # tag -> (H, W)
 CONF, IOU = 0.05, 0.7  # Model-Card-Parameter
-CAL_CROPS = 6  # Zusatz-Ausschnitte pro Kalibrierbild
+CAL_CROPS = 3  # Zusatz-Ausschnitte pro Kalibrierbild
 
 
 def load_rgb(path: str) -> np.ndarray:
@@ -43,9 +43,13 @@ def to_tensor(rgb: np.ndarray, hw: tuple[int, int]) -> np.ndarray:
 
 
 def calibration_images(models: Path) -> list[np.ndarray]:
-    """Screens + Beispielbild, plus zufällige Ausschnitte (andere Skalen)."""
+    """screens/calib (Browser + X11-Szenen) plus zufällige Ausschnitte.
+
+    Das Beispielbild und screens/eval bleiben bewusst draußen: Sie dienen
+    ausschließlich der Auswertung (sonst misst man auf Kalibrierdaten).
+    """
     rng = np.random.default_rng(0)
-    paths = sorted(glob.glob(str(models / "screens" / "*.ppm"))) + [str(models / "example_input.png")]
+    paths = sorted(glob.glob(str(models / "screens" / "calib" / "*.ppm")))
     out = []
     for p in paths:
         img = load_rgb(p)
@@ -135,7 +139,7 @@ def main() -> None:
     Image.fromarray(example).save(models / "example_input.ppm")
 
     cal = calibration_images(models)
-    evals = [load_rgb(p) for p in sorted(glob.glob(str(models / "screens" / "*.ppm")))] + [example]
+    evals = [load_rgb(p) for p in sorted(glob.glob(str(models / "screens" / "eval" / "*.ppm")))] + [example]
     print(f"kalibrierung: {len(cal)} bilder, evaluierung: {len(evals)} bilder")
 
     report = ["variant\tbytes\trecall_vs_fp32\tprecision_vs_fp32\trecall_tol0.15\tboxes_example"]

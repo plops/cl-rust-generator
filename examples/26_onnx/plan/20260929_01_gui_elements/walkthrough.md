@@ -11,7 +11,8 @@ liefert Boxen um Icons, Buttons und Bedienelemente — **bitgenau gleich** wie
 die Python-Referenz von Ultralytics. Auf der RTX A4000 dauert eine Inferenz
 **4,1 ms** (fp16), auf der CPU **41 ms** (INT8, 8 Threads). Quantisierung auf
 INT8 viertelt das Modell (80 → 21 MB) und beschleunigt die CPU um Faktor
-1,4–2,2, kostet aber rund 7 % Recall an der Schwelle und hilft auf der GPU
+1,4–2,2. Dafür fallen an der Score-Schwelle 0,25 rund 5–7 % der Boxen weg
+(auf getrennten Browser-Screenshots gemessen), und auf der GPU hilft INT8
 überhaupt nicht.
 
 ---
@@ -83,6 +84,8 @@ Kein Binär-Asset liegt im Git (`.gitignore`: `models/`, `*.onnx`, `*.pt`,
 | `scripts/export_models.sh` | Kette: fetch → `cargo build` → Screens → `uv run python export.py` |
 | `scripts/bench.sh` | Benchmark-Matrix CPU/CUDA × 6 Varianten + Binärgrößen |
 | `scripts/smoke_xvfb.sh` | End-to-end-Nachweis unter Xvfb |
+| `scripts/fetch_browsers.sh` | Firefox (Mozilla-Tarball) + Chrome for Testing nach `/opt/browsers` |
+| `scripts/make_web_screens.sh` | Firefox/Chrome unter Xvfb auf 18 Websites → `screens/calib` + `screens/eval` |
 
 Die Python-Umgebung (`python/pyproject.toml` + `uv.lock`) enthält zwei
 bewusste Kniffe:
@@ -134,9 +137,16 @@ Der Decode im Detect-Head mischt Box-Pixelwerte (0…640) und Scores (0…1) in
 einem Tensor; eine gemeinsame INT8-Skala dafür würde jeden Score auf 0
 runden. (Ultralytics' eigener `onnx_int8_quantize` trifft dieselbe Wahl.)
 
-Kalibrierdaten sind die drei Xvfb-Szenen plus der Beispiel-Screenshot aus
-dem HF-Repo, jeweils ergänzt um sechs zufällige Ausschnitte (andere Zoomstufen)
-— zusammen 28 Bilder.
+**Kalibrier- und Testdaten sind strikt getrennt.** Kalibriert wird auf
+`screens/calib/`: 24 Browser-Screenshots (Firefox und Chrome, je 12
+Websites wie Wikipedia, GitHub, docs.rs, Stack Overflow, Hacker News,
+OpenStreetMap, heise, BBC — mal Vollbild, mal 1400×900-Fenster) plus die
+drei X11-Szenen, jeweils ergänzt um drei zufällige Ausschnitte (andere
+Zoomstufen) — zusammen 108 Bilder. Ausgewertet wird ausschließlich auf
+`screens/eval/`: 12 Screenshots von sechs *anderen* Domains (de.wikipedia,
+GitLab, Reddit, Amazon, Spiegel, DuckDuckGo) plus das Windows-Beispielbild,
+zusammen 939 Referenzboxen. Die Browser holt `fetch_browsers.sh`, weil
+Ubuntus apt-`firefox` nur ein Snap-Stub ist, der im Container nicht läuft.
 
 Das Skript prüft jede Variante sofort mit onnxruntime-Python und schreibt
 `export_report.tsv` (Größe, Recall/Präzision gegenüber fp32) sowie die
@@ -253,13 +263,15 @@ xychart-beta
 End-to-end unter Xvfb (Grab + Pre + Inferenz + Post): CPU/INT8 **47 ms
 (21 fps)**, CUDA/fp16 **9 ms (110 fps)**; der X11-Grab selbst kostet 3,5 ms.
 
-Genauigkeit gegenüber fp32 (Score ≥ 0,25, IoU ≥ 0,5):
+Genauigkeit gegenüber fp32 auf dem getrennten Testset (Score ≥ 0,25,
+IoU ≥ 0,5). *Recall* = Anteil der fp32-Boxen, die die Variante wiederfindet;
+*Präzision* = Anteil der Varianten-Boxen, die fp32 auch hat:
 
 | Variante | Recall | Präzision | Recall, wenn Variante ≥ 0,15 darf |
 |---|---:|---:|---:|
-| fp16 | 1,000 | 1,000 | 1,000 |
-| int8 640² | 0,934 | 0,955 | 0,986 |
-| int8 384×640 | 0,924 | 0,958 | 0,981 |
+| fp16 | 1,000 | ≥ 0,999 | 1,000 |
+| int8 640² | 0,946 | 0,937 | 0,985 |
+| int8 384×640 | 0,926 | 0,955 | 0,987 |
 | fp32 384×640 vs. 640² | 0,985 | 0,990 | 1,000 |
 
 ### 1.9 Die Antwort auf die Frage aus dem Prompt
@@ -281,9 +293,11 @@ Genauigkeit gegenüber fp32 (Score ≥ 0,25, IoU ≥ 0,5):
   6,1 ms). Der CUDA-Provider fusioniert Q/DQ-Knoten nicht und fügt 112
   Memcpy-Knoten ein. Richtig ist dort fp16 (4,1 ms). Echtes INT8 auf der GPU
   bräuchte TensorRT.
-- *Preis:* INT8 verliert ~7 % Recall an der Schwelle 0,25; fast alle
-  Verluste sind Boxen, deren Score knapp darunter rutscht (98 % Recall, wenn
-  man der Variante 0,15 erlaubt). Für die Remote-Desktop-Anwendung ist eine
+- *Preis:* INT8 verliert an der Schwelle 0,25 rund 5–7 % der Boxen
+  (Recall 0,93–0,95). Fast alle Verluste sind Boxen, deren Score knapp
+  darunter rutscht — ein Button mit 0,27 bei fp32 hat bei INT8 etwa 0,23 und
+  wird vom Filter verworfen, obwohl das Netz ihn sieht. Erlaubt man der
+  Variante 0,15, findet sie 98,5 % der fp32-Boxen. Für die Remote-Desktop-Anwendung ist eine
   etwas niedrigere Schwelle mit INT8 daher ein vertretbarer Tausch.
 
 Der größte Einzelhebel war übrigens keine Quantisierung, sondern die
@@ -302,6 +316,7 @@ flowchart LR
   B -->|uv.lock ignoriert| D[!-Negation in .gitignore]
   B -->|bench.sh Exit 134| E[emit statt println!]
   B -->|INT8 scheinbar -12 %| F[Mikro-Mittel + Toleranz-Recall]
+  B -->|nur 4 Kalibrierbilder| K[Browser-Screens, Calib/Eval getrennt]
   B -->|xcalc nur als Ganzes| G[Domänen-Hinweis statt Fix]
   B -->|Default-Threads langsamer| H[Empfehlung --threads 8]
 ```
@@ -341,6 +356,29 @@ Recall ausgewiesen — der zeigt, dass es sich um Score-Verschiebungen
 handelt, nicht um verlorene Objekte. Vier Kalibriermethoden (MinMax,
 Percentile 99,999, Entropy, MinMax ohne Detect-Head) lagen alle innerhalb
 von ±1 %; MinMax blieb, weil es in 8 s statt 70 s rechnet.
+
+**Vier Kalibrierbilder waren zu wenig — und die Messung war geschönt.**
+Die erste Kalibrierung stützte sich auf nur vier Screenshots (drei
+X11-Szenen und das Windows-Beispielbild), und ausgewertet wurde auf genau
+diesen vier Bildern. Das misst, wie gut das Modell die Bilder kennt, mit
+denen es kalibriert wurde — nicht, wie es sich auf Neuem verhält. Nach dem
+Umbau (Firefox/Chrome auf 12 Kalibrier-Websites, Test auf 6 anderen
+Domains) zeigt der Vergleich beider Kalibrierungen auf demselben getrennten
+Testset:
+
+| Variante | Recall alt → neu | Präzision alt → neu |
+|---|---:|---:|
+| int8 640² | 0,879 → **0,946** | 0,967 → 0,937 |
+| int8 384×640 | 0,921 → 0,926 | 0,967 → 0,955 |
+
+Bei 640² bringt die breitere Kalibrierung sieben Prozentpunkte Recall; bei
+384×640 kaum etwas. In beiden Fällen sinkt die Präzision leicht, weil
+INT8 die Scores jetzt eher nach oben verschiebt und ein paar zusätzliche
+Boxen die Schwelle überschreiten. Die Rechenzeit bleibt gleich (Kalibrierung
+ändert nur Skalen, nicht den Graphen); der komplette Export dauert jetzt 50 s.
+Auf den Browser-Screenshots erkennt GPA übrigens zuverlässig Tabs,
+Adressleiste, Toolbar-Icons, Menüeinträge und Listenzeilen — die
+Domänenlücke der alten X11-Programme tritt dort nicht auf.
 
 **Das Netz sieht alte X11-Programme anders.** Auf dem Windows-Screenshot
 erkennt GPA jedes einzelne Icon und jeden Menüpunkt. Auf den nackten
@@ -416,8 +454,9 @@ flowchart LR
   Eine Destillation auf YOLO11s/n (laut Ultralytics ~22 bzw. ~6,5 GFLOPs,
   also 3–10× weniger) mit GPA als Lehrer wäre der größte Hebel für den
   Laptop.
-- **Mehr Kalibrier- und Testdaten** von echten Linux-Desktops (GNOME/KDE,
-  Browser, IDE), um die Domänenlücke zu messen.
+- **Noch breitere Kalibrier- und Testdaten:** Browser sind jetzt abgedeckt;
+  es fehlen echte Linux-Desktops mit Window-Manager (GNOME/KDE), IDEs,
+  Office, Dark-Themes und HiDPI-Skalierung.
 
 ---
 
@@ -434,6 +473,9 @@ Referenz: `cl-cl-generator/example/05_dockerfile_meta/source01/examples/03_ai_en
 | `x11-apps` | `xcalc`, `xclock`, `xlogo`, `xeyes` als GUI-Testmotive | ja |
 | `xdotool` | Tastatur/Fenster-Automation in Smoke-Tests (source5/6/8) | empfohlen |
 | `cargo-edit` (cargo install) | `cargo upgrade` laut Prompt-Vorgabe | empfohlen |
+| Browser-Bibliotheken: `libgtk-3-0t64 libdbus-glib-1-2 libasound2t64 libnss3 libgbm1 libxss1 libxtst6 libcups2t64 libatk-bridge2.0-0t64 libxkbcommon0 unzip` | Firefox/Chrome für die Website-Screenshots | empfohlen |
+| Fonts: `fonts-dejavu-core fonts-liberation fonts-noto-core fonts-noto-color-emoji` | realistische Web-Darstellung | empfohlen |
+| Firefox + Chrome for Testing (Tarball/Zip nach `/opt/browsers`, siehe `fetch_browsers.sh`) | apt-`firefox` ist ein Snap-Stub | empfohlen |
 | `libnvinfer10` / TensorRT 10 (CUDA 13) | TensorRT-EP für GPU-INT8 | optional |
 
 ```dockerfile
@@ -463,3 +505,6 @@ Export allerdings rund 1 GB Download.
 | `81bb801` style(source8) | rustfmt-Nachzug im Paritätstest |
 | `608a8fe` perf(source8) | Benchmarks, bench.md |
 | `4573a14` fix(source8) | EPIPE-Fehler statt Abort, README |
+| `0fe3323` docs(plan) | dieser Walkthrough |
+| `c991861` docs(plan) | plan_effort.md (Credit-Verbrauch) |
+| (folgt) feat(source8) | Browser-Kalibrierung, getrenntes Testset |

@@ -23,9 +23,11 @@ cargo test --release -- --ignored  # Parität zu Ultralytics (braucht models/)
 ./scripts/smoke_xvfb.sh            # X11-End-to-end unter Xvfb
 ```
 
-Skripte: `fetch_model.sh` (HF-Download, SHA256), `make_screens.sh`
-(Xvfb-Szenen → PPM), `export_models.sh` (komplette Kette), `bench.sh`
-(Matrix), `smoke_xvfb.sh` (Nachweis). Python läuft ausschließlich über
+Skripte: `fetch_model.sh` (HF-Download, SHA256), `fetch_browsers.sh`
+(Firefox + Chrome for Testing nach `/opt/browsers`), `make_screens.sh`
+(X11-Szenen → `models/screens/calib`), `make_web_screens.sh` (Firefox/Chrome
+auf Websites → `calib/` bzw. disjunkt `eval/`), `export_models.sh`
+(komplette Kette), `bench.sh` (Matrix), `smoke_xvfb.sh` (Nachweis). Python läuft ausschließlich über
 `uv` in `python/` (nur Build-Zeit).
 
 Empfehlung: CPU → `gpa_384x640_int8.onnx` mit `--threads 8`;

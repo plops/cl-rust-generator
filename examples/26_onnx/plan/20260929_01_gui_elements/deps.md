@@ -31,7 +31,15 @@ Nur direkt genutzte Deps. Stand: 2026-09-29.
 
 ## System (apt)
 
-`xvfb`, `xterm`, `x11-apps`, `xdotool` (Headless-Tests, Screenshot-Erzeugung).
+`xvfb`, `xterm`, `x11-apps`, `xdotool` (Headless-Tests, Screenshot-Erzeugung),
+Browser-Bibliotheken + Fonts (siehe `source8/scripts/fetch_browsers.sh`).
+
+## Browser (Kalibrier-/Test-Screenshots, nicht im Build)
+
+| Programm | Org/Projekt | Version | Bezug |
+|---|---|---|---|
+| Firefox | mozilla-firefox/firefox | 156.0.1 | Mozilla-Tarball (`download.mozilla.org`, latest, de) |
+| Chrome for Testing | GoogleChromeLabs/chrome-for-testing | 154.0.8037.57 | Stable-Zip laut `last-known-good-versions-with-downloads.json` |
 
 DeepWiki-Abfrage-Muster: `pykeio/ort` (EP-Registrierung, `TensorRef`),
 `ultralytics/ultralytics` (Export, LetterBox, Output-Layout),

@@ -40,6 +40,17 @@ PoC GPA-GUI-Detector in `examples/26_onnx/source8/` (Plan:
   (Shape `[1,5,N]`, Recall@IoU0.5 vs. fp32 wird geloggt).
 - Commit: `feat(source8): onnx export with fp16 and int8 qdq variants`.
 
+## T3b — Browser-Kalibrierung (Nachtrag nach Review)
+
+- Implementierung: `scripts/fetch_browsers.sh` (Firefox-Tarball, Chrome for
+  Testing, Libs/Fonts), `scripts/make_web_screens.sh` (12 Kalibrier- und 6
+  disjunkte Test-Websites × Firefox/Chrome); `export.py` kalibriert nur auf
+  `screens/calib/`, wertet nur auf `screens/eval/` + Beispielbild aus.
+- Test: Kontaktbogen aller Screenshots prüfen (keine leeren Seiten);
+  Export-Report; Vergleich alte vs. neue INT8-Kalibrierung auf dem Testset;
+  Paritätstests weiter grün.
+- Commit: `feat(source8): calibrate int8 on browser screenshots with held-out eval`.
+
 ## T4 — Session, Decode, Detector
 
 - Implementierung: `src/04_session.rs` (CPU/CUDA, Threads, Warmup-Probe),

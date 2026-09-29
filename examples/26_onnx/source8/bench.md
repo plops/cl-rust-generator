@@ -29,12 +29,28 @@ bringen nichts oder schaden (Messrauschen ±10 %).
 
 ## Genauigkeit vs. fp32 (`models/export_report.tsv`, conf ≥ 0,25, IoU ≥ 0,5)
 
+Kalibrierung: 108 Bilder (24 Browser-Screenshots Firefox/Chrome von 12
+Websites + 3 X11-Szenen, je + 3 Ausschnitte). Auswertung **nur auf
+getrennten Bildern**: 12 Browser-Screenshots von 6 anderen Websites + das
+Windows-Beispielbild (939 Referenzboxen).
+
 | Variante | Recall | Präzision | Recall (Variante conf ≥ 0,15) |
 |---|---:|---:|---:|
-| fp16 (beide Formen) | 1,000 | 1,000 | 1,000 |
-| 640² int8 | 0,934 | 0,955 | 0,986 |
-| 384×640 int8 | 0,924 | 0,958 | 0,981 |
-| 384×640 fp32 vs. 640² fp32 | 0,985 | 0,990 | 1,000 |
+| fp16 (beide Formen) | 1,000 | ≥ 0,999 | 1,000 |
+| 640² int8 | 0,946 | 0,937 | 0,985 |
+| 384×640 int8 | 0,926 | 0,955 | 0,987 |
+| 384×640 fp32 vs. 640² fp32 (Beispielbild) | 0,985 | 0,990 | 1,000 |
+
+Vergleich mit der ersten Kalibrierung (nur 4 Bilder: 3 X11-Szenen +
+Beispielbild) auf demselben getrennten Testset:
+
+| Variante | Recall alt → neu | Präzision alt → neu |
+|---|---:|---:|
+| 640² int8 | 0,879 → **0,946** | 0,967 → 0,937 |
+| 384×640 int8 | 0,921 → 0,926 | 0,967 → 0,955 |
+
+Die früher berichteten 0,934/0,924 waren auf den Kalibrierbildern selbst
+gemessen und daher zu optimistisch.
 
 Rust-Parität zu Ultralytics (fp32): 300/300 Boxen, IoU ≥ 0,9, |Δscore| < 0,02.
 
@@ -60,3 +76,6 @@ Rust-Parität zu Ultralytics (fp32): 300/300 Boxen, IoU ≥ 0,9, |Δscore| < 0,0
 - Größe: INT8 viertelt das Modell (80 → 21 MB); eingebettet wächst das
   Binary von 23 auf 44 MB. Die ORT-Bibliothek selbst (~23 MB) ist danach
   der größere Block.
+- Kalibrierung: Browser-Screenshots statt nur 4 Bilder heben den INT8-Recall
+  bei 640² deutlich (0,88 → 0,95), bei 384×640 kaum (0,92 → 0,93); die
+  Laufzeit bleibt gleich (Nachmessung 8T: 70 / 43 ms).

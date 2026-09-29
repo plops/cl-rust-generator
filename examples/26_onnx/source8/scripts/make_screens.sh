@@ -1,14 +1,14 @@
 #!/bin/bash
 # make_screens.sh — erzeugt GUI-Screenshots unter Xvfb (1920×1080) als PPM:
-# Kalibrierdaten für die INT8-Quantisierung und Testbilder für den Smoke.
+# Kalibrierdaten (alte X11-Programme) für die INT8-Quantisierung.
 #
 # Aufruf (aus source8/):  ./scripts/make_screens.sh [BINARY] [OUT-DIR]
-# Default: target/release/gui_detect, models/screens/
+# Default: target/release/gui_detect, models/screens/calib/
 # Voraussetzungen: apt-get install xvfb xterm x11-apps xdotool
 set -euo pipefail
 
 BIN="${1:-target/release/gui_detect}"
-OUT="${2:-models/screens}"
+OUT="${2:-models/screens/calib}"
 DISP="${DISPLAY_NUM:-97}"
 mkdir -p "$OUT"
 export DISPLAY=":$DISP"
