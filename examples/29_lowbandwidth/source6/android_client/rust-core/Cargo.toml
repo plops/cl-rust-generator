@@ -1,0 +1,21 @@
+[package]
+name = "lbw-core"
+description = "Rust-Kern des Android-Clients: Netz, AV1, Szene hinter einer JNI-Schnittstelle"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "lbw_core"
+path = "src/lib.rs"
+# cdylib → liblbw_core.so für Android (jniLibs); rlib → Rust-Tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+lbw-client = { version = "0.1.0", path = "../../client", default-features = false }
+lbw-common = { version = "0.1.0", path = "../../common" }
+jni-sys = "0.4.1"
+
+[dev-dependencies]
+lbw-server = { version = "0.1.0", path = "../../server" }

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["common", "server", "client", "throttle"]
+members = ["common", "server", "client", "throttle", "android_client/rust-core"]
 
 [workspace.package]
 version = "0.1.0"
