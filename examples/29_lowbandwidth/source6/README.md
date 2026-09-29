@@ -28,6 +28,32 @@ cargo test --release -p lbw-server --test models -- --ignored    # echte Modelle
 ./scripts/ssh_tunnel.sh     # E2E über lokalen sshd + ssh -L, Tunnel-Neuaufbau
 ```
 
+## Android-Client
+
+Hybrid: Rust-Kern `android_client/rust-core` (lbw-client ohne macroquad →
+`liblbw_core.so`, JNI) + Kotlin-Oberfläche `android_client/android-app`
+(ohne AndroidX; JSch-SSH-Tunnel mit Host-Key-Pinning, Touch: Trackpad/Direkt/
+Auswahl, Pinch-Zoom, Tastenleiste Esc/Tab/Ctrl/Alt/F1–F12). Das APK baut die
+GitHub Action [`android-lbw.yml`](../../../.github/workflows/android-lbw.yml)
+(Artefakt `lbw-client-debug-apk`). Plan/Walkthrough:
+[`../plan/20260929_03_android/`](../plan/20260929_03_android/), Tasks:
+[android_client/task.md](android_client/task.md), Abhängigkeiten:
+[android_client/deps.md](android_client/deps.md).
+
+```sh
+cd android_client
+scripts/build_android.sh     # Rust → .so (arm64-v8a, x86_64), Unifont, JVM-Tests, Lint, APK
+scripts/ci_local.sh          # alle Schritte der Action lokal (inkl. SSH-Tunnel-Tests gegen sshd)
+scripts/emulator_e2e.sh      # HIL: Emulator (KVM) ↔ lbw-server auf Xvfb, direkt + SSH, 19 Nachweise
+
+# App per Intent starten (Emulator erreicht den Host als 10.0.2.2)
+adb shell am start -n de.lbw.client/.MainActivity --es addr 10.0.2.2:7878 --ez autoconnect true
+```
+
+Serverseite wie oben; das Handy verbindet sich per SSH-Tunnel (in der App)
+mit `127.0.0.1:7878` auf dem SSH-Host. Debug-APK 6,9 MB (Unifont 5,3 MB,
+`liblbw_core.so` 1,8 MB arm64).
+
 ## Messwerte (2026-09-29, Threadripper PRO 7955WX, CPU, Release)
 
 | Größe | Wert |

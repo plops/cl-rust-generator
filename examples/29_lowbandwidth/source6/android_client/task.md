@@ -51,7 +51,7 @@ UI, Tunnel), *Host-Tests* = `cargo test` / JVM-Unit-Tests,
 - [x] A7.1 `08_ScreenView.kt`: Bitmap (Nearest), Unifont-Text in Boxen, Cursor, Auswahlrahmen, HUD; `07_KeyInput.kt`: IME-`InputConnection` (ohne Vorschläge), Hardware-Tasten.
 - [x] A7.2 `05_TouchInput.kt`: Trackpad (Tap=Links, 2-Finger-Tap=Rechts, 2-Finger-Scroll=Rad, Lang-Drücken=Ziehen), Direkt (Lang-Drücken=Rechts), Auswahl; Pinch-Zoom/Pan. `TouchInputTest` (11 Fälle).
 - [x] A7.3 `06_VirtualKeybar.kt`: ⌨ Modus Esc Tab Ctrl Alt ⇧ ❖ ← ↑ ↓ → Rad Fn(F1..F12) Pos1 Ende Bild↑/↓ Einf Entf, Einfügen, Einpassen, HUD; Sticky-Modifier (`StickyModsTest`).
-- [x] A7.4 `09_MainActivity.kt`: Formular (direkt/SSH), Prefs ohne Passwort, `onStart/onStop`, Zurück = trennen (OnBackInvokedDispatcher ab API 33), Intent-Extras für Skripttests.
+- [x] A7.4 `09_ConnectForm.kt` (Formular direkt/SSH, Prefs ohne Passwort, Intent-Extras) + `10_MainActivity.kt` (Sitzung, Verbindung, `onStart/onStop`, Zurück = trennen (OnBackInvokedDispatcher ab API 33)). In A9 geteilt, weil über 300 Zeilen.
 - [x] A7.5 `lintDebug` im Build (0 Fehler); Backup schließt Prefs (Host-Key-Pins) aus.
 
 ## A8 HIL-Nachweis (Emulator)
@@ -63,5 +63,5 @@ UI, Tunnel), *Host-Tests* = `cargo test` / JVM-Unit-Tests,
 - [x] A8.3 Befunde behoben: Modifier-Tasten weiß (Theme-Tint geht bei `backgroundTintList` verloren → eigene Drawables); IME öffnete sich beim Start und verschluckte das erste Zurück (`stateHidden`); Emulator-Hardware-Tastatur unterdrückt IME (`show_ime_with_hard_keyboard=1` im Skript).
 
 ## A9 Abschluss
-- [ ] A9.1 `cargo upgrade` (cargo-edit), fmt, clippy, alle Tests; README-Abschnitt Android.
+- [x] A9.1 `cargo upgrade` (alles aktuell; AGP 9.4.1, Kotlin 2.4.20, JSch 2.28.7, Gradle 9.8.0 = neueste stabile), fmt, clippy, alle Tests; README-Abschnitt Android; `09_MainActivity` (319 Zeilen) in `09_ConnectForm` + `10_MainActivity` geteilt, danach JVM-Tests, Lint und `emulator_e2e.sh` grün.
 - [ ] A9.2 `plan/20260929_03_android/walkthrough.md` (Regeln plan.md §8), Commit.

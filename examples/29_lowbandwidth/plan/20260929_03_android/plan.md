@@ -36,7 +36,8 @@ Abhängigkeiten (GitHub `org/projekt`): `source6/android_client/deps.md`.
 ```text
 Kotlin (android-app, ohne AndroidX/Compose)          Rust (rust-core → liblbw_core.so)
 ┌──────────────────────────────────────────┐          ┌─────────────────────────────────────┐
-│ 09_MainActivity  Formular, Lebenszyklus   │          │ 01_engine  Net + Scene, Größe, Flags │
+│ 10_MainActivity  Sitzung, Lebenszyklus    │          │ 01_engine  Net + Scene, Größe, Flags │
+│ 09_ConnectForm   Formular, Prefs, Extras  │          │                                     │
 │ 02_SshTunnel     JSch -L 0:127.0.0.1:7878 │  JNI     │ 02_blob    Texte → Binärblob, HUD    │
 │ 08_ScreenView    Bitmap+Unifont, HUD      │◄───────► │ 03_keymap  Android-KeyCode → Keysym  │
 │ 05_TouchInput    Trackpad/Direkt/Auswahl  │ jni-sys  │ 04_jni     extern "system"-Exporte   │

@@ -90,7 +90,7 @@ jobs:
           sudo LBW_SSHD_PASSWORD="$pw" android_client/scripts/test_sshd.sh start | sed 's/^export //' | tr ' ' '\n' >> "$GITHUB_ENV"
           echo "LBW_SSHD_PASSWORD=$pw" >> "$GITHUB_ENV"
 
-      - name: Build .so, JVM tests, APK
+      - name: Build .so, JVM tests, lint, APK
         run: android_client/scripts/build_android.sh
 
       - name: Upload APK
@@ -100,10 +100,12 @@ jobs:
           path: ${{ env.SRC }}/android_client/android-app/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      - name: Upload test reports
+      - name: Upload test and lint reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: lbw-android-test-reports
-          path: ${{ env.SRC }}/android_client/android-app/app/build/reports/tests/
+          path: |
+            ${{ env.SRC }}/android_client/android-app/app/build/reports/tests/
+            ${{ env.SRC }}/android_client/android-app/app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
