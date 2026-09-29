@@ -21,3 +21,6 @@ pub mod detector;
 
 #[path = "07_cli.rs"]
 pub mod cli;
+
+#[path = "08_bench.rs"]
+pub mod bench;
