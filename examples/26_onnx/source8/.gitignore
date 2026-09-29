@@ -1,0 +1,13 @@
+# Große Binär-Assets: nie committen (per scripts/fetch_model.sh +
+# scripts/export_models.sh reproduzierbar).
+/models/
+*.onnx
+*.pt
+*.ppm
+/target/
+/python/.venv/
+__pycache__/
+
+# Root-.gitignore ignoriert *.lock; uv.lock pinnt aber die exakten
+# Export-Versionen (pyproject hat nur Untergrenzen) → bewusst einchecken.
+!/python/uv.lock

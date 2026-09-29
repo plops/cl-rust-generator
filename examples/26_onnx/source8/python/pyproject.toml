@@ -1,0 +1,30 @@
+[project]
+name = "gpa-export"
+version = "0.1.0"
+description = "Export + Quantisierung von Salesforce/GPA-GUI-Detector nach ONNX (nur Build-Zeit)"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "onnx>=1.23.0",
+    "onnxruntime>=1.30.0",
+    "onnxslim>=0.1.97",
+    "opencv-python-headless>=5.0.0.93",
+    "torch>=2.14.0",
+    "torchvision>=0.29.0",
+    "ultralytics>=8.4.165",
+]
+
+# torch nur als CPU-Build: Export/Quantisierung brauchen keine GPU,
+# spart mehrere GB CUDA-Wheels.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+# ultralytics zieht opencv-python (braucht libGL); im Container reicht die
+# headless-Variante → Original per Override ausblenden.
+[tool.uv]
+override-dependencies = ["opencv-python; sys_platform == 'never'"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
