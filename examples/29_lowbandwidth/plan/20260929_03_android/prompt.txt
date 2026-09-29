@@ -364,6 +364,298 @@ jobs:
 4. **Release Builds**:
    If building for production release instead of debug, replace `./gradlew assembleDebug` with `./gradlew assembleRelease` and configure signing credentials via GitHub Secrets (`SIGNING_KEY`, `KEY_ALIAS`, `KEY_PASSWORD`).
 
+## Bemerkungen zur Vorgehensweise
+
+### 1. Review des bisherigen Plans: Ist er gut?
+
+**Fazit vorweg:**  
+Die architektonische Grundsatzentscheidung für ein **hybrides Modell (Rust-Core + Kotlin/Compose-UI)** ist **ausgezeichnet und die einzig pragmatische Lösung**. Sie verhindert, dass Sie einen komplexen AV1-Decoder in Java nachbauen müssen, garantiert bitgenaue Protokollkompatibilität zu `lbw-common` und hält den Speicherverbrauch gering.
+
+Dennoch hat der Entwurf in der Praxis einige **kritische Schwachstellen, Fallstricke und Lücken**, die vorab behoben werden müssen:
+
+---
+
+#### Stärken des Plans
+1. **Kein AV1-Neubau:** Die Wiederverwendung von `rav1d` spart Monate fehleranfälliger Arbeit und nutzt C/Rust-SIMD-Optimierungen auf ARM64.
+2. **Keine Protokoll-Divergenz:** Reconnect-Logik, Sequenznummern, Tile-Assembler und Frame-Header bleiben in Rust identisch zum Desktop-Client.
+3. **Klare Schnittstelle:** Trennung zwischen Netzwerk-/Dekodier-Engine und Benutzeroberfläche.
+
+---
+
+#### Kritische Schwachstellen & fehlende Aspekte
+
+##### 1. Rust `cdylib` & JNI vs. UniFFI (Performance & Frame-Transfer)
+* **Problem:** In Ihrem Entwurf fehlte in `rust-core/Cargo.toml` die Deklaration `crate-type = ["cdylib"]`. Ohne diese baut `cargo-ndk` nur ein Rust-Archiv (`.rlib`), aber **keine** dynamischen `.so`-Dateien in `jniLibs`.
+* **Zero-Copy Frame-Puffer:** UniFFI serialisiert `Vec<u8>` über temporäre Puffer. Bei 640×640 RGBA (ca. 1,6 MB pro Frame) bei z. B. 30 Hz erzeugt das massive GC-Last auf Android.  
+  * **Lösung:** Direkte JNI-Anbindung mit `java.nio.ByteBuffer.allocateDirect()` oder `AndroidBitmap_lockPixels`. Der Rust-Core schreibt direkt in den vom JVM-Grafiksystem gehaltenen Puffer.
+
+##### 2. Fehlendes Mobile-UX- und Eingabekonzept
+* Ein 640×640-Canvas ist auf modernen Smartphones (1080p bis 1440p) ohne Skalierung wenige Zentimeter groß.
+* **Touch $\neq$ Maus:** Direkte Toucheingaben verdecken den Bildschirminhalt mit dem Finger. Auf einem Desktop-System benötigt man präzise Klicks, Rechtsklick und Hover.
+  * **Lösung:** Zwei Modi anbieten:
+    1. *Trackpad-Modus* (Standard): Der gesamte Bildschirm fungiert als Touchpad; Mauszeiger wird softwareseitig gerendert. Tap = Linksklick, Zwei-Finger-Tap = Rechtsklick, Zwei-Finger-Scroll = Rad.
+    2. *Direkt-Touch-Modus* (für Touch-optimierte Oberflächen).
+* **Sondertasten:** Android-Software-Keyboards haben kein `Ctrl`, `Alt`, `Esc`, `Tab` oder `F1..F12`. Es wird eine virtuelle Tastenleiste (Overlay) benötigt.
+
+##### 3. SSH-Bibliothek: JSch (`mwiede/jsch`) vs. Apache MINA SSHD
+* **Entscheidung:** Verwenden Sie **ausschließlich `com.github.mwiede:jsch`**.
+* **Begründung:** Apache MINA SSHD zieht schwere Abhängigkeiten nach (Apache Commons, SLF4J, Java NIO2), was auf Android zu Dex-Konflikten und APK-Aufblähung führt. Der Fork von `mwiede/jsch` ist modernisiert (unterstützt `ed25519`, `rsa-sha2-256/512`), pure Java, extrem schlank und läuft out-of-the-box auf Android.
+
+##### 4. Android Lifecycle & Standby (Doze Mode)
+* Wenn das Smartphone gesperrt oder die App minimiert wird, kappt Android nach wenigen Sekunden den TCP-Socket.
+* **Lösung:** Saubere Trennung bei `onStop()` / `onPause()` und optional ein schlanker *Foreground Service* mit Notification, falls der Tunnel im Hintergrund offen bleiben soll.
+
+##### 5. GitHub Action Fallstrick (NDK-Pfad)
+* `NDK_PATH=$(ls -d $ANDROID_SDK_ROOT/ndk/* | sort -V | tail -n 1)` kann fehlschlagen, wenn im Runner kein oder mehrere NDKs liegen. Besser ist es, in `androidApp/build.gradle.kts` eine feste `ndkVersion` (z. B. `"26.3.11579264"`) zu definieren und im CI-Workflow gezielt diese Version zu adressieren.
+
+---
+
+### 2. Fehlende Requirements: Konkrete Vorschläge
+
+1. **Skalierung & Viewport:**
+   * Pinch-to-Zoom und Panning (Verschieben des sichtbaren Ausschnitts bei Zoom > 1.0).
+   * Scharfe Pixelskalierung (Nearest-Neighbor) beibehalten, damit Text in Unifont lesbar bleibt.
+2. **Virtuelle Eingabeleiste:**
+   * Einblendbare Leiste am oberen/unteren Rand mit: `Esc`, `Tab`, `Ctrl`, `Alt`, `F1` (HUD), `F2` (Auswahl), `F3` (Einfügen).
+3. **Android-Berechtigungen:**
+   * `android.permission.INTERNET` im `AndroidManifest.xml`.
+4. **Verbindungsverwaltung:**
+   * Profile speichern (Host, Port, SSH-User, SSH-Key/Passwort). EncryptedSharedPreferences verwenden.
+
+---
+
+### 3. Externe Abhängigkeiten (`deps.md`)
+
+Legen Sie diese Datei in `source6/android_client/deps.md` an:
+
+```markdown
+# Dependencies Reference (<organization>/<project>)
+
+Für DeepWiki MCP Recherchen und Dokumentationsabfragen:
+
+## Rust Core
+- `rust-lang/rust` (Edition 2024, Standard Library)
+- `videolan/dav1d` (Referenz-C-Decoder)
+- `memorysafety/rav1d` (Rust-Port von dav1d, AV1 Decoding)
+- `jni-rs/jni-rs` (Typsichere JNI-Bindings für Rust)
+
+## Android & Kotlin
+- `mwiede/jsch` (Moderner JSch-Fork für SSH2 mit Ed25519/Key-Support auf Android)
+- `androidx/androidx` (Jetpack Compose, Activity, Lifecycle)
+- `willowtreeapps/assertk` oder `mockk/mockk` (Unit-Tests)
+
+## Build & Tooling
+- `bbqsrc/cargo-ndk` (Cargo Extension zum Bauen von Android .so-Bibliotheken)
+- `actions/setup-java` (GitHub Action)
+- `actions-rust-lang/setup-rust-toolchain` (GitHub Action)
+```
+
+---
+
+### 4. Code-Architektur & Datei-Aufteilung ($\le$ 300 Zeilen, 2-stellige Nummern)
+
+Der Code wird unter `/workspace/src/cl-rust-generator/examples/29../source6/android_client` platziert:
+
+```text
+android_client/
+├── deps.md
+├── task.md
+├── rust-core/
+│   ├── Cargo.toml
+│   └── src/
+│       ├── 01_types.rs         # Datenstrukturen, Rect, Event, Status
+│       ├── 02_av1.rs           # rav1d Wrapper (dekodiert Still-Picture OBUs)
+│       ├── 03_assembler.rs     # TileStart + TileData Paket-Assembler
+│       ├── 04_net.rs           # TCP-Loop, Ping/Pong, Flow-Control ACK
+│       ├── 05_scene.rs         # RGBA Framebuffer, Blit, TextItem Map
+│       ├── 06_input.rs         # Keysyms, Mouse-Throttle, Event-Mapping
+│       ├── 07_jni_bridge.rs    # JNI-Exporte: allocate, render_to_buffer, send_input
+│       └── lib.rs              # Modul-Deklarationen
+└── android-app/
+    ├── build.gradle.kts
+    ├── app/
+    │   ├── build.gradle.kts
+    │   └── src/main/
+    │       ├── AndroidManifest.xml
+    │       ├── java/de/lbw/client/
+    │       │   ├── 01_CoreBridge.kt     # JNI Wrapper (System.loadLibrary("lbw_core"))
+    │       │   ├── 02_SshTunnel.kt      # JSch SSH Local Port Forwarding (127.0.0.1:port)
+    │       │   ├── 03_TouchInput.kt     # Trackpad-Gesten, Drag, Scroll-Erkennung
+    │       │   ├── 04_VirtualKeybar.kt  # Compose Toolbar (Ctrl, Alt, Esc, F-Keys)
+    │       │   ├── 05_ScreenRenderer.kt # Canvas/Bitmap Rendering, Zoom & Pan
+    │       │   └── 06_MainActivity.kt   # App-Entrypoint, State-Wiring, Lifecycle
+    │       └── res/
+```
+
+### Fonts
+
+Beim Desktop-Client liest `07_render.rs` die Schriftdatei hartkodiert aus dem Linux-Dateisystem (`/usr/share/fonts/.../unifont.otf`). Auf Android gibt es diesen Pfad nicht.
+
+Hier ist die detaillierte Analyse, warum die Schriftart für dieses Protokoll kritisch ist und wie wir sie auf Android sauber handhaben:
+
+---
+
+#### 1. Warum GNU Unifont im Server-Protokoll unverzichtbar ist
+
+Das Protokoll sendet Text als strukturierte Vektordaten (`ServerMsg::Text` mit `TextItem { id, rect, fg, bg, text }`).
+* Der Server berechnet die Hintergrund-Boxen (`rect.w`, `rect.h`) basierend auf den Maßen von **GNU Unifont** (einem 8×16 bzw. 16×16 Pixel-Bitmap-Raster für fast den gesamten Unicode-Raum).
+* Würde Android einfach die System-Schrift (*Roboto*) nehmen, ist diese **proportional** (ein `i` ist schmaler als ein `m`). 
+* **Die Folge:** Der Text passt horizontal nicht in die berechneten Boxen, läuft über oder wird abgeschnitten, und Zeilen fluchten nicht mehr mit dem AV1-Canvas darunter.
+
+---
+
+#### 2. Die Lösung: Unifont als APK-Asset einbetten
+
+Wir bündeln die TrueType/OpenType-Datei direkt im Android-Projekt unter:  
+`android-app/app/src/main/assets/fonts/unifont.otf`
+
+##### Dateigröße & APK-Overhead
+* **Unkomprimiert:** ca. 12–14 MB (deckt die gesamte BMP / Unicode-Ebene 0 ab).
+* **Im APK (Zip-komprimiert):** Die Datei schrumpft beim Packen des APKs auf nur **~3,5 bis 4 MB**.
+* **Lizenz:** GNU Unifont steht unter der *GPLv2+ mit GNU Font Exception*. Durch die Font Exception wird der eigene Kotlin/Rust-Code **nicht** infiziert; die Schrift darf problemlos in der App gebündelt ausgeliefert werden.
+
+---
+
+#### 3. Exakte Nachbildung der Render-Logik (`07_render.rs`) in Kotlin
+
+In `07_render.rs` gibt es zwei entscheidende Tricks:
+1. Dynamische Schriftgröße abhängig von der Kachelhöhe (`11..=22 => 16 px`).
+2. Horizontale Stauchung/Streckung (`font_scale_aspect`), damit der Text exakt in die Box gepresst wird.
+
+In Jetpack Compose bilden wir das über `android.graphics.Paint` und `drawIntoCanvas` 1:1 nach:
+
+```kotlin
+// 05_ScreenRenderer.kt
+package de.lbw.client
+
+import android.content.Context
+import android.graphics.Paint
+import android.graphics.Typeface
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+
+class TextRenderer(context: Context) {
+    // 1. Unifont aus Assets laden, Fallback auf System-Monospace
+    val typeface: Typeface = try {
+        Typeface.createFromAsset(context.assets, "fonts/unifont.otf")
+    } catch (e: Exception) {
+        Typeface.MONOSPACE
+    }
+
+    private val paint = Paint().apply {
+        typeface = this@TextRenderer.typeface
+        isAntiAlias = false // Pixelschrift bleibt ohne Weichzeichner scharf
+    }
+
+    fun calculateFontSize(boxHeight: Int, zoom: Boolean): Float {
+        val size = when (boxHeight) {
+            in 11..22 -> 16f
+            else -> (boxHeight * 0.8f).coerceIn(8f, 96f)
+        }
+        return if (zoom) size else (size * 9f / 16f).coerceIn(8f, 96f)
+    }
+
+    fun drawItem(
+        drawScope: DrawScope,
+        item: TextItem,
+        scale: Float,
+        zoom: Boolean
+    ) {
+        val r = item.rect
+        val x = r.x * scale
+        val y = r.y * scale
+        val w = r.w * scale
+        val h = r.h * scale
+
+        // 1. Hintergrund-Box füllen
+        drawScope.drawRect(
+            color = androidx.compose.ui.graphics.Color(item.bg[0], item.bg[1], item.bg[2]),
+            topLeft = androidx.compose.ui.geometry.Offset(x, y),
+            size = androidx.compose.ui.geometry.Size(w, h)
+        )
+
+        // 2. Schriftgröße und Textbreite messen
+        val fontSize = calculateFontSize(r.h, zoom) * (scale / if (zoom) 2f else 1f)
+        paint.textSize = fontSize
+        val measuredWidth = paint.measureText(item.text)
+        if (measuredWidth <= 0f) return
+
+        // 3. Aspect Ratio berechnen (exakt wie in 07_render.rs)
+        val pad = scale
+        val aspect = if (zoom) {
+            1.0f
+        } else {
+            ((w - 2.0f * pad) / measuredWidth).coerceIn(0.4f, 2.5f)
+        }
+        paint.textScaleX = aspect
+        paint.color = android.graphics.Color.rgb(item.fg[0], item.fg[1], item.fg[2])
+
+        // 4. Baseline-Ausrichtung berechnen
+        val fontMetrics = paint.fontMetrics
+        val textHeight = fontMetrics.descent - fontMetrics.ascent
+        val baseline = y + (h - textHeight) / 2f - fontMetrics.ascent
+
+        drawScope.drawIntoCanvas { canvas ->
+            canvas.nativeCanvas.drawText(item.text, x + pad, baseline, paint)
+        }
+    }
+}
+```
+
+#### In `deps.md` aufnehmen:
+* `gnu-unifont` (Quelle: [GNU Unifont Releases](https://unifoundry.com/unifont/) oder Debian-Paket `fonts-unifont`).
+
+#### In der GitHub Action (`.github/workflows/build.yml`) ergänzen:
+Die Schriftdatei muss im CI-Lauf bereitgestellt werden (entweder über das Ubuntu-Paket `fonts-unifont` kopiert oder im Git-LFS / Repository abgelegt):
+
+```yaml
+      - name: Install fonts-unifont & copy to Android assets
+        run: |
+          sudo apt-get update && sudo apt-get install -y fonts-unifont
+          mkdir -p androidApp/app/src/main/assets/fonts/
+          # Kopiere unifont.otf in die Android Assets
+          cp /usr/share/fonts/opentype/unifont/unifont.otf androidApp/app/src/main/assets/fonts/unifont.otf || \
+          cp /usr/share/fonts/truetype/unifont/unifont.ttf androidApp/app/src/main/assets/fonts/unifont.otf
+```
+
+#### In `task.md` ergänzen:
+* **Unter Task 4 / Task 7:**
+  - Asset-Verzeichnis `app/src/main/assets/fonts/` anlegen.
+  - Automatisches Download-/Kopier-Skript für `unifont.otf` hinterlegen.
+  - Fallback-Mechanismus auf `Typeface.MONOSPACE` testen, falls die Schrift-Asset-Datei im Testbetrieb fehlt.
+
+---
+
+### 6. Konventionen für Commit-Messages (Conventional Commits)
+
+Jeder Schritt muss mit einer präzisen, didaktischen Commit-Message nach folgendem Standard committet werden:
+
+```text
+<typ>(<scope>): <kurze beschreibung im präsens>
+
+<ausführliche begründung: warum war die änderung nötig, was wurde gelöst>
+
+- Detail 1
+- Detail 2
+```
+* **Typen:** `feat` (neues Feature), `fix` (Bugfix), `refactor` (Code-Umbau ohne Verhaltensänderung), `test` (Tests hinzugefügt), `ci` (GitHub Action/Build-Anpassungen).
+* **Beispiel:**
+  ```text
+  feat(rust-core): implement zero-copy direct bytebuffer rendering in 07_jni_bridge.rs
+
+  Avoids intermediate memory allocation on JVM heap when passing 640x640 RGBA
+  frames from Rust to Kotlin. Writes directly into ByteBuffer pointer.
+
+  - Add direct buffer pointer lookup via JNIEnv
+  - Implement bounds check against current scene dimensions
+  - Add native unit test validating buffer stride alignment
+  ```
+
+---
+
+
+
 ## Code Anforderungen
 
 ich moechte kleinen/uebersichtlichen und effizienten code und
