@@ -10,5 +10,14 @@ pub mod capture;
 #[path = "03_letterbox.rs"]
 pub mod letterbox;
 
+#[path = "04_session.rs"]
+pub mod session;
+
+#[path = "05_decode.rs"]
+pub mod decode;
+
+#[path = "06_detector.rs"]
+pub mod detector;
+
 #[path = "07_cli.rs"]
 pub mod cli;
