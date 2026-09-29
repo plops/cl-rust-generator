@@ -17,27 +17,32 @@ use crate::select::{drag_rect, paste_chunks, selected_text};
 const REPEAT_DELAY: Duration = Duration::from_millis(450);
 const REPEAT_EVERY: Duration = Duration::from_millis(60);
 
-fn log_event(e: &Event) {
+/// Protokollzeile je Ereignis (`--dump-text`), mit Sekunden seit Start.
+fn log_event(e: &Event, t0: Instant) {
+    let t = t0.elapsed().as_secs_f64();
     match e {
         Event::Text { remove, add } => {
             for id in remove {
-                println!("TEXT - {id}");
+                println!("TEXT - {id} t={t:.3}");
             }
-            for t in add {
-                let r = t.rect;
+            for x in add {
+                let r = x.rect;
                 println!(
-                    "TEXT + {} {} {} {} {} {:?}",
-                    t.id, r.x, r.y, r.w, r.h, t.text
+                    "TEXT + {} {} {} {} {} {:?} t={t:.3}",
+                    x.id, r.x, r.y, r.w, r.h, x.text
                 );
             }
         }
         Event::Tile { rect, bytes, .. } => {
-            println!("TILE {} {} {} {} {bytes}", rect.x, rect.y, rect.w, rect.h)
+            println!(
+                "TILE {} {} {} {} {bytes} t={t:.3}",
+                rect.x, rect.y, rect.w, rect.h
+            );
         }
-        Event::Connected { resumed, .. } => println!("CONNECTED resumed={resumed}"),
-        Event::Disconnected(why) => println!("DISCONNECTED {why}"),
-        Event::Clear => println!("CLEAR"),
-        Event::Stats { .. } => {}
+        Event::Connected { resumed, .. } => println!("CONNECTED resumed={resumed} t={t:.3}"),
+        Event::Disconnected(why) => println!("DISCONNECTED {why} t={t:.3}"),
+        Event::Clear => println!("CLEAR t={t:.3}"),
+        Event::Stats { rate, backlog, .. } => println!("STATS {rate} {backlog} t={t:.3}"),
     }
 }
 
@@ -179,10 +184,11 @@ pub async fn run(cfg: Config) {
         mouse: MouseThrottle::new(30),
         held: None,
     };
+    let t0 = Instant::now();
     loop {
         while let Ok(e) = net.events.try_recv() {
             if cfg.dump_text {
-                log_event(&e);
+                log_event(&e, t0);
             }
             scene.apply(e);
         }

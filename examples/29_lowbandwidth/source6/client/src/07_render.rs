@@ -21,8 +21,10 @@ pub fn load_font(path: Option<&str>) -> Option<Font> {
     let cands: Vec<&str> = path.map_or_else(|| UNIFONT.to_vec(), |p| vec![p]);
     for p in cands {
         if let Ok(b) = std::fs::read(p)
-            && let Ok(f) = load_ttf_font_from_bytes(&b)
+            && let Ok(mut f) = load_ttf_font_from_bytes(&b)
         {
+            // Pixelschrift: ohne Interpolation bleibt sie scharf.
+            f.set_filter(FilterMode::Nearest);
             return Some(f);
         }
     }
@@ -36,10 +38,15 @@ fn rgb(c: [u8; 3]) -> Color {
     Color::from_rgba(c[0], c[1], c[2], 255)
 }
 
-/// Schriftgröße aus der Boxhöhe: DBNet-Boxen sind ~1,3× so hoch wie die Glyphen.
+/// Schriftgröße aus der Boxhöhe. Unifont ist eine 16-px-Bitmapschrift:
+/// für übliche UI-Zeilen (Boxhöhe 11–22 px) exakt 16 px (scharf), sonst
+/// proportional.
 #[must_use]
 pub fn font_size_for(r: &Rect) -> u16 {
-    ((f32::from(r.h) * 0.8).round() as u16).clamp(8, 96)
+    match r.h {
+        11..=22 => 16,
+        h => (f32::from(h) * 0.8).round().clamp(8.0, 96.0) as u16,
+    }
 }
 
 /// Canvas + Texte zeichnen.
@@ -67,10 +74,10 @@ impl Renderer {
         if d.width <= 0.0 {
             return;
         }
-        // Breite exakt auf die Box (abzüglich Rand) strecken/stauchen.
-        let pad = (f32::from(r.h) * 0.1).max(1.0);
+        // Breite exakt auf die Box strecken/stauchen, vertikal zentrieren.
+        let pad = 1.0;
         let aspect = ((f32::from(r.w) - 2.0 * pad) / d.width).clamp(0.4, 2.5);
-        let y = f32::from(r.y) + (f32::from(r.h) - d.height) / 2.0 + d.offset_y;
+        let y = (f32::from(r.y) + (f32::from(r.h) - d.height) / 2.0 + d.offset_y).round();
         draw_text_ex(
             &t.text,
             f32::from(r.x) + pad,
@@ -155,8 +162,9 @@ mod tests {
 
     #[test]
     fn font_size_follows_box_height() {
-        assert_eq!(font_size_for(&Rect::new(0, 0, 100, 20)), 16);
+        assert_eq!(font_size_for(&Rect::new(0, 0, 100, 14)), 16);
         assert_eq!(font_size_for(&Rect::new(0, 0, 100, 2)), 8);
+        assert_eq!(font_size_for(&Rect::new(0, 0, 100, 40)), 32);
         assert_eq!(font_size_for(&Rect::new(0, 0, 100, 500)), 96);
     }
 }

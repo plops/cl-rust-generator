@@ -83,10 +83,20 @@ pub fn sample_colors(img: &Rgb, r: Rect) -> ([u8; 3], [u8; 3]) {
     (s.map(|v| ((v + cnt / 2) / cnt) as u8), bg)
 }
 
-/// Übermalt alle Textboxen mit ihrer Hintergrundfarbe (in-place).
+/// Rand (px) um jede Textbox, der zusätzlich übermalt wird: DBNet-Boxen
+/// sind vertikal knapp, sonst bleiben Unterlängen/Antialiasing als
+/// Geisterreste im AV1-Bild.
+pub const MASK_PAD: u16 = 2;
+
+/// Übermalt alle Textboxen (plus [`MASK_PAD`]) mit ihrer Hintergrundfarbe.
 pub fn mask(img: &mut Rgb, items: &[TextItem]) {
     for t in items {
-        img.fill(t.rect, t.bg);
+        let r = t.rect;
+        let (x, y) = (r.x.saturating_sub(MASK_PAD), r.y.saturating_sub(MASK_PAD));
+        img.fill(
+            Rect::new(x, y, r.x2() + MASK_PAD - x, r.y2() + MASK_PAD - y),
+            t.bg,
+        );
     }
 }
 
@@ -167,11 +177,12 @@ mod tests {
     }
 
     #[test]
-    fn mask_removes_text_pixels() {
+    fn mask_removes_text_pixels_including_fringe() {
         let mut img = text_like();
+        img.put(5, 15, [100; 3]); // Unterlänge knapp unter der Box
         let item = TextItem {
             id: 1,
-            rect: Rect::new(4, 5, 32, 10),
+            rect: Rect::new(5, 6, 30, 8),
             fg: [0; 3],
             bg: [250; 3],
             text: "x".into(),
