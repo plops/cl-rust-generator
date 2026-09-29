@@ -550,4 +550,4 @@ Export allerdings rund 1 GB Download.
 | `c991861` docs(plan) | plan_effort.md (Credit-Verbrauch) |
 | `fd59d01` feat(source8) | Browser-Kalibrierung, getrenntes Testset |
 | `f6bd6ad` docs(plan) | Commit-Hash im Walkthrough nachgetragen |
-| (folgt) feat(source8) | Live-Modus mit eigenem Fenster |
+| `ed3f52b` feat(source8) | Live-Modus mit eigenem Fenster |
