@@ -1,0 +1,23 @@
+[package]
+name = "gui_detect"
+version = "0.1.0"
+edition = "2024"
+description = "PoC: Salesforce/GPA-GUI-Detector (YOLO11m) via ONNX Runtime auf X11-Screenshots"
+
+[dependencies]
+# CPU-Build per Default; Workstation baut zusätzlich mit --features cuda.
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["download-binaries", "copy-dylibs", "tls-native"] }
+x11rb = "0.14.0"
+
+[features]
+# CUDAExecutionProvider (braucht CUDA-13-Runtime + cuDNN 9 am Host).
+cuda = ["ort/cuda"]
+# Bettet models/gpa_384x640_int8.onnx ins Binary ein (Binärgrößen-Messung).
+embed = []
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
