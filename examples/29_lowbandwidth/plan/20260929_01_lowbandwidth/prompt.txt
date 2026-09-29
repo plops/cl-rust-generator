@@ -134,6 +134,13 @@ Paketformat:
 
     Packet::Input { kind } (Client->    Server)
 
+## Gewichte
+
+Schreibe scripte um die modell gewichte herunterzuladen und
+gegebenenfalls in onnx umzuwandeln und zu quantisieren. stelle sicher,
+dass die gewichte und grosse datenmengen nicht ins repo commited
+werden.
+
 ## Remote Input Injection im Server
 
 Da der Server bereits x11rb für den Screen-Capture verwendet, sollte
