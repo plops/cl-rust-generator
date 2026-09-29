@@ -63,6 +63,11 @@ struct Ui {
     drag: Option<(f32, f32)>,
     mouse: MouseThrottle,
     held: Option<(KeyCode, Instant)>,
+    scale: f32,
+}
+
+fn server_position((x, y): (f32, f32), scale: f32) -> (f32, f32) {
+    (x / scale, y / scale)
 }
 
 impl Ui {
@@ -110,7 +115,7 @@ impl Ui {
     }
 
     fn mouse(&mut self, net: &Net, s: &Scene) -> Option<lbw_common::Rect> {
-        let (x, y) = mouse_position();
+        let (x, y) = server_position(mouse_position(), self.scale);
         let (cx, cy) = (
             x.clamp(0.0, s.w as f32 - 1.0) as u16,
             y.clamp(0.0, s.h as f32 - 1.0) as u16,
@@ -176,13 +181,14 @@ pub async fn run(cfg: Config) {
         verbose: cfg.verbose,
     });
     let mut scene = Scene::new(cfg.size, cfg.size);
-    let mut r = Renderer::new(cfg.size, cfg.size, load_font(cfg.font.as_deref()));
+    let mut r = Renderer::new(cfg.size, cfg.size, load_font(cfg.font.as_deref()), cfg.zoom);
     let mut ui = Ui {
         hud: false,
         select: false,
         drag: None,
         mouse: MouseThrottle::new(30),
         held: None,
+        scale: cfg.scale() as f32,
     };
     let t0 = Instant::now();
     loop {
@@ -190,11 +196,30 @@ pub async fn run(cfg: Config) {
             if cfg.dump_text {
                 log_event(&e, t0);
             }
+
             scene.apply(e);
         }
         ui.keys(&net, &scene);
         let sel = ui.mouse(&net, &scene);
         r.draw(&mut scene, sel, ui.hud);
         next_frame().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_coordinates_map_to_capture_coordinates() {
+        assert_eq!(server_position((638.0, 470.0), 2.0), (319.0, 235.0));
+        assert_eq!(server_position((638.0, 470.0), 1.0), (638.0, 470.0));
+        assert_eq!(
+            drag_rect(
+                server_position((20.0, 40.0), 2.0),
+                server_position((80.0, 100.0), 2.0)
+            ),
+            lbw_common::Rect::new(10, 20, 31, 31)
+        );
     }
 }

@@ -17,6 +17,8 @@ target/release/lbw-server --x 0 --y 0 -v
 # lokaler Rechner: Tunnel + Client
 autossh -M 0 -N -o ServerAliveInterval=15 -o ServerAliveCountMax=8 -L 7878:127.0.0.1:7878 user@remote &
 target/release/lbw-client --connect 127.0.0.1:7878
+# Client startet mit 2:1-Zoom (1280×1280 bei --size 640).
+# Für 1:1-Darstellung: lbw-client --no-zoom
 # Client-Tasten: F1 HUD, F2 Text auswählen → Zwischenablage, F3 Zwischenablage tippen
 
 # Tests

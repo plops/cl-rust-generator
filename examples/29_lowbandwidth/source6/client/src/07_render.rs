@@ -38,14 +38,18 @@ fn rgb(c: [u8; 3]) -> Color {
     Color::from_rgba(c[0], c[1], c[2], 255)
 }
 
-/// Schriftgröße aus der Boxhöhe. Unifont ist eine 16-px-Bitmapschrift:
-/// für übliche UI-Zeilen (Boxhöhe 11–22 px) exakt 16 px (scharf), sonst
-/// proportional.
+/// Schriftgröße aus der Boxhöhe: bei Zoom 16 px für übliche UI-Zeilen,
+/// ohne Zoom 9 px; größere Boxen bleiben proportional.
 #[must_use]
-pub fn font_size_for(r: &Rect) -> u16 {
-    match r.h {
+pub fn font_size_for(r: &Rect, zoom: bool) -> u16 {
+    let size = match r.h {
         11..=22 => 16,
         h => (f32::from(h) * 0.8).round().clamp(8.0, 96.0) as u16,
+    };
+    if zoom {
+        size
+    } else {
+        (f32::from(size) * 9.0 / 16.0).round().clamp(8.0, 96.0) as u16
     }
 }
 
@@ -54,34 +58,50 @@ pub struct Renderer {
     img: Image,
     tex: Texture2D,
     font: Option<Font>,
+    zoom: bool,
 }
 
 impl Renderer {
     #[must_use]
-    pub fn new(w: usize, h: usize, font: Option<Font>) -> Self {
+    pub fn new(w: usize, h: usize, font: Option<Font>, zoom: bool) -> Self {
         let img = Image::gen_image_color(w as u16, h as u16, BLACK);
         let tex = Texture2D::from_image(&img);
         tex.set_filter(FilterMode::Nearest);
-        Self { img, tex, font }
+        Self {
+            img,
+            tex,
+            font,
+            zoom,
+        }
     }
 
     fn text(&self, t: &TextItem) {
         let r = &t.rect;
-        draw_rectangle(r.x.into(), r.y.into(), r.w.into(), r.h.into(), rgb(t.bg));
-        let size = font_size_for(r);
+        let scale = if self.zoom { 2.0 } else { 1.0 };
+        let (x, y, w, h) = (
+            f32::from(r.x) * scale,
+            f32::from(r.y) * scale,
+            f32::from(r.w) * scale,
+            f32::from(r.h) * scale,
+        );
+        draw_rectangle(x, y, w, h, rgb(t.bg));
+        let size = font_size_for(r, self.zoom);
         let font = self.font.as_ref();
         let d = measure_text(&t.text, font, size, 1.0);
         if d.width <= 0.0 {
             return;
         }
-        // Breite exakt auf die Box strecken/stauchen, vertikal zentrieren.
-        let pad = 1.0;
-        let aspect = ((f32::from(r.w) - 2.0 * pad) / d.width).clamp(0.4, 2.5);
-        let y = (f32::from(r.y) + (f32::from(r.h) - d.height) / 2.0 + d.offset_y).round();
+        let pad = scale;
+        let aspect = if self.zoom {
+            1.0
+        } else {
+            ((w - 2.0 * pad) / d.width).clamp(0.4, 2.5)
+        };
+        let baseline = (y + (h - d.height) / 2.0 + d.offset_y).round();
         draw_text_ex(
             &t.text,
-            f32::from(r.x) + pad,
-            y,
+            x + pad,
+            baseline,
             TextParams {
                 font,
                 font_size: size,
@@ -95,25 +115,42 @@ impl Renderer {
 
     /// Kompletter Frame; `sel` = aktives Auswahlrechteck.
     pub fn draw(&mut self, s: &mut Scene, sel: Option<Rect>, hud: bool) {
+        let scale = if self.zoom { 2.0 } else { 1.0 };
         if s.dirty {
             self.img.bytes.copy_from_slice(&s.canvas);
             self.tex.update(&self.img);
             s.dirty = false;
         }
         clear_background(BLACK);
-        draw_texture(&self.tex, 0.0, 0.0, WHITE);
+        draw_texture_ex(
+            &self.tex,
+            0.0,
+            0.0,
+            WHITE,
+            DrawTextureParams {
+                dest_size: Some(vec2(s.w as f32 * scale, s.h as f32 * scale)),
+                ..Default::default()
+            },
+        );
         for t in s.texts.values() {
             self.text(t);
         }
         if let Some(r) = sel {
             draw_rectangle(
-                r.x.into(),
-                r.y.into(),
-                r.w.into(),
-                r.h.into(),
+                f32::from(r.x) * scale,
+                f32::from(r.y) * scale,
+                f32::from(r.w) * scale,
+                f32::from(r.h) * scale,
                 Color::new(0.2, 0.5, 1.0, 0.25),
             );
-            draw_rectangle_lines(r.x.into(), r.y.into(), r.w.into(), r.h.into(), 2.0, BLUE);
+            draw_rectangle_lines(
+                f32::from(r.x) * scale,
+                f32::from(r.y) * scale,
+                f32::from(r.w) * scale,
+                f32::from(r.h) * scale,
+                scale,
+                BLUE,
+            );
         }
         let stale = s.last_rx.elapsed().as_secs();
         let down = !matches!(s.link, Link::Up);
@@ -162,9 +199,10 @@ mod tests {
 
     #[test]
     fn font_size_follows_box_height() {
-        assert_eq!(font_size_for(&Rect::new(0, 0, 100, 14)), 16);
-        assert_eq!(font_size_for(&Rect::new(0, 0, 100, 2)), 8);
-        assert_eq!(font_size_for(&Rect::new(0, 0, 100, 40)), 32);
-        assert_eq!(font_size_for(&Rect::new(0, 0, 100, 500)), 96);
+        assert_eq!(font_size_for(&Rect::new(0, 0, 100, 14), true), 16);
+        assert_eq!(font_size_for(&Rect::new(0, 0, 100, 14), false), 9);
+        assert_eq!(font_size_for(&Rect::new(0, 0, 100, 2), true), 8);
+        assert_eq!(font_size_for(&Rect::new(0, 0, 100, 40), true), 32);
+        assert_eq!(font_size_for(&Rect::new(0, 0, 100, 500), true), 96);
     }
 }

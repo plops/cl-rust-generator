@@ -8,7 +8,8 @@ pub const USAGE: &str = "\
 lbw-client — Low-Bandwidth-Remote-Desktop-Client
 
   --connect ADDR    Server (Default 127.0.0.1:7878, typ. Ende von ssh -L)
-  --size N          Fenstergröße = Capture-Größe (Default 640)
+  --size N          Capture-Größe (Default 640; Fenster standardmäßig 2x)
+  --no-zoom         1:1-Fenster statt 2:1-Zoom
   --font PATH       Schrift (Default GNU Unifont aus fonts-unifont)
   --dead-after S    Verbindung neu aufbauen nach S s ohne Daten (Default 90)
   --dump-text       Text-Deltas auf stdout protokollieren
@@ -21,6 +22,7 @@ Tasten: F1 HUD, F2 Text auswählen → Zwischenablage, F3 Zwischenablage tippen.
 pub struct Config {
     pub connect: String,
     pub size: usize,
+    pub zoom: bool,
     pub font: Option<String>,
     pub dead_after: Duration,
     pub dump_text: bool,
@@ -32,6 +34,7 @@ impl Config {
         let mut c = Config {
             connect: format!("127.0.0.1:{DEFAULT_PORT}"),
             size: 640,
+            zoom: true,
             font: None,
             dead_after: Duration::from_secs(90),
             dump_text: false,
@@ -46,6 +49,7 @@ impl Config {
             match a.as_str() {
                 "--connect" => c.connect = it.next().ok_or("--connect: Adresse fehlt")?,
                 "--size" => c.size = num(it.next(), "--size")? as usize,
+                "--no-zoom" => c.zoom = false,
                 "--font" => c.font = it.next(),
                 "--dead-after" => {
                     c.dead_after = Duration::from_secs(num(it.next(), "--dead-after")?)
@@ -61,6 +65,11 @@ impl Config {
         }
         Ok(c)
     }
+
+    #[must_use]
+    pub fn scale(&self) -> usize {
+        if self.zoom { 2 } else { 1 }
+    }
 }
 
 #[cfg(test)]
@@ -71,13 +80,15 @@ mod tests {
     fn parse_defaults_and_flags() {
         let c = Config::parse(Vec::new()).unwrap();
         assert_eq!((c.connect.as_str(), c.size), ("127.0.0.1:7878", 640));
-        let a = "--connect h:1 --size 320 --dump-text -v --dead-after 5";
+        assert_eq!(c.scale(), 2);
+        let a = "--connect h:1 --size 320 --no-zoom --dump-text -v --dead-after 5";
         let c = Config::parse(a.split(' ').map(str::to_owned)).unwrap();
         assert_eq!(
             (c.connect.as_str(), c.size, c.dead_after.as_secs()),
             ("h:1", 320, 5)
         );
         assert!(c.dump_text && c.verbose);
+        assert_eq!(c.scale(), 1);
         assert!(Config::parse(["--size".into(), "1".into()]).is_err());
     }
 }

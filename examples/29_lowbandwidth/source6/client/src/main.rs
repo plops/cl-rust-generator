@@ -12,11 +12,14 @@ fn config() -> Config {
 }
 
 fn window_conf() -> Conf {
-    let c = config();
+    window_conf_for(&config())
+}
+
+fn window_conf_for(c: &Config) -> Conf {
     Conf {
         window_title: "lbw-client".into(),
-        window_width: c.size as i32,
-        window_height: c.size as i32,
+        window_width: (c.size * c.scale()) as i32,
+        window_height: (c.size * c.scale()) as i32,
         window_resizable: false,
         ..Default::default()
     }
@@ -25,4 +28,19 @@ fn window_conf() -> Conf {
 #[macroquad::main(window_conf)]
 async fn main() {
     run(config()).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_dimensions_follow_zoom() {
+        let mut c = Config::parse(Vec::new()).unwrap();
+        let zoomed = window_conf_for(&c);
+        assert_eq!((zoomed.window_width, zoomed.window_height), (1280, 1280));
+        c.zoom = false;
+        let normal = window_conf_for(&c);
+        assert_eq!((normal.window_width, normal.window_height), (640, 640));
+    }
 }
