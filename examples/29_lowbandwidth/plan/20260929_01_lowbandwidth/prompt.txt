@@ -14,7 +14,7 @@ durch eine Verbindung mit geringer Bandbreite (6kB/s) zu
 uebertragen. Der Client soll Eingaben wie Tastatureingaben und
 Mausklicks zum Server weiterleiten.
 
-Der Server soll screenshots abziehen, und nur bei Aenderung Daten
+Der Server soll screenshots aufnehmen, und nur bei Aenderung Daten
 Uebertragen.  Bilddaten und Textdaten sollen durch ein Neuronales Netz
 getrennt werden (weil Text wichtiger ist).
 
@@ -23,12 +23,19 @@ Auf der Client Seite sollen die Bilder und Text ungefaehr wieder so
 zusammengesetzt werden, wie sie im screenshot waren.  Der Text soll
 mit gnu unifont gerendert werden.
 
+Die Verbindung soll robust sein (z.b. wie mosh auch nach 60s ohne
+packet nicht zusammenbrechen) aber auch durch zwei nats
+funktionieren. Ausserdem soll es verschluesselt sein. das muss aber
+nicht im code passieren, es reicht aus wenn die verbindung durch ssh
+tunnel geht.
+
 Die Implementierung kann teilweise von
 /workspace/src/cl-rust-generator/examples/26_onnx/source5/ uebernommen
 werden
 
 Besonders die Client Binary soll moeglichst klein sein, d.h. ich
-moechte moeglichst wenige Rust Dependencies hineinziehen.
+moechte moeglichst wenige Rust Dependencies hineinziehen. Deshalb
+wuerde ich Macroquad favorisieren.
 
 
 For single screenshots over a ~6 kB/s link, AV1 still-picture mode
@@ -38,6 +45,12 @@ with text. xiph/rav1e fully supports this as a Rust-only library: it
 is an AV1 encoder written in Rust, and while it optionally uses NASM
 assembly on x86_64 for speed, that's a build-time feature you can
 disable to get a pure-Rust
+
+Du kannst dir
+/workspace/src/cl-rust-generator/examples/20_webprox_avif anschauen
+(aber ich moechte nicht den browser remote steuern, sondern einfach
+nur bilder ueber x11 capturen)
+
 
 
 ich moechte kleinen/uebersichtlichen und effizienten code und
@@ -76,11 +89,12 @@ anfasst.
 
 
 
-vorgehensweise: nutze tools um konsistenten und aufgeraeumten
-quellcode zu gewaehrleisten (also `cargo fmt` um formatierung zu
-normalisieren, `cargo clippy` um moegliche fehler oder verbesserungen
-zu finden, cargo-edit mit `cargo upgrade` um bei den abhaengigkeiten
-die neueste version zu verwenden, ...)
+vorgehensweise: arbeite mit dem neuesten rust (2024). nutze tools um
+konsistenten und aufgeraeumten quellcode zu gewaehrleisten (also
+`cargo fmt` um formatierung zu normalisieren, `cargo clippy` um
+moegliche fehler oder verbesserungen zu finden, cargo-edit mit `cargo
+upgrade` um bei den abhaengigkeiten die neueste version zu verwenden,
+...)
 
 Schaue dir den Quellcode an und die Architektur dieser Software. Nutze
 deepwiki mcp fuer plops/cl-rust-generator um dokumentation zu bekommen
