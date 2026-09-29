@@ -13,3 +13,4 @@ x11rb = { version = "0.14.0", features = ["xtest"] }
 
 [dev-dependencies]
 lbw-client = { path = "../client" }
+lbw-throttle = { path = "../throttle" }

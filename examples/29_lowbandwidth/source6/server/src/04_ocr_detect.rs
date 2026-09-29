@@ -55,7 +55,7 @@ impl Detector {
     /// Textzeilen-Boxen im Bild (Breite/Höhe Vielfache von 32).
     pub fn detect(&mut self, img: &Rgb) -> Result<Vec<Rect>, String> {
         let (w, h) = (img.w, img.h);
-        if w % 32 != 0 || h % 32 != 0 {
+        if !w.is_multiple_of(32) || !h.is_multiple_of(32) {
             return Err(format!("DBNet braucht Vielfache von 32, nicht {w}x{h}"));
         }
         normalize_imagenet(img, &mut self.input);
