@@ -84,3 +84,16 @@ PoC GPA-GUI-Detector in `examples/26_onnx/source8/` (Plan:
 - `cargo upgrade` (cargo-edit), fmt/clippy/test erneut; Dateigrößen ≤~300.
 - `walkthrough.md` (Deutsch, Mermaid, Struktur 1–4 laut Prompt).
 - Commit: `docs(plan): walkthrough for gui element detection poc`.
+
+## T9 — Live-Modus (Nachtrag)
+
+- Implementierung: `02_capture::grab_region`, `09_window.rs` (X11-Fenster
+  per x11rb, PutImage in Streifen, HUD, Escape/q/WM_DELETE_WINDOW),
+  `10_live.rs` (Ausschnitt = Modell-Input, keine Skalierung),
+  `07_cli.rs` nur noch Parser, Ausführung nach `11_run.rs` (ohne
+  Verhaltensänderung).
+- Host-Tests: Parser `live` (Default-Modell, `--x/--y/--frames`),
+  Fensterposition, BGRX-Swizzle; alle bisherigen Tests grün.
+- Xvfb-Nachweis: `smoke_xvfb.sh` (20 Frames Live), manuell Firefox im
+  Ausschnitt + `xdotool key q` → Exit 0; Region außerhalb → Exit 1.
+- Commit: `feat(source8): live window with detection overlay`.

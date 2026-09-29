@@ -165,8 +165,11 @@ flowchart LR
   L --> S[04_session<br/>EP, Threads, Probe]
   S --> D[05_decode<br/>Boxen + NMS]
   D --> T[06_detector<br/>Pipeline + Timings]
-  T --> CLI[07_cli<br/>grab/detect/bench]
+  T --> CLI[07_cli<br/>Parser]
   T --> B[08_bench<br/>Median/p90]
+  T --> LV[10_live<br/>Schleife]
+  LV --> W[09_window<br/>X11-Fenster]
+  CLI --> R[11_run<br/>Ausführung]
 ```
 
 | Datei | Zeilen | Inhalt |
@@ -177,9 +180,12 @@ flowchart LR
 | `04_session.rs` | 133 | Session, `Device` auto/cpu/cuda, Warmup-Probe, Input-Form aus dem Graphen |
 | `05_decode.rs` | 133 | `[1,4+nc,N]` → Boxen, IoU, klassenweise greedy NMS |
 | `06_detector.rs` | 93 | Letterbox → Inferenz → Decode → Bildkoordinaten, mit Zeitmessung |
-| `07_cli.rs` | 269 | Parser (`std::env`) und Kommandos |
+| `07_cli.rs` | 218 | Parser (`std::env`): Kommandos und Optionen |
 | `08_bench.rs` | 134 | Warmup, Iterationen, Median/p90, TSV-Zeile |
-| `lib.rs` / `main.rs` | 26 / 15 | nur Deklarationen bzw. Verdrahtung |
+| `09_window.rs` | 201 | eigenes X11-Fenster: `PutImage` in Streifen, HUD mit Font `fixed`, Tasten |
+| `10_live.rs` | 100 | Live-Schleife: Grab → Detektion → Boxen → Fenster |
+| `11_run.rs` | 123 | Ausführung der Kommandos, Datei-/Modell-I/O, stdout |
+| `lib.rs` / `main.rs` | 35 / 15 | nur Deklarationen bzw. Verdrahtung |
 
 **Letterboxing** ist das Detail, an dem Parität hängt. Das Netz erwartet ein
 festes Format; ein 1920×1080-Screenshot wird deshalb seitentreu verkleinert
@@ -219,6 +225,41 @@ cargo run --release --features cuda -- bench x11 models/gpa_384x640_fp16.onnx --
 
 Mit Feature `embed` steckt `gpa_384x640_int8.onnx` per `include_bytes!` im
 Binary; das Modell heißt dann einfach `embedded`.
+
+**Live-Modus (Nachtrag).** `gui_detect live [model]` grabbt fortlaufend einen
+festen Bildschirmausschnitt und zeigt ihn mit den Detektionen (Score ≥ 0,25)
+in einem eigenen Fenster; oben läuft eine HUD-Zeile mit FPS, Grab- und
+Inferenzzeit, Boxenzahl und Provider. Default ist `gpa_640_int8.onnx`.
+Damit es einfach bleibt, gibt es **keine Bildskalierung**: Der Ausschnitt
+ist genau so groß wie der Modell-Eingang (640×640 ab `--x/--y`), das
+Letterbox ist dann die Identität (Faktor 1, kein Rand), und die Boxen gelten
+direkt in Fensterpixeln.
+
+```mermaid
+sequenceDiagram
+  participant S as X11 (Root)
+  participant L as 10_live
+  participant D as Detector (int8 640²)
+  participant W as 09_window
+  loop bis q/Esc/Schließen oder --frames
+    L->>S: GetImage 640×640 @ (x,y)
+    L->>D: detect (Letterbox = Identität)
+    D-->>L: Boxen
+    L->>L: Rechtecke einzeichnen
+    L->>W: PutImage in Streifen + HUD-Text
+  end
+```
+
+Das Fenster nutzt nur x11rb, das ohnehin schon Abhängigkeit ist — keine
+GUI-Crate. Zwei Details: Ein 640×640-Frame sind 1,6 MB, mehr als ein
+X11-Request ohne BIG-REQUESTS-Erweiterung transportiert (256 KiB), also geht
+das Bild in Zeilenstreifen passend zu `maximum_request_bytes()` raus. Und
+das Fenster öffnet sich rechts neben dem Ausschnitt (sonst links, sonst bei
+0): Läge es darüber, würde es sich selbst abfilmen (Rückkopplung). Mit
+Window-Manager ist die Position nur ein Hinweis. Gemessen unter Xvfb mit
+Firefox im Ausschnitt: CPU 8 Threads ≈ 78 ms pro Frame (13 fps, davon
+≈ 70 ms Inferenz), CUDA ≈ 22 ms (45 fps). Mit fp16 statt int8 wäre CUDA
+deutlich schneller (siehe 1.8), der Wunsch war aber int8.
 
 ### 1.7 Tests
 
@@ -508,3 +549,5 @@ Export allerdings rund 1 GB Download.
 | `0fe3323` docs(plan) | dieser Walkthrough |
 | `c991861` docs(plan) | plan_effort.md (Credit-Verbrauch) |
 | `fd59d01` feat(source8) | Browser-Kalibrierung, getrenntes Testset |
+| `f6bd6ad` docs(plan) | Commit-Hash im Walkthrough nachgetragen |
+| (folgt) feat(source8) | Live-Modus mit eigenem Fenster |

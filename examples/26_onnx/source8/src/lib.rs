@@ -24,3 +24,12 @@ pub mod cli;
 
 #[path = "08_bench.rs"]
 pub mod bench;
+
+#[path = "09_window.rs"]
+pub mod window;
+
+#[path = "10_live.rs"]
+pub mod live;
+
+#[path = "11_run.rs"]
+pub mod run;

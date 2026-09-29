@@ -12,6 +12,8 @@ use std::time::Instant;
 pub const CONF: f32 = 0.05;
 pub const IOU: f32 = 0.7;
 pub const MAX_DET: usize = 300;
+/// Anzeigeschwelle für eingezeichnete Boxen (annotiertes PPM, Live-Fenster).
+pub const SHOW: f32 = 0.25;
 
 /// Laufzeiten einer Detektion in Millisekunden.
 #[derive(Clone, Copy, Debug, Default)]

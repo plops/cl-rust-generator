@@ -17,6 +17,11 @@ cargo run --release -- bench models/example_input.ppm models/*.onnx --device cpu
 cargo run --release --features cuda -- bench x11 models/gpa_384x640_fp16.onnx --device cuda
 ./scripts/bench.sh 30
 
+# Live-Fenster: 640x640-Ausschnitt ab (x,y) ohne Skalierung, Boxen überlagert,
+# q/Esc oder Fenster schließen = Ende (Fenster öffnet rechts neben dem Ausschnitt)
+cargo run --release -- live --threads 8                      # models/gpa_640_int8.onnx
+cargo run --release -- live --x 200 --y 100 --frames 100     # anderer Ausschnitt, 100 Frames
+
 # Tests
 cargo test                         # Unit + CLI-Smoke (ohne Modelle)
 cargo test --release -- --ignored  # Parität zu Ultralytics (braucht models/)

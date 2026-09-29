@@ -1,7 +1,8 @@
 #!/bin/bash
 # smoke_xvfb.sh — End-to-end-Nachweis unter Xvfb: echte X11-Fenster
 # (xcalc, xterm, xclock) → `gui_detect detect <model> x11` → Boxen > 0,
-# annotiertes PPM, Exit-Code 0. Danach kurzer X11-End-to-end-Bench.
+# annotiertes PPM, Exit-Code 0. Danach kurzer X11-End-to-end-Bench und
+# 20 Frames Live-Modus (eigenes Fenster).
 #
 # Aufruf (aus source8/):  ./scripts/smoke_xvfb.sh [MODEL] [OUT-DIR]
 set -euo pipefail
@@ -27,4 +28,8 @@ n=$(awk '$5 >= 0.25' "$OUT/boxes.tsv" | wc -l)
 echo "boxen (score >= 0.25): $n"
 test "$n" -gt 0
 "$BIN" bench x11 "$MODEL" --device cpu --iters 10 --warmup 2
+
+# Live-Modus: 640×640-Ausschnitt ohne Skalierung, Fenster daneben, 20 Frames.
+"$BIN" live models/gpa_640_int8.onnx --device cpu --frames 20 | tee "$OUT/live.txt"
+grep -q "frames=20" "$OUT/live.txt"
 echo "ok: $OUT/annotated.ppm"

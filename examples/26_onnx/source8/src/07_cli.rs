@@ -1,12 +1,7 @@
-//! `07_cli` — Argument-Parsing (std::env) und Ausführung der Kommandos.
+//! `07_cli` — Argument-Parsing (std::env): Kommandos und Optionen.
+//! Ausführung liegt in `11_run`.
 
-use crate::bench;
-use crate::capture::Screen;
-use crate::detector::Detector;
-use crate::image::Rgb;
-use crate::session::{Device, Model};
-use std::fs::File;
-use std::io::{BufReader, BufWriter, Write};
+use crate::session::Device;
 
 pub const USAGE: &str = "\
 gui_detect grab <out.ppm>
@@ -16,7 +11,13 @@ gui_detect detect <model.onnx|embedded> <in.ppm|x11> [--out annotiert.ppm]
     Boxen als TSV (x1 y1 x2 y2 score) auf stdout, Zeiten auf stderr
 gui_detect bench <in.ppm|x11> <model.onnx>... [--device ..] [--threads N]
     [--iters 30] [--warmup 5]
-    Median-Zeiten pro Stufe als TSV (bei x11 inkl. Grab pro Iteration)";
+    Median-Zeiten pro Stufe als TSV (bei x11 inkl. Grab pro Iteration)
+gui_detect live [model.onnx] [--x 0] [--y 0] [--frames 0] [--device ..] [--threads N]
+    Ausschnitt in Modellgröße (Default models/gpa_640_int8.onnx → 640x640)
+    fortlaufend grabben, detektieren, im eigenen Fenster zeigen; q/Esc = Ende";
+
+/// Default-Modell des Live-Modus (640×640 → Ausschnitt ohne Skalierung).
+pub const LIVE_MODEL: &str = "models/gpa_640_int8.onnx";
 
 /// Optionen, die mehrere Kommandos teilen.
 #[derive(Debug, PartialEq)]
@@ -28,6 +29,10 @@ pub struct Opts {
     pub iters: usize,
     pub warmup: usize,
     pub out: Option<String>,
+    /// Live: Ausschnitt-Ursprung und Frame-Limit (0 = endlos).
+    pub x: usize,
+    pub y: usize,
+    pub frames: usize,
 }
 
 impl Default for Opts {
@@ -40,6 +45,9 @@ impl Default for Opts {
             iters: 30,
             warmup: 5,
             out: None,
+            x: 0,
+            y: 0,
+            frames: 0,
         }
     }
 }
@@ -58,6 +66,10 @@ pub enum Command {
     Bench {
         input: String,
         models: Vec<String>,
+        opts: Opts,
+    },
+    Live {
+        model: String,
         opts: Opts,
     },
 }
@@ -85,6 +97,9 @@ fn split(args: &[String]) -> Result<(Vec<String>, Opts), String> {
             "iters" => o.iters = (num(v)? as usize).max(1),
             "warmup" => o.warmup = num(v)? as usize,
             "out" => o.out = Some(v.clone()),
+            "x" => o.x = num(v)? as usize,
+            "y" => o.y = num(v)? as usize,
+            "frames" => o.frames = num(v)? as usize,
             _ => return Err(format!("unbekannte Option --{key}\n{USAGE}")),
         }
     }
@@ -106,103 +121,16 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             models: models.iter().map(|m| (*m).to_string()).collect(),
             opts,
         }),
+        ["live"] => Ok(Command::Live {
+            model: LIVE_MODEL.into(),
+            opts,
+        }),
+        ["live", model] => Ok(Command::Live {
+            model: model.into(),
+            opts,
+        }),
         _ => Err(USAGE.into()),
     }
-}
-
-/// Modell-Bytes: Datei oder (Feature `embed`) eingebettetes INT8-Modell.
-fn model_bytes(path: &str) -> Result<Vec<u8>, String> {
-    #[cfg(feature = "embed")]
-    if path == "embedded" {
-        return Ok(include_bytes!("../models/gpa_384x640_int8.onnx").to_vec());
-    }
-    std::fs::read(path).map_err(|e| format!("{path}: {e}"))
-}
-
-/// Bildquelle: PPM-Datei oder `x11` (liefert zusätzlich den Screen).
-fn load_input(input: &str) -> Result<(Rgb, Option<Screen>), String> {
-    if input == "x11" {
-        let s = Screen::open()?;
-        return Ok((s.grab()?, Some(s)));
-    }
-    let f = File::open(input).map_err(|e| format!("{input}: {e}"))?;
-    Ok((
-        Rgb::read_ppm(BufReader::new(f)).map_err(|e| format!("{input}: {e}"))?,
-        None,
-    ))
-}
-
-fn save(img: &Rgb, out: &str) -> Result<(), String> {
-    let f = File::create(out).map_err(|e| format!("{out}: {e}"))?;
-    img.write_ppm(BufWriter::new(f))
-        .map_err(|e| format!("{out}: {e}"))
-}
-
-/// Eine Zeile nach stdout. Anders als `println!` wird ein geschlossener
-/// Pipe (`| head`) zum Fehler statt zur Panik (panic=abort → Exit 134).
-fn emit(line: &str) -> Result<(), String> {
-    writeln!(std::io::stdout(), "{line}").map_err(|e| format!("stdout: {e}"))
-}
-
-/// Führt ein Kommando aus.
-pub fn run(cmd: Command) -> Result<(), String> {
-    match cmd {
-        Command::Grab { out } => {
-            let img = Screen::open()?.grab()?;
-            save(&img, &out)?;
-            emit(&format!("grab {}x{} -> {out}", img.w, img.h))?;
-        }
-        Command::Detect { model, input, opts } => {
-            let (mut img, _) = load_input(&input)?;
-            let m = Model::load(&model_bytes(&model)?, opts.device, opts.threads)?;
-            let mut det = Detector::new(m);
-            (det.conf, det.iou) = (opts.conf, opts.iou);
-            let (dets, t) = det.detect(&img)?;
-            for d in &dets {
-                emit(&format!(
-                    "{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.3}",
-                    d.b[0], d.b[1], d.b[2], d.b[3], d.score
-                ))?;
-            }
-            eprintln!(
-                "{} boxen, provider {}, pre {:.1} ms, infer {:.1} ms, post {:.1} ms",
-                dets.len(),
-                det.model.provider,
-                t.pre,
-                t.infer,
-                t.post
-            );
-            if let Some(out) = opts.out {
-                for d in dets.iter().filter(|d| d.score >= 0.25) {
-                    img.draw_rect(d.b[0], d.b[1], d.b[2], d.b[3], 2, [255, 0, 255]);
-                }
-                save(&img, &out)?;
-            }
-        }
-        Command::Bench {
-            input,
-            models,
-            opts,
-        } => {
-            let (img, screen) = load_input(&input)?;
-            emit(bench::HEADER)?;
-            for path in models {
-                let bytes = model_bytes(&path)?;
-                let mut det = Detector::new(Model::load(&bytes, opts.device, opts.threads)?);
-                let mut row = bench::run(&mut det, &img, screen.as_ref(), opts.warmup, opts.iters)?;
-                row.name = path
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(&path)
-                    .trim_end_matches(".onnx")
-                    .into();
-                row.threads = opts.threads;
-                row.mbytes = bytes.len() as f64 / 1e6;
-                emit(&row.tsv())?;
-            }
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -257,6 +185,27 @@ mod tests {
             panic!()
         };
         assert_eq!((models.len(), opts.threads), (2, 8));
+    }
+
+    #[test]
+    fn parse_live_defaults_and_roi() {
+        let Command::Live { model, opts } = parse(&s(&["live"])).unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            (model.as_str(), opts.x, opts.y, opts.frames),
+            (LIVE_MODEL, 0, 0, 0)
+        );
+        let Command::Live { model, opts } = parse(&s(&[
+            "live", "m.onnx", "--x", "100", "--y", "50", "--frames", "3",
+        ]))
+        .unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            (model.as_str(), opts.x, opts.y, opts.frames),
+            ("m.onnx", 100, 50, 3)
+        );
     }
 
     #[test]
