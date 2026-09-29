@@ -47,8 +47,8 @@ flowchart LR
     GUI[06 GPA-GUI-Detector] --> LAY
     LAY --> TD[10 text_diff] --> Q
     LAY --> DR[08 dirty rects] --> ENC[09 rav1e still] --> Q
-    Q[11 scheduler: Text vor Bild, Token-Bucket, Ack-Fenster] --> NET[13 session TCP]
-    NET --> INP[12 xtest input]
+    Q[12 scheduler: Text vor Bild, Token-Bucket, Ack-Fenster] --> NET[14 session TCP]
+    NET --> INP[13 xtest input]
   end
   NET <== ssh -L / -R ==> CN
   subgraph C[lbw-client]
@@ -180,11 +180,11 @@ source6/
   common/src/  01_types.rs 02_codec.rs 03_frame.rs 04_keys.rs 05_yuv.rs 06_rate.rs lib.rs
   server/src/  01_config.rs 02_capture.rs 03_image.rs 04_ocr_detect.rs 05_ocr_recognize.rs
                06_gui_detect.rs 07_layout.rs 08_dirty.rs 09_av1.rs 10_text_diff.rs
-               11_scheduler.rs 12_input.rs 13_session.rs 14_pipeline.rs lib.rs main.rs
-  server/tests/ av1_roundtrip.rs loopback.rs
+               11_analyze.rs 12_scheduler.rs 13_input.rs 14_session.rs 15_pipeline.rs lib.rs main.rs
+  server/tests/ av1_roundtrip.rs loopback.rs models.rs
   client/src/  01_config.rs 02_av1.rs 03_net.rs 04_scene.rs 05_input.rs 06_select.rs
                07_render.rs 08_app.rs lib.rs main.rs
-  throttle/src/ 01_config.rs 02_pipe.rs main.rs
+  throttle/src/ 01_config.rs 02_pipe.rs lib.rs main.rs
   scripts/     fetch_models.sh smoke_xvfb.sh ssh_tunnel.sh
 ```
 
