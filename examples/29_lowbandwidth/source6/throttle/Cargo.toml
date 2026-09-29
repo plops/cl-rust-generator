@@ -6,3 +6,4 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+lbw-common = { version = "0.1.0", path = "../common" }
