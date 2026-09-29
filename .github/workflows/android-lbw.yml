@@ -1,0 +1,109 @@
+name: Android 29_lowbandwidth client
+
+# Builds liblbw_core.so (Rust, cargo-ndk) + the Kotlin app and uploads the
+# debug APK. Same steps as examples/29_lowbandwidth/source6/android_client/
+# scripts/ci_local.sh.
+
+on:
+  push:
+    paths:
+      - 'examples/29_lowbandwidth/source6/**'
+      - '.github/workflows/android-lbw.yml'
+  pull_request:
+    paths:
+      - 'examples/29_lowbandwidth/source6/**'
+      - '.github/workflows/android-lbw.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: android-lbw-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NDK_VERSION: 30.0.16248370
+  CARGO_NDK_VERSION: 4.1.2
+  SRC: examples/29_lowbandwidth/source6
+  CARGO_TERM_COLOR: always
+
+jobs:
+  apk:
+    name: Rust core + APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: examples/29_lowbandwidth/source6
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: System packages (nasm for rav1e tests, Unifont, sshd for tunnel tests)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends nasm fonts-unifont openssh-server
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            examples/29_lowbandwidth/source6/android_client/android-app/**/*.gradle.kts
+            examples/29_lowbandwidth/source6/android_client/android-app/gradle/libs.versions.toml
+            examples/29_lowbandwidth/source6/android_client/android-app/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Rust toolchain with Android targets
+        run: |
+          rustup toolchain install stable --profile minimal -c rustfmt,clippy
+          rustup default stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: examples/29_lowbandwidth/source6
+
+      - name: cargo-ndk
+        run: cargo ndk --version 2>/dev/null | grep -q "$CARGO_NDK_VERSION" || cargo install cargo-ndk --version "$CARGO_NDK_VERSION" --locked
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Pinned NDK and platform
+        run: sdkmanager --install "ndk;${NDK_VERSION}" "platforms;android-36" "build-tools;37.0.0" > /dev/null
+
+      - name: Rust fmt + clippy (client without desktop, core)
+        run: |
+          cargo fmt --all --check
+          cargo clippy -p lbw-common -p lbw-core --all-targets -- -D warnings
+          cargo clippy -p lbw-client --no-default-features --all-targets -- -D warnings
+
+      - name: Rust host tests
+        run: |
+          cargo test -p lbw-common -p lbw-core
+          cargo test -p lbw-client --no-default-features
+
+      - name: Throwaway sshd for tunnel tests
+        run: |
+          pw="ci-$RANDOM-$RANDOM"
+          sudo LBW_SSHD_PASSWORD="$pw" android_client/scripts/test_sshd.sh start | sed 's/^export //' | tr ' ' '\n' >> "$GITHUB_ENV"
+          echo "LBW_SSHD_PASSWORD=$pw" >> "$GITHUB_ENV"
+
+      - name: Build .so, JVM tests, APK
+        run: android_client/scripts/build_android.sh
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: lbw-client-debug-apk
+          path: ${{ env.SRC }}/android_client/android-app/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lbw-android-test-reports
+          path: ${{ env.SRC }}/android_client/android-app/app/build/reports/tests/
+          if-no-files-found: ignore

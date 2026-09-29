@@ -8,13 +8,15 @@
 #   5. APK check: both .so and the font are packaged
 #
 # Call (from anywhere): android_client/scripts/build_android.sh
-# Env: ANDROID_HOME (default /opt/android-sdk), ANDROID_NDK_HOME,
+# Env: ANDROID_HOME (default /opt/android-sdk), LBW_NDK_HOME (default: pinned NDK),
 #      ABIS="arm64-v8a x86_64", PROFILE=release|dev, GRADLE_TASKS.
 set -eu
 cd "$(dirname "$0")/.."
 export ANDROID_HOME="${ANDROID_HOME:-/opt/android-sdk}"
 NDK_VERSION=30.0.16248370
-export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/$NDK_VERSION}"
+# Pinned NDK; runners export ANDROID_NDK_HOME for their own default NDK.
+export ANDROID_NDK_HOME="${LBW_NDK_HOME:-$ANDROID_HOME/ndk/$NDK_VERSION}"
+[ -d "$ANDROID_NDK_HOME" ] || { echo "NDK $NDK_VERSION fehlt: sdkmanager \"ndk;$NDK_VERSION\"" >&2; exit 1; }
 ABIS="${ABIS:-arm64-v8a x86_64}"
 PROFILE="${PROFILE:-release}"
 GRADLE_TASKS="${GRADLE_TASKS:-testDebugUnitTest assembleDebug}"

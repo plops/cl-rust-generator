@@ -44,7 +44,7 @@ UI, Tunnel), *Host-Tests* = `cargo test` / JVM-Unit-Tests,
 - [x] A5.3 (ergänzt) Host-Key-Pinning „Trust on first use“: SHA256-Fingerprint wird im KEX geprüft, vor der Authentisierung.
 
 ## A6 CI
-- [ ] A6.1 `.github/workflows/android-lbw.yml` (Pfadfilter, feste NDK-Version, Rust-Host-Tests, cargo-ndk, Gradle-Tests, APK-Artefakt).
+- [x] A6.1 `.github/workflows/android-lbw.yml` (Pfadfilter, feste NDK-Version, Rust-Host-Tests, cargo-ndk, Gradle-Tests, APK-Artefakt).
   Validierung: YAML parsen; alle Schritte lokal mit denselben Befehlen (`scripts/ci_local.sh`).
 
 ## A7 TUI (Touch-Oberfläche)

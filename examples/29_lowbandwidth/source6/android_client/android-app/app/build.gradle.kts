@@ -54,6 +54,11 @@ val hostLibDir = rootProject.file("../../target/debug").absolutePath
 tasks.withType<Test>().configureEach {
     systemProperty("java.library.path", hostLibDir)
     systemProperty("lbw.hostLib", hostLibDir)
+    inputs.dir(hostLibDir).optional().withPropertyName("hostLib")
+    // SshTunnelTest runs only with a test sshd; re-run when that changes
+    for (v in listOf("LBW_SSHD_PORT", "LBW_SSHD_USER", "LBW_SSHD_KEY", "LBW_SSHD_PWUSER", "LBW_SSHD_PASSWORD")) {
+        inputs.property(v, providers.environmentVariable(v).orElse(""))
+    }
     testLogging {
         events("passed", "skipped", "failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL

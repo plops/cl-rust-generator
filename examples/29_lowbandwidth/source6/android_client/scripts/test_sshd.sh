@@ -22,12 +22,14 @@ esac
 SSHD=$(command -v sshd || echo /usr/sbin/sshd)
 [ -x "$SSHD" ] || { echo "sshd fehlt (apt install openssh-server)" >&2; exit 1; }
 mkdir -p "$DIR" /run/sshd
-chmod 700 "$DIR"
 for t in ed25519 ecdsa; do
     [ -f "$DIR/host_$t" ] || ssh-keygen -q -t "$t" -N '' -f "$DIR/host_$t"
 done
 [ -f "$DIR/id_ecdsa" ] || ssh-keygen -q -t ecdsa -b 256 -m PEM -N '' -f "$DIR/id_ecdsa"
 cp "$DIR/id_ecdsa.pub" "$DIR/authorized_keys"
+# Throwaway test key: readable for a non-root test runner (CI uses sudo here)
+chmod 755 "$DIR"
+chmod 644 "$DIR/id_ecdsa"
 chmod 644 "$DIR/authorized_keys"
 if [ -n "${LBW_SSHD_PASSWORD:-}" ]; then
     id lbwtest >/dev/null 2>&1 || useradd -M -s /bin/sh lbwtest
