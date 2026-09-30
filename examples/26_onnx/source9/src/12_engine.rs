@@ -50,6 +50,10 @@ impl Default for Settings {
 pub struct Sample {
     /// Sprachcode.
     pub lang: String,
+    /// Generator.
+    pub mode: GenMode,
+    /// Schriftgröße.
+    pub px: u32,
     /// Erkennungsmodell (Ordnername).
     pub model: String,
     /// Ground-Truth-Zeilen (visuelle Reihenfolge).
@@ -152,6 +156,8 @@ impl Engine {
         let eval = evaluate(&canvas.lines, &boxes, &confs);
         Ok(Sample {
             lang: lang.code.to_string(),
+            mode: settings.mode,
+            px: settings.px,
             model,
             gt: canvas.lines.iter().map(|l| l.text.clone()).collect(),
             boxes,

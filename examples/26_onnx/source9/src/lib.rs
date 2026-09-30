@@ -38,3 +38,9 @@ pub mod stats;
 
 #[path = "12_engine.rs"]
 pub mod engine;
+
+#[path = "13_cli.rs"]
+pub mod cli;
+
+#[path = "14_bench.rs"]
+pub mod bench;

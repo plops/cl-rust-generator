@@ -217,7 +217,7 @@ impl Stats {
             } else {
                 s.push_str("schlechteste Zeichen (Zeichen, gesehen, Fehlerrate):\n");
                 for (ch, seen, rate) in worst {
-                    s.push_str(&format!("- `{ch}`: {seen}×, {rate:.0}%\n"));
+                    s.push_str(&format!("- `{ch}`: {seen}×, {:.0}%\n", rate * 100.0));
                 }
             }
             let conf = self.top_confusions(lang, 8);
@@ -314,5 +314,6 @@ mod tests {
         assert!(md.contains("| de | m | 1 | 1 | 0.200 |"), "{md}");
         assert!(md.contains("## Zeichen (de)"), "{md}");
         assert!(md.contains("`ß`→`B`: 1×"), "{md}");
+        assert!(md.contains("- `ß`: 1×, 100%"), "{md}");
     }
 }
