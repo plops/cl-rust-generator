@@ -1,12 +1,19 @@
-//! `03_corpus` — Zeichensatz-Schnitt und (T6) Korpus-Laden.
+//! `03_corpus` — Zeichensatz-Schnitt und Korpus-Laden.
 //!
 //! Der `Charset` schneidet Schrift der Sprache ∩ Wörterbuch des Modells ∩
 //! Unifont: Generatoren erzeugen nur darstellbare Zeichen, die das Modell
 //! kennen kann. Fehler messen dann das *Modell*, nicht Wörterbuchlücken
 //! (z. B. `ẞ` fehlt im Universal-Wörterbuch und würde sonst immer
 //! falsch gezählt). Leerzeichen ist implizit erlaubt (`use_space_char`).
+//!
+//! Der `Corpus` lädt `corpus/<lang>.txt` (Wikipedia-Extrakte) und filtert
+//! Tokens: nur Tokens aus Charset-Zeichen überleben (Häufigkeit bleibt
+//! erhalten → gleichverteiltes Ziehen ist häufigkeitsgewichtet). Fehlt
+//! die Datei, ist der Korpus leer und die Generatoren fallen auf
+//! Pangramme zurück.
 
 use std::collections::HashSet;
+use std::path::Path;
 
 use crate::lang::{COMMON, Lang};
 use crate::render::Raster;
@@ -72,6 +79,57 @@ impl Charset {
     }
 }
 
+/// Gefilterte Korpus-Tokens einer Sprache.
+#[derive(Clone, Debug, Default)]
+pub struct Corpus {
+    tokens: Vec<String>,
+}
+
+impl Corpus {
+    /// Lädt `<dir>/<lang>.txt`; fehlt Datei/Verzeichnis → leerer Korpus.
+    ///
+    /// Dekodiert verlustbehaftet (`from_utf8_lossy`): die Wikipedia-
+    /// Extrakte können abgeschnittene UTF-8-Sequenzen enthalten.
+    #[must_use]
+    pub fn load(dir: Option<&Path>, lang: &Lang, charset: &Charset) -> Self {
+        let text = dir
+            .map(|d| d.join(format!("{}.txt", lang.code)))
+            .and_then(|p| std::fs::read(&p).ok())
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .unwrap_or_default();
+        Self::parse(&text, charset)
+    }
+
+    /// Leerer Korpus (kein Verzeichnis konfiguriert).
+    #[must_use]
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Filtert Tokens aus Rohtext (reine Funktion, testbar ohne Datei).
+    #[must_use]
+    pub fn parse(text: &str, charset: &Charset) -> Self {
+        let tokens = text
+            .split_whitespace()
+            .filter(|t| !t.is_empty() && t.chars().all(|c| charset.contains(c)))
+            .map(str::to_string)
+            .collect();
+        Self { tokens }
+    }
+
+    /// Gefilterte Tokens (mit Duplikaten = Häufigkeitsgewichtung).
+    #[must_use]
+    pub fn tokens(&self) -> &[String] {
+        &self.tokens
+    }
+
+    /// Keine Tokens (→ Generatoren fallen auf Pangramme zurück).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.tokens.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,5 +156,44 @@ mod tests {
         assert!(!cs.contains('ẞ')); // nicht im Wörterbuch
         assert!(!cs.contains('ж')); // nicht in der Schrift
         assert_eq!(cs.filter("ß ẞ"), "ß ");
+    }
+
+    #[test]
+    fn parse_keeps_only_allowed_tokens() {
+        let cs = Charset::from_chars("abc. ".chars());
+        let c = Corpus::parse("abc ab.c a!c  d", &cs);
+        assert_eq!(c.tokens(), &["abc".to_string(), "ab.c".to_string()]);
+        assert!(!c.is_empty());
+        assert!(Corpus::parse("", &cs).is_empty());
+    }
+
+    #[test]
+    fn missing_dir_gives_empty_corpus() {
+        let de = &LANGS[by_code("de").unwrap()];
+        let cs = Charset::from_chars("abc ".chars());
+        assert!(Corpus::load(None, de, &cs).is_empty());
+        assert!(Corpus::load(Some(Path::new("/nonexistent-corpus-xyz")), de, &cs).is_empty());
+        assert!(Corpus::empty().is_empty());
+    }
+
+    #[test]
+    fn real_german_corpus_loads_thousands_of_tokens() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("corpus");
+        if !dir.join("de.txt").exists() {
+            println!("SKIP: corpus missing (uv run scripts/fetch_corpus.py)");
+            return;
+        }
+        let font = Raster::load(None).expect("GNU Unifont required");
+        let de = &LANGS[by_code("de").unwrap()];
+        // Durchlässiger Charset: alles aus Schrift + Font.
+        let dict: Vec<String> = ('\u{20}'..='\u{33FF}').map(|c| c.to_string()).collect();
+        let cs = Charset::build(de, &dict, &font);
+        let c = Corpus::load(Some(&dir), de, &cs);
+        assert!(c.tokens().len() > 5000, "tokens: {}", c.tokens().len());
+        assert!(
+            c.tokens()
+                .iter()
+                .all(|t| t.chars().all(|ch| cs.contains(ch)))
+        );
     }
 }

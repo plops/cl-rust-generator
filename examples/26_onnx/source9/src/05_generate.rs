@@ -4,7 +4,7 @@
 //! `fits`-Callback, das die echte Unifont-Breite misst). `Pangram` ist
 //! implementiert; `Words`/`Markov`/`Chars` fallen bis T6–T8 darauf zurück.
 
-use crate::corpus::Charset;
+use crate::corpus::{Charset, Corpus};
 use crate::lang::Lang;
 use crate::rng::Rng;
 
@@ -53,19 +53,21 @@ pub const MIN_LINE_CHARS: usize = 2;
 /// Erzeugt bis zu `n` Zeilen (ggf. weniger, nie leer bei `n > 0`).
 ///
 /// Nur Zeichen aus `charset` (Schrift ∩ Wörterbuch ∩ Font) überleben;
-/// Zeilen unter `MIN_LINE_CHARS` werden übersprungen.
+/// Zeilen unter `MIN_LINE_CHARS` werden übersprungen. Leerer Korpus →
+/// Pangramm-Fallback. `Markov`/`Chars` folgen in T7/T8.
 pub fn generate(
     mode: GenMode,
     lang: &Lang,
     rng: &mut Rng,
     n: usize,
     charset: &Charset,
+    corpus: &Corpus,
     fits: &mut impl FnMut(&str) -> bool,
 ) -> Vec<String> {
     match mode {
-        GenMode::Pangram | GenMode::Words | GenMode::Markov | GenMode::Chars => {
-            generate_pangram(lang, rng, n, charset, fits)
-        }
+        GenMode::Pangram => generate_pangram(lang, rng, n, charset, fits),
+        GenMode::Words => generate_words(lang, rng, n, charset, corpus, fits),
+        GenMode::Markov | GenMode::Chars => generate_pangram(lang, rng, n, charset, fits),
     }
 }
 
@@ -81,17 +83,55 @@ fn generate_pangram(
     while out.len() < n && guard < n * 16 + 16 {
         guard += 1;
         let p = rng.pick(lang.pangrams);
-        for line in wrap(p, fits) {
-            let kept = charset.filter(&line);
-            if kept.chars().filter(|c| !c.is_whitespace()).count() >= MIN_LINE_CHARS {
-                out.push(kept);
-                if out.len() >= n {
-                    break;
-                }
+        push_lines(&mut out, p, n, charset, fits);
+    }
+    out
+}
+
+fn generate_words(
+    lang: &Lang,
+    rng: &mut Rng,
+    n: usize,
+    charset: &Charset,
+    corpus: &Corpus,
+    fits: &mut impl FnMut(&str) -> bool,
+) -> Vec<String> {
+    if corpus.is_empty() {
+        return generate_pangram(lang, rng, n, charset, fits);
+    }
+    let mut out = Vec::new();
+    let mut guard = 0;
+    while out.len() < n && guard < n * 4 + 4 {
+        guard += 1;
+        let text: Vec<&str> = (0..12)
+            .map(|_| rng.pick(corpus.tokens()).as_str())
+            .collect();
+        push_lines(&mut out, &text.join(" "), n, charset, fits);
+    }
+    if out.is_empty() {
+        generate_pangram(lang, rng, n, charset, fits)
+    } else {
+        out
+    }
+}
+
+/// Bricht `text` um, filtert und hängt gültige Zeilen an (bis `n`).
+fn push_lines(
+    out: &mut Vec<String>,
+    text: &str,
+    n: usize,
+    charset: &Charset,
+    fits: &mut impl FnMut(&str) -> bool,
+) {
+    for line in wrap(text, fits) {
+        let kept = charset.filter(&line);
+        if kept.chars().filter(|c| !c.is_whitespace()).count() >= MIN_LINE_CHARS {
+            out.push(kept);
+            if out.len() >= n {
+                break;
             }
         }
     }
-    out
 }
 
 /// Bricht `text` so um, dass jede Zeile `fits` erfüllt.
@@ -193,7 +233,15 @@ mod tests {
         let cs = Charset::from_chars(all.chars());
         for l in LANGS {
             let mut rng = Rng::new(7);
-            let lines = generate(GenMode::Pangram, l, &mut rng, 6, &cs, &mut max10);
+            let lines = generate(
+                GenMode::Pangram,
+                l,
+                &mut rng,
+                6,
+                &cs,
+                &Corpus::empty(),
+                &mut max10,
+            );
             assert!(!lines.is_empty(), "{}", l.code);
             for line in &lines {
                 assert!(max10(line), "{}: {line}", l.code);
@@ -205,8 +253,24 @@ mod tests {
         }
         // Deterministisch.
         let de = &LANGS[by_code("de").unwrap()];
-        let a = generate(GenMode::Pangram, de, &mut Rng::new(3), 4, &cs, &mut max10);
-        let b = generate(GenMode::Pangram, de, &mut Rng::new(3), 4, &cs, &mut max10);
+        let a = generate(
+            GenMode::Pangram,
+            de,
+            &mut Rng::new(3),
+            4,
+            &cs,
+            &Corpus::empty(),
+            &mut max10,
+        );
+        let b = generate(
+            GenMode::Pangram,
+            de,
+            &mut Rng::new(3),
+            4,
+            &cs,
+            &Corpus::empty(),
+            &mut max10,
+        );
         assert_eq!(a, b);
     }
 
@@ -214,7 +278,15 @@ mod tests {
     fn pangram_filtering_drops_disallowed_chars() {
         let de = &LANGS[by_code("de").unwrap()];
         let cs = Charset::from_chars("abc ".chars());
-        let lines = generate(GenMode::Pangram, de, &mut Rng::new(1), 4, &cs, &mut max10);
+        let lines = generate(
+            GenMode::Pangram,
+            de,
+            &mut Rng::new(1),
+            4,
+            &cs,
+            &Corpus::empty(),
+            &mut max10,
+        );
         assert!(!lines.is_empty());
         for line in &lines {
             let n = line.chars().filter(|c| !c.is_whitespace()).count();
@@ -223,5 +295,55 @@ mod tests {
                 assert!(cs.contains(c), "{c:?} in {line}");
             }
         }
+    }
+
+    #[test]
+    fn words_uses_only_corpus_tokens() {
+        let de = &LANGS[by_code("de").unwrap()];
+        let cs = Charset::from_chars("abc ".chars());
+        let corpus = Corpus::parse("ab bc ab", &cs);
+        let lines = generate(
+            GenMode::Words,
+            de,
+            &mut Rng::new(5),
+            4,
+            &cs,
+            &corpus,
+            &mut max10,
+        );
+        assert_eq!(lines.len(), 4);
+        for line in &lines {
+            assert!(max10(line), "{line}");
+            for word in line.split_whitespace() {
+                assert!(["ab", "bc"].contains(&word), "{word} in {line}");
+            }
+        }
+    }
+
+    #[test]
+    fn words_with_empty_corpus_falls_back_to_pangram() {
+        let de = &LANGS[by_code("de").unwrap()];
+        let all: String = de.pangrams.iter().copied().collect();
+        let cs = Charset::from_chars(all.chars());
+        let words = generate(
+            GenMode::Words,
+            de,
+            &mut Rng::new(9),
+            4,
+            &cs,
+            &Corpus::empty(),
+            &mut max10,
+        );
+        let pang = generate(
+            GenMode::Pangram,
+            de,
+            &mut Rng::new(9),
+            4,
+            &cs,
+            &Corpus::empty(),
+            &mut max10,
+        );
+        assert_eq!(words, pang);
+        assert!(!words.is_empty());
     }
 }

@@ -4,10 +4,10 @@
 //! bedient es per Tasten. Zeiten werden je Stufe mit `Instant` gemessen.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use crate::corpus::Charset;
+use crate::corpus::{Charset, Corpus};
 use crate::detect::TextBox;
 use crate::generate::GenMode;
 use crate::lang::LANGS;
@@ -66,15 +66,24 @@ pub struct Engine {
     raster: Raster,
     models: Models,
     charsets: HashMap<(usize, String), Charset>,
+    corpus_dir: Option<PathBuf>,
+    corpora: HashMap<usize, Corpus>,
 }
 
 impl Engine {
-    /// Öffnet Schrift (`None` = Suchliste) und Modellverzeichnis.
-    pub fn open(models_dir: &Path, font: Option<&Path>) -> Result<Self, String> {
+    /// Öffnet Schrift (`None` = Suchliste), Modelle und Korpus (`None` =
+    /// kein Korpus; `Words`/`Markov` fallen auf Pangramme zurück).
+    pub fn open(
+        models_dir: &Path,
+        font: Option<&Path>,
+        corpus_dir: Option<&Path>,
+    ) -> Result<Self, String> {
         Ok(Self {
             raster: Raster::load(font)?,
             models: Models::open(models_dir),
             charsets: HashMap::new(),
+            corpus_dir: corpus_dir.map(Path::to_path_buf),
+            corpora: HashMap::new(),
         })
     }
 
@@ -87,6 +96,15 @@ impl Engine {
             .charsets
             .entry((settings.lang, model.clone()))
             .or_insert_with(|| Charset::build(lang, &dict, &self.raster));
+        let empty = Corpus::empty();
+        let dir = self.corpus_dir.clone();
+        let corpus = if settings.mode == GenMode::Words {
+            self.corpora
+                .entry(settings.lang)
+                .or_insert_with(|| Corpus::load(dir.as_deref(), lang, charset))
+        } else {
+            &empty
+        };
         let mut rng = Rng::new(seed);
         let raster = &mut self.raster;
         let mut fits = |s: &str| raster.width(s, settings.px) <= Raster::max_width();
@@ -96,6 +114,7 @@ impl Engine {
             &mut rng,
             settings.lines,
             charset,
+            corpus,
             &mut fits,
         );
 
