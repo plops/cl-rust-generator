@@ -4,8 +4,9 @@
 #   1. Unifont → assets            (fetch_font.sh)
 #   2. liblbw_core.so per ABI       (cargo ndk → app/src/main/jniLibs)
 #   3. host liblbw_core.so          (cargo build -p lbw-core, for JVM JNI tests)
-#   4. JVM unit tests + debug APK   (gradlew testDebugUnitTest lintDebug assembleDebug)
-#   5. APK check: both .so and the font are packaged
+#   4. JVM unit tests + APK         (gradlew testDebugUnitTest lintDebug assembleDebug;
+#                                    release: GRADLE_TASKS="testDebugUnitTest assembleRelease")
+#   5. APK check: both .so and the font are packaged (every built APK)
 #
 # Call (from anywhere): android_client/scripts/build_android.sh
 # Env: ANDROID_HOME (default /opt/android-sdk), LBW_NDK_HOME (default: pinned NDK),
@@ -34,12 +35,12 @@ prof=(--release)
 
 (cd "$APP" && ./gradlew --console=plain $GRADLE_TASKS)
 
-APK="$APP/app/build/outputs/apk/debug/app-debug.apk"
-if [ -f "$APK" ]; then
+for APK in "$APP"/app/build/outputs/apk/*/app-*.apk; do
+    [ -f "$APK" ] || continue
     list=$(unzip -l "$APK")
     for a in $ABIS; do
         grep -q "lib/$a/liblbw_core.so" <<<"$list" || { echo "APK: lib/$a/liblbw_core.so fehlt" >&2; exit 1; }
     done
     grep -q "assets/fonts/unifont.otf" <<<"$list" || echo "APK: ohne Unifont (Fallback MONOSPACE)" >&2
     echo "APK ok: $APK ($(stat -c %s "$APK") B)"
-fi
+done

@@ -2,6 +2,19 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
+// Single source of truth: [workspace.package] version in source6/Cargo.toml.
+// versionCode = major*10000 + minor*100 + patch (minor, patch < 100).
+val lbwVersion: String = rootProject.file("../../Cargo.toml").readLines()
+    .dropWhile { it.trim() != "[workspace.package]" }
+    .first { it.trim().startsWith("version") }
+    .substringAfter('"').substringBefore('"')
+val lbwVersionCode: Int = lbwVersion.substringBefore('-').split('.').map(String::toInt)
+    .let { (major, minor, patch) -> major * 10000 + minor * 100 + patch }
+
+// Release signing from the environment (CI: GitHub secrets, see source6/RELEASE.md).
+// Without LBW_KEYSTORE the release APK is signed with the debug key.
+fun env(name: String): String? = providers.environmentVariable(name).orNull?.takeIf { it.isNotEmpty() }
+
 android {
     namespace = "de.lbw.client"
     compileSdk = 36
@@ -11,15 +24,27 @@ android {
         applicationId = "de.lbw.client"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.6.0"
+        versionCode = lbwVersionCode
+        versionName = lbwVersion
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+    }
+
+    signingConfigs {
+        env("LBW_KEYSTORE")?.let { ks ->
+            create("release") {
+                storeFile = file(ks)
+                storePassword = env("LBW_KEYSTORE_PASSWORD")
+                keyAlias = env("LBW_KEY_ALIAS")
+                keyPassword = env("LBW_KEY_PASSWORD") ?: env("LBW_KEYSTORE_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
+            // No R8: JNI entry points are looked up by name
             isMinifyEnabled = false
-            // Unsigned by default; CI uses the debug build
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 

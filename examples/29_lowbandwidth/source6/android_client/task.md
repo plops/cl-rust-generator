@@ -65,3 +65,8 @@ UI, Tunnel), *Host-Tests* = `cargo test` / JVM-Unit-Tests,
 ## A9 Abschluss
 - [x] A9.1 `cargo upgrade` (alles aktuell; AGP 9.4.1, Kotlin 2.4.20, JSch 2.28.7, Gradle 9.8.0 = neueste stabile), fmt, clippy, alle Tests; README-Abschnitt Android; `09_MainActivity` (319 Zeilen) in `09_ConnectForm` + `10_MainActivity` geteilt, danach JVM-Tests, Lint und `emulator_e2e.sh` grün.
 - [x] A9.2 `plan/20260929_03_android/walkthrough.md` (Regeln plan.md §8), Commit.
+
+## A10 GitHub-Release
+- [x] A10.1 `RELEASE.md` + `release-29-lowbandwidth.yml`: Tag `lbw-v<version>` → Version prüfen, Linux-Server/-Client (`scripts/package_release.sh`, ubuntu-24.04), signiertes Release-APK (`android-lbw.yml` als `workflow_call`, `apksigner verify`), `SHA256SUMS.txt`, `gh release create`.
+- [x] A10.2 Eine Version: `[workspace.package]` in `Cargo.toml` → `versionName`/`versionCode` im Gradle-Build; Versions-Pins der internen Pfad-Abhängigkeiten entfernt (hätten jede Erhöhung gebrochen); kein `--locked` (Cargo.lock ist repo-weit ignoriert).
+- [x] A10.3 Geprüft: Tarballs entpackt und Server ↔ Client auf Xvfb verbunden (Client braucht zur Laufzeit `libxi6`, `libgl1`); Release-APK mit Test-Keystore signiert (versionCode 100) und ohne Keystore (Debug-Key); `emulator_e2e.sh` mit Release-APK 17 OK + 5d/5e übersprungen (kein `run-as`), mit Debug-APK 19 OK; Workflow-Shell-Schritte lokal simuliert; actionlint.

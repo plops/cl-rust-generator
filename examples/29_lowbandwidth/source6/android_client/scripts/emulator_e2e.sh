@@ -18,7 +18,8 @@
 #
 # Aufruf: scripts/emulator_e2e.sh [out-dir]
 #   Läuft bereits ein Emulator (in `adb devices`), wird er benutzt und nicht beendet.
-#   APK: vorher scripts/build_android.sh (oder APK=pfad).
+#   APK: vorher scripts/build_android.sh (oder APK=pfad; bei Release-APKs
+#   entfallen 5d/5e, weil run-as nur mit debuggable APKs geht).
 set -u
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 SRC6="$(cd "$HERE/.." && pwd)"
@@ -81,6 +82,8 @@ done
 # unterdrückt sonst die Bildschirmtastatur (mIsInputViewShown=false).
 "$ADB" shell settings put secure show_ime_with_hard_keyboard 1
 "$ADB" install -r "$APK" >/dev/null || exit 1
+# Release-APKs sind nicht debuggable: kein run-as, Prefs-Prüfungen 5d/5e entfallen
+DEBUGGABLE=0; "$ADB" shell run-as "$PKG" true >/dev/null 2>&1 && DEBUGGABLE=1
 
 # ---- „Entfernter“ Rechner -----------------------------------------------------
 Xvfb :99 -screen 0 1280x1024x24 >"$OUT/xvfb.log" 2>&1 & PIDS+=($!)
@@ -152,7 +155,7 @@ check "4b Trackpad-Wischen bewegt Zeiger nach rechts ($P0X,$P0Y → $P1X,$P1Y)" 
 
 # ---- 5 SSH-Tunnel -------------------------------------------------------------
 eval "$(cd "$HERE" && LBW_SSHD_PASSWORD=pw scripts/test_sshd.sh start)" || exit 1
-"$ADB" shell run-as "$PKG" rm -f shared_prefs/lbw.xml
+if [ "$DEBUGGABLE" = 1 ]; then "$ADB" shell run-as "$PKG" rm -f shared_prefs/lbw.xml; else "$ADB" shell pm clear "$PKG" >/dev/null; fi
 launch --es ssh_host 10.0.2.2 --ei ssh_port "$LBW_SSHD_PORT" --es ssh_user "$LBW_SSHD_PWUSER" \
   --es ssh_password pw --ei remote_port "$PORT"
 check "5a SSH-Tunnel steht" 'wait_log 40 "ssh tunnel up"'
@@ -161,9 +164,13 @@ KEYS=$(for k in /tmp/lbw-sshd/host_*.pub; do ssh-keygen -lf "$k"; done)
 echo "     Fingerabdruck $FP $(echo "$KEYS" | grep -F -- "$FP" | grep -o "([A-Z0-9]*)$")"
 check "5b Fingerabdruck = ssh-keygen" '[ -n "$FP" ] && echo "$KEYS" | grep -qF -- "$FP"'
 check "5c OCR-Text über den Tunnel" 'wait_log 30 "typed on android"'
-PREFS=$("$ADB" shell run-as "$PKG" cat shared_prefs/lbw.xml)
-check "5d Host-Key-Pin gespeichert" 'echo "$PREFS" | grep -qF "$FP"'
-check "5e Passwort nicht gespeichert" '! echo "$PREFS" | grep -q "ssh_password"'
+if [ "$DEBUGGABLE" = 1 ]; then
+  PREFS=$("$ADB" shell run-as "$PKG" cat shared_prefs/lbw.xml)
+  check "5d Host-Key-Pin gespeichert" '[ -n "$PREFS" ] && echo "$PREFS" | grep -qF "$FP"'
+  check "5e Passwort nicht gespeichert" '[ -n "$PREFS" ] && ! echo "$PREFS" | grep -q "ssh_password"'
+else
+  echo "SKIP 5d/5e Prefs (APK nicht debuggable, kein run-as)"
+fi
 shot 03_ssh
 
 # ---- 6 Lebenszyklus -----------------------------------------------------------

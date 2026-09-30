@@ -1,0 +1,188 @@
+name: Release 29_lowbandwidth
+
+# Publishes a GitHub release for examples/29_lowbandwidth/source6 when a tag
+# lbw-v<version> is pushed. Assets:
+#   lbw-server-<v>-linux-x86_64.tar.gz   server + OCR models
+#   lbw-client-<v>-linux-x86_64.tar.gz   desktop client
+#   lbw-client-<v>-android.apk           signed release APK (arm64-v8a, x86_64)
+#   SHA256SUMS.txt
+# workflow_dispatch on a branch is a dry run: everything is built and
+# uploaded as workflow artifacts, but no release is created.
+# See examples/29_lowbandwidth/source6/RELEASE.md.
+
+on:
+  push:
+    tags:
+      - 'lbw-v*'
+  workflow_dispatch:
+
+concurrency:
+  group: release-lbw-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SRC: examples/29_lowbandwidth/source6
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: Check tag against Cargo.toml
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(awk '/^\[workspace.package\]/{p=1;next} /^\[/{p=0} p&&/^version/{gsub(/"/,"",$3);print $3;exit}' "$SRC/Cargo.toml")
+          [[ "$version" =~ ^[0-9]+\.[0-9]{1,2}\.[0-9]{1,2}(-[0-9A-Za-z.]+)?$ ]] \
+            || { echo "::error::workspace version '$version' is not x.y.z (minor/patch < 100, versionCode)"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            [ "$GITHUB_REF_NAME" = "lbw-v$version" ] \
+              || { echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version (expected lbw-v$version)"; exit 1; }
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version $version, publish $(tail -1 "$GITHUB_OUTPUT")"
+
+  linux:
+    name: Linux server + client
+    needs: version
+    # Pinned: the binaries need at least this runner's glibc (2.39)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      glibc: ${{ steps.pkg.outputs.glibc }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: examples/29_lowbandwidth/source6
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: System packages (nasm for rav1e/rav1d assembly)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends nasm
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal -c rustfmt,clippy
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: examples/29_lowbandwidth/source6
+          key: release
+
+      - uses: actions/cache@v6
+        with:
+          path: ${{ env.SRC }}/models
+          key: lbw-models-${{ hashFiles('examples/29_lowbandwidth/source6/scripts/fetch_models.sh') }}
+
+      - name: fmt, clippy, tests (release)
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace --release
+
+      - name: Build and package
+        id: pkg
+        run: |
+          scripts/package_release.sh "$RUNNER_TEMP/dist"
+          glibc=$(objdump -T target/release/lbw-server target/release/lbw-client | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1)
+          echo "glibc=${glibc#GLIBC_}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lbw-linux-release
+          path: ${{ runner.temp }}/dist/*.tar.gz
+          if-no-files-found: error
+
+  android:
+    name: Android
+    needs: version
+    permissions:
+      contents: read
+    uses: ./.github/workflows/android-lbw.yml
+    with:
+      build_type: release
+    secrets: inherit
+
+  publish:
+    name: GitHub release
+    needs: [version, linux, android]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: lbw-linux-release
+          path: dist
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: lbw-client-release-apk
+          path: dist
+
+      - name: Release notes
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          GLIBC: ${{ needs.linux.outputs.glibc }}
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          prev=$(git tag -l 'lbw-v*' --sort=-v:refname | grep -vxF "$GITHUB_REF_NAME" | head -1 || true)
+          range=${prev:+$prev..}$GITHUB_REF_NAME
+          {
+            echo "Low-bandwidth remote desktop (\`examples/29_lowbandwidth/source6\`), version $VERSION."
+            echo
+            echo "| Asset | Contents |"
+            echo "|---|---|"
+            echo "| \`lbw-server-$VERSION-linux-x86_64.tar.gz\` | Server + PP-OCRv6 models. Linux x86_64, glibc ≥ $GLIBC, X11. Start: \`./lbw-server --gui none\` (see README.txt) |"
+            echo "| \`lbw-client-$VERSION-linux-x86_64.tar.gz\` | Desktop client. Linux x86_64, glibc ≥ $GLIBC; needs \`libx11-6 libxi6 libgl1\` at runtime |"
+            apk=$(cd dist && ls *.apk)
+            echo "| \`$apk\` | Android 8.0+ (arm64-v8a, x86_64), with built-in SSH tunnel |"
+            echo "| \`SHA256SUMS.txt\` | \`sha256sum -c SHA256SUMS.txt\` |"
+            echo
+            case "$apk" in *-debugsigned.apk)
+              echo "> **Note:** this APK is signed with a throwaway debug key; uninstall the previous version before installing."
+              echo;;
+            esac
+            echo "### Changes${prev:+ since $prev}"
+            echo
+            git log --no-merges --max-count=50 --format='- %s (%h)' "$range" -- examples/29_lowbandwidth \
+              .github/workflows/android-lbw.yml .github/workflows/release-29-lowbandwidth.yml
+          } > notes.md
+          cat notes.md
+
+      - name: Create or update release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md
+          else
+            pre=(); [[ "$VERSION" == *-* ]] && pre=(--prerelease)
+            gh release create "$GITHUB_REF_NAME" dist/* --verify-tag "${pre[@]}" \
+              --title "lbw $VERSION (server, Linux client, Android)" --notes-file notes.md
+          fi

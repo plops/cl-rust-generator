@@ -54,6 +54,13 @@ Serverseite wie oben; das Handy verbindet sich per SSH-Tunnel (in der App)
 mit `127.0.0.1:7878` auf dem SSH-Host. Debug-APK 6,9 MB (Unifont 5,3 MB,
 `liblbw_core.so` 1,8 MB arm64).
 
+## Releases
+
+Ein Tag `lbw-v<version>` baut Server, Linux-Client und signiertes APK und
+veröffentlicht sie als GitHub-Release
+([`release-29-lowbandwidth.yml`](../../../.github/workflows/release-29-lowbandwidth.yml)).
+Ablauf, Signierschlüssel und Checkliste: [RELEASE.md](RELEASE.md).
+
 ## Messwerte (2026-09-29, Threadripper PRO 7955WX, CPU, Release)
 
 | Größe                                                 | Wert                                                 |

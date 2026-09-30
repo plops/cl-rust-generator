@@ -6,7 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-lbw-common = { version = "0.1.0", path = "../common" }
+lbw-common = { path = "../common" }
 macroquad = { version = "0.4.16", default-features = false, optional = true }
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8"] }
 
