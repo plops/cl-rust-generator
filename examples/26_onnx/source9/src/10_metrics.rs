@@ -141,6 +141,8 @@ pub struct SampleEval {
     pub lines: Vec<LineEval>,
     /// Detektions-Boxen ohne GT-Zuordnung.
     pub fp_boxes: usize,
+    /// Je Detektions-Box: GT-zugeordnet (grün) oder FP (rot, UI).
+    pub box_matched: Vec<bool>,
 }
 
 impl SampleEval {
@@ -228,6 +230,7 @@ pub fn evaluate(gt: &[GtLine], det: &[TextBox], confs: &[f32]) -> SampleEval {
     SampleEval {
         lines,
         fp_boxes: used.iter().filter(|u| !**u).count(),
+        box_matched: used,
     }
 }
 

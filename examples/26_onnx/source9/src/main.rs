@@ -1,10 +1,16 @@
-//! main.rs — nur Verdrahtung: Befehl parsen → bench oder Testbild.
+//! main.rs — nur Verdrahtung: Befehl parsen → Fenster, bench, Testbild.
 
-use unicode_ocr::{bench, cli, lang, render};
+use unicode_ocr::{bench, cli, lang, render, ui_loop};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match cli::parse(&args) {
+        Ok(cli::Cmd::Window) => {
+            if let Err(e) = ui_loop::run_window() {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
+        }
         Ok(cli::Cmd::Bench(b)) => match bench::run(&b) {
             Ok(md) => print!("{md}"),
             Err(e) => {

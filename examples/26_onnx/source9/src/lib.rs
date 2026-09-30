@@ -47,3 +47,9 @@ pub mod bench;
 
 #[path = "15_ui_state.rs"]
 pub mod ui_state;
+
+#[path = "16_ui_draw.rs"]
+pub mod ui_draw;
+
+#[path = "17_ui_loop.rs"]
+pub mod ui_loop;

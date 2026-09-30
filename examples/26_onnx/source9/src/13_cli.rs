@@ -18,6 +18,8 @@ use crate::models::ModelChoice;
 /// Befehl nach dem Parsen.
 #[derive(Debug)]
 pub enum Cmd {
+    /// Interaktives Fenster (ohne Argumente).
+    Window,
     /// Headless-Benchmark.
     Bench(BenchArgs),
     /// Testbild rendern (Debug).
@@ -95,8 +97,10 @@ impl Default for BenchArgs {
 /// Kurzhilfe.
 #[must_use]
 pub fn usage() -> &'static str {
-    "usage: unicode_ocr bench [OPTIONEN]\n\
+    "usage: unicode_ocr [BEFEHL]\n\
      \n\
+     ohne Befehl: interaktives Fenster (Modelle aus ./models)\n\
+     unicode_ocr bench [OPTIONEN]\n\
      \t--lang de,fr|all   --gen pangram|words|markov|chars|all   --size 32\n\
      \t--lines 8  --samples 20  --seed 1  --model auto|universal\n\
      \t--models DIR  --corpus DIR  --font PATH  --tsv FILE\n\
@@ -107,7 +111,8 @@ pub fn usage() -> &'static str {
 /// Parst `argv` (ohne Programmname).
 pub fn parse(argv: &[String]) -> Result<Cmd, String> {
     match argv.first().map(String::as_str) {
-        None | Some("-h") | Some("--help") | Some("help") => Ok(Cmd::Help),
+        None => Ok(Cmd::Window),
+        Some("-h") | Some("--help") | Some("help") => Ok(Cmd::Help),
         Some("render-test") => parse_render(&argv[1..]),
         Some("bench") => parse_bench(&argv[1..]),
         Some(other) => Err(format!("unknown command: {other}\n{}", usage())),
@@ -309,6 +314,7 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        assert!(matches!(parse(&argv(&[])).unwrap(), Cmd::Help));
+        assert!(matches!(parse(&argv(&[])).unwrap(), Cmd::Window));
+        assert!(matches!(parse(&argv(&["--help"])).unwrap(), Cmd::Help));
     }
 }

@@ -64,6 +64,8 @@ pub struct Sample {
     pub eval: SampleEval,
     /// Stufen-Zeiten.
     pub times: Times,
+    /// Canvas-RGBA (`CANVAS²×4`, für die UI-Textur).
+    pub rgba: Vec<u8>,
 }
 
 /// Roundtrip-Engine: Schrift + Modelle, wiederverwendbar.
@@ -154,12 +156,14 @@ impl Engine {
 
         debug_assert_eq!(canvas.rgba.len(), CANVAS * CANVAS * 4);
         let eval = evaluate(&canvas.lines, &boxes, &confs);
+        let gt: Vec<String> = canvas.lines.iter().map(|l| l.text.clone()).collect();
         Ok(Sample {
             lang: lang.code.to_string(),
             mode: settings.mode,
             px: settings.px,
+            rgba: canvas.rgba,
             model,
-            gt: canvas.lines.iter().map(|l| l.text.clone()).collect(),
+            gt,
             boxes,
             eval,
             times: Times {

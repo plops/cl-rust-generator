@@ -104,19 +104,7 @@ pub struct Raster {
 impl Raster {
     /// Lädt die Schrift von `path` oder aus der Suchliste.
     pub fn load(path: Option<&Path>) -> Result<Self, String> {
-        let bytes = match path {
-            Some(p) => std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()))?,
-            None => FONT_CANDIDATES
-                .iter()
-                .find_map(|p| std::fs::read(p).ok())
-                .ok_or_else(|| {
-                    format!(
-                        "GNU Unifont not found (tried: {}); apt-get install fonts-unifont",
-                        FONT_CANDIDATES.join(", ")
-                    )
-                })?,
-        };
-        Self::from_bytes(bytes)
+        Self::from_bytes(font_bytes(path)?)
     }
 
     /// Aus Font-Bytes (OTF/TTF).
@@ -127,7 +115,25 @@ impl Raster {
             cache: HashMap::new(),
         })
     }
+}
 
+/// Liest Unifont-Bytes von `path` oder aus der Suchliste (auch für HUD-Font).
+pub fn font_bytes(path: Option<&Path>) -> Result<Vec<u8>, String> {
+    match path {
+        Some(p) => std::fs::read(p).map_err(|e| format!("{}: {e}", p.display())),
+        None => FONT_CANDIDATES
+            .iter()
+            .find_map(|p| std::fs::read(p).ok())
+            .ok_or_else(|| {
+                format!(
+                    "GNU Unifont not found (tried: {}); apt-get install fonts-unifont",
+                    FONT_CANDIDATES.join(", ")
+                )
+            }),
+    }
+}
+
+impl Raster {
     /// Kennt die Schrift das Zeichen?
     #[must_use]
     pub fn has(&self, c: char) -> bool {
