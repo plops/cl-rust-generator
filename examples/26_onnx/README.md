@@ -7,3 +7,4 @@ source5 .. paddle paddle (like source 4) but with gnu unifont, screen diffing, d
 source6 .. text detection, TUI display, automation (in particular browser)
 source7 .. face detection and recognition
 source8 .. detect icons and images
+source9 .. unicode ocr round trip: unifont samples in 15 languages read back with paddleocr, cer/speed measured (window + headless bench)

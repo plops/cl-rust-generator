@@ -268,6 +268,14 @@ mod tests {
         s.chars().count() <= 10
     }
 
+    fn gen_input<'a>(cs: &'a Charset, corpus: &'a Corpus, markov: &'a Markov) -> GenInput<'a> {
+        GenInput {
+            charset: cs,
+            corpus,
+            markov,
+        }
+    }
+
     #[test]
     fn mode_names_cycle() {
         assert_eq!(GenMode::ALL.len(), 4);
@@ -298,11 +306,7 @@ mod tests {
         let cs = Charset::from_chars(all.chars());
         let corpus = Corpus::empty();
         let markov = Markov::train(&[]);
-        let input = GenInput {
-            charset: &cs,
-            corpus: &corpus,
-            markov: &markov,
-        };
+        let input = gen_input(&cs, &corpus, &markov);
         for l in LANGS {
             let mut rng = Rng::new(7);
             let lines = generate(GenMode::Pangram, l, &mut rng, 6, &input, &mut max10);
@@ -342,11 +346,7 @@ mod tests {
         let cs = Charset::from_chars("abc ".chars());
         let corpus = Corpus::empty();
         let markov = Markov::train(&[]);
-        let input = GenInput {
-            charset: &cs,
-            corpus: &corpus,
-            markov: &markov,
-        };
+        let input = gen_input(&cs, &corpus, &markov);
         let lines = generate(
             GenMode::Pangram,
             de,
@@ -371,11 +371,7 @@ mod tests {
         let cs = Charset::from_chars("abc ".chars());
         let corpus = Corpus::parse("ab bc ab", &cs);
         let markov = Markov::train(&[]);
-        let input = GenInput {
-            charset: &cs,
-            corpus: &corpus,
-            markov: &markov,
-        };
+        let input = gen_input(&cs, &corpus, &markov);
         let lines = generate(GenMode::Words, de, &mut Rng::new(5), 4, &input, &mut max10);
         assert_eq!(lines.len(), 4);
         for line in &lines {
@@ -393,11 +389,7 @@ mod tests {
         let cs = Charset::from_chars(all.chars());
         let corpus = Corpus::empty();
         let markov = Markov::train(&[]);
-        let input = GenInput {
-            charset: &cs,
-            corpus: &corpus,
-            markov: &markov,
-        };
+        let input = gen_input(&cs, &corpus, &markov);
         let words = generate(GenMode::Words, de, &mut Rng::new(9), 4, &input, &mut max10);
         let pang = generate(
             GenMode::Pangram,
@@ -417,11 +409,7 @@ mod tests {
         let cs = Charset::from_chars("abcdef ".chars());
         let corpus = Corpus::parse("abc abd abe", &cs);
         let markov = Markov::train(corpus.tokens());
-        let input = GenInput {
-            charset: &cs,
-            corpus: &corpus,
-            markov: &markov,
-        };
+        let input = gen_input(&cs, &corpus, &markov);
         let lines = generate(GenMode::Markov, de, &mut Rng::new(2), 4, &input, &mut max10);
         assert_eq!(lines.len(), 4);
         for line in &lines {
@@ -440,11 +428,7 @@ mod tests {
         let cs = Charset::from_chars("abcd ".chars());
         let corpus = Corpus::empty();
         let markov = Markov::train(&[]);
-        let input = GenInput {
-            charset: &cs,
-            corpus: &corpus,
-            markov: &markov,
-        };
+        let input = gen_input(&cs, &corpus, &markov);
         let lines = generate(GenMode::Chars, de, &mut Rng::new(4), 6, &input, &mut max10);
         assert_eq!(lines.len(), 6);
         for line in &lines {
@@ -468,11 +452,7 @@ mod tests {
         let cs = Charset::from_chars(all.chars());
         let corpus = Corpus::empty();
         let markov = Markov::train(&[]);
-        let input = GenInput {
-            charset: &cs,
-            corpus: &corpus,
-            markov: &markov,
-        };
+        let input = gen_input(&cs, &corpus, &markov);
         let mark = generate(GenMode::Markov, de, &mut Rng::new(9), 4, &input, &mut max10);
         let pang = generate(
             GenMode::Pangram,
