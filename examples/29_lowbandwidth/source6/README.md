@@ -56,16 +56,24 @@ mit `127.0.0.1:7878` auf dem SSH-Host. Debug-APK 6,9 MB (Unifont 5,3 MB,
 
 ## Messwerte (2026-09-29, Threadripper PRO 7955WX, CPU, Release)
 
-| Größe | Wert |
-|---|---|
-| Client-Binary (`--profile min` / release) | 2,0 MB / 2,4 MB, nur libc/libm/libgcc |
-| Server-Binary (ORT statisch) | 24,9 MB (+ Modelle 52 MB) |
-| DBNet-Detektion 640² | 55–65 ms |
-| Erkennung je Zeile / mit Cache (unverändert) | ~11 ms / ~0 ms |
-| GUI-Detektor 640² int8 | 80–100 ms |
-| AV1 640² Speed 10 | 80–140 ms |
-| HN-Seite 640²: AV1 roh → maskiert | 37 610 B → 1 966 B; Text 2 606 B (37 Zeilen) |
-| xterm, Tippen im Client → Text zurück (6 kB/s, 50 ms) | ~0,1 s nach letzter Taste |
-| Loopback: Textänderung (6 kB/s, 30 ms) | 62 ms |
-| Webseite öffnen: Text / Bild komplett | Text zuerst, AV1 (2,2 kB, 1 + 3 Icon-Kacheln) +0,4 s |
-| 60 s Blackout | keine Trennung, gestaute Eingaben kommen danach an |
+| Größe                                                 | Wert                                                 |
+|-------------------------------------------------------+------------------------------------------------------|
+| Client-Binary (`--profile min` / release)             | 2,0 MB / 2,4 MB, nur libc/libm/libgcc                |
+| Server-Binary (ORT statisch)                          | 24,9 MB (+ Modelle 52 MB)                            |
+| DBNet-Detektion 640²                                  | 55–65 ms                                             |
+| Erkennung je Zeile / mit Cache (unverändert)          | ~11 ms / ~0 ms                                       |
+| GUI-Detektor 640² int8                                | 80–100 ms                                            |
+| AV1 640² Speed 10                                     | 80–140 ms                                            |
+| HN-Seite 640²: AV1 roh → maskiert                     | 37 610 B → 1 966 B; Text 2 606 B (37 Zeilen)         |
+| xterm, Tippen im Client → Text zurück (6 kB/s, 50 ms) | ~0,1 s nach letzter Taste                            |
+| Loopback: Textänderung (6 kB/s, 30 ms)                | 62 ms                                                |
+| Webseite öffnen: Text / Bild komplett                 | Text zuerst, AV1 (2,2 kB, 1 + 3 Icon-Kacheln) +0,4 s |
+| 60 s Blackout                                         | keine Trennung, gestaute Eingaben kommen danach an   |
+
+
+# SSH Key
+
+Android app doesnt support the ED25519 key, use this instead
+```
+ssh-keygen -t ecdsa -b 256 -f ~/.ssh/android_ecdsa
+```
