@@ -2,10 +2,13 @@ name: Android 29_lowbandwidth client
 
 # Builds liblbw_core.so (Rust, cargo-ndk) + the Kotlin app and uploads the
 # debug APK. Same steps as examples/29_lowbandwidth/source6/android_client/
-# scripts/ci_local.sh.
+# scripts/ci_local.sh. release-29-lowbandwidth.yml calls it with
+# build_type=release (signed APK, see examples/29_lowbandwidth/source6/RELEASE.md).
 
 on:
   push:
+    # Branches only: tag pushes are handled by release-29-lowbandwidth.yml
+    branches: ['**']
     paths:
       - 'examples/29_lowbandwidth/source6/**'
       - '.github/workflows/android-lbw.yml'
@@ -14,9 +17,26 @@ on:
       - 'examples/29_lowbandwidth/source6/**'
       - '.github/workflows/android-lbw.yml'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      build_type:
+        description: debug or release
+        type: string
+        default: debug
+    secrets:
+      LBW_KEYSTORE_BASE64:
+        required: false
+      LBW_KEYSTORE_PASSWORD:
+        required: false
+      LBW_KEY_ALIAS:
+        required: false
+      LBW_KEY_PASSWORD:
+        required: false
 
 concurrency:
-  group: android-lbw-${{ github.ref }}
+  # github.workflow is the caller's name when called, so release runs never
+  # cancel (or get cancelled by) branch builds
+  group: android-lbw-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -27,10 +47,11 @@ env:
   CARGO_NDK_VERSION: 4.1.2
   SRC: examples/29_lowbandwidth/source6
   CARGO_TERM_COLOR: always
+  BUILD_TYPE: ${{ inputs.build_type || 'debug' }}
 
 jobs:
   apk:
-    name: Rust core + APK
+    name: Rust core + APK (${{ inputs.build_type || 'debug' }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
     defaults:
@@ -90,22 +111,58 @@ jobs:
           sudo LBW_SSHD_PASSWORD="$pw" android_client/scripts/test_sshd.sh start | sed 's/^export //' | tr ' ' '\n' >> "$GITHUB_ENV"
           echo "LBW_SSHD_PASSWORD=$pw" >> "$GITHUB_ENV"
 
+      - name: Release keystore from secrets
+        if: env.BUILD_TYPE == 'release'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.LBW_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.LBW_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.LBW_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.LBW_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::LBW_KEYSTORE_BASE64 not set: release APK is signed with a throwaway debug key (no updates between releases)"
+            echo "APK_SUFFIX=-debugsigned" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          ks="$RUNNER_TEMP/lbw-release.jks"
+          base64 -d <<<"$KEYSTORE_BASE64" > "$ks"
+          {
+            echo "LBW_KEYSTORE=$ks"
+            echo "LBW_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "LBW_KEY_ALIAS=$KEY_ALIAS"
+            echo "LBW_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
       - name: Build .so, JVM tests, lint, APK
-        run: android_client/scripts/build_android.sh
+        run: |
+          if [ "$BUILD_TYPE" = release ]; then
+            export GRADLE_TASKS="testDebugUnitTest lintRelease assembleRelease"
+          fi
+          android_client/scripts/build_android.sh
+
+      - name: Name and verify release APK
+        if: env.BUILD_TYPE == 'release'
+        run: |
+          version=$(awk '/^\[workspace.package\]/{p=1;next} /^\[/{p=0} p&&/^version/{gsub(/"/,"",$3);print $3;exit}' Cargo.toml)
+          mkdir -p "$RUNNER_TEMP/apk"
+          out="$RUNNER_TEMP/apk/lbw-client-${version}-android${APK_SUFFIX:-}.apk"
+          cp android_client/android-app/app/build/outputs/apk/release/app-release.apk "$out"
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs "$out" | grep -v '^WARNING'
+          echo "APK_PATH=$out" >> "$GITHUB_ENV"
 
       - name: Upload APK
         uses: actions/upload-artifact@v7
         with:
-          name: lbw-client-debug-apk
-          path: ${{ env.SRC }}/android_client/android-app/app/build/outputs/apk/debug/app-debug.apk
+          name: lbw-client-${{ env.BUILD_TYPE }}-apk
+          path: ${{ env.APK_PATH || format('{0}/android_client/android-app/app/build/outputs/apk/debug/app-debug.apk', env.SRC) }}
           if-no-files-found: error
 
       - name: Upload test and lint reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: lbw-android-test-reports
+          name: lbw-android-test-reports-${{ env.BUILD_TYPE }}
           path: |
             ${{ env.SRC }}/android_client/android-app/app/build/reports/tests/
-            ${{ env.SRC }}/android_client/android-app/app/build/reports/lint-results-debug.html
+            ${{ env.SRC }}/android_client/android-app/app/build/reports/lint-results-*.html
           if-no-files-found: ignore
