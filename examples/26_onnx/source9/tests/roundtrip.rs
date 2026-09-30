@@ -1,10 +1,10 @@
 //! Roundtrip-Integrationstest: rendern → detektieren → erkennen.
 //!
 //! Braucht echte Assets (Font + Modelle); kein stilles Überspringen.
-//! T3: nur Deutsch („Hallo Welt“); T5 erweitert auf alle 15 Sprachen.
+//! T3: nur Deutsch („Hallo Welt“); T5: alle 15 Sprachen + CER-Gate.
 
 use std::path::PathBuf;
-use unicode_ocr::{lang, models, render};
+use unicode_ocr::{engine, generate, lang, models, render};
 
 fn models_dir() -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models");
@@ -45,4 +45,50 @@ fn german_hello_world_reads_back_correctly() {
         .join(" ");
     assert_eq!(read, "Hallo Welt", "boxes: {boxes:?}");
     assert!(confs.iter().all(|&c| c > 0.5), "confs: {confs:?}");
+}
+
+/// Alle Sprachen laufen durch; de/en/fr lesen fast fehlerfrei.
+///
+/// Gate CER < 10 % (Plan sagte < 5 % voraus; gemessen 3–5 % mit
+/// Einzelzeichen-Verwechslungen des Modells auf Unifont: ß→B/β, Ä→A,
+/// œ→e, è→ē/e, ç→c, ’→', “→", –→-, !→l). Dazu Recall 1.0 + keine FP:
+/// echte Regressionen (z. B. ohne Crop-Padding de-CER 29 %) lösen aus.
+#[test]
+fn all_languages_run_through_and_latin_pangram_cer_low() {
+    let mut eng = engine::Engine::open(&models_dir(), None).expect("engine");
+    let mut cers: Vec<(&str, f32)> = Vec::new();
+    for (i, l) in lang::LANGS.iter().enumerate() {
+        let s = engine::Settings {
+            lang: i,
+            mode: generate::GenMode::Pangram,
+            px: 32,
+            lines: 4,
+            model: models::ModelChoice::Auto,
+        };
+        let sample = eng.run(&s, 1).expect(l.code);
+        assert!(
+            !sample.eval.lines.is_empty(),
+            "{}: no lines rendered",
+            l.code
+        );
+        println!(
+            "{}: cer={:.3} recall={:.2} fp={} det={:.0}ms rec={:.0}ms",
+            l.code,
+            sample.eval.mean_cer(),
+            sample.eval.recall(),
+            sample.eval.fp_boxes,
+            sample.times.det_ms,
+            sample.times.rec_ms,
+        );
+        if ["de", "en", "fr"].contains(&l.code) {
+            assert_eq!(sample.eval.recall(), 1.0, "{}: missed line", l.code);
+            assert_eq!(sample.eval.fp_boxes, 0, "{}: false positive", l.code);
+        }
+        cers.push((l.code, sample.eval.mean_cer()));
+    }
+    for (code, cer) in &cers {
+        if ["de", "en", "fr"].contains(code) {
+            assert!(*cer < 0.10, "{code}: cer={cer} (all: {cers:?})");
+        }
+    }
 }

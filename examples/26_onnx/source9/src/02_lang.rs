@@ -30,7 +30,7 @@ const DEVANAGARI: &[(char, char)] = &[('\u{900}', '\u{97F}')];
 const TAMIL: &[(char, char)] = &[('\u{B80}', '\u{BFF}')];
 
 /// Zeichen, die jede Sprache benutzen darf.
-const COMMON: &str = "0123456789 .,;:!?-()'\"%/";
+pub(crate) const COMMON: &str = "0123456789 .,;:!?-()'\"%/";
 
 /// Eine unterstützte Sprache.
 #[derive(Debug)]

@@ -9,7 +9,7 @@ use ort::{inputs, session::Session, value::TensorRef};
 use std::path::Path;
 
 use crate::detect::TextBox;
-use crate::render::CANVAS;
+use crate::render::{CANVAS, Rect};
 
 /// Erkennungshöhe des Modells.
 const REC_H: usize = 48;
@@ -69,7 +69,8 @@ impl Recognizer {
     }
 
     fn preprocess_crop(&mut self, rgba: &[u8], crop: &TextBox) -> usize {
-        let (cw, ch) = (crop.rect.w.max(1.0), crop.rect.h.max(1.0));
+        let padded = pad_rect(&crop.rect);
+        let (cw, ch) = (padded.w.max(1.0), padded.h.max(1.0));
         let raw_w = (REC_H as f32 * (cw / ch)).round() as usize;
         let target_w = (raw_w.div_ceil(32) * 32).clamp(32, 960);
         let resized_w = raw_w.min(target_w).max(1);
@@ -81,7 +82,7 @@ impl Recognizer {
         self.input[..total].fill(0.0);
 
         let plane_stride = REC_H * target_w;
-        let (ox, oy) = (crop.rect.x, crop.rect.y);
+        let (ox, oy) = (padded.x, padded.y);
         for dy in 0..REC_H {
             let sy = (oy + (dy as f32 + 0.5) * (ch / REC_H as f32) - 0.5).round() as usize;
             let sy_c = sy.clamp(0, CANVAS - 1);
@@ -99,6 +100,23 @@ impl Recognizer {
             }
         }
         target_w
+    }
+}
+
+/// Erweitert die Crop-Box um Rand (30 % der Höhe, mind. 4 px, Canvas-Clamp).
+///
+/// Die Erkennung ist auf Detektions-Crops mit Weißraum trainiert; enge
+/// Boxen schneiden diakritische Zeichen an und kosten gut 10 % CER.
+pub fn pad_rect(r: &Rect) -> Rect {
+    let pad = (r.h * 0.3).ceil().max(4.0);
+    let max = CANVAS as f32;
+    let (x0, y0) = ((r.x - pad).max(0.0), (r.y - pad).max(0.0));
+    let (x1, y1) = ((r.x + r.w + pad).min(max), (r.y + r.h + pad).min(max));
+    Rect {
+        x: x0,
+        y: y0,
+        w: x1 - x0,
+        h: y1 - y0,
     }
 }
 
@@ -203,6 +221,32 @@ mod tests {
     fn dict_unescapes_yaml_quotes() {
         let d = load_dict("  character_dict:\n  - ''''\n  - \"\\\"\"\n  - $\n");
         assert_eq!(d, ["'", "\"", "$"]);
+    }
+
+    #[test]
+    fn pad_rect_adds_margin_and_clamps() {
+        let r = pad_rect(&Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 100.0,
+            h: 20.0,
+        });
+        assert_eq!(
+            r,
+            Rect {
+                x: 4.0,
+                y: 4.0,
+                w: 112.0,
+                h: 32.0
+            }
+        );
+        let c = pad_rect(&Rect {
+            x: 630.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        });
+        assert!(c.x + c.w <= CANVAS as f32 && c.y >= 0.0);
     }
 
     #[test]

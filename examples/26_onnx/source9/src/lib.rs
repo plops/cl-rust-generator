@@ -9,6 +9,12 @@ pub mod rng;
 #[path = "02_lang.rs"]
 pub mod lang;
 
+#[path = "03_corpus.rs"]
+pub mod corpus;
+
+#[path = "05_generate.rs"]
+pub mod generate;
+
 #[path = "06_render.rs"]
 pub mod render;
 
@@ -26,3 +32,6 @@ pub mod metrics;
 
 #[path = "11_stats.rs"]
 pub mod stats;
+
+#[path = "12_engine.rs"]
+pub mod engine;
