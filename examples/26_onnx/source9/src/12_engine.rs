@@ -9,8 +9,9 @@ use std::time::Instant;
 
 use crate::corpus::{Charset, Corpus};
 use crate::detect::TextBox;
-use crate::generate::GenMode;
+use crate::generate::{GenInput, GenMode};
 use crate::lang::LANGS;
+use crate::markov::Markov;
 use crate::metrics::{SampleEval, evaluate};
 use crate::models::{ModelChoice, Models, rec_model_for};
 use crate::render::{CANVAS, Raster};
@@ -68,6 +69,7 @@ pub struct Engine {
     charsets: HashMap<(usize, String), Charset>,
     corpus_dir: Option<PathBuf>,
     corpora: HashMap<usize, Corpus>,
+    markovs: HashMap<usize, Markov>,
 }
 
 impl Engine {
@@ -84,6 +86,7 @@ impl Engine {
             charsets: HashMap::new(),
             corpus_dir: corpus_dir.map(Path::to_path_buf),
             corpora: HashMap::new(),
+            markovs: HashMap::new(),
         })
     }
 
@@ -96,14 +99,27 @@ impl Engine {
             .charsets
             .entry((settings.lang, model.clone()))
             .or_insert_with(|| Charset::build(lang, &dict, &self.raster));
-        let empty = Corpus::empty();
+        let empty_corpus = Corpus::empty();
+        let empty_markov = Markov::train(&[]);
         let dir = self.corpus_dir.clone();
-        let corpus = if settings.mode == GenMode::Words {
+        let corpus = if matches!(settings.mode, GenMode::Words | GenMode::Markov) {
             self.corpora
                 .entry(settings.lang)
                 .or_insert_with(|| Corpus::load(dir.as_deref(), lang, charset))
         } else {
-            &empty
+            &empty_corpus
+        };
+        let markov = if settings.mode == GenMode::Markov && !corpus.is_empty() {
+            self.markovs
+                .entry(settings.lang)
+                .or_insert_with(|| Markov::train(corpus.tokens()))
+        } else {
+            &empty_markov
+        };
+        let input = GenInput {
+            charset,
+            corpus,
+            markov,
         };
         let mut rng = Rng::new(seed);
         let raster = &mut self.raster;
@@ -113,8 +129,7 @@ impl Engine {
             lang,
             &mut rng,
             settings.lines,
-            charset,
-            corpus,
+            &input,
             &mut fits,
         );
 

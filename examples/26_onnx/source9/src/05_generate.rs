@@ -6,6 +6,7 @@
 
 use crate::corpus::{Charset, Corpus};
 use crate::lang::Lang;
+use crate::markov::Markov;
 use crate::rng::Rng;
 
 /// Textgenerator-Modus.
@@ -50,24 +51,34 @@ impl GenMode {
 /// Detektion misst `recall`/`FP` ohnehin separat.
 pub const MIN_LINE_CHARS: usize = 2;
 
+/// Eingaben für die Generatoren (alles in `Engine` gecacht).
+pub struct GenInput<'a> {
+    /// Erlaubte Zeichen.
+    pub charset: &'a Charset,
+    /// Korpus-Tokens (für `Words`, Training für `Markov`).
+    pub corpus: &'a Corpus,
+    /// Trainiertes n-Gramm (für `Markov`).
+    pub markov: &'a Markov,
+}
+
 /// Erzeugt bis zu `n` Zeilen (ggf. weniger, nie leer bei `n > 0`).
 ///
-/// Nur Zeichen aus `charset` (Schrift ∩ Wörterbuch ∩ Font) überleben;
-/// Zeilen unter `MIN_LINE_CHARS` werden übersprungen. Leerer Korpus →
-/// Pangramm-Fallback. `Markov`/`Chars` folgen in T7/T8.
+/// Nur Zeichen aus dem Charset überleben; Zeilen unter `MIN_LINE_CHARS`
+/// werden übersprungen. Leerer Korpus → Pangramm-Fallback. `Chars`
+/// folgt in T8.
 pub fn generate(
     mode: GenMode,
     lang: &Lang,
     rng: &mut Rng,
     n: usize,
-    charset: &Charset,
-    corpus: &Corpus,
+    input: &GenInput,
     fits: &mut impl FnMut(&str) -> bool,
 ) -> Vec<String> {
     match mode {
-        GenMode::Pangram => generate_pangram(lang, rng, n, charset, fits),
-        GenMode::Words => generate_words(lang, rng, n, charset, corpus, fits),
-        GenMode::Markov | GenMode::Chars => generate_pangram(lang, rng, n, charset, fits),
+        GenMode::Pangram => generate_pangram(lang, rng, n, input.charset, fits),
+        GenMode::Words => generate_words(lang, rng, n, input.charset, input.corpus, fits),
+        GenMode::Markov => generate_markov(lang, rng, n, input.charset, input.markov, fits),
+        GenMode::Chars => generate_pangram(lang, rng, n, input.charset, fits),
     }
 }
 
@@ -107,6 +118,30 @@ fn generate_words(
             .map(|_| rng.pick(corpus.tokens()).as_str())
             .collect();
         push_lines(&mut out, &text.join(" "), n, charset, fits);
+    }
+    if out.is_empty() {
+        generate_pangram(lang, rng, n, charset, fits)
+    } else {
+        out
+    }
+}
+
+fn generate_markov(
+    lang: &Lang,
+    rng: &mut Rng,
+    n: usize,
+    charset: &Charset,
+    markov: &Markov,
+    fits: &mut impl FnMut(&str) -> bool,
+) -> Vec<String> {
+    if markov.is_empty() {
+        return generate_pangram(lang, rng, n, charset, fits);
+    }
+    let mut out = Vec::new();
+    let mut guard = 0;
+    while out.len() < n && guard < n * 4 + 4 {
+        guard += 1;
+        push_lines(&mut out, &markov.sample(rng, 120), n, charset, fits);
     }
     if out.is_empty() {
         generate_pangram(lang, rng, n, charset, fits)
@@ -231,17 +266,16 @@ mod tests {
             .flat_map(|l| l.pangrams.iter().copied())
             .collect();
         let cs = Charset::from_chars(all.chars());
+        let corpus = Corpus::empty();
+        let markov = Markov::train(&[]);
+        let input = GenInput {
+            charset: &cs,
+            corpus: &corpus,
+            markov: &markov,
+        };
         for l in LANGS {
             let mut rng = Rng::new(7);
-            let lines = generate(
-                GenMode::Pangram,
-                l,
-                &mut rng,
-                6,
-                &cs,
-                &Corpus::empty(),
-                &mut max10,
-            );
+            let lines = generate(GenMode::Pangram, l, &mut rng, 6, &input, &mut max10);
             assert!(!lines.is_empty(), "{}", l.code);
             for line in &lines {
                 assert!(max10(line), "{}: {line}", l.code);
@@ -258,8 +292,7 @@ mod tests {
             de,
             &mut Rng::new(3),
             4,
-            &cs,
-            &Corpus::empty(),
+            &input,
             &mut max10,
         );
         let b = generate(
@@ -267,8 +300,7 @@ mod tests {
             de,
             &mut Rng::new(3),
             4,
-            &cs,
-            &Corpus::empty(),
+            &input,
             &mut max10,
         );
         assert_eq!(a, b);
@@ -278,13 +310,19 @@ mod tests {
     fn pangram_filtering_drops_disallowed_chars() {
         let de = &LANGS[by_code("de").unwrap()];
         let cs = Charset::from_chars("abc ".chars());
+        let corpus = Corpus::empty();
+        let markov = Markov::train(&[]);
+        let input = GenInput {
+            charset: &cs,
+            corpus: &corpus,
+            markov: &markov,
+        };
         let lines = generate(
             GenMode::Pangram,
             de,
             &mut Rng::new(1),
             4,
-            &cs,
-            &Corpus::empty(),
+            &input,
             &mut max10,
         );
         assert!(!lines.is_empty());
@@ -302,15 +340,13 @@ mod tests {
         let de = &LANGS[by_code("de").unwrap()];
         let cs = Charset::from_chars("abc ".chars());
         let corpus = Corpus::parse("ab bc ab", &cs);
-        let lines = generate(
-            GenMode::Words,
-            de,
-            &mut Rng::new(5),
-            4,
-            &cs,
-            &corpus,
-            &mut max10,
-        );
+        let markov = Markov::train(&[]);
+        let input = GenInput {
+            charset: &cs,
+            corpus: &corpus,
+            markov: &markov,
+        };
+        let lines = generate(GenMode::Words, de, &mut Rng::new(5), 4, &input, &mut max10);
         assert_eq!(lines.len(), 4);
         for line in &lines {
             assert!(max10(line), "{line}");
@@ -325,25 +361,71 @@ mod tests {
         let de = &LANGS[by_code("de").unwrap()];
         let all: String = de.pangrams.iter().copied().collect();
         let cs = Charset::from_chars(all.chars());
-        let words = generate(
-            GenMode::Words,
-            de,
-            &mut Rng::new(9),
-            4,
-            &cs,
-            &Corpus::empty(),
-            &mut max10,
-        );
+        let corpus = Corpus::empty();
+        let markov = Markov::train(&[]);
+        let input = GenInput {
+            charset: &cs,
+            corpus: &corpus,
+            markov: &markov,
+        };
+        let words = generate(GenMode::Words, de, &mut Rng::new(9), 4, &input, &mut max10);
         let pang = generate(
             GenMode::Pangram,
             de,
             &mut Rng::new(9),
             4,
-            &cs,
-            &Corpus::empty(),
+            &input,
             &mut max10,
         );
         assert_eq!(words, pang);
         assert!(!words.is_empty());
+    }
+
+    #[test]
+    fn markov_lines_come_from_model_and_are_deterministic() {
+        let de = &LANGS[by_code("de").unwrap()];
+        let cs = Charset::from_chars("abcdef ".chars());
+        let corpus = Corpus::parse("abc abd abe", &cs);
+        let markov = Markov::train(corpus.tokens());
+        let input = GenInput {
+            charset: &cs,
+            corpus: &corpus,
+            markov: &markov,
+        };
+        let lines = generate(GenMode::Markov, de, &mut Rng::new(2), 4, &input, &mut max10);
+        assert_eq!(lines.len(), 4);
+        for line in &lines {
+            assert!(max10(line), "{line}");
+            for c in line.chars() {
+                assert!(cs.contains(c), "{c:?} in {line}");
+            }
+        }
+        let again = generate(GenMode::Markov, de, &mut Rng::new(2), 4, &input, &mut max10);
+        assert_eq!(lines, again);
+    }
+
+    #[test]
+    fn markov_with_empty_model_falls_back_to_pangram() {
+        let de = &LANGS[by_code("de").unwrap()];
+        let all: String = de.pangrams.iter().copied().collect();
+        let cs = Charset::from_chars(all.chars());
+        let corpus = Corpus::empty();
+        let markov = Markov::train(&[]);
+        let input = GenInput {
+            charset: &cs,
+            corpus: &corpus,
+            markov: &markov,
+        };
+        let mark = generate(GenMode::Markov, de, &mut Rng::new(9), 4, &input, &mut max10);
+        let pang = generate(
+            GenMode::Pangram,
+            de,
+            &mut Rng::new(9),
+            4,
+            &input,
+            &mut max10,
+        );
+        assert_eq!(mark, pang);
+        assert!(!mark.is_empty());
     }
 }

@@ -12,6 +12,9 @@ pub mod lang;
 #[path = "03_corpus.rs"]
 pub mod corpus;
 
+#[path = "04_markov.rs"]
+pub mod markov;
+
 #[path = "05_generate.rs"]
 pub mod generate;
 

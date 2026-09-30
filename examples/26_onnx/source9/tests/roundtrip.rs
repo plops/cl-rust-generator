@@ -129,3 +129,36 @@ fn words_mode_reads_back_cleanly() {
         );
     }
 }
+
+/// Modus `markov`: n-Gramm-Text sieht plausibel aus und liest sich.
+///
+/// T7-Nachweis auf Engine-Ebene (der `bench`-Nachweis folgt in T9).
+#[test]
+fn markov_mode_samples_plausible_text() {
+    if !corpus_dir().join("de.txt").exists() {
+        println!("SKIP: corpus missing (uv run scripts/fetch_corpus.py)");
+        return;
+    }
+    let mut eng = engine::Engine::open(&models_dir(), None, Some(&corpus_dir())).expect("engine");
+    for code in ["de", "ja"] {
+        let s = engine::Settings {
+            lang: lang::by_code(code).unwrap(),
+            mode: generate::GenMode::Markov,
+            px: 32,
+            lines: 4,
+            model: models::ModelChoice::Auto,
+        };
+        let sample = eng.run(&s, 1).expect(code);
+        println!(
+            "{code} markov: cer={:.3} gt={:?}",
+            sample.eval.mean_cer(),
+            sample.gt
+        );
+        assert_eq!(sample.eval.lines.len(), 4, "{code}: short sample");
+        assert!(
+            sample.eval.mean_cer() < 0.50,
+            "{code}: cer={}",
+            sample.eval.mean_cer()
+        );
+    }
+}
