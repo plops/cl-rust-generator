@@ -20,3 +20,9 @@ pub mod recognize;
 
 #[path = "09_models.rs"]
 pub mod models;
+
+#[path = "10_metrics.rs"]
+pub mod metrics;
+
+#[path = "11_stats.rs"]
+pub mod stats;
