@@ -7,7 +7,7 @@ description = "Unicode OCR round trip: GNU Unifont samples in many languages ren
 [dependencies]
 fontdue = "0.9.4"
 macroquad = { version = "0.4.16", default-features = false }
-ort = { version = "2.0.0-rc.13", default-features = false, features = ["download-binaries", "copy-dylibs", "tls-native"] }
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-native"] }
 
 [profile.release]
 opt-level = 3

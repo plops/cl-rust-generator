@@ -11,3 +11,12 @@ pub mod lang;
 
 #[path = "06_render.rs"]
 pub mod render;
+
+#[path = "07_detect.rs"]
+pub mod detect;
+
+#[path = "08_recognize.rs"]
+pub mod recognize;
+
+#[path = "09_models.rs"]
+pub mod models;
