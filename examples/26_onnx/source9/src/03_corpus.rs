@@ -22,6 +22,8 @@ use crate::render::Raster;
 #[derive(Clone, Debug)]
 pub struct Charset {
     set: HashSet<char>,
+    /// Ziehbare Zeichen (sortiert, ohne Whitespace) für `Chars`.
+    draw: Vec<char>,
 }
 
 impl Charset {
@@ -55,21 +57,31 @@ impl Charset {
             consider(c);
         }
         consider(' ');
-        Self { set }
+        Self::from_set(set)
     }
 
     /// Aus expliziter Zeichenliste (für Tests ohne Font/Wörterbuch).
     #[must_use]
     pub fn from_chars(chars: impl IntoIterator<Item = char>) -> Self {
-        Self {
-            set: chars.into_iter().collect(),
-        }
+        Self::from_set(chars.into_iter().collect())
+    }
+
+    fn from_set(set: HashSet<char>) -> Self {
+        let mut draw: Vec<char> = set.iter().copied().filter(|c| !c.is_whitespace()).collect();
+        draw.sort();
+        Self { set, draw }
     }
 
     /// Darf das Zeichen erzeugt werden?
     #[must_use]
     pub fn contains(&self, c: char) -> bool {
         self.set.contains(&c)
+    }
+
+    /// Gleichverteilte Ziehliste (sortiert, ohne Whitespace).
+    #[must_use]
+    pub fn drawable(&self) -> &[char] {
+        &self.draw
     }
 
     /// Entfernt alle nicht erlaubten Zeichen.
@@ -141,6 +153,12 @@ mod tests {
         assert_eq!(cs.filter("a c b!"), "a  b");
         assert!(cs.contains(' '));
         assert!(!cs.contains('!'));
+    }
+
+    #[test]
+    fn drawable_is_sorted_without_whitespace() {
+        let cs = Charset::from_chars("b a\t".chars());
+        assert_eq!(cs.drawable(), &['a', 'b']);
     }
 
     #[test]

@@ -64,8 +64,7 @@ pub struct GenInput<'a> {
 /// Erzeugt bis zu `n` Zeilen (ggf. weniger, nie leer bei `n > 0`).
 ///
 /// Nur Zeichen aus dem Charset überleben; Zeilen unter `MIN_LINE_CHARS`
-/// werden übersprungen. Leerer Korpus → Pangramm-Fallback. `Chars`
-/// folgt in T8.
+/// werden übersprungen. Leerer Korpus → Pangramm-Fallback.
 pub fn generate(
     mode: GenMode,
     lang: &Lang,
@@ -78,7 +77,7 @@ pub fn generate(
         GenMode::Pangram => generate_pangram(lang, rng, n, input.charset, fits),
         GenMode::Words => generate_words(lang, rng, n, input.charset, input.corpus, fits),
         GenMode::Markov => generate_markov(lang, rng, n, input.charset, input.markov, fits),
-        GenMode::Chars => generate_pangram(lang, rng, n, input.charset, fits),
+        GenMode::Chars => generate_chars(lang, rng, n, input.charset, fits),
     }
 }
 
@@ -142,6 +141,37 @@ fn generate_markov(
     while out.len() < n && guard < n * 4 + 4 {
         guard += 1;
         push_lines(&mut out, &markov.sample(rng, 120), n, charset, fits);
+    }
+    if out.is_empty() {
+        generate_pangram(lang, rng, n, charset, fits)
+    } else {
+        out
+    }
+}
+
+/// Pseudowörter (2–8 Zeichen) aus gleichverteilten Charset-Zeichen.
+///
+/// Jedes Sonderzeichen kommt gleich oft vor (keine Häufigkeits-
+/// Gewichtung wie bei `Words`/`Markov`).
+fn generate_chars(
+    lang: &Lang,
+    rng: &mut Rng,
+    n: usize,
+    charset: &Charset,
+    fits: &mut impl FnMut(&str) -> bool,
+) -> Vec<String> {
+    let draw = charset.drawable();
+    if draw.is_empty() {
+        return generate_pangram(lang, rng, n, charset, fits);
+    }
+    let mut out = Vec::new();
+    let mut guard = 0;
+    while out.len() < n && guard < n * 4 + 4 {
+        guard += 1;
+        let words: Vec<String> = (0..12)
+            .map(|_| (0..rng.range(2, 8)).map(|_| rng.pick(draw)).collect())
+            .collect();
+        push_lines(&mut out, &words.join(" "), n, charset, fits);
     }
     if out.is_empty() {
         generate_pangram(lang, rng, n, charset, fits)
@@ -401,6 +431,33 @@ mod tests {
             }
         }
         let again = generate(GenMode::Markov, de, &mut Rng::new(2), 4, &input, &mut max10);
+        assert_eq!(lines, again);
+    }
+
+    #[test]
+    fn chars_draws_only_charset_chars_in_pseudowords_2_to_8() {
+        let de = &LANGS[by_code("de").unwrap()];
+        let cs = Charset::from_chars("abcd ".chars());
+        let corpus = Corpus::empty();
+        let markov = Markov::train(&[]);
+        let input = GenInput {
+            charset: &cs,
+            corpus: &corpus,
+            markov: &markov,
+        };
+        let lines = generate(GenMode::Chars, de, &mut Rng::new(4), 6, &input, &mut max10);
+        assert_eq!(lines.len(), 6);
+        for line in &lines {
+            assert!(max10(line), "{line}");
+            for word in line.split_whitespace() {
+                let len = word.chars().count();
+                assert!((2..=8).contains(&len), "{word} in {line}");
+                for c in word.chars() {
+                    assert!(cs.contains(c), "{c:?} in {line}");
+                }
+            }
+        }
+        let again = generate(GenMode::Chars, de, &mut Rng::new(4), 6, &input, &mut max10);
         assert_eq!(lines, again);
     }
 

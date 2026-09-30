@@ -162,3 +162,34 @@ fn markov_mode_samples_plausible_text() {
         );
     }
 }
+
+/// Modus `chars`: Pseudowörter enthalten Umlaute/ß.
+///
+/// T8-Nachweis auf Engine-Ebene (der `bench`-Nachweis folgt in T9).
+#[test]
+fn chars_mode_covers_special_glyphs() {
+    let mut eng = engine::Engine::open(&models_dir(), None, Some(&corpus_dir())).expect("engine");
+    let s = engine::Settings {
+        lang: lang::by_code("de").unwrap(),
+        mode: generate::GenMode::Chars,
+        px: 32,
+        lines: 4,
+        model: models::ModelChoice::Auto,
+    };
+    let sample = eng.run(&s, 1).expect("de chars");
+    println!(
+        "de chars: cer={:.3} gt={:?}",
+        sample.eval.mean_cer(),
+        sample.gt
+    );
+    assert_eq!(sample.eval.lines.len(), 4);
+    // Breite Abdeckung statt CER-Gate: exotische Glyphen misst die
+    // Zeichen-Statistik in T9, statt sie hier zu verwerfen.
+    let gt: String = sample.gt.join(" ");
+    assert!(
+        gt.chars().any(|c| "äöüÄÖÜß".contains(c)),
+        "no umlaut in {gt:?}"
+    );
+    let distinct: std::collections::HashSet<char> = gt.chars().filter(|c| !c.is_ascii()).collect();
+    assert!(distinct.len() >= 8, "narrow coverage: {distinct:?}");
+}
