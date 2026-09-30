@@ -56,7 +56,7 @@ fn german_hello_world_reads_back_correctly() {
 /// Gate CER < 10 % (Plan sagte < 5 % voraus; gemessen 3–5 % mit
 /// Einzelzeichen-Verwechslungen des Modells auf Unifont: ß→B/β, Ä→A,
 /// œ→e, è→ē/e, ç→c, ’→', “→", –→-, !→l). Dazu Recall 1.0 + keine FP:
-/// echte Regressionen (z. B. ohne Crop-Padding de-CER 29 %) lösen aus.
+/// echte Regressionen (enge Crops ohne Charset: de-CER 69 %) lösen aus.
 #[test]
 fn all_languages_run_through_and_latin_pangram_cer_low() {
     let mut eng = engine::Engine::open(&models_dir(), None, Some(&corpus_dir())).expect("engine");
