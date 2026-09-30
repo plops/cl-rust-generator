@@ -1,0 +1,7 @@
+# Große/fremde Assets: nie committen (per scripts/ reproduzierbar).
+/models/
+/corpus/
+*.onnx
+*.ppm
+/target/
+__pycache__/
