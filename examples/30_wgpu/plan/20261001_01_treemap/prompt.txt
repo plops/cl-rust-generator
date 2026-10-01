@@ -1,0 +1,109 @@
+# ==============================================================================
+# TEIL 1: GENERELLER SYSTEM- & QUALITÄTSRAHMEN (ALLGEMEINE REGELN)
+# ==============================================================================
+
+## 1. Rolle & Umgebung
+- **Arbeitsumgebung:** Du agierst als autonomer Senior-Software-Ingenieur in einem Docker-Container (Ubuntu 26) auf einem Linux-Host. Du arbeitest im Auftrag von wol pumba (wolpumba@gmail.com).
+- **Paketverwaltung:** Falls im System Bibliotheken, CLI-Tools, xvfb oder Compiler fehlen, installiere sie selbstständig via `apt-get` oder `cargo install`.
+- **Programmiersprache:** Ausschließlich modernes Rust (Edition 2024).
+
+---
+
+## 2. Dependency-Erkundung via DeepWiki MCP & `deps.md`
+- **Keine Blind-Implementierung von Drittbibliotheken:** Sobald eine externe Dependency in Betracht gezogen oder eingeführt wird, musst du zwingend das **DeepWiki MCP** verwenden, um die Dokumentation, Architektur, Best Practices und API-Signaturen direkt aus dem offiziellen GitHub-Repository der Crate abzufragen.
+- **Dokumentation in `deps.md`:** 
+  - Führe im Projektverzeichnis eine Datei `deps.md`.
+  - Notiere darin jede Crate in der GitHub-Notation: `<owner>/<repo>` (z. B. `algesten/ureq`, `serde-rs/serde`).
+  - Dokumentiere für jede Abhängigkeit kurz die über DeepWiki ermittelten Codebeispiele, Eigenheiten und den Einsatzzweck.
+- **Versions-Aktualität:**
+  - Nutze Tools wie `cargo-edit` (`cargo upgrade`), um sicherzustellen, dass ausnahmslos die **allerneuesten verfügbaren Versionen** verwendet werden (auch wenn Breaking Changes existieren – passe den Code proaktiv an die neueste API an).
+
+---
+
+## 3. Code-Architektur & Dateistruktur-Regeln
+- **Schlank & Minimal:** Halte die Abhängigkeiten so gering wie möglich. Schreibe modularen, effizienten und idiomatischen Rust-Code.
+- **Strikte Datei-Aufteilung (300-Zeilen-Regel):**
+  - Sobald eine Datei mehr als eine klar abgegrenzte Zuständigkeit hat oder ca. **300 Zeilen** überschreitet, ist sie zwingend in semantisch getrennte Dateien aufzuspalten.
+  - Jede Quellcodedatei (außer `main.rs` / `lib.rs` / `mod.rs`) erhält ein zweistelliges Nummernpräfix, das die Initialisierungs- bzw. Datenflussreihenfolge widerspiegelt (z. B. `01_types.rs`, `02_config.rs`, `03_client.rs`, `04_parser.rs`).
+  - Zusammengehörige Typen und ihre spezifischen Unit-Tests bleiben in derselben Datei.
+  - `main.rs` bzw. `lib.rs` dient ausschließlich als oberste Verdrahtung (Deklarationen, CLI-Einstiegspunkt, Exit-Codes) und enthält **keine Geschäftslogik**.
+
+---
+
+## 4. Tooling & Code-Qualität
+Führe nach jeder Änderung und vor jedem Commit folgende Werkzeuge aus:
+1. `cargo fmt --all` (Zwang zur Normalisierung der Codeformatierung).
+2. `cargo clippy --all-targets --all-features -- -D warnings` (Keine Warnungen erlaubt).
+3. `cargo test` (Alle Unit- und Integrationstests müssen grün sein).
+
+---
+
+## 5. Arbeitsweise: 2-Stufen-Planung & Git-Disziplin
+Bevor du produktiven Code schreibst, erstellst du zwei Dokumente:
+
+### A. `plan.md` (Implementierungsplan)
+Befähigt einen unabhängigen Agenten, ohne Vorwissen den vollen Kontext zu erfassen:
+- **Kontext-Dateien:** Liste aller relevanten Dateien im Repo/System mit Kurzbeschreibung.
+- **Dependency-Plan:** Welche Crates wurden via DeepWiki geprüft und warum ausgewählt?
+- **Architektur-Entscheidungen:** Begründung der Modul- und Datenflussstruktur.
+- **Git-Strategie:** Definition sauberer atomarer Commits im **Conventional Commits** Format (z. B. `feat(parser): add zero-copy line tokenizer`, `test(mcp): add mock integration test`).
+
+### B. `task.md` (Serielle Aufgabenliste)
+- Zerlege das Gesamtprojekt in eine fein granulierte, serielle Checkliste (`- [ ] Task`).
+- Jeder Modus/Komponente erhält eigene Phasen:
+  1. API-/Typ-Definition & Vorab-Recherche (DeepWiki)
+  2. Implementierung
+  3. Lokale Unit-Tests & Mocks
+  4. Integrationstests / Smoke-Tests
+- Hake erledigte Punkte sukzessive ab (`- [x] Task`).
+
+---
+
+## 6. Projektabschluss: Walkthrough-Dokument (`walkthrough.md`)
+Nachdem alle Tests grün sind und der Code committed ist, erstelle die Datei `walkthrough.md` im Projekt- bzw. Planungsordner.
+
+**Strikte Vorgaben für den Walkthrough:**
+- **Sprache & Stil:** Zwingend auf **Deutsch**. Didaktisch hervorragend aufgebaut, flüssig und mitreißend zu lesen, holt Entwickler auf Senior-Niveau ab.
+- **Erklärungen:** Fachbegriffe werden prägnant und intuitiv erklärt.
+- **Visualisierung:** Nutze reichlich Code-Snippets und zwingend **Mermaid-Diagramme** für Datenflüsse, Zustandsübergänge und Architektur.
+- **Feste Gliederung:**
+  1. **Was exakt implementiert wurde** (Überblick & Funktionalität).
+  2. **Architektur- und Design-Entscheidungen** (insb. was aufgrund von Tests/Problemen spontan angepasst werden musste).
+  3. **Learnings & zukünftige Erweiterungen**.
+  4. **Docker-Environment-Updates:** Welche Systempakete/Tools dauerhaft in das `Dockerfile` aufgenommen werden sollten.
+
+
+# ==============================================================================
+# TEIL 2: SPEZIFISCHER PROJEKTAUFTRAG
+# ==============================================================================
+
+## Ziel des Programms
+
+Entwickle ein eigenständiges Linux Programm in Rust, das die Datei und
+Verzeichnisgroessen mittels Treemap visualisiert.  Das Programm soll
+wgpu und winit benutzen. Nur Vulkan soll unterstuetzt sein. Es soll
+absolut minimal sein. Versuche mit der kleinstmoeglichen Anzahl von
+dependencies auszukommen und eine kleine Binary zu erreichen. Versuche
+insbesondere die Einstellungen der Dependencies in Cargo.toml so
+einzustellen, dass sie selbst nicht mehr als noetig ins Projekt
+ziehen.
+
+Du kannst /workspace/src/rs_disk_treemap/03_mvp_lisp/src/main.rs als
+Beispiel verwenden.
+
+Ich habe bereits Informationen zu moeglichen dependencies
+gesammelt. Du kannst sie hier finden:
+/workspace/src/cl-rust-generator/examples/30_wgpu/plan/misc
+
+---
+
+## Spezifische Anforderungen
+
+Wichtige features: Rechtecke muessen angezeigt werden (squarified
+treemap). Mouse hover soll groesse Verzeichnis und Dateinamen fuer die
+darunterliegende Datei anzeigen.
+
+Nice to have:
+- Farbe zeigt Dateityp an
+- Cushion Treemap mit Shader
+
