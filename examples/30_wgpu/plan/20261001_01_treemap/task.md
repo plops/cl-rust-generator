@@ -50,5 +50,5 @@ Legende: `- [ ]` offen, `- [x]` erledigt. Serielle Abarbeitung.
 - [x] `cargo upgrade` (neueste Versionen prüfen), `cargo tree`-Kontrolle (107 statt 152 Crates)
 - [x] Release-Build + Binary-Größe messen (3.1 MB, `strip`+LTO+`opt-z`+`abort`)
 - [x] Smoke-Test unter `xvfb` mit llvmpipe-Vulkan (Screenshots, Hover-Titel, `/`-Scan <20 s)
-- [ ] `walkthrough.md` schreiben (Deutsch, Mermaid, feste Gliederung)
-- [ ] Commit `docs(walkthrough): add german walkthrough with diagrams`
+- [x] `walkthrough.md` schreiben (Deutsch, Mermaid, feste Gliederung)
+- [x] Commit `docs(walkthrough): add german walkthrough with diagrams`
