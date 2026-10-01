@@ -15,7 +15,8 @@ const TREEMAP_SHADER: &str = include_str!("shaders/treemap.wgsl");
 const TEXT_SHADER: &str = include_str!("shaders/text.wgsl");
 
 /// Obergrenzen der Instanz-Buffer (schützen vor Riesen-Bäumen).
-pub const MAX_RECTS: usize = 65_536;
+/// 262.144 × 32 Byte = 8 MB — genug für ~260k sichtbare Rechtecke.
+pub const MAX_RECTS: usize = 262_144;
 pub const MAX_GLYPHS: usize = 512;
 
 /// `RectInstance`-Flags (müssen zu `treemap.wgsl` passen).

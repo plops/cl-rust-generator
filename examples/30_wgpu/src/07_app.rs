@@ -76,16 +76,31 @@ impl App {
         let (w, h) = self.size;
         let canvas_h = (h as f32 - HEADER_H).max(1.0);
         let canvas = Rect::new(0.0, HEADER_H, w as f32, canvas_h);
-        let mut rects = vec![RectInstance {
-            x: 0.0,
-            y: 0.0,
-            w: w as f32,
-            h: HEADER_H,
-            r: HEADER_BG.0,
-            g: HEADER_BG.1,
-            b: HEADER_BG.2,
-            flags: FLAG_FLAT,
-        }];
+        let mut rects = vec![
+            RectInstance {
+                x: 0.0,
+                y: 0.0,
+                w: w as f32,
+                h: HEADER_H,
+                r: HEADER_BG.0,
+                g: HEADER_BG.1,
+                b: HEADER_BG.2,
+                flags: FLAG_FLAT,
+            },
+            // Canvas-Hintergrund: Regionen ohne gezeichnete Rechtecke
+            // (Subpixel-Skip, MAX_RECTS-Kappe) zeigen Verzeichnisfarbe
+            // statt der Clear-Farbe.
+            RectInstance {
+                x: canvas.x,
+                y: canvas.y,
+                w: canvas.w,
+                h: canvas_h,
+                r: crate::color::DIR_COLOR.r,
+                g: crate::color::DIR_COLOR.g,
+                b: crate::color::DIR_COLOR.b,
+                flags: FLAG_FLAT,
+            },
+        ];
         if let Some(root) = &mut self.root {
             root.rect = canvas;
             squarify(&mut root.children, canvas);
@@ -158,9 +173,17 @@ impl App {
     }
 }
 
-/// Sammelt Zeichen-Rechtecke in Tiefensuche (Eltern zuerst, Kinder darüber).
+/// Sammelt Zeichen-Rechtecke in Breitensuche (Eltern zuerst, Kinder darüber).
+///
+/// Breitensuche statt Tiefensuche: Bei riesigen Bäumen kappt `MAX_RECTS`
+/// sonst ganze hintere Teilbäume — deren Top-Level-Rechtecke (sortiert
+/// klein = unten rechts) bleiben grau, obwohl Hover sie findet. In
+/// Breitensuche stehen alle Top-Level-Rechtecke vorne; die Kappe trifft
+/// nur noch tiefes Detail, unter dem die Elternfarbe sichtbar bleibt.
 fn collect_rects(nodes: &[Node], out: &mut Vec<RectInstance>) {
-    for node in nodes {
+    use std::collections::VecDeque;
+    let mut queue: VecDeque<&Node> = nodes.iter().collect();
+    while let Some(node) = queue.pop_front() {
         if out.len() >= crate::render::MAX_RECTS {
             return;
         }
@@ -176,7 +199,7 @@ fn collect_rects(nodes: &[Node], out: &mut Vec<RectInstance>) {
                 flags: 0,
             });
         }
-        collect_rects(&node.children, out);
+        queue.extend(node.children.iter());
     }
 }
 
@@ -289,6 +312,45 @@ mod tests {
     fn truncate_short_and_long() {
         assert_eq!(truncate("abc", 10), "abc");
         assert_eq!(truncate("abcdef", 4), "abcd");
+    }
+
+    fn flat_node(name: &str, w: f32, children: Vec<Node>) -> Node {
+        use crate::types::{Rect, Rgb};
+        Node {
+            path: PathBuf::from(name),
+            size: 10,
+            is_dir: false,
+            children,
+            rect: Rect::new(0.0, 0.0, w, 10.0),
+            color: Rgb::new(1.0, 0.0, 0.0),
+        }
+    }
+
+    #[test]
+    fn collect_is_breadth_first() {
+        // Regressionstest: Bei Tiefensuche kappt MAX_RECTS ganze hintere
+        // Regionen (unten rechts grau), obwohl Hover dort trifft. In
+        // Breitensuche stehen alle Top-Level-Rechtecke vorne.
+        let nodes = vec![
+            flat_node("A", 30.0, vec![flat_node("a1", 10.0, vec![])]),
+            flat_node("B", 20.0, vec![flat_node("b1", 11.0, vec![])]),
+            flat_node("C", 15.0, vec![]),
+        ];
+        let mut out = Vec::new();
+        collect_rects(&nodes, &mut out);
+        let widths: Vec<f32> = out.iter().map(|r| r.w).collect();
+        assert_eq!(widths, vec![30.0, 20.0, 15.0, 10.0, 11.0]);
+    }
+
+    #[test]
+    fn collect_respects_cap() {
+        use crate::render::MAX_RECTS;
+        let nodes: Vec<Node> = (0..MAX_RECTS + 1000)
+            .map(|i| flat_node(&format!("f{i}"), 5.0, vec![]))
+            .collect();
+        let mut out = Vec::new();
+        collect_rects(&nodes, &mut out);
+        assert_eq!(out.len(), MAX_RECTS);
     }
 
     #[test]

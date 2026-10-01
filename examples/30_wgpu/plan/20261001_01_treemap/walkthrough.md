@@ -219,9 +219,12 @@ Scan→Layout→Pick-Pipeline) und hält jeden Commit für sich kompilier-
 und testbar.
 
 **Obergrenzen gegen Riesen-Bäume.** Rekursion nur für Rechtecke > 4 px
-(MVP-Regel), Zeichen-Skip unter 1 px, Instanz-Cap bei 65.536 Rechtecken
-und 512 Glyphen. Der `/`-Scan mit Millionen Dateien läuft dadurch in
-< 20 s bei 385 MB RSS.
+(MVP-Regel), Zeichen-Skip unter 1 px, Instanz-Cap bei 262.144 Rechtecken
+(8 MB Buffer) und 512 Glyphen. Gesammelt wird in **Breitensuche**, damit
+die Kappe nur tiefes Detail trifft statt ganzer Regionen (anfangs
+Tiefensuche — ließ unten rechts grau, s. 2.2); ein Canvas-Hintergrund in
+Verzeichnisfarbe fängt jeden Rest ab. Der `/`-Scan mit Millionen Dateien
+läuft dadurch in < 20 s bei 385 MB RSS.
 
 ### 2.2 Was Tests und Probleme spontan erzwangen
 
@@ -263,6 +266,14 @@ mit mehr Endungen.
 schlanken Container fehlte sie → Panik beim Start. Per `apt` installiert
 und unten fürs Dockerfile notiert. Reine Laufzeit-, keine Compilezeit-
 Abhängigkeit.
+
+**Graue Region trotz Hover-Treffern (Nutzer-Fund).** Auf großen Platten
+blieb unten rechts grau, obwohl Hover dort Dateien fand. Ursache:
+`collect_rects` sammelte per Tiefensuche und kappte bei 65.536
+Instanzen — hintere Top-Level-Teilbäume (sortiert klein = unten rechts)
+wurden nie gezeichnet, `pick()` (ohne Kappe) fand sie trotzdem. Fix:
+Breitensuche + Cap auf 262.144 + Canvas-Hintergrund. Vorher/Nachher auf
+100k-Dateien-Fixture: Hintergrund-Anteil unten rechts 82,7 % → 0 %.
 
 ### 2.3 Der Cushion-Shader (Kernstück)
 
