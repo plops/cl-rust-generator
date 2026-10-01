@@ -30,7 +30,7 @@ wgpu = { version = "30", default-features = false, features = ["vulkan", "wgsl"]
 ## `rust-windowing/winit` — Fenster & Events
 
 ```toml
-winit = { version = "0.30", default-features = false, features = ["x11"] }
+winit = { version = "0.30", default-features = false, features = ["x11", "rwh_06"] }
 ```
 
 - **Einsatzzweck**: Fenster-Erstellung, Maus-Hover (`CursorMoved`),
@@ -40,9 +40,12 @@ winit = { version = "0.30", default-features = false, features = ["x11"] }
     wird in `resumed()` via `ActiveEventLoop::create_window` erzeugt.
   - Events in `window_event()`: `CloseRequested`, `Resized`,
     `CursorMoved`, `RedrawRequested`, `KeyboardInput`.
-  - Default-Features sind `x11` + `wayland (+dlopen, +csd-adwaita)`;
-    wir aktivieren bewusst nur `x11` (X11/Xvfb-Testbarkeit, ~halber
-    Plattform-Code, kleinere Binary).
+  - Default-Features sind `x11` + `wayland (+dlopen, +csd-adwaita)` +
+    `rwh_06`; wir aktivieren bewusst nur `x11` (X11/Xvfb-Testbarkeit,
+    ~halber Plattform-Code) plus `rwh_06` (Pflicht: ohne dieses Feature
+    implementiert `Window` die `HasWindowHandle`/`HasDisplayHandle`-Traits
+    nicht und `wgpu::Instance::create_surface` kompiliert nicht; zieht nur
+    das dep-lose `raw-window-handle` 0.6 rein).
   - `EventLoop::run_app(&mut handler)` startet die Schleife;
     `ControlFlow::Wait` + `request_redraw()` = On-Demand-Rendering.
 - **Version**: 0.30.13 (neueste **stabile**; `0.31-beta` bewusst

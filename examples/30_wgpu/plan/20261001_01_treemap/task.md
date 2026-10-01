@@ -25,14 +25,14 @@ Legende: `- [ ]` offen, `- [x]` erledigt. Serielle Abarbeitung.
 
 ## Phase 2: Text-Atlas & wgpu-Renderer
 
-- [ ] API-/Typ-Definition: Atlas-Layout, Instanz-Formate, Uniform (`05_text.rs`, `06_render.rs`)
-- [ ] Implementierung: font8x8-Atlas (`ASCII 32..127`, 16x6-Grid, RGBA-Textur)
-- [ ] Implementierung: WGSL-Shader (`treemap.wgsl` mit Cushion-Shading, `text.wgsl`)
-- [ ] Implementierung: `WgpuState` (Vulkan-Instance, Device, Surface, Pipelines, Buffer)
-- [ ] Implementierung: eigener `block_on`-Mini-Executor (kein `pollster`)
-- [ ] Unit-Tests: Atlas-Maße/Glyphen-Bits, Instanz-Aufbau, `block_on`
-- [ ] `cargo fmt`, Clippy (`-D warnings`), `cargo test`
-- [ ] Commit `feat(render): add vulkan-only wgpu renderer with cushion shader`
+- [x] API-/Typ-Definition: Atlas-Layout, Instanz-Formate, Uniform (`05_text.rs`, `06_render.rs`)
+- [x] Implementierung: font8x8-Atlas (`ASCII 32..127`, 16x6-Grid, RGBA-Textur)
+- [x] Implementierung: WGSL-Shader (`treemap.wgsl` mit Cushion-Shading, `text.wgsl`)
+- [x] Implementierung: `WgpuState` (Vulkan-Instance, Device, Surface, Pipelines, Buffer)
+- [x] Implementierung: eigener `block_on`-Mini-Executor (kein `pollster`)
+- [x] Unit-Tests: Atlas-Maße/Glyphen-Bits, Instanz-Aufbau, `block_on`
+- [x] `cargo fmt`, Clippy (`-D warnings`), `cargo test`
+- [x] Commit `feat(render): add vulkan-only wgpu renderer with cushion shader`
 
 ## Phase 3: winit-App & Verdrahtung
 
@@ -47,8 +47,8 @@ Legende: `- [ ]` offen, `- [x]` erledigt. Serielle Abarbeitung.
 
 ## Phase 4: Verifikation & Abschluss
 
-- [ ] `cargo upgrade` (neueste Versionen prüfen), `cargo tree`-Kontrolle (Dep-Zahl)
-- [ ] Release-Build + Binary-Größe messen (`strip`, Größe dokumentieren)
-- [ ] Smoke-Test unter `xvfb` mit llvmpipe-Vulkan (Screenshot/Exit-Code)
+- [ ] `cargo upgrade` (neueste Versionen prüfen), `cargo tree`-Kontrolle (107 statt 152 Crates)
+- [ ] Release-Build + Binary-Größe messen (3.1 MB, `strip`+LTO+`opt-z`+`abort`)
+- [ ] Smoke-Test unter `xvfb` mit llvmpipe-Vulkan (Screenshots, Hover-Titel, `/`-Scan <20 s)
 - [ ] `walkthrough.md` schreiben (Deutsch, Mermaid, feste Gliederung)
 - [ ] Commit `docs(walkthrough): add german walkthrough with diagrams`

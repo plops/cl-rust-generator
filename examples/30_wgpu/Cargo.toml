@@ -7,7 +7,7 @@ rust-version = "1.87"
 [dependencies]
 font8x8 = "0.3"
 wgpu = { version = "30", default-features = false, features = ["vulkan", "wgsl"] }
-winit = { version = "0.30", default-features = false, features = ["x11"] }
+winit = { version = "0.30", default-features = false, features = ["x11", "rwh_06"] }
 
 [profile.release]
 opt-level = "z"

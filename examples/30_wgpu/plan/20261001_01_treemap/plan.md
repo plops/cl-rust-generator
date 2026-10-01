@@ -37,7 +37,7 @@ Nice-to-have (wird mit umgesetzt):
 | Crate | GitHub-Notation | Version | Features | Zweck |
 |---|---|---|---|---|
 | `wgpu` | `gfx-rs/wgpu` | 30.x (neueste) | `default-features=false`, `vulkan`, `wgsl` | Vulkan-Rendering, WGSL-Shader |
-| `winit` | `rust-windowing/winit` | 0.30.x stable (neueste) | `default-features=false`, `x11` | Fenster, Maus-/Resize-Events |
+| `winit` | `rust-windowing/winit` | 0.30.x stable (neueste) | `default-features=false`, `x11`, `rwh_06` | Fenster, Maus-/Resize-Events |
 | `font8x8` | `saibatizoku/font8x8-rs` (GitLab) | 0.3.x | keine | 8x8-Bitmap-Font, null transitive Deps |
 
 Begründungen:
