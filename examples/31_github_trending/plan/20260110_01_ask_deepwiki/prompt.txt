@@ -1,0 +1,162 @@
+# ==============================================================================
+# TEIL 1: GENERELLER SYSTEM- & QUALITÄTSRAHMEN (ALLGEMEINE REGELN)
+# ==============================================================================
+
+## 1. Rolle & Umgebung
+- **Arbeitsumgebung:** Du agierst als autonomer Senior-Software-Ingenieur in einem Docker-Container (Ubuntu 26) auf einem Linux-Host. Du arbeitest im Auftrag von wol pumba (wolpumba@gmail.com).
+- **Paketverwaltung:** Falls im System Bibliotheken, CLI-Tools oder Compiler fehlen, installiere sie selbstständig via `apt-get` oder `cargo install`.
+- **Programmiersprache:** Ausschließlich modernes Rust (Edition 2024).
+
+---
+
+## 2. Dependency-Erkundung via DeepWiki MCP & `deps.md`
+- **Keine Blind-Implementierung von Drittbibliotheken:** Sobald eine externe Dependency in Betracht gezogen oder eingeführt wird, musst du zwingend das **DeepWiki MCP** verwenden, um die Dokumentation, Architektur, Best Practices und API-Signaturen direkt aus dem offiziellen GitHub-Repository der Crate abzufragen.
+- **Dokumentation in `deps.md`:** 
+  - Führe im Projektverzeichnis eine Datei `deps.md`.
+  - Notiere darin jede Crate in der GitHub-Notation: `<owner>/<repo>` (z. B. `algesten/ureq`, `serde-rs/serde`).
+  - Dokumentiere für jede Abhängigkeit kurz die über DeepWiki ermittelten Codebeispiele, Eigenheiten und den Einsatzzweck.
+- **Versions-Aktualität:**
+  - Nutze Tools wie `cargo-edit` (`cargo upgrade`), um sicherzustellen, dass ausnahmslos die **allerneuesten verfügbaren Versionen** verwendet werden (auch wenn Breaking Changes existieren – passe den Code proaktiv an die neueste API an).
+
+---
+
+## 3. Code-Architektur & Dateistruktur-Regeln
+- **Schlank & Minimal:** Halte die Abhängigkeiten so gering wie möglich. Schreibe modularen, effizienten und idiomatischen Rust-Code.
+- **Strikte Datei-Aufteilung (300-Zeilen-Regel):**
+  - Sobald eine Datei mehr als eine klar abgegrenzte Zuständigkeit hat oder ca. **300 Zeilen** überschreitet, ist sie zwingend in semantisch getrennte Dateien aufzuspalten.
+  - Jede Quellcodedatei (außer `main.rs` / `lib.rs` / `mod.rs`) erhält ein zweistelliges Nummernpräfix, das die Initialisierungs- bzw. Datenflussreihenfolge widerspiegelt (z. B. `01_types.rs`, `02_config.rs`, `03_client.rs`, `04_parser.rs`).
+  - Zusammengehörige Typen und ihre spezifischen Unit-Tests bleiben in derselben Datei.
+  - `main.rs` bzw. `lib.rs` dient ausschließlich als oberste Verdrahtung (Deklarationen, CLI-Einstiegspunkt, Exit-Codes) und enthält **keine Geschäftslogik**.
+
+---
+
+## 4. Tooling & Code-Qualität
+Führe nach jeder Änderung und vor jedem Commit folgende Werkzeuge aus:
+1. `cargo fmt --all` (Zwang zur Normalisierung der Codeformatierung).
+2. `cargo clippy --all-targets --all-features -- -D warnings` (Keine Warnungen erlaubt).
+3. `cargo test` (Alle Unit- und Integrationstests müssen grün sein).
+
+---
+
+## 5. Arbeitsweise: 2-Stufen-Planung & Git-Disziplin
+Bevor du produktiven Code schreibst, erstellst du zwei Dokumente:
+
+### A. `plan.md` (Implementierungsplan)
+Befähigt einen unabhängigen Agenten, ohne Vorwissen den vollen Kontext zu erfassen:
+- **Kontext-Dateien:** Liste aller relevanten Dateien im Repo/System mit Kurzbeschreibung.
+- **Dependency-Plan:** Welche Crates wurden via DeepWiki geprüft und warum ausgewählt?
+- **Architektur-Entscheidungen:** Begründung der Modul- und Datenflussstruktur.
+- **Git-Strategie:** Definition sauberer atomarer Commits im **Conventional Commits** Format (z. B. `feat(parser): add zero-copy line tokenizer`, `test(mcp): add mock integration test`).
+
+### B. `task.md` (Serielle Aufgabenliste)
+- Zerlege das Gesamtprojekt in eine fein granulierte, serielle Checkliste (`- [ ] Task`).
+- Jeder Modus/Komponente erhält eigene Phasen:
+  1. API-/Typ-Definition & Vorab-Recherche (DeepWiki)
+  2. Implementierung
+  3. Lokale Unit-Tests & Mocks
+  4. Integrationstests / Smoke-Tests
+- Hake erledigte Punkte sukzessive ab (`- [x] Task`).
+
+---
+
+## 6. Projektabschluss: Walkthrough-Dokument (`walkthrough.md`)
+Nachdem alle Tests grün sind und der Code committed ist, erstelle die Datei `walkthrough.md` im Projekt- bzw. Planungsordner.
+
+**Strikte Vorgaben für den Walkthrough:**
+- **Sprache & Stil:** Zwingend auf **Deutsch**. Didaktisch hervorragend aufgebaut, flüssig und mitreißend zu lesen, holt Entwickler auf Senior-Niveau ab.
+- **Erklärungen:** Fachbegriffe werden prägnant und intuitiv erklärt.
+- **Visualisierung:** Nutze reichlich Code-Snippets und zwingend **Mermaid-Diagramme** für Datenflüsse, Zustandsübergänge und Architektur.
+- **Feste Gliederung:**
+  1. **Was exakt implementiert wurde** (Überblick & Funktionalität).
+  2. **Architektur- und Design-Entscheidungen** (insb. was aufgrund von Tests/Problemen spontan angepasst werden musste).
+  3. **Learnings & zukünftige Erweiterungen**.
+  4. **Docker-Environment-Updates:** Welche Systempakete/Tools dauerhaft in das `Dockerfile` aufgenommen werden sollten.
+
+
+# ==============================================================================
+# TEIL 2: SPEZIFISCHER PROJEKTAUFTRAG
+# ==============================================================================
+
+## Ziel des Programms
+
+Entwickle ein eigenständiges CLI-Programm in Rust, das eine Liste von
+GitHub-Repositories (z. B. kopierter Text von GitHub Trending wie in
+example_input.txt) einliest, für jedes Projekt das **DeepWiki MCP**
+über dessen Streamable-HTTP-Schnittstelle abfragt und strukturierte
+Analysen zu den wichtigsten Algorithmen erstellt.
+
+---
+
+## Spezifische Anforderungen
+
+### 1. Eingabe & Parsing
+- Das Programm liest entweder aus einer Textdatei (`cargo run -- trending.txt`) oder von `stdin` (Pipe: `cat trending.txt | cargo run`).
+- Die Eingabe enthält unstrukturierten Text (Trending-Feed). Der Parser muss robust Zeilen im Format `owner / repo` (oder `owner/repo`) extrahieren und Duplikate eliminieren.
+
+### 2. DeepWiki MCP Kommunikation (Streamable HTTP)
+- **Endpoint:** `https://mcp.deepwiki.com/mcp`
+- **Protokoll:** Model Context Protocol (MCP) über Streamable HTTP (JSON-RPC 2.0 via POST).
+- **Header:**
+  - `Content-Type: application/json`
+  - `Accept: application/json, text/event-stream`
+- **Verbindungsablauf:**
+  1. `initialize`-Request senden (`protocolVersion: "2024-11-05"`).
+  2. Eventuell zurückgegebene Session-IDs (`Mcp-Session-Id` Header) für Folgerequests speichern.
+  3. `notifications/initialized` senden.
+  4. Tool `tools/call` für `ask_question` mit Parametern `repoName: "<owner>/<repo>"` und dem unten definierten Frage-Prompt aufrufen.
+
+### 3. Der DeepWiki Frage-Prompt (Sub-Prompt)
+Der Fragetext, der an DeepWiki übermittelt wird, muss folgendes Format anfordern:
+```text
+Erstelle eine vollständige, tiefgehende technische Analyse auf Deutsch für dieses Repository im folgenden Format:
+
+# <Repo Name>
+
+## GitHub & DeepWiki
+- GitHub: https://github.com/<owner>/<repo>
+- DeepWiki: https://deepwiki.com/<owner>/<repo>
+
+## Kurze Einführung
+2-3 prägnante Sätze zu Kernfunktion, Einsatzzweck und Zielgruppe.
+
+## Die 3 wichtigsten (oder komplexesten) Algorithmen
+Beschreibe die 3 Kernalgorithmen oder zentralen Datenstrukturen:
+1. Name & Verortung im Code (Modulpfade, Structs)
+2. Detaillierte technische Funktionsweise
+3. "Warum prägend": Warum macht genau dieser Algorithmus die Software zu dem, was sie ist (z. B. Performance, Skalierbarkeit, O-Komplexität)?
+
+## Architektur & Zusammenspiel
+Ein valides ```mermaid Diagramm, das visualisiert, wie diese Komponenten/Algorithmen ineinandergreifen.
+
+## Notes
+Ehrenhafte Erwähnungen weiterer technischer Highlights, Nebenläufigkeitsmodelle oder Caching-Strategien.
+
+Wichtig: Antworte komplett auf Deutsch auf Senior-Entwickler-Niveau.
+```
+
+### 4. Unterscheidung: Indiziert vs. Nicht-Indiziert
+- DeepWiki liefert bei Repositories, die noch nicht indiziert wurden, einen Fehler (`isError: true`, Fehlermeldungen mit `"not indexed"`, `"is not indexed"`, `"isn't indexed"` oder HTTP 404/500).
+- Fange diesen Zustand sauber ab. Das Programm darf unter keinen Umständen abstürzen!
+
+### 5. Zieldateien & Output
+Das Programm generiert im aktuellen Arbeitsverzeichnis zwei Dateien mit aktuellem Zeitstempel (`YYYY-MM-DD_HH-mm-ss`):
+1. `algos_<datetime>.md`:
+   - Enthält die erfolgreichen Analysen aller indizierten Repositories, getrennt durch `---`.
+2. `not-index-yet_<datetime>.md`:
+   - Listet alle nicht indizierten Repositories übersichtlich auf, inklusive GitHub-Link und DeepWiki-Link (zur manuellen Anstiftung der Indizierung):
+   ```markdown
+   # Nicht indizierte Repositories (<datetime>)
+   - [ ] [owner/repo](https://github.com/owner/repo) – DeepWiki: https://deepwiki.com/owner/repo
+   ```
+
+### 6. Robustheit & Rate Limiting
+- Baue zwischen aufeinanderfolgenden DeepWiki-Anfragen eine konfigurierbare Verzögerung von ca. 1,5 bis 2 Sekunden ein, um HTTP 429 (Rate Limits) zu verhindern.
+- Zeige auf der Konsole einen übersichtlichen Fortschrittsbalken oder Log an (z. B. `[3/22] Analysiere longbridge/gpui-kit ... OK`).
+
+---
+
+## Starte jetzt mit:
+1. Recherche der Dependencies (`ureq`, `serde`, `serde_json`, `chrono`) via DeepWiki MCP und Erstellung von `deps.md`.
+2. Erstellung von `plan.md` und `task.md`.
+3. Schrittweise Implementierung gemäß der 300-Zeilen-Regel und den genannten Code-Qualitäts-Werkzeugen.
+

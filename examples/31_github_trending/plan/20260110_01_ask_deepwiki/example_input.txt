@@ -1,0 +1,118 @@
+
+Skip to content
+
+    Trending
+
+Explore
+Topics
+Trending
+Collections
+Events
+GitHub Sponsors
+Trending
+
+See what the GitHub community is most excited about this month.
+Repositories
+Developers
+max-sixty / worktrunk
+
+Worktrunk is a CLI for Git worktree management, designed for parallel AI agent workflows
+Rust 8,589 306 Built by @max-sixty @claude @worktrunk-bot @dependabot @github-actions 1,884 stars this month
+longbridge / gpui-kit
+
+Rust GUI components for building fantastic cross-platform desktop application by using GPUI.
+Rust 15,433 956 Built by @huacnlee @madcodelife @claude @codex @ylinwind 1,600 stars this month
+rustfs / rustfs
+
+RustFS is an open-source, S3-compatible high-performance object storage system supporting migration and coexistence with other S3-compatible platforms such as MinIO and Ceph.
+Rust 34,258 1,543 Built by @overtrue @houseme @heihutu @weisd @cxymds 2,949 stars this month
+clash-verge-rev / clash-verge-rev
+
+A modern GUI client based on Tauri, designed to run in Windows, macOS and Linux for tailored proxy experience
+Rust 148,661 10,673 Built by @Tunglies @zzzgydi @wonfen @MystiPanda @renovate 7,571 stars this month
+rustdesk / rustdesk
+
+An open-source remote desktop application designed for self-hosting, as an alternative to TeamViewer.
+Rust 124,930 19,371 Built by @rustdesk @fufesou @21pages @Kingtous @Heap-Hop 3,056 stars this month
+magnitudedev / magnitude
+
+Open source inference engine for agents that optimizes itself for your exact hardware. Compiles and tunes its kernels on your device, so open models run up to 2x faster than llama.cpp. Works on Apple Silicon, NVIDIA, AMD, or just a CPU.
+Rust 5,973 401 Built by @anerli @thrgreenwald @github-actions @ambikeesshh @Nitish-1303 3,983 stars this month
+HakanSeven12 / OpenCADStudio
+
+A CAD application built with Rust — 2D/3D drawing, DWG/DXF support, and GPU-accelerated rendering
+Rust 2,380 249 Built by @HakanSeven12 @claude @ramox81 @KarimJerbi @felixriestra 1,396 stars this month
+pacifio / atlas
+
+Source control for agents. Use multiple coding agents, track their changes and query them in one place
+Rust 8,554 341 Built by @pacifio @uzayer @Ukaykhingmarma28 @ahammadnafiz @claude 7,121 stars this month
+ankitects / anki
+
+Anki is a smart spaced repetition flashcard program
+Rust 31,691 3,290 Built by @dae @hgiesel @RumovZ @abdnh @Arthur-Milchior 1,774 stars this month
+mesamirh / MovieBox-Tui
+
+Terminal interface to find, download, and stream movies, TV shows, and live TV using local media players.
+Rust 2,375 271 Built by @mesamirh @dependabot @fredIV @M-Nabeegh 1,048 stars this month
+lbjlaq / Antigravity-Manager
+
+Professional Antigravity Account Manager & Switcher. One-click seamless account switching for Antigravity Tools. Built with Tauri v2 + React (Rust).专业的 Antigravity 账号管理与切换工具。为 Antigravity 提供一键无缝账号切换功能。
+Rust 31,852 3,436 Built by @lbjlaq @jeikl @new-Beginner @claude 1,237 stars this month
+NVIDIA / OpenShell
+
+OpenShell is the safe, private runtime for autonomous AI agents.
+Rust 13,745 1,605 Built by @drew @johntmyers @pimlock @miyoungc @elezar 5,240 stars this month
+akitaonrails / ai-memory
+
+Solution for long term memory for agent coding CLIs and to facilitate handoff between different agent vendors
+Rust 8,687 597 Built by @akitaonrails @claude @djalmajr @samirhvbr @everton-dgn 3,418 stars this month
+pnpm / pnpm
+
+Fast, disk space efficient package manager
+Rust 36,722 1,900 Built by @zkochan @claude @KSXGitHub @rstacruz @renovate-bot 439 stars this month
+juspay / hyperswitch
+
+Open source, composable payments platform | PCI compliant | SaaS and Self-host options | Enables connectivity to multiple payment, payout, fraud, vault and tokenization providers | Uplifts authorization with intelligent routing and revenue recovery | Reduce payment processing costs with cost observability | Reduces payment ops with reconciliation
+Rust 45,274 6,428 Built by @hyperswitch-bot @github-actions @SanchithHegde @AkshayaFoiger @swangi-kumari 2,014 stars this month
+CapSoftware / Cap
+
+Open source Loom alternative. Beautiful, shareable screen recordings.
+Rust 22,991 1,997 Built by @richiemcilroy @Brendonovich @ameer2468 @ItsEeleeya @cursoragent 1,673 stars this month
+harry0703 / MangoDisk
+
+Safety-first disk cleaner and space analyzer for macOS and Windows, with duplicate cleanup, app uninstall, startup management, system optimization, and maintenance.
+Rust 3,531 260 Built by @harry0703 @traoreera @ivg-design @claude @rorschachwhy 1,700 stars this month
+router-for-me / EasyCLIProxyAPI
+
+A desktop GUI for CLIProxyAPI and a tool for automatically configuring popular AI agents.
+Rust 2,600 211 Built by @lzt404 @luispater @faketrader @starrylistener @Roomen 913 stars this month
+pollen-robotics / microduck
+
+A Tiny biped duck robot 🦆
+Rust 9,045 1,153 Built by @pierre-rouanet @apirrone @claude @Nixxx19 @hadelan 4,797 stars this month
+remorses / gpuix
+
+Node.js & React bindings for Zed’s GPUI. Build memory efficient native apps with React and no Electron
+Rust 2,500 69 Built by @remorses @oxura @chrissm79 @mateo-m @monotykamary 1,109 stars this month
+zeronsh / zeron
+
+A native control plane for Claude Code, Codex, Cursor, Devin and other coding agents.
+Rust 2,521 241 Built by @wing-anara @claude @jsgrrchg @wingleeio @gaelcado 1,378 stars this month
+rust-lang / rust
+
+Empowering everyone to build reliable and efficient software.
+Rust 119,387 17,253 Built by @bors @matthiaskrgr @RalfJung @GuillaumeGomez @matklad 3,072 stars this month
+Footer
+© 2026 GitHub, Inc.
+Footer navigation
+
+    Terms
+    Privacy
+    Security
+    Status
+    Community
+    Docs
+    Contact
+    Manage cookies
+    Do not share my personal information
+
