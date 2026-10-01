@@ -1,8 +1,10 @@
 //! Treemap-Disk-Visualisierer: Bibliothek (Module) für Binärprogramm und Tests.
 //!
 //! Module in Datenfluss-Reihenfolge: Typen → Scan → Layout → Farbe →
-//! Text-Atlas → Vulkan-Renderer. (Die winit-Anwendung folgt in Phase 3.)
+//! Text-Atlas → Vulkan-Renderer → winit-Anwendung.
 
+#[path = "07_app.rs"]
+pub mod app;
 #[path = "04_color.rs"]
 pub mod color;
 #[path = "03_layout.rs"]
@@ -15,3 +17,5 @@ pub mod scan;
 pub mod text;
 #[path = "01_types.rs"]
 pub mod types;
+
+pub use app::App;

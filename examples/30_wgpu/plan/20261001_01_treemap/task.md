@@ -36,19 +36,19 @@ Legende: `- [ ]` offen, `- [x]` erledigt. Serielle Abarbeitung.
 
 ## Phase 3: winit-App & Verdrahtung
 
-- [ ] API-/Typ-Definition: `App`-Zustand, Hover-Picking, Header-Text (`07_app.rs`, `main.rs`)
-- [ ] Implementierung: `ApplicationHandler` (resumed/window_event/about_to_wait)
-- [ ] Implementierung: Hover-Picking (kleinstes enthaltendes Rechteck), `set_title`
-- [ ] Implementierung: Scan-Thread + mpsc, Resize-Relayout, On-Demand-Redraw
-- [ ] Implementierung: `main.rs` (CLI-Arg, EventLoop, Exit-Codes)
-- [ ] Unit-/Integrationstests: Picking-Logik, Header-Trunkierung, Scan→Layout-Pipeline
-- [ ] `cargo fmt`, Clippy (`-D warnings`), `cargo test`
-- [ ] Commit `feat(app): add winit event loop with hover picking and header text`
+- [x] API-/Typ-Definition: `App`-Zustand, Hover-Picking, Header-Text (`07_app.rs`, `main.rs`)
+- [x] Implementierung: `ApplicationHandler` (resumed/window_event/about_to_wait)
+- [x] Implementierung: Hover-Picking (kleinstes enthaltendes Rechteck), `set_title`
+- [x] Implementierung: Scan-Thread + mpsc, Resize-Relayout, On-Demand-Redraw
+- [x] Implementierung: `main.rs` (CLI-Arg, EventLoop, Exit-Codes)
+- [x] Unit-/Integrationstests: Picking-Logik, Header-Trunkierung, Scan→Layout-Pipeline
+- [x] `cargo fmt`, Clippy (`-D warnings`), `cargo test`
+- [x] Commit `feat(app): add winit event loop with hover picking and header text`
 
 ## Phase 4: Verifikation & Abschluss
 
-- [ ] `cargo upgrade` (neueste Versionen prüfen), `cargo tree`-Kontrolle (107 statt 152 Crates)
-- [ ] Release-Build + Binary-Größe messen (3.1 MB, `strip`+LTO+`opt-z`+`abort`)
-- [ ] Smoke-Test unter `xvfb` mit llvmpipe-Vulkan (Screenshots, Hover-Titel, `/`-Scan <20 s)
+- [x] `cargo upgrade` (neueste Versionen prüfen), `cargo tree`-Kontrolle (107 statt 152 Crates)
+- [x] Release-Build + Binary-Größe messen (3.1 MB, `strip`+LTO+`opt-z`+`abort`)
+- [x] Smoke-Test unter `xvfb` mit llvmpipe-Vulkan (Screenshots, Hover-Titel, `/`-Scan <20 s)
 - [ ] `walkthrough.md` schreiben (Deutsch, Mermaid, feste Gliederung)
 - [ ] Commit `docs(walkthrough): add german walkthrough with diagrams`

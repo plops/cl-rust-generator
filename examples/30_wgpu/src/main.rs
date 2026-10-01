@@ -1,26 +1,14 @@
 //! Treemap-Disk-Visualisierer (wgpu + winit, Vulkan-only).
 //!
-//! Nur Verdrahtung: Modul-Deklarationen, CLI-Einstiegspunkt, Exit-Codes.
+//! Nur Verdrahtung: CLI-Einstiegspunkt, Event-Loop, Exit-Codes.
+//! Exit-Codes: 0 = ok, 1 = kein Verzeichnis, 2 = Fenster-/GPU-Fehler.
 
 use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-#[path = "04_color.rs"]
-mod color;
-#[path = "03_layout.rs"]
-mod layout;
-#[path = "02_scan.rs"]
-mod scan;
-#[path = "01_types.rs"]
-mod types;
-
-use types::{Rect, format_bytes};
-
-/// Größenklassen für die Scan-Zusammenfassung (Phase 1: Headless-Überblick).
-const SUMMARY_TOP_N: usize = 10;
-const SUMMARY_CANVAS_W: f32 = 1920.0;
-const SUMMARY_CANVAS_H: f32 = 1044.0;
+use treemap::App;
+use winit::event_loop::EventLoop;
 
 fn main() -> ExitCode {
     let raw = std::env::args()
@@ -32,40 +20,23 @@ fn main() -> ExitCode {
         eprintln!("error: not a directory: {}", target.display());
         return ExitCode::from(1);
     }
-    let mut root = scan::scan_tree(&target);
-    let canvas = Rect::new(0.0, 0.0, SUMMARY_CANVAS_W, SUMMARY_CANVAS_H);
-    root.rect = canvas;
-    layout::squarify(&mut root.children, canvas);
-    println!(
-        "{}: {} in {} nodes",
-        target.display(),
-        format_bytes(root.size),
-        scan::count_nodes(&root)
-    );
-    for child in root.children.iter().take(SUMMARY_TOP_N) {
-        println!(
-            "  {:>10}  {:>4.0}x{:<4.0}  #{:02X}{:02X}{:02X}  {}",
-            format_bytes(child.size),
-            child.rect.w,
-            child.rect.h,
-            (child.color.r * 255.0) as u8,
-            (child.color.g * 255.0) as u8,
-            (child.color.b * 255.0) as u8,
-            child.path.display()
-        );
+    let event_loop = match EventLoop::new() {
+        Ok(event_loop) => event_loop,
+        Err(err) => {
+            eprintln!("error: event loop: {err:?}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut app = App::new(target);
+    if let Err(err) = event_loop.run_app(&mut app) {
+        eprintln!("error: event loop: {err:?}");
+        return ExitCode::from(2);
     }
-    // Center-Probe: Vorwegnahme des Hover-Pickings (tiefster Treffer).
-    match layout::pick(
-        &root.children,
-        SUMMARY_CANVAS_W / 2.0,
-        SUMMARY_CANVAS_H / 2.0,
-    ) {
-        Some(hit) => println!(
-            "center: {} ({})",
-            hit.path.display(),
-            format_bytes(hit.size)
-        ),
-        None => println!("center: (no hit)"),
+    match app.take_error() {
+        Some(err) => {
+            eprintln!("error: {err}");
+            ExitCode::from(2)
+        }
+        None => ExitCode::SUCCESS,
     }
-    ExitCode::SUCCESS
 }
