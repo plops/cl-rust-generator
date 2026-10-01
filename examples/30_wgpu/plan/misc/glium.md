@@ -48,3 +48,42 @@ Reflection garantiert Korrektheit, das State-Diffing garantiert Performance (kei
 - Ich habe auf Basis der Wiki-Doku und sichtbarer Snippets geantwortet; die zentralen Dateien `src/ops/draw.rs` und `src/program/reflection.rs` sind im Index nicht vollständig sichtbar — dort liegt vermutlich die größte Einzelkomplexität (die `draw()`-Orchestrierung).
 - "Algorithmen" ist hier eher als "Subsysteme" zu lesen; glium ist ein Wrapper, keine Algorithmen-Sammlung.
 
+
+
+how do i have to configure the glium dependency in Cargo.toml if i want the smallest possible libarry for linux x11
+
+
+For a minimal X11-only build, disable glium's default features and enable only the backends you need, then turn on the X11/GLX backends on `glutin`/`winit` yourself, since glium declares those dependencies with `default-features = false`.
+
+```toml
+[dependencies]
+glium = { version = "0.36", default-features = false, features = ["glutin_backend", "simple_window_builder"] }
+winit = { version = "0.30", default-features = false, features = ["x11"] }
+glutin = { version = "0.32", default-features = false, features = ["x11", "glx"] }
+glutin-winit = { version = "0.5", default-features = false }
+```
+
+---
+
+## Why this works
+
+Glium's default feature set is fairly heavy — it enables the glutin backend, the `SimpleWindowBuilder` helper, **and** the default features of `glutin`, `winit`, and `glutin-winit` (which pull in Wayland, EGL, etc.): [1](#0-0) 
+
+The actual feature flags you can pick from are:
+
+| Feature | Pulls in |
+|---|---|
+| `glutin_backend` | `glutin` only |
+| `simple_window_builder` | `glutin`, `glutin-winit`, `winit`, `raw-window-handle` | [2](#0-1) 
+
+Crucially, glium declares all of those optional deps with `default-features = false`, so when you disable glium's default features, `glutin`/`winit` have *no* platform backend at all — you must enable `x11`/`glx` via your own direct dependency entries as shown above: [3](#0-2) 
+
+If you don't need the `SimpleWindowBuilder` convenience API (it's mainly for the tutorial), you can drop `simple_window_builder`, `winit`, `glutin-winit`, and `raw-window-handle` entirely and manage the window/context yourself — that leaves only `glutin` as the extra dep: [2](#0-1) [4](#0-3) 
+
+The unavoidable base deps are `memoffset`, `backtrace`, `smallvec`, `fnv`, and build-time `gl_generator` — there's no feature flag to remove those: [5](#0-4) 
+
+## Notes
+
+- The exact glutin feature names (`x11`, `glx`, `egl`) come from glutin 0.32's own `Cargo.toml`, which isn't in this repo's index — verify with `cargo tree` or `cargo add glutin --features x11,glx` if a name is off.
+- If you want EGL instead of GLX (e.g., for newer NVIDIA drivers), use `features = ["x11", "egl"]` on glutin.
+- Tip: run `cargo build` and check `cargo tree -e normal` to confirm no Wayland/wayland-* crates remain.
