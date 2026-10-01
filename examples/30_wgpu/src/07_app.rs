@@ -11,7 +11,7 @@ use std::thread;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
@@ -34,7 +34,10 @@ const MIN_DRAW_PX: f32 = 1.0;
 /// Fenster-Anwendung (wird an `EventLoop::run_app` übergeben).
 pub struct App {
     target: PathBuf,
+    proxy: EventLoopProxy<()>,
+    tx: Option<mpsc::Sender<Node>>,
     rx: mpsc::Receiver<Node>,
+    scan_started: bool,
     window: Option<Arc<Window>>,
     gpu: Option<WgpuState>,
     root: Option<Node>,
@@ -45,17 +48,16 @@ pub struct App {
 }
 
 impl App {
-    /// Startet den Scan-Thread und liefert die noch fensterlose App.
-    pub fn new(target: PathBuf) -> Self {
+    /// Bereitet den Scan vor; der Thread startet erst in `resumed` und
+    /// weckt die Loop per `proxy` bei Fertigstellung auf.
+    pub fn new(target: PathBuf, proxy: EventLoopProxy<()>) -> Self {
         let (tx, rx) = mpsc::channel();
-        let scan_root = target.clone();
-        thread::spawn(move || {
-            let root = scan_tree(&scan_root);
-            let _ = tx.send(root);
-        });
         Self {
             target,
+            proxy,
+            tx: Some(tx),
             rx,
+            scan_started: false,
             window: None,
             gpu: None,
             root: None,
@@ -237,6 +239,21 @@ impl ApplicationHandler for App {
                 self.gpu = Some(gpu);
                 self.window = Some(window);
                 self.relayout();
+                // Scan-Thread erst hier starten: `send_event` weckt die
+                // Loop (`ControlFlow::Wait`) bei Fertigstellung auf, damit
+                // `about_to_wait` den Baum ohne Mausbewegung abholt.
+                if !self.scan_started {
+                    self.scan_started = true;
+                    if let Some(tx) = self.tx.take() {
+                        let proxy = self.proxy.clone();
+                        let target = self.target.clone();
+                        thread::spawn(move || {
+                            let root = scan_tree(&target);
+                            let _ = tx.send(root);
+                            let _ = proxy.send_event(());
+                        });
+                    }
+                }
             }
             Err(err) => {
                 self.fatal = Some(err);

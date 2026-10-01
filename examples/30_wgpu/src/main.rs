@@ -27,7 +27,8 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let mut app = App::new(target);
+    let proxy = event_loop.create_proxy();
+    let mut app = App::new(target, proxy);
     if let Err(err) = event_loop.run_app(&mut app) {
         eprintln!("error: event loop: {err:?}");
         return ExitCode::from(2);

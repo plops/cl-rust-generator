@@ -275,6 +275,14 @@ wurden nie gezeichnet, `pick()` (ohne Kappe) fand sie trotzdem. Fix:
 Breitensuche + Cap auf 262.144 + Canvas-Hintergrund. Vorher/Nachher auf
 100k-Dateien-Fixture: Hintergrund-Anteil unten rechts 82,7 % → 0 %.
 
+**Scan-Ergebnis weckte die Loop nicht auf.** Mit `ControlFlow::Wait`
+schläft die Loop bis zum nächsten OS-Event — das per `mpsc`
+eintreffende Scan-Ergebnis lag unbeachtet im Kanal, bis die Maus sich
+bewegte. Fix: Der Scan-Thread startet in `resumed()` und ruft nach dem
+Senden `EventLoopProxy::send_event(())` (winit 0.30 kennt kein
+`wake_up`; der Proxy muss in `main` per `EventLoop::create_proxy`
+erzeugt werden, da `ActiveEventLoop` ihn nicht anbietet).
+
 ### 2.3 Der Cushion-Shader (Kernstück)
 
 ```wgsl
