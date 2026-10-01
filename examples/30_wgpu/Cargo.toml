@@ -1,0 +1,17 @@
+[package]
+name = "treemap"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+
+[dependencies]
+font8x8 = "0.3"
+wgpu = { version = "30", default-features = false, features = ["vulkan", "wgsl"] }
+winit = { version = "0.30", default-features = false, features = ["x11"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

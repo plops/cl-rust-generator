@@ -15,13 +15,13 @@ Legende: `- [ ]` offen, `- [x]` erledigt. Serielle Abarbeitung.
 
 ## Phase 1: Typen, Scan, Layout, Farbe
 
-- [ ] API-/Typ-Definition: `Node`, `Rect`, `Rgb`, `format_bytes` (`01_types.rs`)
-- [ ] Implementierung: `scan_tree`/`scan_entry` (`02_scan.rs`, Port des macroquad-MVP)
-- [ ] Implementierung: `worst`/`layout_row`/`squarify` (`03_layout.rs`, Port des MVP)
-- [ ] Implementierung: `color_for_path`/`hash_color` (`04_color.rs`, Port des MVP)
-- [ ] Unit-Tests: `format_bytes`, Scan auf Fixture-Baum, Flächen-Erhaltung, Farb-Mapping
-- [ ] `cargo fmt`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`
-- [ ] Commit `feat(scan): add scanner, squarified layout and filetype colors`
+- [x] API-/Typ-Definition: `Node`, `Rect`, `Rgb`, `format_bytes` (`01_types.rs`)
+- [x] Implementierung: `scan_tree`/`scan_entry` (`02_scan.rs`, Port des macroquad-MVP)
+- [x] Implementierung: `worst`/`layout_row`/`squarify` + `pick` (`03_layout.rs`, Port des MVP)
+- [x] Implementierung: `color_for_path`/`hash_color` (`04_color.rs`, Port des MVP)
+- [x] Unit-Tests: `format_bytes`, Scan auf Fixture-Baum, Flächen-Erhaltung, Farb-Mapping (13 Tests grün)
+- [x] `cargo fmt`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`
+- [x] Commit `feat(scan): add scanner, squarified layout and filetype colors`
 
 ## Phase 2: Text-Atlas & wgpu-Renderer
 
