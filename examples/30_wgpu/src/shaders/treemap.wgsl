@@ -44,12 +44,16 @@ const FLAG_HI: u32 = 2u;
 fn fs(in: VsOut) -> @location(0) vec4f {
     let flat = (in.flags & FLAG_FLAT) != 0u;
     let hi = (in.flags & FLAG_HI) != 0u;
+    // Invertiertes Detail für kleine Rechtecke: Cushion + 1.5-px-Kante würden
+    // alles unter ~3 px schwarz färben. Daher unter 3 px volle Dateifarbe,
+    // darüber weicher Übergang bis 8 px zu Cushion + Kante.
+    let detail = smoothstep(3.0, 8.0, min(in.size_px.x, in.size_px.y));
     var base = in.color;
     if (!flat) {
         // Cushion: Mitte heller (parabolisch), Ränder dunkler.
         let n = in.uv * 2.0 - 1.0;
         let d = max(0.0, (1.0 - n.x * n.x) * (1.0 - n.y * n.y));
-        base *= 0.68 + 0.42 * d;
+        base *= mix(1.0, 0.68 + 0.42 * d, detail);
     }
     if (hi) {
         base = base * 0.5 + vec3f(0.5);
@@ -59,7 +63,7 @@ fn fs(in: VsOut) -> @location(0) vec4f {
         min(in.uv.x, 1.0 - in.uv.x) * in.size_px.x,
         min(in.uv.y, 1.0 - in.uv.y) * in.size_px.y
     );
-    let edge = smoothstep(0.0, 1.5, m);
+    let edge = mix(1.0, smoothstep(0.0, 1.5, m), detail);
     var border = base * 0.45;
     if (hi) {
         border = vec3f(1.0);

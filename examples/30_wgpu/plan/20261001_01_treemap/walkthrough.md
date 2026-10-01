@@ -283,17 +283,27 @@ Senden `EventLoopProxy::send_event(())` (winit 0.30 kennt kein
 `wake_up`; der Proxy muss in `main` per `EventLoop::create_proxy`
 erzeugt werden, da `ActiveEventLoop` ihn nicht anbietet).
 
+**Schwarze Kleinst-Rechtecke (Nutzer-Fund + -Vorschlag).** Cushion
+(0,68× am Rand) mal dunkler 1,5-px-Kante (0,45×) drückt alles unter
+~3 px auf ~0,3× Helligkeit — dichte Regionen wirkten schwarz. Fix nach
+Nutzer-Vorschlag („Cushion invertieren“): Detail-Faktor
+`smoothstep(3, 8, kürzeste Seite)` blendet unter 3 px auf volle
+Dateifarbe ohne Kante, darüber weich zum vollen Cushion. Dichte-Zone im
+Vorher/Nachher: mittlere Helligkeit 146 → 206 (+42 %).
+
 ### 2.3 Der Cushion-Shader (Kernstück)
 
 ```wgsl
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4f {
+    // Invertiertes Detail für kleine Rechtecke (s. 2.2).
+    let detail = smoothstep(3.0, 8.0, min(in.size_px.x, in.size_px.y));
     var base = in.color;
     if (!flat) {
         // Cushion: Mitte heller (parabolisch), Ränder dunkler.
         let n = in.uv * 2.0 - 1.0;
         let d = max(0.0, (1.0 - n.x * n.x) * (1.0 - n.y * n.y));
-        base *= 0.68 + 0.42 * d;
+        base *= mix(1.0, 0.68 + 0.42 * d, detail);
     }
     // 1.5-px-Innenkante: dunkel, im Highlight-Modus weiß.
     ...
