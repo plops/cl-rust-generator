@@ -20,7 +20,14 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let verbose = args.verbose;
 
+    if verbose {
+        match args.input_file.as_ref() {
+            Some(file) => eprintln!("Eingabe: Datei '{}'", file.display()),
+            None => eprintln!("Eingabe: stdin"),
+        }
+    }
     let text = match read_input(args.input_file.as_ref()) {
         Ok(text) => text,
         Err(message) => {
@@ -28,8 +35,31 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if verbose {
+        let lines = text.lines().count();
+        let unit = if lines == 1 { "Zeile" } else { "Zeilen" };
+        eprintln!("Eingabe: {} Bytes, {lines} {unit} gelesen", text.len());
+    }
 
     let repos = parser::parse_repos(&text);
+    if verbose {
+        let unit = if repos.len() == 1 {
+            "Repository"
+        } else {
+            "Repositories"
+        };
+        eprintln!("Parse: {} {unit} gefunden", repos.len());
+        for (index, repo) in repos.iter().enumerate() {
+            eprintln!(
+                "  [parse {}/{}] {} (Organisation='{}', Projekt='{}')",
+                index + 1,
+                repos.len(),
+                repo.full_name(),
+                repo.owner(),
+                repo.name()
+            );
+        }
+    }
     if repos.is_empty() {
         eprintln!("Keine Repositories im Format 'owner/repo' gefunden.");
         return ExitCode::FAILURE;
@@ -39,20 +69,35 @@ fn main() -> ExitCode {
         delay: args.delay,
         ..config::Config::default()
     };
+    let mut progress = io::stderr();
+    if verbose {
+        eprintln!(
+            "MCP: initialisiere {} (protocolVersion={})",
+            settings.endpoint, settings.protocol_version
+        );
+    }
     let mut client = mcp_client::McpClient::new(&settings);
-    if let Err(error) = client.initialize() {
+    if let Err(error) = client.initialize(&mut progress, verbose) {
         eprintln!("Warnung: MCP-Initialize fehlgeschlagen ({error}); versuche es trotzdem.");
     }
 
-    let mut progress = io::stderr();
     let report = pipeline::run(
         &repos,
         &mut client,
         &pipeline::ThreadSleeper,
         settings.delay,
         &mut progress,
+        verbose,
     );
 
+    if verbose {
+        eprintln!(
+            "Ausgabe: schreibe Reports ({} OK, {} fehlend, {} Fehler)",
+            report.successes().len(),
+            report.missing().len(),
+            report.failed().len()
+        );
+    }
     match output::write_reports(&report, Path::new(".")) {
         Ok((algos_path, missing_path)) => {
             println!(

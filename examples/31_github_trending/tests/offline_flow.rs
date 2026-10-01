@@ -53,7 +53,12 @@ struct Scripted {
 }
 
 impl Analyzer for Scripted {
-    fn analyze(&mut self, _repo: &Repo) -> AnalysisOutcome {
+    fn analyze(
+        &mut self,
+        _repo: &Repo,
+        _log: &mut dyn std::io::Write,
+        _verbose: bool,
+    ) -> AnalysisOutcome {
         self.script.remove(0)
     }
 }
@@ -85,6 +90,7 @@ fn pipeline_to_files_end_to_end() {
         &Noop,
         Duration::from_millis(1750),
         &mut progress,
+        false,
     );
     assert_eq!(report.total(), 2);
     let log = String::from_utf8(progress).expect("utf8 log");
@@ -119,7 +125,84 @@ fn empty_report_renders_notes() {
     // Fortschritts-Log bleibt bei leerer Eingabe still.
     let mut analyzer = Scripted { script: vec![] };
     let mut progress = Vec::new();
-    let report = run(&[], &mut analyzer, &Noop, Duration::ZERO, &mut progress);
+    let report = run(
+        &[],
+        &mut analyzer,
+        &Noop,
+        Duration::ZERO,
+        &mut progress,
+        false,
+    );
     assert!(report.is_empty());
     assert!(progress.is_empty());
+}
+
+#[test]
+fn several_projects_are_each_processed_exactly_once() {
+    let input = "alpha / one\nbeta / two\ngamma / three\ndelta / four\nepsilon / five\n";
+    let repos = parser::parse_repos(input);
+    assert_eq!(repos.len(), 5, "alle Projekte erkannt");
+    let mut analyzer = Scripted {
+        script: repos
+            .iter()
+            .map(|repo| AnalysisOutcome::Success {
+                repo: repo.clone(),
+                markdown: format!("# {}", repo.full_name()),
+            })
+            .collect(),
+    };
+    let mut progress = Vec::new();
+    let report = run(
+        &repos,
+        &mut analyzer,
+        &Noop,
+        Duration::ZERO,
+        &mut progress,
+        false,
+    );
+    assert_eq!(report.total(), 5);
+    assert_eq!(report.successes().len(), 5);
+    let log = String::from_utf8(progress).expect("utf8 log");
+    for (index, repo) in repos.iter().enumerate() {
+        assert!(
+            log.contains(&format!(
+                "[{}/5] Analysiere {} ... OK",
+                index + 1,
+                repo.full_name()
+            )),
+            "{log}"
+        );
+    }
+}
+
+#[test]
+fn verbose_logs_each_project_step() {
+    let repos = parser::parse_repos("alpha / one\nbeta / two\n");
+    let mut analyzer = Scripted {
+        script: vec![
+            AnalysisOutcome::Success {
+                repo: repos[0].clone(),
+                markdown: String::from("# alpha/one"),
+            },
+            AnalysisOutcome::Missing {
+                repo: repos[1].clone(),
+            },
+        ],
+    };
+    let mut progress = Vec::new();
+    let report = run(
+        &repos,
+        &mut analyzer,
+        &Noop,
+        Duration::from_millis(1750),
+        &mut progress,
+        true,
+    );
+    assert_eq!(report.total(), 2);
+    let log = String::from_utf8(progress).expect("utf8 log");
+    assert!(log.contains("→ [1/2] Starte alpha/one"), "{log}");
+    assert!(log.contains("← [1/2] alpha/one: OK"), "{log}");
+    assert!(log.contains("→ [2/2] Starte beta/two"), "{log}");
+    assert!(log.contains("← [2/2] beta/two: MISSING"), "{log}");
+    assert!(log.contains("warte 1750 ms (Rate-Limit)"), "{log}");
 }

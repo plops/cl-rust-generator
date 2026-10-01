@@ -47,6 +47,7 @@ impl Default for Config {
 pub struct CliArgs {
     pub input_file: Option<PathBuf>,
     pub delay: Duration,
+    pub verbose: bool,
 }
 
 /// Ergebnis der Argument-Auswertung: laufen oder Hilfe anzeigen.
@@ -56,7 +57,7 @@ pub enum ArgsOutcome {
     Help,
 }
 
-/// Parst `cargo run [--delay-ms N] [DATEI]`; ohne Datei wird `stdin` gelesen.
+/// Parst `cargo run [--delay-ms N] [--verbose] [DATEI]`; ohne Datei wird `stdin` gelesen.
 pub fn parse_args<I, S>(raw: I) -> Result<ArgsOutcome, String>
 where
     I: IntoIterator<Item = S>,
@@ -64,12 +65,17 @@ where
 {
     let mut input_file: Option<PathBuf> = None;
     let mut delay_ms: Option<u64> = None;
+    let mut verbose = false;
     let mut items = raw.into_iter().peekable();
 
     while let Some(item) = items.next() {
         let arg = item.as_ref();
         if arg == "-h" || arg == "--help" {
             return Ok(ArgsOutcome::Help);
+        }
+        if arg == "-v" || arg == "--verbose" {
+            verbose = true;
+            continue;
         }
         if let Some(value) = arg.strip_prefix("--delay-ms=") {
             delay_ms = Some(parse_delay(value)?);
@@ -96,7 +102,11 @@ where
         Some(ms) => Duration::from_millis(ms),
         None => env_delay().unwrap_or_else(|| Duration::from_millis(DEFAULT_DELAY_MS)),
     };
-    Ok(ArgsOutcome::Run(CliArgs { input_file, delay }))
+    Ok(ArgsOutcome::Run(CliArgs {
+        input_file,
+        delay,
+        verbose,
+    }))
 }
 
 fn parse_delay(value: &str) -> Result<u64, String> {
@@ -115,9 +125,10 @@ fn env_delay() -> Option<Duration> {
 
 pub fn usage() -> String {
     format!(
-        "Verwendung: github-trending-algos [--delay-ms MS] [DATEI]\n\
+        "Verwendung: github-trending-algos [--delay-ms MS] [--verbose] [DATEI]\n\
          Liest Trending-Text aus DATEI oder stdin und analysiert jedes Repo via DeepWiki MCP.\n\
-         Default-Delay zwischen Anfragen: {DEFAULT_DELAY_MS} ms (Env: {DELAY_ENV_VAR}=MS)."
+         Default-Delay zwischen Anfragen: {DEFAULT_DELAY_MS} ms (Env: {DELAY_ENV_VAR}=MS).\n\
+         Mit -v/--verbose jeden Schritt (Parse, Requests, Delays) auf stderr loggen."
     )
 }
 
@@ -207,6 +218,23 @@ mod tests {
     fn args_help_flag() {
         assert_eq!(parse_args(["--help"]).expect("ok"), ArgsOutcome::Help);
         assert_eq!(parse_args(["-h"]).expect("ok"), ArgsOutcome::Help);
+    }
+
+    #[test]
+    fn verbose_flag_forms() {
+        for flag in ["-v", "--verbose"] {
+            let outcome = parse_args([flag, "trend.txt"]).expect("ok");
+            let ArgsOutcome::Run(args) = outcome else {
+                panic!("Hilfe unerwartet");
+            };
+            assert!(args.verbose, "Flag {flag} sollte verbose setzen");
+            assert_eq!(args.input_file, Some(PathBuf::from("trend.txt")));
+        }
+        let outcome = parse_args(["trend.txt"]).expect("ok");
+        let ArgsOutcome::Run(args) = outcome else {
+            panic!("Hilfe unerwartet");
+        };
+        assert!(!args.verbose, "Default ist nicht-verbose");
     }
 
     #[test]

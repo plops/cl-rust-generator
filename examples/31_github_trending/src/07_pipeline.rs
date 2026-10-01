@@ -10,13 +10,22 @@ use crate::types::{AnalysisOutcome, Repo, RunReport};
 
 /// Abstraktion des Analyse-Schritts (echter MCP-Client oder Test-Skript).
 pub trait Analyzer {
-    fn analyze(&mut self, repo: &Repo) -> AnalysisOutcome;
+    fn analyze(&mut self, repo: &Repo, log: &mut dyn Write, verbose: bool) -> AnalysisOutcome;
 }
 
 impl Analyzer for McpClient {
-    fn analyze(&mut self, repo: &Repo) -> AnalysisOutcome {
+    fn analyze(&mut self, repo: &Repo, log: &mut dyn Write, verbose: bool) -> AnalysisOutcome {
         let question = build_question(repo);
-        classify(repo, self.ask(repo, &question))
+        vlog(
+            log,
+            verbose,
+            &format!(
+                "  → Frage für {} gebaut ({} Zeichen)",
+                repo.full_name(),
+                question.chars().count()
+            ),
+        );
+        classify(repo, self.ask(repo, &question, log, verbose))
     }
 }
 
@@ -35,12 +44,14 @@ impl Sleeper for ThreadSleeper {
 }
 
 /// Führt den Loop aus; einzelne Repo-Fehler brechen den Lauf nie ab.
+/// Jedes übergebene Repo wird genau einmal analysiert, in Eingabereihenfolge.
 pub fn run<A, S, W>(
     repos: &[Repo],
     analyzer: &mut A,
     sleeper: &S,
     delay: Duration,
     progress: &mut W,
+    verbose: bool,
 ) -> RunReport
 where
     A: Analyzer,
@@ -50,14 +61,61 @@ where
     let total = repos.len();
     let mut report = RunReport::default();
     for (index, repo) in repos.iter().enumerate() {
-        let outcome = analyzer.analyze(repo);
-        log_progress(progress, index + 1, total, &outcome);
+        let current = index + 1;
+        vlog(
+            &mut *progress,
+            verbose,
+            &format!(
+                "  → [{current}/{total}] Starte {}: DeepWiki-Anfrage wird vorbereitet",
+                repo.full_name()
+            ),
+        );
+        let outcome = analyzer.analyze(repo, &mut *progress, verbose);
+        log_progress(progress, current, total, &outcome);
+        vlog(
+            &mut *progress,
+            verbose,
+            &format!(
+                "  ← [{current}/{total}] {}: {}",
+                repo.full_name(),
+                verbose_detail(&outcome)
+            ),
+        );
         report.push(outcome);
-        if index + 1 < total {
+        if current < total {
+            vlog(
+                &mut *progress,
+                verbose,
+                &format!("  → warte {} ms (Rate-Limit)", delay.as_millis()),
+            );
             sleeper.sleep(delay);
+        } else {
+            vlog(
+                &mut *progress,
+                verbose,
+                "  → letztes Repo erreicht, kein Delay",
+            );
         }
     }
     report
+}
+
+/// Detailtext für die Verbose-Ergebniszeile eines Repos.
+fn verbose_detail(outcome: &AnalysisOutcome) -> String {
+    match outcome {
+        AnalysisOutcome::Success { markdown, .. } => {
+            format!("OK ({} Zeichen Markdown)", markdown.chars().count())
+        }
+        AnalysisOutcome::Missing { .. } => String::from("MISSING (nicht indiziert)"),
+        AnalysisOutcome::Failed { reason, .. } => format!("ERROR ({reason})"),
+    }
+}
+
+/// Schreibt eine Verbose-Zeile; still, wenn `verbose` aus ist.
+fn vlog(log: &mut dyn Write, verbose: bool, message: &str) {
+    if verbose {
+        let _ = writeln!(log, "{message}");
+    }
 }
 
 fn log_progress<W: Write>(out: &mut W, current: usize, total: usize, outcome: &AnalysisOutcome) {
@@ -84,7 +142,12 @@ mod tests {
     }
 
     impl Analyzer for Scripted {
-        fn analyze(&mut self, _repo: &Repo) -> AnalysisOutcome {
+        fn analyze(
+            &mut self,
+            _repo: &Repo,
+            _log: &mut dyn Write,
+            _verbose: bool,
+        ) -> AnalysisOutcome {
             self.outcomes.remove(0)
         }
     }
@@ -129,6 +192,7 @@ mod tests {
             &sleeper,
             Duration::from_millis(10),
             &mut progress,
+            false,
         );
 
         assert_eq!(report.total(), 3);
@@ -142,6 +206,10 @@ mod tests {
         assert!(
             log.contains("[3/3] Analysiere owner/c ... ERROR: timeout"),
             "{log}"
+        );
+        assert!(
+            !log.contains("→") && !log.contains("←"),
+            "still ohne verbose: {log}"
         );
     }
 
@@ -158,9 +226,59 @@ mod tests {
             &sleeper,
             Duration::from_millis(10),
             &mut progress,
+            true,
         );
         assert!(report.is_empty());
         assert_eq!(sleeper.calls.get(), 0);
         assert!(progress.is_empty());
+    }
+
+    #[test]
+    fn verbose_logs_every_step_for_each_repo() {
+        let repos = vec![repo("a"), repo("b"), repo("c")];
+        let mut analyzer = Scripted {
+            outcomes: vec![
+                AnalysisOutcome::Success {
+                    repo: repo("a"),
+                    markdown: String::from("# Analyse"),
+                },
+                AnalysisOutcome::Missing { repo: repo("b") },
+                AnalysisOutcome::Failed {
+                    repo: repo("c"),
+                    reason: "timeout".to_owned(),
+                },
+            ],
+        };
+        let sleeper = RecordingSleeper {
+            calls: Cell::new(0),
+        };
+        let mut progress = Vec::new();
+        let report = run(
+            &repos,
+            &mut analyzer,
+            &sleeper,
+            Duration::from_millis(10),
+            &mut progress,
+            true,
+        );
+
+        assert_eq!(report.total(), 3, "jedes Repo wird verarbeitet");
+        let log = String::from_utf8(progress).expect("utf8");
+        for (index, name) in ["a", "b", "c"].iter().enumerate() {
+            let current = index + 1;
+            assert!(
+                log.contains(&format!("→ [{current}/3] Starte owner/{name}")),
+                "{log}"
+            );
+            assert!(
+                log.contains(&format!("← [{current}/3] owner/{name}:")),
+                "{log}"
+            );
+        }
+        assert!(log.contains("OK (9 Zeichen Markdown)"), "{log}");
+        assert!(log.contains("MISSING (nicht indiziert)"), "{log}");
+        assert!(log.contains("ERROR (timeout)"), "{log}");
+        assert_eq!(log.matches("warte 10 ms (Rate-Limit)").count(), 2, "{log}");
+        assert!(log.contains("letztes Repo erreicht, kein Delay"), "{log}");
     }
 }

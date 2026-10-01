@@ -1,5 +1,6 @@
 //! MCP-Transport: blockierender Streamable-HTTP-Client mit Session-Verwaltung.
 
+use std::io::Write;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -44,27 +45,55 @@ impl McpClient {
     }
 
     /// `initialize` → Session-ID sichern → `notifications/initialized`.
-    pub fn initialize(&mut self) -> Result<(), McpError> {
+    pub fn initialize(&mut self, log: &mut dyn Write, verbose: bool) -> Result<(), McpError> {
         let params = json!({
             "protocolVersion": self.protocol_version,
             "capabilities": {},
             "clientInfo": {"name": "github-trending-algos", "version": env!("CARGO_PKG_VERSION")},
         });
-        self.request("initialize", Some(params))?;
-        self.notify("notifications/initialized", Some(json!({})))?;
+        self.request("initialize", Some(params), log, verbose)?;
+        if verbose {
+            match self.session_id() {
+                Some(session) => vlog(
+                    log,
+                    verbose,
+                    &format!("  MCP: initialize OK (session-id={session})"),
+                ),
+                None => vlog(log, verbose, "  MCP: initialize OK (keine session-id)"),
+            }
+        }
+        self.notify("notifications/initialized", Some(json!({})), log, verbose)?;
+        vlog(log, verbose, "  MCP: notifications/initialized gesendet");
         Ok(())
     }
 
     /// Stellt die Analyse-Frage; bei unbekanntem Tool einmal mit Alternativnamen.
-    pub fn ask(&mut self, repo: &Repo, question: &str) -> Result<String, McpError> {
+    pub fn ask(
+        &mut self,
+        repo: &Repo,
+        question: &str,
+        log: &mut dyn Write,
+        verbose: bool,
+    ) -> Result<String, McpError> {
         let primary = self.primary_tool.clone();
         let fallback = self.fallback_tool.clone();
         let full_name = repo.full_name();
         let params_for = |tool: &str| json!({"name": tool, "arguments": {"repoName": full_name, "question": question}});
-        match self.request("tools/call", Some(params_for(&primary))) {
+        vlog(
+            log,
+            verbose,
+            &format!("  → DeepWiki-Request für {full_name} gesendet (tool={primary})"),
+        );
+        match self.request("tools/call", Some(params_for(&primary)), log, verbose) {
             Ok(result) => interpret_tool_result(&result),
             Err(error) if is_unknown_tool(&error) => {
-                let result = self.request("tools/call", Some(params_for(&fallback)))?;
+                vlog(
+                    log,
+                    verbose,
+                    &format!("  MCP: Tool {primary} unbekannt ({error}); Fallback {fallback}"),
+                );
+                let result =
+                    self.request("tools/call", Some(params_for(&fallback)), log, verbose)?;
                 interpret_tool_result(&result)
             }
             Err(error) => Err(error),
@@ -77,18 +106,45 @@ impl McpClient {
         id
     }
 
-    fn request(&mut self, method: &str, params: Option<Value>) -> Result<Value, McpError> {
+    fn request(
+        &mut self,
+        method: &str,
+        params: Option<Value>,
+        log: &mut dyn Write,
+        verbose: bool,
+    ) -> Result<Value, McpError> {
         let id = self.take_id();
         let payload = request_payload(method, params, id)?;
+        vlog(
+            log,
+            verbose,
+            &format!("  MCP: POST {method} (id={id}) an {}", self.endpoint),
+        );
         let raw = self.http_post(&payload)?;
         if let Some(session) = raw.session {
             self.session_id = Some(session);
         }
+        vlog(
+            log,
+            verbose,
+            &format!("  MCP: Antwort auf id={id} ({} Bytes)", raw.body.len()),
+        );
         parse_jsonrpc_response(&raw.body, Some(id))
     }
 
-    fn notify(&mut self, method: &str, params: Option<Value>) -> Result<(), McpError> {
+    fn notify(
+        &mut self,
+        method: &str,
+        params: Option<Value>,
+        log: &mut dyn Write,
+        verbose: bool,
+    ) -> Result<(), McpError> {
         let payload = notification_payload(method, params)?;
+        vlog(
+            log,
+            verbose,
+            &format!("  MCP: POST {method} (notification) an {}", self.endpoint),
+        );
         let raw = self.http_post(&payload)?;
         if let Some(session) = raw.session {
             self.session_id = Some(session);
@@ -128,6 +184,13 @@ fn map_ureq_error(error: ureq::Error) -> McpError {
     match error {
         ureq::Error::StatusCode(code) => McpError::HttpStatus(code),
         other => McpError::Transport(other.to_string()),
+    }
+}
+
+/// Schreibt eine Verbose-Zeile; still, wenn `verbose` aus ist.
+fn vlog(log: &mut dyn Write, verbose: bool, message: &str) {
+    if verbose {
+        let _ = writeln!(log, "{message}");
     }
 }
 
