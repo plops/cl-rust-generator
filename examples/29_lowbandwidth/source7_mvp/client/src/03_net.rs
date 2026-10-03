@@ -69,7 +69,7 @@ impl Net {
 }
 
 fn run(addr: &str, ev: Sender<Event>, out: Receiver<ClientMsg>, stop: &AtomicBool) {
-    let mut decoder = match Decoder::new(1) {
+    let mut decoder = match Decoder::new() {
         Ok(d) => d,
         Err(e) => {
             let _ = ev.send(Event::Disconnected(format!("rav1d: {e}")));

@@ -11,9 +11,11 @@
 use std::process::{Child, Command};
 use std::time::Duration;
 
+use clap::Parser;
 use image::RgbImage;
-use lbw_server::av1::{Av1Params, encode_rgb};
+use lbw_server::av1::encode_rgb;
 use lbw_server::capture::{FrameSource, ScrapSource};
+use lbw_server::config::Config;
 use lbw_server::ocr::{Detector, Ocr, Recognizer, sample_colors};
 use lbw_server::tiles::{MASK_PAD, crop_rgb, fill_rect, pad_rect};
 
@@ -138,7 +140,8 @@ fn sweep_padding_on_xterm() {
     assert!(at(4) >= at(0), "REC_PAD=4 schlechter als 0: {rec_chars:?}");
 
     // Masken-Sweep: Textregion maskieren, Rest als AV1 messen.
-    let params = Av1Params::default();
+    // Echter Server-Default statt hartkodierter Zahl.
+    let quantizer = Config::try_parse_from(["lbw-server"]).unwrap().quantizer;
     let mut mask_bytes = Vec::new();
     for mpad in [0u16, 2, 4, 6, 8, 10, 12] {
         let mut masked = img.clone();
@@ -169,7 +172,7 @@ fn sweep_padding_on_xterm() {
             h as u16,
         );
         let rgb = crop_rgb(&masked, r);
-        let bytes = encode_rgb(&rgb, w, h, params).unwrap().len();
+        let bytes = encode_rgb(&rgb, w, h, quantizer).unwrap().len();
         mask_bytes.push((mpad, bytes));
         eprintln!("[padding] mask_pad={mpad}: Region {w}x{h} = {bytes} B AV1");
     }

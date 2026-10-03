@@ -36,15 +36,15 @@ pub struct Decoder {
 unsafe impl Send for Decoder {}
 
 impl Decoder {
-    /// Öffnet rav1d mit `threads` Worker-Threads (1 genügt für 640²).
-    pub fn new(threads: i32) -> Result<Self, String> {
+    /// Öffnet rav1d (1 Thread genügt für 640²).
+    pub fn new() -> Result<Self, String> {
         let mut s = std::mem::MaybeUninit::<Dav1dSettings>::uninit();
         // SAFETY: `s` ist gültig beschreibbar; danach initialisiert.
         let mut s = unsafe {
             dav1d_default_settings(NonNull::new(s.as_mut_ptr()).unwrap());
             s.assume_init()
         };
-        s.n_threads = threads;
+        s.n_threads = 1;
         s.max_frame_delay = 1;
         let mut ctx: Option<Dav1dContext> = None;
         // SAFETY: Zeiger auf lokale, gültige Werte.
@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn garbage_is_an_error_not_a_crash() {
-        let mut d = Decoder::new(1).unwrap();
+        let mut d = Decoder::new().unwrap();
         assert!(d.decode(&[]).is_err());
         assert!(d.decode(&[0x12, 0x00, 0xff, 0xff, 0x01]).is_err());
     }

@@ -68,7 +68,7 @@ fn recv_until(net: &Net, until: Instant, want: &mut dyn FnMut(Event) -> bool) {
 #[test]
 fn hello_text_tile_and_reconnect() {
     let rgb = [40u8, 80, 160].repeat(64 * 64);
-    let tile = lbw_server::av1::encode_rgb(&rgb, 64, 64, Default::default()).unwrap();
+    let tile = lbw_server::av1::encode_rgb(&rgb, 64, 64, 180).unwrap();
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -142,7 +142,7 @@ fn hello_text_tile_and_reconnect() {
     assert!(down, "Abriss muss als Event kommen");
 
     let listener2 = TcpListener::bind(&addr).unwrap();
-    let tile2 = lbw_server::av1::encode_rgb(&rgb, 64, 64, Default::default()).unwrap();
+    let tile2 = lbw_server::av1::encode_rgb(&rgb, 64, 64, 180).unwrap();
     let stub2 = stub(listener2, tile2, 0);
     let mut reconnected = false;
     recv_until(&net, Instant::now() + Duration::from_secs(10), &mut |e| {

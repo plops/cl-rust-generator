@@ -12,7 +12,7 @@ use image::RgbImage;
 use lbw_common::framing::{FrameReader, write_msg};
 use lbw_common::{ClientMsg, PROTO_VERSION, ServerMsg, TextItem};
 
-use crate::av1::{Av1Params, encode_rgb};
+use crate::av1::encode_rgb;
 use crate::capture::FrameSource;
 use crate::config::Config;
 use crate::input::Injector;
@@ -87,10 +87,6 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
         }
     };
 
-    let params = Av1Params {
-        quantizer: cfg.quantizer,
-        ..Default::default()
-    };
     let mut prev: Option<RgbImage> = None;
     let mut last_texts: Vec<TextItem> = Vec::new();
     let mut frames: u64 = 0;
@@ -134,7 +130,7 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
         let mut tiles = 0;
         if let Some(r) = dirty_bbox(prev.as_ref(), &masked) {
             let rgb = crop_rgb(&masked, r);
-            let data = match encode_rgb(&rgb, r.w as usize, r.h as usize, params) {
+            let data = match encode_rgb(&rgb, r.w as usize, r.h as usize, cfg.quantizer) {
                 Ok(d) => d,
                 Err(e) => break Err(e),
             };

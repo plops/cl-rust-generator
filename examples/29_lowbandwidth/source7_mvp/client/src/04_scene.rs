@@ -3,8 +3,6 @@
 //! Fest 640×640, ohne Skalierungscode. Rein, ohne Grafik-Kontext
 //! testbar; `05_app` zeichnet daraus.
 
-use std::time::Instant;
-
 use lbw_common::{SIZE, TextItem};
 
 use crate::net::Event;
@@ -14,8 +12,7 @@ use crate::net::Event;
 pub enum Link {
     Connecting,
     Up,
-    /// Getrennt seit … (Grund).
-    Down(Instant, String),
+    Down(String),
 }
 
 /// Zustand der Anzeige (immer 640×640 RGBA).
@@ -25,7 +22,6 @@ pub struct Scene {
     /// Canvas seit dem letzten Upload verändert.
     pub dirty: bool,
     pub link: Link,
-    pub last_rx: Instant,
     pub tiles: u32,
     pub tile_bytes: u64,
 }
@@ -40,7 +36,6 @@ impl Scene {
             texts: Vec::new(),
             dirty: true,
             link: Link::Connecting,
-            last_rx: Instant::now(),
             tiles: 0,
             tile_bytes: 0,
         }
@@ -63,12 +58,11 @@ impl Scene {
 
     /// Wendet ein Netz-Ereignis an.
     pub fn apply(&mut self, e: Event) {
-        self.last_rx = Instant::now();
         match e {
             Event::Connected => self.link = Link::Up,
             Event::Disconnected(why) => {
-                if !matches!(self.link, Link::Down(..)) {
-                    self.link = Link::Down(Instant::now(), why);
+                if !matches!(self.link, Link::Down(_)) {
+                    self.link = Link::Down(why);
                 }
             }
             Event::ClearText => self.texts.clear(),
@@ -159,10 +153,8 @@ mod tests {
         s.apply(Event::Connected);
         assert_eq!(s.link, Link::Up);
         s.apply(Event::Disconnected("x".into()));
-        let Link::Down(t, _) = s.link.clone() else {
-            panic!()
-        };
+        assert_eq!(s.link, Link::Down("x".into()));
         s.apply(Event::Disconnected("y".into()));
-        assert_eq!(s.link, Link::Down(t, "x".into()), "erste Trennung zählt");
+        assert_eq!(s.link, Link::Down("x".into()), "erste Trennung zählt");
     }
 }
