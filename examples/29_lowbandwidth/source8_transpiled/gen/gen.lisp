@@ -2,6 +2,7 @@
 (load (merge-pathnames "texts.lisp" *load-pathname*))
 (load (merge-pathnames "common.lisp" *load-pathname*))
 (load (merge-pathnames "server.lisp" *load-pathname*))
+(load (merge-pathnames "client.lisp" *load-pathname*))
 
 (in-package :cl-rust-generator)
 
@@ -30,6 +31,12 @@
     (write-source (s8-path "server/tests/loopback.rs") (server-test-loopback-rs))
     (write-source (s8-path "server/tests/models.rs") (server-test-models-rs))
     (write-source (s8-path "server/tests/padding.rs") (server-test-padding-rs))
-    (write-text-file "server/Cargo.toml" (server-cargo-toml))))
+    (write-text-file "server/Cargo.toml" (server-cargo-toml))
+    (write-source (s8-path "client/src/01_config.rs") (client-config-rs))
+    (write-source (s8-path "client/src/02_av1.rs") (client-av1-rs))
+    (write-source (s8-path "client/src/03_net.rs") (client-net-rs))
+    (write-source (s8-path "client/src/04_scene.rs") (client-scene-rs))
+    (write-source (s8-path "client/src/lib.rs") (client-lib-rs))
+    (write-text-file "client/Cargo.toml" (client-cargo-toml))))
 
 (generate-all)

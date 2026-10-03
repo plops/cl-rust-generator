@@ -66,18 +66,20 @@ Erst weiter, wenn der Schritt grün ist. Baseline: `source7_mvp`
 
 ## T5 — `client`-Crate (ohne App-Fenster)
 
-- [ ] `gen/client.lisp` (Teil 1): `01_config.rs` (via `clap-struct`),
+- [x] `gen/client.lisp` (Teil 1): `01_config.rs` (via `clap-struct`),
       `02_av1.rs` (`unsafe`-Decoder 1:1), `03_net.rs` (Reconnect-Thread),
-      `04_scene.rs` (Canvas, Tests), `lib.rs`.
-- [ ] Prüfen: `cargo test -p lbw-client --lib` (6 Tests);
+      `04_scene.rs` (Canvas, Tests), `lib.rs`, `client/Cargo.toml`
+      (Manifest bereits hier, sonst baut die Crate nicht).
+- [x] Prüfen: `cargo test -p lbw-client --lib` (6 Tests);
       Protokoll gegen `source7` stichprobenhaft verglichen (kein Byte-Diff).
 - [ ] Commit: `feat(source8): client-module config/av1/net/scene`.
 
 ## T6 — `client`-Crate (App, Main, Probe, Tests)
 
 - [ ] `gen/client.lisp` (Teil 2): `05_app.rs` (Nutzt `+key-table+` für
-      `send_input`!), `main.rs` (`macroquad::main`), `client/Cargo.toml`,
-      `examples/probe.rs`, `tests/loopback.rs`.
+      `send_input`!), `main.rs` (`macroquad::main`),
+      `examples/probe.rs`, `tests/loopback.rs`, `lib.rs` um `app`
+      erweitern (`client/Cargo.toml` existiert bereits aus T5).
 - [ ] Prüfen: `cargo test -p lbw-client` (6 lib + 1 main + 1 loopback);
       Protokoll gegen `source7` stichprobenhaft verglichen (kein Byte-Diff).
 - [ ] Commit: `feat(source8): client-app, probe und loopback-test`.
