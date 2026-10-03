@@ -1,6 +1,7 @@
 (load (merge-pathnames "00_util.lisp" *load-pathname*))
 (load (merge-pathnames "texts.lisp" *load-pathname*))
 (load (merge-pathnames "common.lisp" *load-pathname*))
+(load (merge-pathnames "server_a.lisp" *load-pathname*))
 
 (in-package :cl-rust-generator)
 
@@ -16,6 +17,10 @@
     (write-source (s8-path "common/src/01_types.rs") (common-types-rs))
     (write-source (s8-path "common/src/02_framing.rs") (common-framing-rs))
     (write-source (s8-path "common/src/03_yuv.rs") (common-yuv-rs))
-    (write-source (s8-path "common/src/lib.rs") (common-lib-rs))))
+    (write-source (s8-path "common/src/lib.rs") (common-lib-rs))
+    (write-source (s8-path "server/src/01_config.rs") (server-config-rs))
+    (write-source (s8-path "server/src/02_capture.rs") (server-capture-rs))
+    (write-source (s8-path "server/src/05_av1.rs") (server-av1-rs))
+    (write-source (s8-path "server/src/06_input.rs") (server-input-rs))))
 
 (generate-all)

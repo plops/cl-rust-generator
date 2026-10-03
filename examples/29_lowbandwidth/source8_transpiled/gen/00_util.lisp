@@ -43,6 +43,7 @@
   "Blank-line item for do0/progn sequences: splice with ,*blank* as a
 direct template child, but as plain *blank* inside an already-unquoted
 call like ,(testmod ...) (a comma there would be outside the backquote).
+Inside quoted defuns (',(defun ...)) use a literal single-space string.
 A single space becomes a true blank line after rustfmt (which strips
 the space, so `cargo fmt --check` stays green). Needed between
 use/mod groups: without blank lines rustfmt would reorder them
@@ -122,3 +123,30 @@ Returns T when the file was written."
   (loop for (name codes key) in +key-table+
         append (loop for c in codes
                      collect `(paren (scope KeyCode ,c) (string ,name)))))
+
+(defun clap-struct (doc-lines struct-attrs name fields)
+  "Assemble a clap derive-Parser struct as one string (field docs and
+field attributes fit no defstruct0 slot). DOC-LINES is a list of ///
+lines (\"\" for a bare ///), STRUCT-ATTRS a list of attribute strings,
+FIELDS a list of (doc attr name type) specs."
+  (with-output-to-string (s)
+    (loop for l in doc-lines do
+      (if (string= l "")
+          (write-string "///" s)
+          (format s "/// ~a" l))
+      (terpri s))
+    (loop for a in struct-attrs do (format s "#[~a]~%" a))
+    (format s "pub struct ~a {~%" name)
+    (loop for (doc attr fname ftype) in fields do
+      (format s "    /// ~a~%" doc)
+      (format s "    #[~a]~%" attr)
+      (format s "    pub ~a: ~a,~%" fname ftype))
+    (write-string "}" s)))
+
+(defun trymap (expr err-body)
+  "EXPR.map_err(|e| ERR-BODY)? -- the ubiquitous String-error mapping.
+Splice with ,(trymap 'EXPR 'ERR-BODY) (both quoted data), but ONLY as a
+direct template child -- never inside ,(pub_ '(...)): the inner comma
+would sit at backquote depth 0 (\"Comma not inside a backquote\").
+There, inline (? (dot EXPR (map_err (lambda (e) ERR-BODY)))) instead."
+  `(? (dot ,expr (map_err (lambda (e) ,err-body)))))
