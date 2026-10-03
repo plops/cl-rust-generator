@@ -17,7 +17,7 @@ use crate::capture::FrameSource;
 use crate::config::Config;
 use crate::input::Injector;
 use crate::ocr::Ocr;
-use crate::tiles::{crop_rgb, dirty_bbox, fill_rect};
+use crate::tiles::{MASK_PAD, crop_rgb, dirty_bbox, fill_rect, pad_rect};
 
 /// Was die Session zum Erkennen braucht (Tests nutzen Attrappen).
 pub trait Recognize {
@@ -127,7 +127,8 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
         }
         let mut masked = img.clone();
         for t in &texts {
-            fill_rect(&mut masked, t.rect, t.bg);
+            let m = pad_rect(t.rect, MASK_PAD, masked.width(), masked.height());
+            fill_rect(&mut masked, m, t.bg);
         }
         // Genau ein AV1-Bild pro Frame (ein Header-Overhead statt N×).
         let mut tiles = 0;

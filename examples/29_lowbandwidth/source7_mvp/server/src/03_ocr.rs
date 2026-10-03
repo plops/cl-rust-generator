@@ -13,6 +13,12 @@ use ort::value::TensorRef;
 
 use lbw_common::{Rect, TextItem};
 
+use crate::tiles::pad_rect;
+
+/// Erkennungs-Rand je Seite: Detektions-Boxen schneiden Glyphen (z. B.
+/// Umlaut-Punkte) haarscharf ab — mit Weißraum liest das Netz deutlich besser
+/// (Befund aus `26_onnx`: CER 69→4 %). Per Xvfb/xterm-Sweep bestimmt.
+const REC_PAD: u16 = 4;
 /// Pixel-Schwelle für Textkandidaten.
 const DET_THRESH: f32 = 0.3;
 /// Mindest-Mittelscore einer Komponente.
@@ -388,11 +394,13 @@ impl Ocr {
     }
 
     /// Textzeilen mit Farben; unsichere/leere Erkennungen fallen weg
-    /// (die bleiben dann Bildinhalt).
+    /// (die bleiben dann Bildinhalt). Das Rechteck ist bereits um [`REC_PAD`]
+    /// erweitert — Erkennung, Farben, Maske und Client malen dasselbe.
     pub fn text(&mut self, img: &RgbImage) -> Result<Vec<TextItem>, String> {
         let mut out = Vec::new();
         let boxes = self.det.detect(img)?;
         for r in boxes.into_iter().take(MAX_LINES) {
+            let r = pad_rect(r, REC_PAD, img.width(), img.height());
             let (text, conf) = self.rec.recognize(img, r)?;
             let text = text.trim().to_owned();
             if text.is_empty() || conf < MIN_TEXT_CONF {

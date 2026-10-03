@@ -66,6 +66,23 @@ pub fn dirty_bbox(prev: Option<&RgbImage>, cur: &RgbImage) -> Option<Rect> {
     Some(Rect::new(bx as u16, by as u16, bw as u16, bh as u16))
 }
 
+/// Maskierungs-Zuschlag je Seite (zusätzlich zum Erkennungs-Padding im
+/// `TextItem`-Rechteck): löscht Glyphen-Fransen, die sonst als AV1-Reste
+/// Bandbreite kosten. Per Xvfb/xterm-Sweep bestimmt (vgl. `tests/padding.rs`).
+pub const MASK_PAD: u16 = 2;
+
+/// Weitet `r` um `pad` Pixel je Seite auf (im `w`×`h`-Bild gehalten).
+/// Detektions-Boxen schneiden Glyphen haarscharf ab — ohne Rand leidet die
+/// Erkennung und Fransensäume bleiben als AV1-Reste stehen.
+#[must_use]
+pub fn pad_rect(r: Rect, pad: u16, w: u32, h: u32) -> Rect {
+    let x0 = u32::from(r.x).saturating_sub(u32::from(pad));
+    let y0 = u32::from(r.y).saturating_sub(u32::from(pad));
+    let x1 = (u32::from(r.x) + u32::from(r.w) + u32::from(pad)).min(w);
+    let y1 = (u32::from(r.y) + u32::from(r.h) + u32::from(pad)).min(h);
+    Rect::new(x0 as u16, y0 as u16, (x1 - x0) as u16, (y1 - y0) as u16)
+}
+
 /// Füllt `r` (aufs Bild begrenzt) mit `c` — für die Text-Maskierung.
 pub fn fill_rect(img: &mut RgbImage, r: Rect, c: [u8; 3]) {
     let (w, h) = img.dimensions();
@@ -136,6 +153,27 @@ mod tests {
         let mut b = a.clone();
         b.put_pixel(127, 127, image::Rgb([9; 3]));
         assert_eq!(dirty_bbox(Some(&a), &b), Some(Rect::new(112, 112, 16, 16)));
+    }
+
+    #[test]
+    fn pad_expands_and_clamps() {
+        assert_eq!(
+            pad_rect(Rect::new(10, 10, 20, 8), 4, 128, 128),
+            Rect::new(6, 6, 28, 16)
+        );
+        assert_eq!(
+            pad_rect(Rect::new(10, 10, 20, 8), 0, 128, 128),
+            Rect::new(10, 10, 20, 8)
+        );
+        // Am Rand klemmen statt überlaufen.
+        assert_eq!(
+            pad_rect(Rect::new(0, 0, 10, 10), 4, 128, 128),
+            Rect::new(0, 0, 14, 14)
+        );
+        assert_eq!(
+            pad_rect(Rect::new(120, 120, 8, 8), 4, 128, 128),
+            Rect::new(116, 116, 12, 12)
+        );
     }
 
     #[test]
