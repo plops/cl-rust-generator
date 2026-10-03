@@ -8,7 +8,7 @@ license.workspace = true
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 enigo = "0.6.1"
-image = "0.25.10"
+image = "0.24"
 lbw-common = { path = "../common" }
 ort = { version = "2.0.0-rc.13", default-features = false, features = ["download-binaries", "copy-dylibs", "tls-native", "std"] }
 rav1e = { version = "0.8.1", default-features = false, features = ["threading"] }
