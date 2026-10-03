@@ -17,6 +17,17 @@
 ;;;;   (the emitter would print 0.50-style digits).
 ;;;; - Generics, lifetimes, `self`, struct-variant patterns and let-chains
 ;;;;   are strings (the documented escape hatch).
+;;;; - (range ...) forms keep their parentheses: fine for `for` (which
+;;;;   strips them) and dot receivers (which need them), but rejected by
+;;;;   unused_parens in index/argument position. There, build the range
+;;;;   with (space ..): (aref buf (space ".." HEADER)) => buf[..HEADER].
+;;;; - Mirror every explicit paren pair of the source7 code with (paren ...);
+;;;;   omit-mode drops only redundant ones, and clippy's precedence lint
+;;;;   wants the rest back.
+;;;; - A leading string in a defun/let/lambda body is swallowed as a Lisp
+;;;;   docstring. Emitted leading comments need a progn wrapper:
+;;;;   (defun f () (progn "// comment" ...)) -- the singleton progn is
+;;;;   spliced, so no extra braces appear.
 
 (defparameter *source-dir* #P"examples/29_lowbandwidth/source8_transpiled/")
 
@@ -27,6 +38,15 @@
 (defun pub_ (form)
   "Wrap a defun/defstruct0/defenum/impl item as a pub item."
   `(space "pub" ,form))
+
+(defparameter *blank* " "
+  "Blank-line item for do0/progn sequences: splice with ,*blank* as a
+direct template child, but as plain *blank* inside an already-unquoted
+call like ,(testmod ...) (a comma there would be outside the backquote).
+A single space becomes a true blank line after rustfmt (which strips
+the space, so `cargo fmt --check` stays green). Needed between
+use/mod groups: without blank lines rustfmt would reorder them
+(reorder_imports/reorder_modules). Cosmetic everywhere else.")
 
 (defun doc (&rest lines)
   "Module doc comment block: each line becomes `//! ...` (empty line: `//!`)."
