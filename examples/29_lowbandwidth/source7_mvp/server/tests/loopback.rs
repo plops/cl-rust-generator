@@ -78,7 +78,7 @@ fn full_frame_then_single_dirty_tile() {
     )
     .unwrap();
 
-    // Hello + Vollbild: ClearText, AddText, 4 Kacheln (128² / 64²).
+    // Hello + Vollbild: ClearText, AddText, 1 Box (128×128).
     let mut hello = false;
     read_until(
         &mut fr,
@@ -109,12 +109,12 @@ fn full_frame_then_single_dirty_tile() {
                 ServerMsg::Tile { .. } => tiles += 1,
                 _ => {}
             }
-            clear >= 1 && texts >= 1 && tiles >= 4
+            clear >= 1 && texts >= 1 && tiles >= 1
         },
     );
-    assert_eq!((clear, texts, tiles), (1, 1, 4));
+    assert_eq!((clear, texts, tiles), (1, 1, 1));
 
-    // Ein Pixel in Kachel (64,0) ändern → genau diese Kachel kommt neu.
+    // Ein Pixel ändern → genau eine 16×16-Box um den Pixel kommt neu.
     let mut img = solid(128, 128, [40; 3]);
     img.put_pixel(100, 10, image::Rgb([9; 3]));
     shared.set(img);
@@ -132,7 +132,7 @@ fn full_frame_then_single_dirty_tile() {
             false
         },
     );
-    assert_eq!(found, Some((64, 0)));
+    assert_eq!(found, Some((100, 10)));
 
     server.join().unwrap().unwrap();
 }

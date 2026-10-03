@@ -10,6 +10,4 @@ pub mod framing;
 #[path = "03_yuv.rs"]
 pub mod yuv;
 
-pub use types::{
-    ClientMsg, DEFAULT_PORT, MAX_MSG, PROTO_VERSION, Rect, SIZE, ServerMsg, TILE, TextItem,
-};
+pub use types::{ClientMsg, DEFAULT_PORT, MAX_MSG, PROTO_VERSION, Rect, SIZE, ServerMsg, TextItem};

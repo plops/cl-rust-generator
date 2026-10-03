@@ -1,5 +1,5 @@
 //! `07_session` — Client-Bedienung: Handshake, Input-Thread und
-//! Capture → OCR → Maske → Dirty-Kacheln-Schleife mit direktem TCP.
+//! Capture → OCR → Maske → Bounding-Box mit direktem TCP.
 //! Kein Scheduler, kein Client-State: Reconnect beginnt bei Vollbild.
 
 use std::net::TcpStream;
@@ -17,7 +17,7 @@ use crate::capture::FrameSource;
 use crate::config::Config;
 use crate::input::Injector;
 use crate::ocr::Ocr;
-use crate::tiles::{crop_rgb, dirty_tiles, fill_rect};
+use crate::tiles::{crop_rgb, dirty_bbox, fill_rect};
 
 /// Was die Session zum Erkennen braucht (Tests nutzen Attrappen).
 pub trait Recognize {
@@ -129,17 +129,13 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
         for t in &texts {
             fill_rect(&mut masked, t.rect, t.bg);
         }
+        // Genau ein AV1-Bild pro Frame (ein Header-Overhead statt N×).
         let mut tiles = 0;
-        let mut enc_err: Option<String> = None;
-        let mut conn_lost = false;
-        for r in dirty_tiles(prev.as_ref(), &masked) {
+        if let Some(r) = dirty_bbox(prev.as_ref(), &masked) {
             let rgb = crop_rgb(&masked, r);
             let data = match encode_rgb(&rgb, r.w as usize, r.h as usize, params) {
                 Ok(d) => d,
-                Err(e) => {
-                    enc_err = Some(e);
-                    break;
-                }
+                Err(e) => break Err(e),
             };
             let msg = ServerMsg::Tile {
                 x: r.x,
@@ -148,18 +144,9 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
             };
             match write_msg(&mut wr, &msg) {
                 Ok(n) => bytes += n,
-                Err(_) => {
-                    conn_lost = true;
-                    break;
-                }
+                Err(_) => break Ok(()),
             }
-            tiles += 1;
-        }
-        if let Some(e) = enc_err {
-            break Err(e);
-        }
-        if conn_lost {
-            break Ok(());
+            tiles = 1;
         }
         if cfg.verbose {
             eprintln!(

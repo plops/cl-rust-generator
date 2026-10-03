@@ -100,8 +100,16 @@ fn hello_text_tile_and_reconnect() {
                 assert_eq!(t.text, "hi");
                 texts += 1;
             }
-            Event::Tile { x, y, rgba, bytes } => {
+            Event::Tile {
+                x,
+                y,
+                w,
+                h,
+                rgba,
+                bytes,
+            } => {
                 assert_eq!((x, y), (0, 0));
+                assert_eq!((w, h), (64, 64));
                 assert_eq!(rgba.len(), 64 * 64 * 4);
                 assert!(bytes > 0);
                 // Flache Kachel: überall fast die Quellfarbe, Alpha 255.
