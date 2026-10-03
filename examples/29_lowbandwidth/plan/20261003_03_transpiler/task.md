@@ -86,12 +86,13 @@ Erst weiter, wenn der Schritt grün ist. Baseline: `source7_mvp`
 
 ## T7 — Gesamtverifikation und Smoke
 
-- [ ] `gen/texts.lisp` finalisieren: `scripts/smoke_xvfb.sh` (identisch,
-      ausführbar), `README.md` (Pfade auf `source8_transpiled` angepasst,
-      Generator-Abschnitt), `collect.sh`, `deps.md`-Kopie mit
-      Generator-Zeile, `Cargo.lock` via `cargo generate-lockfile`
-      (oder Build).
-- [ ] Prüfen, alles aus `source8_transpiled/`:
+- [x] `gen/texts.lisp` finalisieren: `scripts/smoke_xvfb.sh` (identisch
+      bis auf Aufruf-Kommentar, ausführbar), `README.md` (Pfade auf
+      `source8_transpiled` angepasst, Generator-Abschnitt), `collect.sh`
+      (byte-identisch), `deps.md`-Kopie mit Generator-Zeile,
+      `Cargo.lock` via `cargo generate-lockfile` (bleibt untracked:
+      `*.lock` in `.gitignore`, wie `source7_mvp`).
+- [x] Prüfen, alles aus `source8_transpiled/`:
       `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`,
       `cargo test --workspace` (46 + 2 ignored),
       `./scripts/smoke_xvfb.sh` (braucht `xvfb`, `xterm`, Modelle).

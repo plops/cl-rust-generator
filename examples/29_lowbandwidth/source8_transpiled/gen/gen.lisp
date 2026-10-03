@@ -41,6 +41,10 @@
     (write-source (s8-path "client/src/main.rs") (client-main-rs))
     (write-source (s8-path "client/examples/probe.rs") (client-probe-rs))
     (write-source (s8-path "client/tests/loopback.rs") (client-test-loopback-rs))
-    (write-text-file "client/Cargo.toml" (client-cargo-toml))))
+    (write-text-file "client/Cargo.toml" (client-cargo-toml))
+    (write-text-file "scripts/smoke_xvfb.sh" (smoke-xvfb-sh) :executable t)
+    (write-text-file "collect.sh" (collect-sh))
+    (write-text-file "README.md" (readme-md))
+    (write-text-file "deps.md" (deps-md))))
 
 (generate-all)
