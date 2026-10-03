@@ -30,16 +30,17 @@ danach Smoke/Doku. (TUI entfällt im MVP ersatzlos — kein Fluch-Auswahlmodus.)
   `main.rs`-Verdrahtung. Loopback-Test mit `SharedSource` + Stub-OCR
   über echtes TCP: Hello, ClearText/AddText, Tile für geänderte Kachel,
   keine Tile für unveränderte. Validierung: `cargo test -p lbw-server`.
-- [ ] **T5 Client-Kern**: `01_config.rs` (clap), `02_av1.rs`
-  (rav1d-Decoder), `04_scene.rs` (Canvas, Texte ohne IDs, blit mit
-  Clipping). Unit-Tests: Config, Müll-Dekodierung ist Fehler (kein
-  Crash), Scene-Clear/Add/Blit/Link-Zustand. Validierung:
+- [ ] **T5 Client-Kern**: `01_config.rs` (clap, ohne Zoom),
+  `02_av1.rs` (rav1d-Decoder), `03_net.rs` (Reconnect mit Backoff,
+  Event-Kanal, `send`), `04_scene.rs` (fest 640×640, Texte ohne IDs,
+  Blit ohne Clipping). Tests: Config, Müll-Dekodierung ist Fehler (kein
+  Crash), Scene-Clear/Add/Blit/Link-Zustand, Loopback gegen Stub-Server
+  (Hello/Text/echte AV1-Kachel, Reconnect nach Abriss). Validierung:
   `cargo test -p lbw-client` (headless, ohne Display).
-- [ ] **T6 Client-Netz + App**: `03_net.rs` (Reconnect mit Backoff,
-  Event-Kanal, `send`), `05_app.rs` + `main.rs` (macroquad: Textur +
-  Default-Font-Text + HUD, Maus/Tasten/`Text`-Eingabe). Loopback-Test:
-  Stub-Server schickt Hello/Text/Tile (AV1 aus T2), Client-Events kommen
-  an; Reconnect nach Abriss. Validierung: `cargo test -p lbw-client`.
+- [ ] **T6 Client-App**: `05_app.rs` + `main.rs` (macroquad: festes
+  640×640-Fenster, Textur + Default-Font-Text + HUD, Maus/Tasten/
+  `Text`-Eingabe ohne Skalierung). Validierung: Build + Clippy
+  (Laufzeit-Test im Xvfb-Smoke T7).
 - [ ] **T7 Integration + Smoke**: `scripts/smoke_xvfb.sh`
   (Xvfb-Server-Display, `xterm`-Inhalt, `lbw-server` mit echten Modellen,
   Headless-Probe liest Hello/Text/Tile und schickt Input; Abbruch sauber).
