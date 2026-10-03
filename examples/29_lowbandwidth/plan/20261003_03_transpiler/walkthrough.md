@@ -271,28 +271,29 @@ schicken / Input lesen / Heartbeat". Ergebnis: 266 Zeilen in einer
 Ebene statt tief verschachtelter Module, deutlich einfacher zu folgen,
 Protokoll identisch.
 
-### 2.2 Keine Tupel-`let`s — der Emitter kann das nicht
+### 2.2 Tupel-`let`s — doch möglich (Annahme widerlegt)
 
-Rust erlaubt `let (a, b) = pair;`. Der Emitter von `cl-rust-generator`
-kennt dieses Muster nicht: Jeder Versuch endete in nicht
-kompilierendem Code. Lösung überall im Projekt: **aufspalten** in
-Einzel-`let`s mit Feldzugriff:
+Lange galt: Rust erlaubt `let (a, b) = pair;`, aber der Emitter von
+`cl-rust-generator` kennt dieses Muster nicht — also wurde überall in
+Einzel-`let`s mit Feldzugriff aufgespalten (`(dot pair "0")` …).
+Gezielte Proben (T9) haben diese Annahme **widerlegt**: Die Form
 
 ```lisp
-;; Statt: (let (((a b) pair)) ...)
-(let ((a (dot pair "0"))
-      (b (dot pair "1")))
+(let (((paren a b) pair))
   ...)
 ```
 
-```rust
-let a = pair.0;
-let b = pair.1;
-```
+emittiert korrekt `let (a, b) = pair;` — auch gemischt mit
+gewöhnlichen Bindungen in derselben Liste und mit `_`-Platzhaltern.
+Seitdem gilt umgekehrt: **Echte Tupel** (Kanäle, `dimensions()`,
+Koordinaten, Closure-Argumente) werden destrukturiert.
 
-Betroffen waren u. a. Kanalenden (`tx`/`rx`), Rechtecke (`x0`/`y0`,
-`w`/`h`) und YUV-Ebenen. Etwas mehr Zeilen, aber robust und für jeden
-Rust-Leser sofort verständlich.
+Eine echte Grenze bleibt — aber es ist eine **Rust**-Regel, keine
+Emitter-Schwäche: **Tupel-Structs** wie `Dav1dResult` lassen sich ohne
+Strukturpfad nicht destrukturieren (`let (code, _) = r` → E0308).
+Dort bleibt der Feldzugriff `(dot r 0)` (→ `r.0`) Pflicht. Der
+Refactor-Versuch, das zu „vereinheitlichen", scheiterte zu Recht am
+Compiler — und wurde revertiert.
 
 ### 2.3 Let-Chains von Hand „entfaltet"
 
@@ -375,6 +376,46 @@ Workspace-Manifest temporär auf die fertigen Crates reduziert
 erzeugt, bevor irgendeine Client-Quelle existierte — sonst hätte kein
 einziges Client-Gate laufen können.
 
+### 2.11 T9-Nachlese: `let`s flach, Wiederholung in Splices (Review-Feedback)
+
+Ein Review fand den generierten Code „weird": tief **verschachtelte
+Einzel-`let`s** (sieben Ebenen für sieben Variablen) und überall
+**wörtlich wiederholte Sequenzen** (`match`-Arme, Kanal-Tripel,
+`assert!`-Reihen, `draw_rectangle`-Koordinaten …). Beides wurde in
+einem eigenen Refactor-Durchgang (T9) bereinigt — nach demselben
+Probe-zuerst-Prinzip wie alles andere (P1–P8 in `/tmp/probe_refactor*.lisp`):
+
+- **Flache Multi-Binding-`let`s:** Verschachtelte Einzel-`let`s wurden
+  in **eine** Bindungsliste überführt, Tupel per `(paren …)`
+  destrukturiert (siehe 2.2), Rebindings (`bw`/`bh`-Klemmung) als
+  zweiter flacher `let`. Ergebnis im Rust: **262 Zeilen weniger**
+  (4009 → 3747), weil jede überflüssige Ebene auch einen
+  überflüssigen Block `{ … }` erzeugte.
+- **`,@(loop …)`-Splices statt Copy-Paste:** Jede wiederholte Sequenz
+  bekam eine **Lisp-Helferfunktion**, die die Formen per `loop`/`collect`
+  erzeugt. Die Helfer wohnen bei ihren Schablonen (Single-Source-Prinzip
+  aus Learning 4, als Funktion statt Tabelle):
+
+| Helfer | Datei | Erzeugt |
+|---|---|---|
+| `channel-arefs` | `00_util.lisp` | `ARR[IDX+k]`-Tripel (vermeidet `+ 0` wegen Clippy-`identity_op`) |
+| `chroma-store` | `common.lisp` | Chroma-Mittel/Speichern (`u`/`v`-Ebenen) |
+| `argv-expr`, `config-reject-assert` | `server.lisp` | CLI-Fehlschlag-`assert!`-Reihen |
+| `minmax-assign` | `server.lisp` | `x0 = x0.min(cx)`-Zuweisungen (Flood-Fill, Sweep) |
+| `rgb565-expr`, `luma-term` | `server.lisp` | RGB565-Faltung, Luma-Terme |
+| `unclip-bindings`, `ceil-extent` | `server.lisp` | Unclip-Bindungen, Aufrundungs-Extents |
+| `server-msg-event-arms` | `client.lisp` | `ServerMsg→Event`-`match`-Arme |
+| `mouse-button-pairs`, `rect-f32-exprs`, `channel-exprs` | `client.lisp` | Button-Paare, `f32`-Koordinaten, Farbkanäle |
+| `scene-stats-exprs`, `pixel-asserts`, `greeting-write` | `client.lisp` | Szenen-Statistik, Pixel-`assert!`-Reihen, Loopback-Grüße |
+
+Zwei Fallen aus diesem Durchgang (fürs nächste Mal notiert):
+Klammer-Arithmetik an Schablonenschwänzen ist trügerisch — verlässlich
+ist nur der **Regionsabgleich gegen `git HEAD`** (Netto-Klammerbilanz
+pro `defun` muss gleich bleiben) plus der Emitter selbst als
+Schiedsrichter. Und: Jede neue Destrukturierung muss gegen den
+**echten Rust-Typ** geprüft werden — Tupel ja, Tupel-Struct nein
+(siehe 2.2).
+
 ---
 
 ## 3. Learnings und mögliche Erweiterungen
@@ -426,7 +467,8 @@ Spickzettel für alle, die den Generator erweitern:
 | `&x` / `&mut x` | `(ref x)` / `(ref-mut x)` |
 | `*x` | `(deref x)` |
 | `f::<T>(x)` | `("f::<T>" x)` (String-Trick) |
-| `x.0`, `t.1` | `(dot x "0")`, `(dot t "1")` |
+| `let (a, b) = pair;` | `(let (((paren a b) pair)) ...)` (mischt mit Normalbindung, `_` ok) |
+| `x.0` (nur Tupel-Structs!) | `(dot x 0)` |
 | `Struct { a, ..Default::default() }` | `(space Struct (curly a "..Default::default()"))` |
 | `match x { ... }` | `(case x ...)` |
 | `if let Some(v) = o { ... }` | `(if-let ((v o)) ...)` (nur Einfach-Form!) |
@@ -443,10 +485,10 @@ Spickzettel für alle, die den Generator erweitern:
 ### 3.2 Mögliche Erweiterungen
 
 **Am Transpiler (`cl-rust-generator`):**
-- Tupel-Destrukturierung in `let` nativ unterstützen — würde Abschnitt
-  2.2 überflüssig machen und den Code kürzer machen.
 - Let-Chains (`if let A && let B`) emittieren können — die
   `#[allow(collapsible_if)]`-Stellen würden verschwinden.
+  (Tupel-Destrukturierung in `let` war ebenfalls gewünscht, stellte
+  sich aber als bereits vorhanden heraus — siehe 2.2.)
 - Struct-Update-Syntax (`..Default::default()`) in `make-instance`
   unterstützen statt Umweg über `space`/`curly`.
 - Mehrzeilige Raw-Strings nativ (für eingebettete Skripte/Doku),
@@ -507,12 +549,13 @@ Hinweise:
 
 ## Fazit
 
-Aus 4075 Zeilen Lisp entstehen 4009 Zeilen Rust plus Skripte und Doku —
+Aus 4100 Zeilen Lisp entstehen 3747 Zeilen Rust plus Skripte und Doku —
 mit identischen Abhängigkeiten, 46 grünen Tests und einem laufenden
 Smoke-Test. Der Weg dorthin war kein stupides Abtippen, sondern ein
 Dialog mit Compiler und Tests: Session neu gedacht, Emitter-Grenzen
-kartiert und umgangen, Redundanz in Tabellen gegossen. Wer den
-Generator anfasst, beginnt am besten mit dem Idiom-Katalog (3.1) und
-einer kleinen Probe-Datei — der Rest ist Handwerk.
+kartiert und umgangen (eine vermeintliche Grenze widerlegt: 2.2),
+Redundanz erst in Tabellen, dann in Splice-Helfer gegossen (2.11).
+Wer den Generator anfasst, beginnt am besten mit dem Idiom-Katalog
+(3.1) und einer kleinen Probe-Datei — der Rest ist Handwerk.
 
 

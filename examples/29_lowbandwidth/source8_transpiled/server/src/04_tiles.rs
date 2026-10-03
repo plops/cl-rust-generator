@@ -19,64 +19,54 @@ use crate::av1::MIN_TILE;
 #[must_use]
 pub fn dirty_bbox(prev: Option<&RgbImage>, cur: &RgbImage) -> Option<Rect> {
     let (w, h) = cur.dimensions();
+    let prev = match prev {
+        Some(p) => p,
+        None => return Some(Rect::new(0, 0, w as u16, h as u16)),
+    };
+    debug_assert_eq!((prev.width(), prev.height()), (w, h));
+    debug_assert!(w >= MIN_TILE as u32 && h >= MIN_TILE as u32 && w % 2 == 0 && h % 2 == 0);
     {
-        let prev = match prev {
-            Some(p) => p,
-            None => return Some(Rect::new(0, 0, w as u16, h as u16)),
-        };
-        debug_assert_eq!((prev.width(), prev.height()), (w, h));
-        debug_assert!(w >= MIN_TILE as u32 && h >= MIN_TILE as u32 && w % 2 == 0 && h % 2 == 0);
+        let stride = w as usize * 3;
+        let (a, b) = (prev.as_raw(), cur.as_raw());
+        let (mut x0, mut x1, mut y0, mut y1) = (w, 0, h, 0);
+        for y in 0..h {
+            let s = y as usize * stride;
+            let (ra, rb) = (&a[s..s + stride], &b[s..s + stride]);
+            if ra == rb {
+                continue;
+            }
+            y0 = y0.min(y);
+            y1 = y1.max(y);
+            for x in 0..w {
+                let o = x as usize * 3;
+                if ra[o..o + 3] != rb[o..o + 3] {
+                    x0 = x0.min(x);
+                    break;
+                }
+            }
+            for x in (0..w).rev() {
+                let o = x as usize * 3;
+                if ra[o..o + 3] != rb[o..o + 3] {
+                    x1 = x1.max(x);
+                    break;
+                }
+            }
+        }
+        if x0 > x1 {
+            return None;
+        }
+        // Auf Mindestgröße und gerade Kanten erweitern, im Bild halten.
         {
-            let stride = w as usize * 3;
+            let t = MIN_TILE as u32;
+            let mut bw = ((x1 - x0) + 1).max(t).min(w);
+            let mut bh = ((y1 - y0) + 1).max(t).min(h);
+            bw += bw & 1;
+            bh += bh & 1;
             {
-                let (a, b) = (prev.as_raw(), cur.as_raw());
-                let (mut x0, mut x1, mut y0, mut y1) = (w, 0, h, 0);
-                for y in 0..h {
-                    let s = y as usize * stride;
-                    {
-                        let (ra, rb) = (&a[s..s + stride], &b[s..s + stride]);
-                        if ra == rb {
-                            continue;
-                        }
-                        y0 = y0.min(y);
-                        y1 = y1.max(y);
-                        for x in 0..w {
-                            let o = x as usize * 3;
-                            if ra[o..o + 3] != rb[o..o + 3] {
-                                x0 = x0.min(x);
-                                break;
-                            }
-                        }
-                        for x in (0..w).rev() {
-                            let o = x as usize * 3;
-                            if ra[o..o + 3] != rb[o..o + 3] {
-                                x1 = x1.max(x);
-                                break;
-                            }
-                        }
-                    }
-                }
-                if x0 > x1 {
-                    return None;
-                }
-                // Auf Mindestgröße und gerade Kanten erweitern, im Bild halten.
-                {
-                    let t = MIN_TILE as u32;
-                    {
-                        let mut bw = ((x1 - x0) + 1).max(t).min(w);
-                        let mut bh = ((y1 - y0) + 1).max(t).min(h);
-                        bw += bw & 1;
-                        bh += bh & 1;
-                        {
-                            let (bw, bh) = (bw.min(w), bh.min(h));
-                            {
-                                let bx = x0.min(w - bw);
-                                let by = y0.min(h - bh);
-                                Some(Rect::new(bx as u16, by as u16, bw as u16, bh as u16))
-                            }
-                        }
-                    }
-                }
+                let (bw, bh) = (bw.min(w), bh.min(h));
+                let bx = x0.min(w - bw);
+                let by = y0.min(h - bh);
+                Some(Rect::new(bx as u16, by as u16, bw as u16, bh as u16))
             }
         }
     }
@@ -111,24 +101,14 @@ pub fn pad_rect(r: Rect, pad: u16, w: u32, h: u32) -> Rect {
 /// Füllt `r` (aufs Bild begrenzt) mit `c` — für die Text-Maskierung.
 pub fn fill_rect(img: &mut RgbImage, r: Rect, c: [u8; 3]) {
     let (w, h) = img.dimensions();
-    {
-        let x0 = u32::from(r.x).min(w);
-        {
-            let y0 = u32::from(r.y).min(h);
-            {
-                let x1 = (x0 + u32::from(r.w)).min(w);
-                {
-                    let y1 = (y0 + u32::from(r.h)).min(h);
-                    {
-                        let px = image::Rgb(c);
-                        for y in y0..y1 {
-                            for x in x0..x1 {
-                                img.put_pixel(x, y, px)
-                            }
-                        }
-                    }
-                }
-            }
+    let x0 = u32::from(r.x).min(w);
+    let y0 = u32::from(r.y).min(h);
+    let x1 = (x0 + u32::from(r.w)).min(w);
+    let y1 = (y0 + u32::from(r.h)).min(h);
+    let px = image::Rgb(c);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            img.put_pixel(x, y, px)
         }
     }
 }
@@ -137,17 +117,13 @@ pub fn fill_rect(img: &mut RgbImage, r: Rect, c: [u8; 3]) {
 #[must_use]
 pub fn crop_rgb(img: &RgbImage, r: Rect) -> Vec<u8> {
     let stride = img.width() * 3;
-    {
-        let raw = img.as_raw();
-        {
-            let mut out = Vec::with_capacity(r.area() as usize * 3);
-            for row in 0..u32::from(r.h) {
-                let s = ((u32::from(r.y) + row) * stride + u32::from(r.x) * 3) as usize;
-                out.extend_from_slice(&raw[s..s + (u32::from(r.w) * 3) as usize])
-            }
-            out
-        }
+    let raw = img.as_raw();
+    let mut out = Vec::with_capacity(r.area() as usize * 3);
+    for row in 0..u32::from(r.h) {
+        let s = ((u32::from(r.y) + row) * stride + u32::from(r.x) * 3) as usize;
+        out.extend_from_slice(&raw[s..s + (u32::from(r.w) * 3) as usize])
     }
+    out
 }
 
 #[cfg(test)]
@@ -164,44 +140,36 @@ mod tests {
     #[test]
     fn identical_frames_are_silent() {
         let a = solid(128, 128, [7; 3]);
-        {
-            let b = solid(128, 128, [7; 3]);
-            assert_eq!(dirty_bbox(Some(&a), &b), None)
-        }
+        let b = solid(128, 128, [7; 3]);
+        assert_eq!(dirty_bbox(Some(&a), &b), None)
     }
 
     #[test]
     fn scattered_pixels_yield_single_box() {
         let a = solid(128, 128, [0; 3]);
+        let mut b = a.clone();
+        b.put_pixel(10, 10, image::Rgb([9; 3]));
+        b.put_pixel(100, 100, image::Rgb([9; 3]));
         {
-            let mut b = a.clone();
-            b.put_pixel(10, 10, image::Rgb([9; 3]));
-            b.put_pixel(100, 100, image::Rgb([9; 3]));
-            {
-                // 10..=100 → 91 px, auf gerade Kanten erweitert.
-                assert_eq!(dirty_bbox(Some(&a), &b), Some(Rect::new(10, 10, 92, 92)))
-            }
+            // 10..=100 → 91 px, auf gerade Kanten erweitert.
+            assert_eq!(dirty_bbox(Some(&a), &b), Some(Rect::new(10, 10, 92, 92)))
         }
     }
 
     #[test]
     fn single_pixel_is_padded_to_minimum() {
         let a = solid(128, 128, [0; 3]);
-        {
-            let mut b = a.clone();
-            b.put_pixel(5, 5, image::Rgb([9; 3]));
-            assert_eq!(dirty_bbox(Some(&a), &b), Some(Rect::new(5, 5, 16, 16)))
-        }
+        let mut b = a.clone();
+        b.put_pixel(5, 5, image::Rgb([9; 3]));
+        assert_eq!(dirty_bbox(Some(&a), &b), Some(Rect::new(5, 5, 16, 16)))
     }
 
     #[test]
     fn box_clamps_at_image_edge() {
         let a = solid(128, 128, [0; 3]);
-        {
-            let mut b = a.clone();
-            b.put_pixel(127, 127, image::Rgb([9; 3]));
-            assert_eq!(dirty_bbox(Some(&a), &b), Some(Rect::new(112, 112, 16, 16)))
-        }
+        let mut b = a.clone();
+        b.put_pixel(127, 127, image::Rgb([9; 3]));
+        assert_eq!(dirty_bbox(Some(&a), &b), Some(Rect::new(112, 112, 16, 16)))
     }
 
     #[test]

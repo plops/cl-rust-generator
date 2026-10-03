@@ -36,34 +36,32 @@ pub fn encode_rgb(rgb: &[u8], w: usize, h: usize, quantizer: usize) -> Result<Ve
             enc.max_key_frame_interval = 1;
             {
                 let cfg = Config::new().with_encoder_config(enc).with_threads(4);
+                let mut ctx: Context<u8> =
+                    cfg.new_context().map_err(|e| format!("rav1e: {e:?}"))?;
+
                 {
-                    let mut ctx: Context<u8> =
-                        cfg.new_context().map_err(|e| format!("rav1e: {e:?}"))?;
+                    let mut frame = ctx.new_frame();
+                    frame.planes[0].copy_from_raw_u8(&yuv.y, w, 1);
+                    frame.planes[1].copy_from_raw_u8(&yuv.u, yuv.cw(), 1);
+                    frame.planes[2].copy_from_raw_u8(&yuv.v, yuv.cw(), 1);
+                    ctx.send_frame(frame)
+                        .map_err(|e| format!("send_frame: {e:?}"))?;
+                    ctx.flush();
 
                     {
-                        let mut frame = ctx.new_frame();
-                        frame.planes[0].copy_from_raw_u8(&yuv.y, w, 1);
-                        frame.planes[1].copy_from_raw_u8(&yuv.u, yuv.cw(), 1);
-                        frame.planes[2].copy_from_raw_u8(&yuv.v, yuv.cw(), 1);
-                        ctx.send_frame(frame)
-                            .map_err(|e| format!("send_frame: {e:?}"))?;
-                        ctx.flush();
-
-                        {
-                            let mut out = Vec::new();
-                            loop {
-                                match ctx.receive_packet() {
-                                    Ok(pkt) => out.extend_from_slice(&pkt.data),
-                                    Err(EncoderStatus::Encoded) => {}
-                                    Err(EncoderStatus::LimitReached) => break,
-                                    Err(e) => return Err(format!("receive_packet: {e:?}")),
-                                }
+                        let mut out = Vec::new();
+                        loop {
+                            match ctx.receive_packet() {
+                                Ok(pkt) => out.extend_from_slice(&pkt.data),
+                                Err(EncoderStatus::Encoded) => {}
+                                Err(EncoderStatus::LimitReached) => break,
+                                Err(e) => return Err(format!("receive_packet: {e:?}")),
                             }
-                            if out.is_empty() {
-                                return Err("rav1e lieferte kein Paket".into());
-                            }
-                            Ok(out)
                         }
+                        if out.is_empty() {
+                            return Err("rav1e lieferte kein Paket".into());
+                        }
+                        Ok(out)
                     }
                 }
             }
@@ -78,14 +76,12 @@ mod tests {
     #[test]
     fn flat_tile_is_tiny() {
         let rgb = [40u8, 80, 160].repeat(64 * 64);
-        {
-            let bytes = encode_rgb(&rgb, 64, 64, 180).unwrap();
-            assert!(
-                !bytes.is_empty() && bytes.len() < 200,
-                "{} Byte",
-                bytes.len()
-            )
-        }
+        let bytes = encode_rgb(&rgb, 64, 64, 180).unwrap();
+        assert!(
+            !bytes.is_empty() && bytes.len() < 200,
+            "{} Byte",
+            bytes.len()
+        )
     }
 
     #[test]

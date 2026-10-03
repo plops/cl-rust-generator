@@ -70,15 +70,13 @@ pub fn rgb_to_yuv420(rgb: &[u8], w: usize, h: usize) -> Yuv420 {
             for yy in 0..h {
                 for xx in 0..w {
                     let i = (yy * w + xx) * 3;
+                    let (y, u, v) = rgb_to_yuv(rgb[i], rgb[i + 1], rgb[i + 2]);
+                    out.y[yy * w + xx] = y;
                     {
-                        let (y, u, v) = rgb_to_yuv(rgb[i], rgb[i + 1], rgb[i + 2]);
-                        out.y[yy * w + xx] = y;
-                        {
-                            let c = (yy / 2) * cw + xx / 2;
-                            usum[c] += u32::from(u);
-                            vsum[c] += u32::from(v);
-                            cnt[c] += 1
-                        }
+                        let c = (yy / 2) * cw + xx / 2;
+                        usum[c] += u32::from(u);
+                        vsum[c] += u32::from(v);
+                        cnt[c] += 1
                     }
                 }
             }
@@ -106,13 +104,9 @@ pub fn yuv420_to_rgba(
     for yy in 0..h {
         for xx in 0..w {
             let c = (yy / 2) * cs + xx / 2;
-            {
-                let [r, g, b] = yuv_to_rgb(y[yy * ys + xx], u[c], v[c]);
-                {
-                    let o = (yy * w + xx) * 4;
-                    rgba[o..o + 4].copy_from_slice(&[r, g, b, 255])
-                }
-            }
+            let [r, g, b] = yuv_to_rgb(y[yy * ys + xx], u[c], v[c]);
+            let o = (yy * w + xx) * 4;
+            rgba[o..o + 4].copy_from_slice(&[r, g, b, 255])
         }
     }
 }
@@ -128,11 +122,9 @@ mod tests {
             for g in (0..=255).step_by(15) {
                 for b in (0..=255).step_by(15) {
                     let (y, u, v) = rgb_to_yuv(r as u8, g as u8, b as u8);
-                    {
-                        let back = yuv_to_rgb(y, u, v);
-                        for (a, o) in [r, g, b].iter().zip(back) {
-                            assert!((a - i32::from(o)).abs() <= 3, "{r},{g},{b} -> {back:?}")
-                        }
+                    let back = yuv_to_rgb(y, u, v);
+                    for (a, o) in [r, g, b].iter().zip(back) {
+                        assert!((a - i32::from(o)).abs() <= 3, "{r},{g},{b} -> {back:?}")
                     }
                 }
             }

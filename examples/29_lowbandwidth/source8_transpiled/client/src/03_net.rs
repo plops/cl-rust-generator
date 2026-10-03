@@ -50,35 +50,17 @@ impl Drop for Net {
 impl Net {
     /// Verbindet mit `addr` (Reconnect läuft im Hintergrund).
     pub fn connect(addr: &str) -> Self {
-        let ev_ch = channel();
-        {
-            let ev_tx = ev_ch.0;
+        let (ev_tx, events) = channel();
+        let (out, out_rx) = channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        std::thread::spawn({
             {
-                let events = ev_ch.1;
-                {
-                    let out_ch = channel();
-                    {
-                        let out = out_ch.0;
-                        {
-                            let out_rx = out_ch.1;
-                            {
-                                let stop = Arc::new(AtomicBool::new(false));
-                                std::thread::spawn({
-                                    {
-                                        let addr = addr.to_owned();
-                                        {
-                                            let stop = stop.clone();
-                                            move || run(&addr, ev_tx, out_rx, &stop)
-                                        }
-                                    }
-                                });
-                                Self { events, out, stop }
-                            }
-                        }
-                    }
-                }
+                let addr = addr.to_owned();
+                let stop = stop.clone();
+                move || run(&addr, ev_tx, out_rx, &stop)
             }
-        }
+        });
+        Self { events, out, stop }
     }
 
     /// Sendet eine Nachricht (geht verloren, wenn gerade keine Verbindung besteht).

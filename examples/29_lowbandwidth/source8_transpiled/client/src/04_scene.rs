@@ -45,20 +45,16 @@ impl Scene {
     /// werden ignoriert statt den Client abstürzen zu lassen.
     pub fn blit(&mut self, x: u16, y: u16, w: usize, h: usize, rgba: &[u8]) {
         let x0 = x as usize;
-        {
-            let y0 = y as usize;
-            if x0 + w > N || y0 + h > N || rgba.len() < w * h * 4 {
-                return;
-            }
-            for row in 0..h {
-                let s = row * w * 4;
-                {
-                    let d = ((y0 + row) * N + x0) * 4;
-                    self.canvas[d..d + w * 4].copy_from_slice(&rgba[s..s + w * 4])
-                }
-            }
-            self.dirty = true;
+        let y0 = y as usize;
+        if x0 + w > N || y0 + h > N || rgba.len() < w * h * 4 {
+            return;
         }
+        for row in 0..h {
+            let s = row * w * 4;
+            let d = ((y0 + row) * N + x0) * 4;
+            self.canvas[d..d + w * 4].copy_from_slice(&rgba[s..s + w * 4])
+        }
+        self.dirty = true;
     }
 
     /// Wendet ein Netz-Ereignis an.

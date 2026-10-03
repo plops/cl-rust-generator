@@ -71,66 +71,58 @@ impl Decoder {
         // `Dav1dContext` ist ein `Copy`-Handle (roher Arc-Zeiger).
         {
             let ctx = self.ctx;
+            let mut data = Dav1dData::default();
+            // SAFETY: `data` ist gültig beschreibbar; Puffer hat `obu.len()` Byte.
+            unsafe {
+                let p = dav1d_data_create(Some(NonNull::from(&mut data)), obu.len());
+                if p.is_null() {
+                    return Err("dav1d_data_create".into());
+                }
+                std::ptr::copy_nonoverlapping(obu.as_ptr(), p, obu.len())
+            }
             {
-                let mut data = Dav1dData::default();
-                // SAFETY: `data` ist gültig beschreibbar; Puffer hat `obu.len()` Byte.
-                unsafe {
-                    let p = dav1d_data_create(Some(NonNull::from(&mut data)), obu.len());
-                    if p.is_null() {
-                        return Err("dav1d_data_create".into());
+                let mut pic = Dav1dPicture::default();
+                let mut got = false;
+                // Senden bis alles verbraucht ist; dazwischen Bilder abholen.
+                for _ in 0..16 {
+                    if data.sz > 0 {
+                        // SAFETY: `ctx` stammt aus `dav1d_open`; `data` ist gültig.
+                        {
+                            let r = unsafe { dav1d_send_data(ctx, Some(NonNull::from(&mut data))) };
+                            if r.0 != 0 && r.0 != EAGAIN {
+                                // SAFETY: `data` ist gültig.
+                                unsafe { dav1d_data_unref(Some(NonNull::from(&mut data))) }
+                                return Err(format!("dav1d_send_data: {}", r.0));
+                            }
+                        }
                     }
-                    std::ptr::copy_nonoverlapping(obu.as_ptr(), p, obu.len())
+                    // SAFETY: `ctx` gültig, `pic` beschreibbar.
+                    {
+                        let r = unsafe { dav1d_get_picture(ctx, Some(NonNull::from(&mut pic))) };
+                        if r.0 == 0 {
+                            got = true;
+                            break;
+                        }
+                        if r.0 != EAGAIN {
+                            // SAFETY: `data` ist gültig.
+                            unsafe { dav1d_data_unref(Some(NonNull::from(&mut data))) }
+                            return Err(format!("dav1d_get_picture: {}", r.0));
+                        }
+                        if data.sz == 0 {
+                            break;
+                        }
+                    }
+                }
+                // SAFETY: `data` ist gültig (evtl. schon leer).
+                unsafe { dav1d_data_unref(Some(NonNull::from(&mut data))) }
+                if !got {
+                    return Err("kein Bild dekodiert".into());
                 }
                 {
-                    let mut pic = Dav1dPicture::default();
-                    {
-                        let mut got = false;
-                        // Senden bis alles verbraucht ist; dazwischen Bilder abholen.
-                        for _ in 0..16 {
-                            if data.sz > 0 {
-                                // SAFETY: `ctx` stammt aus `dav1d_open`; `data` ist gültig.
-                                {
-                                    let r = unsafe {
-                                        dav1d_send_data(ctx, Some(NonNull::from(&mut data)))
-                                    };
-                                    if r.0 != 0 && r.0 != EAGAIN {
-                                        // SAFETY: `data` ist gültig.
-                                        unsafe { dav1d_data_unref(Some(NonNull::from(&mut data))) }
-                                        return Err(format!("dav1d_send_data: {}", r.0));
-                                    }
-                                }
-                            }
-                            // SAFETY: `ctx` gültig, `pic` beschreibbar.
-                            {
-                                let r = unsafe {
-                                    dav1d_get_picture(ctx, Some(NonNull::from(&mut pic)))
-                                };
-                                if r.0 == 0 {
-                                    got = true;
-                                    break;
-                                }
-                                if r.0 != EAGAIN {
-                                    // SAFETY: `data` ist gültig.
-                                    unsafe { dav1d_data_unref(Some(NonNull::from(&mut data))) }
-                                    return Err(format!("dav1d_get_picture: {}", r.0));
-                                }
-                                if data.sz == 0 {
-                                    break;
-                                }
-                            }
-                        }
-                        // SAFETY: `data` ist gültig (evtl. schon leer).
-                        unsafe { dav1d_data_unref(Some(NonNull::from(&mut data))) }
-                        if !got {
-                            return Err("kein Bild dekodiert".into());
-                        }
-                        {
-                            let out = picture_to_rgba(&pic);
-                            // SAFETY: `pic` wurde von `dav1d_get_picture` gefüllt.
-                            unsafe { dav1d_picture_unref(Some(NonNull::from(&mut pic))) }
-                            out
-                        }
-                    }
+                    let out = picture_to_rgba(&pic);
+                    // SAFETY: `pic` wurde von `dav1d_get_picture` gefüllt.
+                    unsafe { dav1d_picture_unref(Some(NonNull::from(&mut pic))) }
+                    out
                 }
             }
         }
@@ -139,48 +131,30 @@ impl Decoder {
 
 fn picture_to_rgba(pic: &Dav1dPicture) -> Result<Rgba, String> {
     let w = pic.p.w as usize;
+    let h = pic.p.h as usize;
+    if pic.p.bpc != 8 || pic.p.layout != DAV1D_PIXEL_LAYOUT_I420 {
+        return Err(format!(
+            "nicht unterstützt: bpc {} layout {}",
+            pic.p.bpc, pic.p.layout
+        ));
+    }
     {
-        let h = pic.p.h as usize;
-        if pic.p.bpc != 8 || pic.p.layout != DAV1D_PIXEL_LAYOUT_I420 {
-            return Err(format!(
-                "nicht unterstützt: bpc {} layout {}",
-                pic.p.bpc, pic.p.layout
-            ));
-        }
+        let ys = pic.stride[0] as usize;
+        let cs = pic.stride[1] as usize;
+        let ch = h.div_ceil(2);
+        let cw = w.div_ceil(2);
+        let plane = |i: usize, len: usize| -> Result<&[u8], String> {
+            let p = pic.data[i].ok_or("fehlende Ebene")?;
+            // SAFETY: dav1d garantiert `stride * Zeilen` gültige Bytes je Ebene.
+            Ok(unsafe { std::slice::from_raw_parts(p.as_ptr() as *const u8, len) })
+        };
         {
-            let ys = pic.stride[0] as usize;
-            {
-                let cs = pic.stride[1] as usize;
-                {
-                    let ch = h.div_ceil(2);
-                    {
-                        let cw = w.div_ceil(2);
-                        {
-                            let plane = |i: usize, len: usize| -> Result<&[u8], String> {
-                                let p = pic.data[i].ok_or("fehlende Ebene")?;
-                                // SAFETY: dav1d garantiert `stride * Zeilen` gültige Bytes je Ebene.
-                                Ok(unsafe {
-                                    std::slice::from_raw_parts(p.as_ptr() as *const u8, len)
-                                })
-                            };
-                            {
-                                let y = plane(0, ys * (h - 1) + w)?;
-                                {
-                                    let u = plane(1, cs * (ch - 1) + cw)?;
-                                    {
-                                        let v = plane(2, cs * (ch - 1) + cw)?;
-                                        {
-                                            let mut data = vec![0u8; w * h * 4];
-                                            yuv420_to_rgba(y, ys, u, v, cs, w, h, &mut data);
-                                            Ok(Rgba { w, h, data })
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            let y = plane(0, ys * (h - 1) + w)?;
+            let u = plane(1, cs * (ch - 1) + cw)?;
+            let v = plane(2, cs * (ch - 1) + cw)?;
+            let mut data = vec![0u8; w * h * 4];
+            yuv420_to_rgba(y, ys, u, v, cs, w, h, &mut data);
+            Ok(Rgba { w, h, data })
         }
     }
 }

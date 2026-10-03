@@ -124,6 +124,12 @@ Returns T when the file was written."
         append (loop for c in codes
                      collect `(paren (scope KeyCode ,c) (string ,name)))))
 
+(defun channel-arefs (arr idx &optional (order '(0 1 2)))
+  "`ARR[IDX+k]` je k in ORDER (vermeidet `+ 0`, damit clippy's
+identity_op still bleibt). ARR/IDX sind gequotete Ausdrücke/Symbole."
+  (loop for k in order
+        collect `(aref ,arr ,(if (zerop k) idx (list '+ idx k)))))
+
 (defun clap-struct (doc-lines struct-attrs name fields)
   "Assemble a clap derive-Parser struct as one string (field docs and
 field attributes fit no defstruct0 slot). DOC-LINES is a list of ///

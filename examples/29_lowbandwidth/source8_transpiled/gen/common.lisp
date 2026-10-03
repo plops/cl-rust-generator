@@ -7,6 +7,13 @@
 
 ;;;; common.lisp --- lbw-common: types, framing, yuv, lib.rs, manifest.
 
+;;; Splice-Helfer (eine Quelle für u/v-symmetrische Formen).
+
+(defun chroma-store (plane sum)
+  "`out.PLANE[c] = Mittelwert(SUM)` — eine der beiden Chroma-Ebenen."
+  `(= (aref (dot out ,plane) c)
+      (coerce (/ (+ (aref ,sum c) (/ (aref cnt c) 2)) (aref cnt c)) u8)))
+
 (defun common-cargo-toml ()
   "[package]
 name = \"lbw-common\"
@@ -418,7 +425,7 @@ bincode = { version = \"2.0\", features = [\"serde\"] }
     ,*blank*
     "/// Interleaved RGB8 (`w*h*3`) → YUV 4:2:0; Chroma = Mittel über 2×2."
     (attr "must_use"
-      ,(pub_ '(defun rgb_to_yuv420 (rgb w h)
+      ,(pub_ `(defun rgb_to_yuv420 (rgb w h)
                 (declare (type "&[u8]" rgb)
                          (type usize w h)
                          (values Yuv420))
@@ -435,19 +442,18 @@ bincode = { version = \"2.0\", features = [\"serde\"] }
                          (cnt "vec![0u32; cw * ch]"))
                     (for (yy (range 0 h))
                       (for (xx (range 0 w))
-                        (let ((i (* (+ (* yy w) xx) 3)))
-                          (let (((paren y u v)
-                                 (rgb_to_yuv (aref rgb i) (aref rgb (+ i 1)) (aref rgb (+ i 2)))))
+                        (let ((i (* (+ (* yy w) xx) 3))
+                              ((paren y u v)
+                               (rgb_to_yuv ,@(channel-arefs 'rgb 'i))))
                             (= (aref (dot out y) (+ (* yy w) xx)) y)
                             (let ((c (+ (* (/ yy 2) cw) (/ xx 2))))
-                              (incf (aref usum c) (u32--from u))
-                              (incf (aref vsum c) (u32--from v))
-                              (incf (aref cnt c)))))))
+                              ,@(loop for (arr v) in '((usum u) (vsum v))
+                                      collect (list 'incf (list 'aref arr 'c)
+                                                    (list 'u32--from v)))
+                              (incf (aref cnt c))))))
                     (for (c (range 0 (* cw ch)))
-                      (= (aref (dot out u) c)
-                         (coerce (/ (+ (aref usum c) (/ (aref cnt c) 2)) (aref cnt c)) u8))
-                      (= (aref (dot out v) c)
-                         (coerce (/ (+ (aref vsum c) (/ (aref cnt c) 2)) (aref cnt c)) u8)))
+                      ,@(loop for (plane sum) in '((u usum) (v vsum))
+                              collect (chroma-store plane sum)))
                     out)))))
     ,*blank*
     "/// YUV-Ebenen mit beliebigen Strides → RGBA8 (`w*h*4`, Alpha 255)."
@@ -458,14 +464,14 @@ bincode = { version = \"2.0\", features = [\"serde\"] }
                          (type "&mut [u8]" rgba))
                 (for (yy (range 0 h))
                   (for (xx (range 0 w))
-                    (let ((c (+ (* (/ yy 2) cs) (/ xx 2))))
-                      (let (((bracket r g b)
-                             (yuv_to_rgb (aref y (+ (* yy ys) xx))
-                                         (aref u c)
-                                         (aref v c))))
-                        (let ((o (* (+ (* yy w) xx) 4)))
-                          (dot (aref rgba (space o ".." (+ o 4)))
-                               (copy_from_slice (ref (bracket r g b 255))))))))))))
+                    (let ((c (+ (* (/ yy 2) cs) (/ xx 2)))
+                          ((bracket r g b)
+                           (yuv_to_rgb (aref y (+ (* yy ys) xx))
+                                       (aref u c)
+                                       (aref v c)))
+                          (o (* (+ (* yy w) xx) 4)))
+                      (dot (aref rgba (space o ".." (+ o 4)))
+                           (copy_from_slice (ref (bracket r g b 255))))))))))
     ,*blank*
     ,(testmod
       "use super::*;"
@@ -477,11 +483,11 @@ bincode = { version = \"2.0\", features = [\"serde\"] }
              (for (g (dot (range-inclusive 0 255) (step_by 15)))
                (for (b (dot (range-inclusive 0 255) (step_by 15)))
                  (let (((paren y u v)
-                        (rgb_to_yuv (coerce r u8) (coerce g u8) (coerce b u8))))
-                   (let ((back (yuv_to_rgb y u v)))
+                        (rgb_to_yuv (coerce r u8) (coerce g u8) (coerce b u8)))
+                       (back (yuv_to_rgb y u v)))
                      (for ((tuple a o) (dot (bracket r g b) (iter) (zip back)))
                        (assert! (<= (dot (paren (- a (i32--from o))) (abs)) 3)
-                                (string "{r},{g},{b} -> {back:?}")))))))))))
+                                (string "{r},{g},{b} -> {back:?}"))))))))))
       *blank*
       '(attr "test"
          (defun grey_has_neutral_chroma ()

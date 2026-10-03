@@ -78,9 +78,9 @@ impl Injector {
 fn primary_origin() -> (i32, i32) {
     match query_monitors() {
         Ok(ms) => {
-            let o = pick_origin(&ms);
-            eprintln!("[input] Monitor-Ursprung {:+}{:+}", o.0, o.1);
-            o
+            let (ox, oy) = pick_origin(&ms);
+            eprintln!("[input] Monitor-Ursprung {:+}{:+}", ox, oy);
+            (ox, oy)
         }
         Err(e) => {
             eprintln!("[input] Monitore nicht abfragbar ({e}) — Ursprung +0+0");

@@ -110,3 +110,25 @@ Erst weiter, wenn der Schritt grün ist. Baseline: `source7_mvp`
       SBCL 2.6.0 verifiziert, alle 4 Manifeste byte-identisch, keine neuen Crates).
 - [x] Letzter Commit: `docs(plan): walkthrough transpiler-migration`.
 - [x] Abschlussmeldung mit Testübersicht und Verifikationsergebnis.
+
+## T9 — Review-Refactor: flache `let`s, Splice-Helfer
+
+- [x] Proben P1–P8 (`/tmp/probe_refactor*.lisp`): Multi-Binding-`let`
+      mit Tupel-Mix, `_`-Platzhalter, gesplicte Bindungslisten,
+      `mut`-Declare, Reduce-Faltung, Cons-Parens — alle ok.
+- [x] Helfer ergänzt: `channel-arefs` (`00_util.lisp`), `chroma-store`
+      (`common.lisp`), 7 Helfer (`server.lisp`), 7 Helfer (`client.lisp`).
+- [x] Verschachtelte Einzel-`let`s in flache Multi-Binding-`let`s
+      überführt (M1–M6, C1–C28, S1–S47); Tupel-Destrukturierung
+      `((paren a b) expr)` überall dort, wo echte Tupel vorliegen.
+- [x] Wiederholte Sequenzen durch `,@(loop …)`-Splices ersetzt
+      (Match-Arme, Kanal-Tripel, Button-Paare, Koordinaten, Asserts …).
+- [x] Falle dokumentiert: Tupel-Structs (`Dav1dResult`) nicht
+      destrukturierbar (E0308) — dort bleibt `(dot r 0)`.
+- [x] Gates aus `source8_transpiled/`: `cargo fmt --check`,
+      `cargo clippy --workspace --all-targets -- -D warnings`,
+      `cargo test --workspace` (46 + 2 ignored),
+      `./scripts/smoke_xvfb.sh` — alle grün.
+- [x] Walkthrough aktualisiert (2.2 widerlegt, neu: 2.11, Idiom-Tabelle,
+      3.2, Fazit-Zahlen: 4100 Lisp → 3747 Rust).
+- [x] Commit: `refactor(source8): flache lets und splice-helfer (t9)`.

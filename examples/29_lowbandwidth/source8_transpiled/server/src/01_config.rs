@@ -87,13 +87,13 @@ mod tests {
     fn bad_values_are_rejected() {
         {
             // Unbekannte Option scheitert schon beim Parsen.
-            assert!(Config::try_parse_from(["lbw-server", "--bogus"]).is_err())
+            assert!(Config::try_parse_from(["lbw-server", "--bogus"]).is_err());
+            assert!(Config::try_parse_from(["lbw-server", "--no-ocr"]).is_err());
+            assert!(Config::try_parse_from(["lbw-server", "--dump"]).is_err());
+            assert!(Config::try_parse_from(["lbw-server", "--no-input"]).is_err());
+            assert!(Config::try_parse_from(["lbw-server", "--size"]).is_err());
+            assert!(Config::try_parse_from(["lbw-server", "--quantizer", "x"]).is_err())
         }
-        assert!(Config::try_parse_from(["lbw-server", "--no-ocr"]).is_err());
-        assert!(Config::try_parse_from(["lbw-server", "--dump"]).is_err());
-        assert!(Config::try_parse_from(["lbw-server", "--no-input"]).is_err());
-        assert!(Config::try_parse_from(["lbw-server", "--size"]).is_err());
-        assert!(Config::try_parse_from(["lbw-server", "--quantizer", "x"]).is_err());
         // Falsche Wertebereiche scheitern bei validate().
         {
             let c = Config::try_parse_from(["lbw-server", "--quantizer", "256"]).unwrap();

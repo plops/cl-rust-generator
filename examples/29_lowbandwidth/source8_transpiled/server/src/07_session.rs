@@ -58,92 +58,80 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
         .map_err(|e| e.to_string())?;
     {
         let mut rd = stream.try_clone().map_err(|e| e.to_string())?;
+        let mut wr = stream;
+        let mut fr = FrameReader::new();
+        handshake(&mut rd, &mut fr, &mut wr)?;
+        // Eingaben laufen in eigenem Thread, damit Tippen nie auf AV1 wartet.
+        rd.set_read_timeout(Some(Duration::from_millis(200)))
+            .map_err(|e| e.to_string())?;
         {
-            let mut wr = stream;
+            let stop = Arc::new(AtomicBool::new(false));
+            let input = match Injector::open((cfg.x, cfg.y)) {
+                Ok(inj) => Some(spawn_input(rd, fr, inj, stop.clone(), cfg.verbose)),
+                Err(e) => {
+                    eprintln!("[input] {e} — laufe ohne Eingabe");
+                    None
+                }
+            };
+            let mut prev: Option<RgbImage> = None;
+            let mut last_texts: Vec<TextItem> = Vec::new();
+            let mut frames: u64 = 0;
             {
-                let mut fr = FrameReader::new();
-                handshake(&mut rd, &mut fr, &mut wr)?;
-                // Eingaben laufen in eigenem Thread, damit Tippen nie auf AV1 wartet.
-                rd.set_read_timeout(Some(Duration::from_millis(200)))
-                    .map_err(|e| e.to_string())?;
-                {
-                    let stop = Arc::new(AtomicBool::new(false));
+                let result = loop {
+                    if max_frames.is_some_and(|n| frames >= n) {
+                        break Ok(());
+                    }
+                    frames += 1;
                     {
-                        let input = match Injector::open((cfg.x, cfg.y)) {
-                            Ok(inj) => Some(spawn_input(rd, fr, inj, stop.clone(), cfg.verbose)),
-                            Err(e) => {
-                                eprintln!("[input] {e} — laufe ohne Eingabe");
-                                None
-                            }
+                        let img = match src.grab() {
+                            Ok(i) => i,
+                            Err(e) => break Err(e),
                         };
                         {
-                            let mut prev: Option<RgbImage> = None;
+                            let texts = match ocr.text(&img) {
+                                Ok(t) => t,
+                                Err(e) => break Err(e),
+                            };
+                            // Text nur bei Änderung senden (sonst Dauerlast bei Standbild).
+                            if texts != last_texts {
+                                if push_texts(&mut wr, &texts).is_err() {
+                                    break Ok(());
+                                }
+                                last_texts = texts.clone()
+                            }
                             {
-                                let mut last_texts: Vec<TextItem> = Vec::new();
+                                let mut masked = img.clone();
+                                mask_text(&mut masked, &texts);
                                 {
-                                    let mut frames: u64 = 0;
-                                    {
-                                        let result = loop {
-                                            if max_frames.is_some_and(|n| frames >= n) {
-                                                break Ok(());
-                                            }
-                                            frames += 1;
-                                            {
-                                                let img = match src.grab() {
-                                                    Ok(i) => i,
-                                                    Err(e) => break Err(e),
-                                                };
-                                                {
-                                                    let texts = match ocr.text(&img) {
-                                                        Ok(t) => t,
-                                                        Err(e) => break Err(e),
-                                                    };
-                                                    // Text nur bei Änderung senden (sonst Dauerlast bei Standbild).
-                                                    if texts != last_texts {
-                                                        if push_texts(&mut wr, &texts).is_err() {
-                                                            break Ok(());
-                                                        }
-                                                        last_texts = texts.clone()
-                                                    }
-                                                    {
-                                                        let mut masked = img.clone();
-                                                        mask_text(&mut masked, &texts);
-                                                        {
-                                                            let sent = match push_tile(
-                                                                &mut wr,
-                                                                prev.as_ref(),
-                                                                &masked,
-                                                                cfg.quantizer,
-                                                            ) {
-                                                                Ok(TileOut::Sent(n)) => n,
-                                                                Ok(TileOut::Same) => 0,
-                                                                Ok(TileOut::Gone) => break Ok(()),
-                                                                Err(e) => break Err(e),
-                                                            };
-                                                            if cfg.verbose {
-                                                                eprintln!(
-                                                                    "[frame {frames}] {} Texte, {sent} B",
-                                                                    texts.len()
-                                                                )
-                                                            }
-                                                            prev = Some(masked);
-                                                            std::thread::sleep(FRAME_GAP)
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        };
-                                        stop.store(true, Ordering::Relaxed);
-                                        if let Some(h) = input {
-                                            let _ = h.join();
-                                        }
-                                        result
+                                    let sent = match push_tile(
+                                        &mut wr,
+                                        prev.as_ref(),
+                                        &masked,
+                                        cfg.quantizer,
+                                    ) {
+                                        Ok(TileOut::Sent(n)) => n,
+                                        Ok(TileOut::Same) => 0,
+                                        Ok(TileOut::Gone) => break Ok(()),
+                                        Err(e) => break Err(e),
+                                    };
+                                    if cfg.verbose {
+                                        eprintln!(
+                                            "[frame {frames}] {} Texte, {sent} B",
+                                            texts.len()
+                                        )
                                     }
+                                    prev = Some(masked);
+                                    std::thread::sleep(FRAME_GAP)
                                 }
                             }
                         }
                     }
+                };
+                stop.store(true, Ordering::Relaxed);
+                if let Some(h) = input {
+                    let _ = h.join();
                 }
+                result
             }
         }
     }
@@ -200,22 +188,16 @@ fn push_tile(
         Some(r) => r,
         None => return Ok(TileOut::Same),
     };
-    {
-        let rgb = crop_rgb(masked, r);
-        {
-            let data = encode_rgb(&rgb, r.w as usize, r.h as usize, quantizer)?;
-            {
-                let msg = ServerMsg::Tile {
-                    x: r.x,
-                    y: r.y,
-                    data,
-                };
-                match write_msg(wr, &msg) {
-                    Ok(n) => Ok(TileOut::Sent(n)),
-                    Err(_) => Ok(TileOut::Gone),
-                }
-            }
-        }
+    let rgb = crop_rgb(masked, r);
+    let data = encode_rgb(&rgb, r.w as usize, r.h as usize, quantizer)?;
+    let msg = ServerMsg::Tile {
+        x: r.x,
+        y: r.y,
+        data,
+    };
+    match write_msg(wr, &msg) {
+        Ok(n) => Ok(TileOut::Sent(n)),
+        Err(_) => Ok(TileOut::Gone),
     }
 }
 

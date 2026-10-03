@@ -120,9 +120,9 @@ lbw-server = { path = \"../server\" }
                 (when (dot obu (is_empty))
                   (return (Err (dot (string "leere Kachel") (into)))))
                 "// `Dav1dContext` ist ein `Copy`-Handle (roher Arc-Zeiger)."
-                (let ((ctx (dot self ctx)))
-                  (let ((data (Dav1dData--default)))
-                    (declare (mutable data))
+                (let ((ctx (dot self ctx))
+                      (data (Dav1dData--default)))
+                  (declare (mutable data))
                     "// SAFETY: `data` ist gültig beschreibbar; Puffer hat `obu.len()` Byte."
                     (unsafe
                      (let ((p (dav1d_data_create (Some (NonNull--from (ref-mut data)))
@@ -130,10 +130,9 @@ lbw-server = { path = \"../server\" }
                        (when (dot p (is_null))
                          (return (Err (dot (string "dav1d_data_create") (into)))))
                        (std--ptr--copy_nonoverlapping (dot obu (as_ptr)) p (dot obu (len)))))
-                    (let ((pic (Dav1dPicture--default)))
-                      (declare (mutable pic))
-                      (let ((got false))
-                        (declare (mutable got))
+                    (let ((pic (Dav1dPicture--default))
+                          (got false))
+                      (declare (mutable pic got))
                         "// Senden bis alles verbraucht ist; dazwischen Bilder abholen."
                         (for (_ (range 0 16))
                           (when (> (dot data sz) 0)
@@ -161,21 +160,21 @@ lbw-server = { path = \"../server\" }
                         (let ((out (picture_to_rgba (ref pic))))
                           "// SAFETY: `pic` wurde von `dav1d_get_picture` gefüllt."
                           (unsafe (dav1d_picture_unref (Some (NonNull--from (ref-mut pic)))))
-                          out))))))))
+                          out))))))
     ,*blank*
     (defun picture_to_rgba ("pic: &Dav1dPicture")
       (declare (values "Result<Rgba, String>"))
-      (let ((w (coerce (dot pic p w) usize)))
-        (let ((h (coerce (dot pic p h) usize)))
+      (let ((w (coerce (dot pic p w) usize))
+            (h (coerce (dot pic p h) usize)))
           (when (or (!= (dot pic p bpc) 8)
                     (!= (dot pic p layout) DAV1D_PIXEL_LAYOUT_I420))
             (return (Err (format! (string "nicht unterstützt: bpc {} layout {}")
                                   (dot pic p bpc) (dot pic p layout)))))
-          (let ((ys (coerce (aref (dot pic stride) 0) usize)))
-            (let ((cs (coerce (aref (dot pic stride) 1) usize)))
-              (let ((ch (dot h (div_ceil 2))))
-                (let ((cw (dot w (div_ceil 2))))
-                  (let ((plane (lambda (i len)
+          (let ((ys (coerce (aref (dot pic stride) 0) usize))
+                (cs (coerce (aref (dot pic stride) 1) usize))
+                (ch (dot h (div_ceil 2)))
+                (cw (dot w (div_ceil 2)))
+                (plane (lambda (i len)
                                  (declare (type usize i) (type usize len)
                                           (values "Result<&[u8], String>"))
                                  (let ((p (? (dot (aref (dot pic data) i)
@@ -184,13 +183,13 @@ lbw-server = { path = \"../server\" }
                                    (Ok (unsafe (std--slice--from_raw_parts
                                                 (coerce (dot p (as_ptr)) "*const u8")
                                                 len)))))))
-                    (let ((y (? (plane 0 (+ (* ys (- h 1)) w)))))
-                      (let ((u (? (plane 1 (+ (* cs (- ch 1)) cw)))))
-                        (let ((v (? (plane 2 (+ (* cs (- ch 1)) cw)))))
-                          (let ((data (space "vec!" (bracket (space "0u8" ";" (* w h 4))))))
-                            (declare (mutable data))
+                    (let ((y (? (plane 0 (+ (* ys (- h 1)) w))))
+                          (u (? (plane 1 (+ (* cs (- ch 1)) cw))))
+                          (v (? (plane 2 (+ (* cs (- ch 1)) cw))))
+                          (data (space "vec!" (bracket (space "0u8" ";" (* w h 4))))))
+                      (declare (mutable data))
                             (yuv420_to_rgba y ys u v cs w h (ref-mut data))
-                            (Ok (make-instance Rgba w h data))))))))))))))
+                            (Ok (make-instance Rgba w h data))))))
     ,*blank*
     (impl (space Drop for Decoder)
       (defun drop ("&mut self")
@@ -253,21 +252,15 @@ lbw-server = { path = \"../server\" }
       "/// Verbindet mit `addr` (Reconnect läuft im Hintergrund)."
       ,(pub_ '(defun connect ("addr: &str")
                 (declare (values Self))
-                ;; Der Emitter kennt keine Tupel-`let`s: Kanal-Enden
-                ;; werden über `.0`/`.1` entpackt (statt `let (a, b)`).
-                (let ((ev_ch (channel)))
-                  (let ((ev_tx (dot ev_ch 0)))
-                    (let ((events (dot ev_ch 1)))
-                      (let ((out_ch (channel)))
-                        (let ((out (dot out_ch 0)))
-                          (let ((out_rx (dot out_ch 1)))
-                            (let ((stop (Arc--new (AtomicBool--new false))))
-                              (std--thread--spawn
-                               (progn
-                                 (let ((addr (dot addr (to_owned))))
-                                   (let ((stop (dot stop (clone))))
-                                     (space "move" (lambda () (run (ref addr) ev_tx out_rx (ref stop))))))))
-                              (make-instance Self events out stop))))))))))
+                (let (((paren ev_tx events) (channel))
+                      ((paren out out_rx) (channel))
+                      (stop (Arc--new (AtomicBool--new false))))
+                  (std--thread--spawn
+                   (progn
+                     (let ((addr (dot addr (to_owned)))
+                           (stop (dot stop (clone))))
+                       (space "move" (lambda () (run (ref addr) ev_tx out_rx (ref stop)))))))
+                  (make-instance Self events out stop))))
       ,*blank*
       "/// Sendet eine Nachricht (geht verloren, wenn gerade keine Verbindung besteht)."
       ,(pub_ '(defun send ("&self" "m: ClientMsg")
@@ -325,12 +318,7 @@ lbw-server = { path = \"../server\" }
               (case (dot fr (read (ref-mut rd)))
                 ((Ok (scope Read1 (Frame b)))
                  (case ("decode_msg::<ServerMsg>" (ref b))
-                   ((Ok (scope ServerMsg Hello))
-                    (let ((_ (dot ev (send (scope Event Connected)))))))
-                   ((Ok (scope ServerMsg ClearText))
-                    (let ((_ (dot ev (send (scope Event ClearText)))))))
-                   ((Ok (scope ServerMsg (AddText t)))
-                    (let ((_ (dot ev (send (scope Event (AddText t))))))))
+                   ,@(server-msg-event-arms)
                    ("Ok(ServerMsg::Tile { x, y, data })"
                     (case (dot dec (decode (ref data)))
                       ((Ok rgba)
@@ -395,19 +383,18 @@ lbw-server = { path = \"../server\" }
       "/// Kopiert eine `w`×`h`-RGBA-Box an (`x`, `y`). Kaputte Boxen"
       "/// werden ignoriert statt den Client abstürzen zu lassen."
       ,(pub_ '(defun blit ("&mut self" "x: u16" "y: u16" "w: usize" "h: usize" "rgba: &[u8]")
-                ;; Kein Tupel-`let` im Emitter: zwei `let`s statt `let (x0, y0)`.
-                (let ((x0 (coerce x usize)))
-                  (let ((y0 (coerce y usize)))
+                (let ((x0 (coerce x usize))
+                      (y0 (coerce y usize)))
                     (when (or (> (+ x0 w) N)
                               (> (+ y0 h) N)
                               (< (dot rgba (len)) (* w h 4)))
                       (return))
                     (for (row (range 0 h))
-                      (let ((s (* row w 4)))
-                        (let ((d (* (+ (* (+ y0 row) N) x0) 4)))
+                      (let ((s (* row w 4))
+                            (d (* (+ (* (+ y0 row) N) x0) 4)))
                           (dot (aref (dot self canvas) (space d ".." (+ d (* w 4))))
-                               (copy_from_slice (ref (aref rgba (space s ".." (+ s (* w 4))))))))))
-                    (setf (dot self dirty) true)))))
+                               (copy_from_slice (ref (aref rgba (space s ".." (+ s (* w 4)))))))))
+                    (setf (dot self dirty) true))))
       ,*blank*
       "/// Wendet ein Netz-Ereignis an."
       ,(pub_ '(defun apply ("&mut self" "e: Event")
@@ -429,12 +416,10 @@ lbw-server = { path = \"../server\" }
       ,*blank*
       "/// Farbe des Canvas an `(x, y)` (Tests/Debug)."
       (attr "must_use"
-        ,(pub_ '(defun pixel ("&self" "x: usize" "y: usize")
+        ,(pub_ `(defun pixel ("&self" "x: usize" "y: usize")
                   (declare (values "[u8; 3]"))
                   (let ((i (* (+ (* y N) x) 4)))
-                    (bracket (aref (dot self canvas) i)
-                             (aref (dot self canvas) (+ i 1))
-                             (aref (dot self canvas) (+ i 2))))))))
+                    (bracket ,@(channel-arefs '(dot self canvas) 'i)))))))
     ,*blank*
     (impl (space Default for Scene)
       (defun default ()
@@ -465,30 +450,30 @@ lbw-server = { path = \"../server\" }
              (dot s (apply (scope Event (AddText (item (string "c"))))))
              (assert_eq! (dot (aref (dot s texts) 0) text) (string "c")))))
       *blank*
-      '(attr "test"
+      `(attr "test"
          (defun blit_places_tile_and_ignores_garbage ()
            (let ((s (Scene--new)))
              (declare (mutable s))
              (setf (dot s dirty) false)
              (dot s (blit 64 0 64 64 (ref (dot (bracket 200 100 50 255) (repeat (* 64 64))))))
              (assert! (dot s dirty))
-             (assert_eq! (dot s (pixel 64 0)) (bracket 200 100 50))
-             (assert_eq! (dot s (pixel 127 63)) (bracket 200 100 50))
-             (assert_eq! (dot s (pixel 63 0)) (bracket 24 24 32))
+             ,@(pixel-asserts '((64 0 200 100 50)
+                                (127 63 200 100 50)
+                                (63 0 24 24 32)))
              "// Außerhalb und zu kurz: ignoriert."
              (dot s (blit 640 0 64 64 (ref (array-repeat 0 (* 64 64 4)))))
              (dot s (blit 0 0 64 64 (ref (array-repeat 0 10))))
              (assert_eq! (dot s (pixel 0 0)) (bracket 24 24 32)))))
       *blank*
-      '(attr "test"
+      `(attr "test"
          (defun blit_handles_arbitrary_box_sizes ()
            (let ((s (Scene--new)))
              (declare (mutable s))
              (dot s (blit 100 100 16 92 (ref (dot (bracket 10 20 30 255) (repeat (* 16 92))))))
-             (assert_eq! (dot s (pixel 100 100)) (bracket 10 20 30))
-             (assert_eq! (dot s (pixel 115 191)) (bracket 10 20 30))
-             (assert_eq! (dot s (pixel 116 100)) (bracket 24 24 32))
-             (assert_eq! (dot s (pixel 100 192)) (bracket 24 24 32)))))
+             ,@(pixel-asserts '((100 100 10 20 30)
+                                (115 191 10 20 30)
+                                (116 100 24 24 32)
+                                (100 192 24 24 32))))))
       *blank*
       '(attr "test"
          (defun link_state_follows_events ()
@@ -502,6 +487,46 @@ lbw-server = { path = \"../server\" }
              (assert_eq! (dot s link) (scope Link (Down (dot (string "x") (into))))
                          (string "erste Trennung zählt"))))))))
 
+;;; Splice-Helfer (Tabellen statt Wiederholung; vgl. `00_util.lisp`).
+
+(defun server-msg-event-arms ()
+  "`ServerMsg` → `Event`-Weiterleitung (Hello/ClearText/AddText)."
+  (loop for (pat evt) in '((Hello Connected)
+                            (ClearText ClearText)
+                            ((AddText t) (AddText t)))
+        collect `((Ok (scope ServerMsg ,pat))
+                  (let ((_ (dot ev (send (scope Event ,evt)))))))))
+
+(defun mouse-button-pairs ()
+  "`(Macroquad-Button, Protokoll-Code)`-Paare für die Klick-Schleife."
+  (loop for (variant code) in '((Left 1) (Middle 2) (Right 3))
+        collect `(paren (scope MouseButton ,variant) ,code)))
+
+(defun rect-f32-exprs (&optional (fields '(x y w h)))
+  "`r.FELD as f32` je Feld (Rechteck-Geometrie für macroquad)."
+  (loop for f in fields
+        collect `(coerce (dot r ,f) f32)))
+
+(defun channel-exprs (field)
+  "`t.FELD[0..2]` (Text-Vorder-/Hintergrundfarbe)."
+  (loop for k below 3
+        collect `(aref (dot t ,field) ,k)))
+
+(defun scene-stats-exprs (scene-var)
+  "Die drei Kennzahlen (Textzahl, Kachelzahl, Bytes) für Statusmeldungen."
+  `((dot (dot ,scene-var texts) (len))
+    (dot ,scene-var tiles)
+    (dot ,scene-var tile_bytes)))
+
+(defun pixel-asserts (cases)
+  "`pixel(x, y) == [r, g, b]` je Fall `(x y r g b)`."
+  (loop for (x y r g b) in cases
+        collect `(assert_eq! (dot s (pixel ,x ,y)) (bracket ,r ,g ,b))))
+
+(defun greeting-write (msg)
+  "Eine Begrüßungs-Nachricht des Loopback-Stubs (Hello/Clear/Text/Tile)."
+  `(dot (write_msg (ref-mut s) (ref ,msg)) (unwrap)))
+
 (defun app-image-expr ()
   "Shared `&Image { bytes, width, height }` expr for the app texture
 init and update (macroquad `Image` literal, same shape twice)."
@@ -513,22 +538,17 @@ init and update (macroquad `Image` literal, same shape twice)."
 (defun send-input-defun ()
   "Private `send_input` as backquoted data (`,@` splices `+key-table+`)."
   `(defun send_input ("net: &Net" "last_mouse: &mut (u16, u16)" "show_hud: &mut bool")
-       ;; Tupel-`let` → `.0`/`.1` (Emitter-Limit, siehe T5).
        ;; Tasten-Tabelle per `,@`-Splice aus `+key-table+` (eine Quelle
        ;; für Client- und Server-Tasten, siehe `00_util.lisp`).
-       (let ((mp (mouse_position)))
-         (let ((mx (dot mp 0)))
-           (let ((my (dot mp 1)))
-             (let ((pos (paren (coerce (dot mx (clamp "0.0" (coerce (paren (- SIZE 1)) f32))) u16)
-                                (coerce (dot my (clamp "0.0" (coerce (paren (- SIZE 1)) f32))) u16))))
+       (let (((paren mx my) (mouse_position))
+             (pos (paren (coerce (dot mx (clamp "0.0" (coerce (paren (- SIZE 1)) f32))) u16)
+                         (coerce (dot my (clamp "0.0" (coerce (paren (- SIZE 1)) f32))) u16))))
                (when (!= pos (deref last_mouse))
                  (dot net (send (make-instance (scope ClientMsg MouseMove)
                                                :x (dot pos 0) :y (dot pos 1))))
                  (setf (deref last_mouse) pos))
                (for ((paren btn code)
-                      (bracket (paren (scope MouseButton Left) 1)
-                               (paren (scope MouseButton Middle) 2)
-                               (paren (scope MouseButton Right) 3)))
+                      (bracket ,@(mouse-button-pairs)))
                  (when (is_mouse_button_pressed btn)
                    (dot net (send (make-instance (scope ClientMsg Button)
                                                  :button code :down true))))
@@ -546,7 +566,7 @@ init and update (macroquad `Image` literal, same shape twice)."
                    (dot net (send (make-instance (scope ClientMsg Key)
                                                  :key (dot name (into)) :down false)))))
                (when (is_key_pressed (scope KeyCode F1))
-                 (setf (deref show_hud) (not (deref show_hud))))))))))
+              (setf (deref show_hud) (not (deref show_hud)))))))
 
 (defun client-app-rs ()
   `(do0
@@ -562,16 +582,15 @@ init and update (macroquad `Image` literal, same shape twice)."
     ,*blank*
     "/// Startet den Client (läuft bis zum Fensterschluss)."
     ,(pub_ `(defun-async run ("cfg: Config")
-              (let ((net (Net--connect (ref (dot cfg connect)))))
-                (let ((scene (Scene--new)))
-                  (declare (mutable scene))
-                  (let ((texture (Texture2D--from_image ,(app-image-expr))))
-                    (setf (dot scene dirty) false)
-                    (let ((show_hud true))
-                      (declare (mutable show_hud))
-                      (let ((last_mouse (paren (scope u16 MAX) (scope u16 MAX))))
-                        (declare (mutable last_mouse))
-                        (loop
+              (let ((net (Net--connect (ref (dot cfg connect))))
+                    (scene (Scene--new))
+                    (texture (Texture2D--from_image ,(app-image-expr))))
+                (declare (mutable scene))
+                (setf (dot scene dirty) false)
+                (let ((show_hud true)
+                      (last_mouse (paren (scope u16 MAX) (scope u16 MAX))))
+                  (declare (mutable show_hud last_mouse))
+                  (loop
                           (while-let ((Ok e) (dot (dot net events) (try_recv)))
                             (dot scene (apply e)))
                           (when (dot scene dirty)
@@ -581,26 +600,17 @@ init and update (macroquad `Image` literal, same shape twice)."
                           (draw_texture (ref texture) "0.0" "0.0" WHITE)
                           (for (t (ref (dot scene texts)))
                             (let ((r (dot t rect)))
-                              (draw_rectangle (coerce (dot r x) f32)
-                                              (coerce (dot r y) f32)
-                                              (coerce (dot r w) f32)
-                                              (coerce (dot r h) f32)
-                                              (Color--from_rgba (aref (dot t bg) 0)
-                                                                (aref (dot t bg) 1)
-                                                                (aref (dot t bg) 2)
+                              (draw_rectangle ,@(rect-f32-exprs)
+                                              (Color--from_rgba ,@(channel-exprs 'bg)
                                                                 255))
                               (stmt (draw_text (ref (dot t text))
-                                                (coerce (dot r x) f32)
-                                                (coerce (dot r y) f32)
-                                                (coerce (dot r h) f32)
-                                                (Color--from_rgba (aref (dot t fg) 0)
-                                                                  (aref (dot t fg) 1)
-                                                                  (aref (dot t fg) 2)
+                                                ,@(rect-f32-exprs '(x y h))
+                                                (Color--from_rgba ,@(channel-exprs 'fg)
                                                                   255)))))
                           (when show_hud
                             (stmt (draw_text (dot (hud (ref scene)) (as_str)) "8.0" "16.0" "16.0" YELLOW)))
                           (send_input (ref net) (ref-mut last_mouse) (ref-mut show_hud))
-                          (await (next_frame))))))))))
+                          (await (next_frame)))))))
     ,*blank*
     (defun hud ("s: &Scene")
       (declare (values String))
@@ -612,9 +622,7 @@ init and update (macroquad `Image` literal, same shape twice)."
                     ((scope Link (Down why))
                      (format! (string "offline ({why})"))))))
         (format! (string "{link} | {} Texte | {} Kacheln ({} B) | F1 HUD")
-                 (dot (dot s texts) (len))
-                 (dot s tiles)
-                 (dot s tile_bytes))))
+                 ,@(scene-stats-exprs 's))))
     ,*blank*
     "/// Liest macroquad-Eingaben und schickt Deltas an den Server."
     ,(send-input-defun)))
@@ -678,15 +686,13 @@ init and update (macroquad `Image` literal, same shape twice)."
                                                 (dot (dot s (parse)) (ok)))))
                                (unwrap_or 0))))
             (declare (type u64 stay))
-            (let ((net (Net--connect (ref addr))))
-              (let ((scene (Scene--new)))
-                (declare (mutable scene))
-                (let ((deadline (+ (Instant--now) (Duration--from_secs 60))))
-                  (let ((sent_input false))
-                    (declare (mutable sent_input))
-                    (let ((connected false))
-                      (declare (mutable connected))
-                      (while (< (Instant--now) deadline)
+            (let ((net (Net--connect (ref addr)))
+                  (scene (Scene--new))
+                  (deadline (+ (Instant--now) (Duration--from_secs 60)))
+                  (sent_input false)
+                  (connected false))
+              (declare (mutable scene sent_input connected))
+              (while (< (Instant--now) deadline)
                         (case (dot (dot net events) (recv_timeout (Duration--from_millis 500)))
                           ((Ok (scope Event Connected))
                            (progn
@@ -695,17 +701,18 @@ init and update (macroquad `Image` literal, same shape twice)."
                           ((Ok e)
                            (dot scene (apply e)))
                           ((Err _)))
-                        (let ((got_text (not (dot (dot scene texts) (is_empty)))))
-                          (let ((got_tile (> (dot scene tiles) 0)))
+                        (let ((got_text (not (dot (dot scene texts) (is_empty))))
+                              (got_tile (> (dot scene tiles) 0)))
                             (when (and connected got_tile (not sent_input))
-                              (dot net (send (make-instance (scope ClientMsg MouseMove) :x 100 :y 100)))
-                              (dot net (send (make-instance (scope ClientMsg Button) :button 1 :down true)))
-                              (dot net (send (make-instance (scope ClientMsg Button) :button 1 :down false)))
-                              (dot net (send (scope ClientMsg (Text (dot (string "hi") (into))))))
-                              (dot net (send (make-instance (scope ClientMsg Key)
-                                                            :key (dot (string "Enter") (into)) :down true)))
-                              (dot net (send (make-instance (scope ClientMsg Key)
-                                                            :key (dot (string "Enter") (into)) :down false)))
+                              ,@(loop for m in '((make-instance (scope ClientMsg MouseMove) :x 100 :y 100)
+                                                 (make-instance (scope ClientMsg Button) :button 1 :down true)
+                                                 (make-instance (scope ClientMsg Button) :button 1 :down false)
+                                                 (scope ClientMsg (Text (dot (string "hi") (into))))
+                                                 (make-instance (scope ClientMsg Key)
+                                                                :key (dot (string "Enter") (into)) :down true)
+                                                 (make-instance (scope ClientMsg Key)
+                                                                :key (dot (string "Enter") (into)) :down false))
+                                      collect (list 'dot 'net (list 'send m)))
                               (setf sent_input true)
                               (println! (string "probe: Eingaben geschickt")))
                             (when (and connected got_text got_tile sent_input)
@@ -714,9 +721,7 @@ init and update (macroquad `Image` literal, same shape twice)."
                               "// dem Prozess, bevor der Server sie sieht."
                               (std--thread--sleep (Duration--from_secs 1))
                               (println! (string "probe: OK ({} Texte, {} Kacheln, {} B)")
-                                        (dot (dot scene texts) (len))
-                                        (dot scene tiles)
-                                        (dot scene tile_bytes))
+                                        ,@(scene-stats-exprs 'scene))
                               (for (t (dot (dot (dot scene texts) (iter)) (take 5)))
                                 (println! (string "probe: Text {:?} {:?}") (dot t rect) (dot t text)))
                               (when (== stay 0)
@@ -726,15 +731,13 @@ init and update (macroquad `Image` literal, same shape twice)."
                                   (if-let ((Ok e) (dot (dot net events) (recv_timeout (Duration--from_millis 500))))
                                     (dot scene (apply e))))
                                 (println! (string "probe: nach {stay}s: {} Texte, {} Kacheln, {} B ({} B/s)")
-                                          (dot (dot scene texts) (len))
-                                          (dot scene tiles)
-                                          (dot scene tile_bytes)
+                                          ,@(scene-stats-exprs 'scene)
                                           (/ (dot scene tile_bytes) (dot stay (max 1))))
-                                (return))))))
+                                (return)))))
                       (eprintln! (string "probe: TIMEOUT (connected={connected} texte={} kacheln={})")
                                  (dot (dot scene texts) (len))
                                  (dot scene tiles))
-                      (std--process--exit 1))))))))))))
+                      (std--process--exit 1))))))))
 
 (defun client-test-loopback-rs ()
   `(do0
@@ -762,22 +765,18 @@ init and update (macroquad `Image` literal, same shape twice)."
       (declare (values "std::thread::JoinHandle<Vec<ClientMsg>>"))
       (std--thread--spawn
        (space "move" (lambda ()
-                       ;; Tupel-`let` → `.0` (Emitter-Limit, siehe T5).
-                       (let ((acc (dot (dot listener (accept)) (unwrap))))
-                         (let ((s (dot acc 0)))
-                           (declare (mutable s))
-                           (let ((fr (FrameReader--new)))
-                             (declare (mutable fr))
+                       (let (((paren "mut s" _) (dot (dot listener (accept)) (unwrap)))
+                             (fr (FrameReader--new)))
+                         (declare (mutable fr))
                              (dot (dot s (set_read_timeout (Some (Duration--from_secs 10)))) (unwrap))
                              (assert! (matches! (dot (dot fr ("read_msg::<ClientMsg>" (ref-mut s))) (unwrap))
                                                 "Some(ClientMsg::Hello { version: 1 })"))
-                             (dot (write_msg (ref-mut s) (ref (scope ServerMsg Hello))) (unwrap))
-                             (dot (write_msg (ref-mut s) (ref (scope ServerMsg ClearText))) (unwrap))
-                             (dot (write_msg (ref-mut s) (ref (scope ServerMsg (AddText (item))))) (unwrap))
-                             (dot (write_msg (ref-mut s)
-                                             (ref (make-instance (scope ServerMsg Tile)
-                                                                 :x 0 :y 0 :data tile)))
-                                  (unwrap))
+                             ,@(loop for m in '((scope ServerMsg Hello)
+                                               (scope ServerMsg ClearText)
+                                               (scope ServerMsg (AddText (item)))
+                                               (make-instance (scope ServerMsg Tile)
+                                                              :x 0 :y 0 :data tile))
+                                     collect (greeting-write m))
                              (let ((got (Vec--new)))
                                (declare (mutable got))
                                (while (< (dot got (len)) expect)
@@ -786,7 +785,7 @@ init and update (macroquad `Image` literal, same shape twice)."
                                     (dot got (push m)))
                                    (None
                                     (panic! (string "Timeout beim Warten auf Client-Nachrichten")))))
-                               got))))))))
+                               got))))))
     ,*blank*
     (defun recv_until ("net: &Net" "until: Instant" "want: &mut dyn FnMut(Event) -> bool")
       (while (< (Instant--now) until)
@@ -798,28 +797,22 @@ init and update (macroquad `Image` literal, same shape twice)."
     ,*blank*
     (attr "test"
       (defun hello_text_tile_and_reconnect ()
-        (let ((rgb (dot (bracket "40u8" 80 160) (repeat (* 64 64)))))
-          (let ((tile (dot (lbw_server--av1--encode_rgb (ref rgb) 64 64 180) (unwrap))))
-            (let ((listener (dot (TcpListener--bind (string "127.0.0.1:0")) (unwrap))))
-              (let ((port (dot (dot (dot listener (local_addr)) (unwrap)) (port))))
-                (let ((addr (format! (string "127.0.0.1:{port}"))))
-                  (let ((sent (vec! (make-instance (scope ClientMsg MouseMove) :x 10 :y 20)
-                                    (make-instance (scope ClientMsg Button) :button 1 :down true)
-                                    (make-instance (scope ClientMsg Button) :button 1 :down false)
-                                    (scope ClientMsg (Text (dot (string "ab") (into)))))))
-                    (let ((stub1 (stub listener tile (dot sent (len)))))
-                      (let ((net (Net--connect (ref addr))))
+        (let ((rgb (dot (bracket "40u8" 80 160) (repeat (* 64 64))))
+              (tile (dot (lbw_server--av1--encode_rgb (ref rgb) 64 64 180) (unwrap)))
+              (listener (dot (TcpListener--bind (string "127.0.0.1:0")) (unwrap)))
+              (port (dot (dot (dot listener (local_addr)) (unwrap)) (port)))
+              (addr (format! (string "127.0.0.1:{port}")))
+              (sent (vec! (make-instance (scope ClientMsg MouseMove) :x 10 :y 20)
+                          (make-instance (scope ClientMsg Button) :button 1 :down true)
+                          (make-instance (scope ClientMsg Button) :button 1 :down false)
+                          (scope ClientMsg (Text (dot (string "ab") (into))))))
+              (stub1 (stub listener tile (dot sent (len))))
+              (net (Net--connect (ref addr))))
                         "// Erste Verbindung: Hello → Clear → Text → Kachel."
-                        ;; Tupel-`let` → vier `let`s (Emitter-Limit, siehe T5).
-                        (let ((connected 0))
-                          (declare (mutable connected))
-                          (let ((clear 0))
-                            (declare (mutable clear))
-                            (let ((texts 0))
-                              (declare (mutable texts))
-                              (let ((tiles 0))
-                                (declare (mutable tiles))
-                                (recv_until (ref net) (+ (Instant--now) (Duration--from_secs 10))
+                        (let (,@(loop for v in '(connected clear texts tiles)
+                                      collect (list v 0)))
+                          (declare (mutable connected clear texts tiles))
+                          (recv_until (ref net) (+ (Instant--now) (Duration--from_secs 10))
                                             (ref-mut (lambda (e)
                                                        (case e
                                                          ((scope Event Connected)
@@ -833,9 +826,10 @@ init and update (macroquad `Image` literal, same shape twice)."
                                                             (incf texts)))
                                                          ("Event::Tile { x, y, w, h, rgba, bytes }"
                                                           (progn
-                                                            (assert_eq! (paren x y) (paren 0 0))
-                                                            (assert_eq! (paren w h) (paren 64 64))
-                                                            (assert_eq! (dot rgba (len)) (* 64 64 4))
+                                                            ,@(loop for (a b) in '(((paren x y) (paren 0 0))
+                                                                                    ((paren w h) (paren 64 64))
+                                                                                    ((dot rgba (len)) (* 64 64 4)))
+                                                                    collect (list 'assert_eq! a b))
                                                             (assert! (> bytes 0))
                                                             "// Flache Kachel: überall fast die Quellfarbe, Alpha 255."
                                                             (assert! (dot (dot rgba (chunks 4))
@@ -861,11 +855,11 @@ init and update (macroquad `Image` literal, same shape twice)."
                                                            (return true))
                                                          false)))
                                   (assert! down (string "Abriss muss als Event kommen"))
-                                  (let ((listener2 (dot (TcpListener--bind (ref addr)) (unwrap))))
-                                    (let ((tile2 (dot (lbw_server--av1--encode_rgb (ref rgb) 64 64 180) (unwrap))))
-                                      (let ((stub2 (stub listener2 tile2 0)))
-                                        (let ((reconnected false))
-                                          (declare (mutable reconnected))
+                                  (let ((listener2 (dot (TcpListener--bind (ref addr)) (unwrap)))
+                                        (tile2 (dot (lbw_server--av1--encode_rgb (ref rgb) 64 64 180) (unwrap)))
+                                        (stub2 (stub listener2 tile2 0))
+                                        (reconnected false))
+                                    (declare (mutable reconnected))
                                           (recv_until (ref net) (+ (Instant--now) (Duration--from_secs 10))
                                                       (ref-mut (lambda (e)
                                                                  (when (matches! e (scope Event Connected))
@@ -874,7 +868,7 @@ init and update (macroquad `Image` literal, same shape twice)."
                                                                  false)))
                                           (assert! reconnected (string "Client muss neu verbinden"))
                                           (dot (dot stub2 (join)) (unwrap))
-                                          (drop net))))))))))))))))))))))
+                                          (drop net)))))))))
 
 (defun client-lib-rs ()
   `(do0

@@ -176,21 +176,19 @@ fn sweep_padding_on_xterm() {
                                     let h = (((y1 - y0) + 1) as usize).max(16);
                                     {
                                         let (w, h) = (w + w % 2, h + h % 2);
-                                        {
-                                            let r = lbw_common::Rect::new(
-                                                x0.min(640 - w as u16),
-                                                y0.min(640 - h as u16),
-                                                w as u16,
-                                                h as u16,
-                                            );
-                                            let rgb = crop_rgb(&masked, r);
-                                            let bytes =
-                                                encode_rgb(&rgb, w, h, quantizer).unwrap().len();
-                                            mask_bytes.push((mpad, bytes));
-                                            eprintln!(
-                                                "[padding] mask_pad={mpad}: Region {w}x{h} = {bytes} B AV1"
-                                            )
-                                        }
+                                        let r = lbw_common::Rect::new(
+                                            x0.min(640 - w as u16),
+                                            y0.min(640 - h as u16),
+                                            w as u16,
+                                            h as u16,
+                                        );
+                                        let rgb = crop_rgb(&masked, r);
+                                        let bytes =
+                                            encode_rgb(&rgb, w, h, quantizer).unwrap().len();
+                                        mask_bytes.push((mpad, bytes));
+                                        eprintln!(
+                                            "[padding] mask_pad={mpad}: Region {w}x{h} = {bytes} B AV1"
+                                        )
                                     }
                                 }
                             }
