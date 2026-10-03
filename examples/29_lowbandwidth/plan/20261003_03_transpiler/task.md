@@ -102,10 +102,11 @@ Erst weiter, wenn der Schritt grün ist. Baseline: `source7_mvp`
 
 ## T8 — Walkthrough und Abschluss
 
-- [ ] `plan/20261003_03_transpiler/walkthrough.md` (Regeln aus dem Prompt:
+- [x] `plan/20261003_03_transpiler/walkthrough.md` (Regeln aus dem Prompt:
       deutsch, didaktisch, Fachbegriffe erklärt, Mermaid-Diagramme,
       Code-Beispiele; Inhalt: implementiert / Architektur-Änderungen /
       Learnings+Erweiterungen / Dockerfile-Pakete).
-- [ ] `plan/20261003_03_transpiler/deps.md` final prüfen.
-- [ ] Letzter Commit: `docs(plan): walkthrough transpiler-migration`.
-- [ ] Abschlussmeldung mit Testübersicht und Verifikationsergebnis.
+- [x] `plan/20261003_03_transpiler/deps.md` final prüfen (keine Änderung nötig:
+      SBCL 2.6.0 verifiziert, alle 4 Manifeste byte-identisch, keine neuen Crates).
+- [x] Letzter Commit: `docs(plan): walkthrough transpiler-migration`.
+- [x] Abschlussmeldung mit Testübersicht und Verifikationsergebnis.
