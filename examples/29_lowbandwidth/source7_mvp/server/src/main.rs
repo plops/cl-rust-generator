@@ -47,11 +47,7 @@ fn run(cfg: Config) -> Result<(), String> {
         img.save(path).map_err(|e| format!("{path}: {e}"))?;
         eprintln!("[server] Startbild nach {path} geschrieben");
     }
-    let mut ocr = if cfg.no_ocr {
-        Ocr::Disabled
-    } else {
-        Ocr::load(&cfg.models, OCR_THREADS)?
-    };
+    let mut ocr = Ocr::load(&cfg.models, OCR_THREADS)?;
     let listener = TcpListener::bind(&cfg.listen).map_err(|e| format!("{}: {e}", cfg.listen))?;
     eprintln!(
         "[server] lauscht auf {} ({}x{}@{},{}, q={})",

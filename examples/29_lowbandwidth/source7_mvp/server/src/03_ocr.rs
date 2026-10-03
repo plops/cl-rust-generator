@@ -3,7 +3,8 @@
 //! Aus `source6` (`04_ocr_detect`, `05_ocr_recognize`, Farb-Sampling aus
 //! `07_layout`) übernommen, aber auf `image::RgbImage` umgestellt, das
 //! Wörterbuch per `serde_yaml` gelesen und ohne Erkennungs-Cache (MVP).
-//! [`Ocr::Disabled`] erlaubt Betrieb ganz ohne Modelle.
+//! OCR ist Pflicht: ohne Modelle startet der Server nicht (reines AV1-Textbild
+//! würde das 6-kB/s-Budget sprengen).
 
 use image::RgbImage;
 use ort::session::Session;
@@ -359,21 +360,16 @@ pub fn sample_colors(img: &RgbImage, r: Rect) -> ([u8; 3], [u8; 3]) {
     (s.map(|v| ((v + cnt / 2) / cnt) as u8), bg)
 }
 
-/// Texterkennung: echt (Modelle geladen) oder abgeschaltet.
-pub enum Ocr {
-    Disabled,
-    Enabled(Box<OcrInner>),
-}
-
-/// Geladene OCR-Modelle (geboxt: Enum bleibt klein).
-pub struct OcrInner {
+/// Geladene Texterkennung (Pflicht: ohne Modelle kein Serverstart).
+pub struct Ocr {
     det: Detector,
     rec: Recognizer,
 }
 
 impl Ocr {
     /// Lädt `PP-OCRv6_small_{det,rec}.onnx` + `inference.yml` aus `dir`.
-    /// Fehlt eine Datei, läuft der Server ohne Text weiter (Warnung).
+    /// Fehlt eine Datei, ist das ein harter Fehler (kein Fallback: ohne
+    /// Textmaskierung sprengt AV1-Text das Bandbreiten-Budget).
     pub fn load(dir: &str, threads: usize) -> Result<Self, String> {
         let (det, rec, dict) = (
             format!("{dir}/PP-OCRv6_small_det.onnx"),
@@ -382,26 +378,22 @@ impl Ocr {
         );
         for p in [&det, &rec, &dict] {
             if !std::path::Path::new(p).exists() {
-                eprintln!("[ocr] {p} fehlt — laufe ohne Texterkennung");
-                return Ok(Self::Disabled);
+                return Err(format!("Modell fehlt: {p}"));
             }
         }
-        Ok(Self::Enabled(Box::new(OcrInner {
+        Ok(Self {
             det: Detector::new(&det, threads)?,
             rec: Recognizer::new(&rec, &dict, threads)?,
-        })))
+        })
     }
 
     /// Textzeilen mit Farben; unsichere/leere Erkennungen fallen weg
-    /// (die bleiben dann Bildinhalt). Ohne Modelle: leere Liste.
+    /// (die bleiben dann Bildinhalt).
     pub fn text(&mut self, img: &RgbImage) -> Result<Vec<TextItem>, String> {
-        let Self::Enabled(inner) = self else {
-            return Ok(Vec::new());
-        };
-        let (det, rec) = (&mut inner.det, &mut inner.rec);
         let mut out = Vec::new();
-        for r in det.detect(img)?.into_iter().take(MAX_LINES) {
-            let (text, conf) = rec.recognize(img, r)?;
+        let boxes = self.det.detect(img)?;
+        for r in boxes.into_iter().take(MAX_LINES) {
+            let (text, conf) = self.rec.recognize(img, r)?;
             let text = text.trim().to_owned();
             if text.is_empty() || conf < MIN_TEXT_CONF {
                 continue;
@@ -461,18 +453,11 @@ mod tests {
     }
 
     #[test]
-    fn disabled_ocr_yields_no_text() {
-        let mut ocr = Ocr::Disabled;
-        let img = solid(64, 64, [255; 3]);
-        assert!(ocr.text(&img).unwrap().is_empty());
-    }
-
-    #[test]
-    fn missing_models_disable_ocr_with_warning() {
-        assert!(matches!(
-            Ocr::load("/pfad/den/es/nicht/gibt", 1).unwrap(),
-            Ocr::Disabled
-        ));
+    fn missing_models_are_an_error() {
+        let Err(e) = Ocr::load("/pfad/den/es/nicht/gibt", 1) else {
+            panic!("muss scheitern");
+        };
+        assert!(e.contains("Modell fehlt"), "{e}");
     }
 
     #[test]
