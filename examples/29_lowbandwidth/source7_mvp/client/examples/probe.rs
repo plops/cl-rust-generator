@@ -52,6 +52,10 @@ fn main() {
             println!("probe: Eingaben geschickt");
         }
         if connected && got_text && got_tile && sent_input {
+            // Netz-Thread braucht einen Schleifendurchlauf (≤50 ms), um die
+            // eben geschickten Eingaben zu flushen — sonst sterben sie mit
+            // dem Prozess, bevor der Server sie sieht.
+            std::thread::sleep(Duration::from_secs(1));
             println!(
                 "probe: OK ({} Texte, {} Kacheln, {} B)",
                 scene.texts.len(),

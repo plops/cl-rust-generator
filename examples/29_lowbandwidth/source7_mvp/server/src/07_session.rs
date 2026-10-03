@@ -73,10 +73,13 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
         .map_err(|e| e.to_string())?;
     let stop = Arc::new(AtomicBool::new(false));
     let input = if cfg.no_input {
+        if cfg.verbose {
+            eprintln!("[input] deaktiviert (--no-input)");
+        }
         None
     } else {
         match Injector::open((cfg.x, cfg.y)) {
-            Ok(inj) => Some(spawn_input(rd, fr, inj, stop.clone())),
+            Ok(inj) => Some(spawn_input(rd, fr, inj, stop.clone(), cfg.verbose)),
             Err(e) => {
                 eprintln!("[input] {e} — laufe ohne Eingabe");
                 None
@@ -175,26 +178,48 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
     result
 }
 
-fn spawn_input(
+/// Liest Client-Nachrichten bis EOF/Stop und ruft `on_msg` je Nachricht.
+/// Eigenständig (und `pub`), damit Tests die Eingabe-Anlieferung ohne
+/// Display prüfen können; die Produktion übergibt den enigo-Injector.
+pub fn input_loop(
     mut rd: TcpStream,
     mut fr: FrameReader,
+    stop: &AtomicBool,
+    verbose: bool,
+    mut on_msg: impl FnMut(ClientMsg),
+) {
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
+        match fr.read_msg::<ClientMsg>(&mut rd) {
+            Ok(Some(m)) => {
+                if verbose {
+                    eprintln!("[input] {m:?}");
+                }
+                on_msg(m);
+            }
+            Ok(None) => {}   // Idle: erneut prüfen (Stop-Flag)
+            Err(_) => break, // EOF/Fehler: Client weg
+        }
+    }
+}
+
+fn spawn_input(
+    rd: TcpStream,
+    fr: FrameReader,
     mut inj: Injector,
     stop: Arc<AtomicBool>,
+    verbose: bool,
 ) -> std::thread::JoinHandle<()> {
+    if verbose {
+        eprintln!("[input] bereit");
+    }
     std::thread::spawn(move || {
-        loop {
-            if stop.load(Ordering::Relaxed) {
-                break;
+        input_loop(rd, fr, &stop, verbose, |m| {
+            if let Err(e) = inj.handle(&m) {
+                eprintln!("[input] {e}");
             }
-            match fr.read_msg::<ClientMsg>(&mut rd) {
-                Ok(Some(m)) => {
-                    if let Err(e) = inj.handle(&m) {
-                        eprintln!("[input] {e}");
-                    }
-                }
-                Ok(None) => {}   // Idle: erneut prüfen (Stop-Flag)
-                Err(_) => break, // EOF/Fehler: Client weg
-            }
-        }
+        });
     })
 }

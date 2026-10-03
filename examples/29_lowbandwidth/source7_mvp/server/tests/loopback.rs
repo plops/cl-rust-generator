@@ -2,6 +2,7 @@
 //! Läuft ohne X11 und ohne Modelle.
 
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
@@ -10,7 +11,7 @@ use lbw_common::framing::{FrameReader, write_msg};
 use lbw_common::{ClientMsg, PROTO_VERSION, Rect, ServerMsg, TextItem};
 use lbw_server::capture::{SharedSource, solid};
 use lbw_server::config::Config;
-use lbw_server::session::{Recognize, serve_client};
+use lbw_server::session::{Recognize, input_loop, serve_client};
 
 struct StubOcr(Vec<TextItem>);
 
@@ -161,4 +162,48 @@ fn wrong_version_is_rejected() {
     }
     let r = server.join().unwrap();
     assert!(r.is_err(), "falsche Version muss Fehler sein");
+}
+
+#[test]
+fn input_messages_reach_handler_in_order() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let sent = vec![
+        ClientMsg::Hello {
+            version: PROTO_VERSION,
+        },
+        ClientMsg::MouseMove { x: 100, y: 200 },
+        ClientMsg::Button {
+            button: 1,
+            down: true,
+        },
+        ClientMsg::Button {
+            button: 1,
+            down: false,
+        },
+        ClientMsg::Text("hi".into()),
+        ClientMsg::Key {
+            key: "Enter".into(),
+            down: true,
+        },
+    ];
+    let writer = sent.clone();
+    let client = std::thread::spawn(move || {
+        let mut s = TcpStream::connect(addr).unwrap();
+        for m in &writer {
+            write_msg(&mut s, m).unwrap();
+        }
+        // Socket fällt hier: input_loop sieht EOF und endet.
+    });
+
+    let (rd, _) = listener.accept().unwrap();
+    rd.set_read_timeout(Some(Duration::from_millis(200)))
+        .unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let stop = AtomicBool::new(false);
+    input_loop(rd, FrameReader::new(), &stop, false, |m| {
+        tx.send(m).unwrap();
+    });
+    client.join().unwrap();
+    assert_eq!(rx.try_iter().collect::<Vec<_>>(), sent);
 }

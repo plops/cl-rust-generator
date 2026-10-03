@@ -17,8 +17,13 @@ fn item() -> TextItem {
     }
 }
 
-/// Stub: Hello lesen, Hello + Text + Kachel schicken, kurz halten, schließen.
-fn stub(listener: TcpListener, tile: Vec<u8>) -> std::thread::JoinHandle<()> {
+/// Stub: Hello lesen, Hello + Text + Kachel schicken, dann `expect`
+/// Client-Nachrichten lesen und zurückgeben. Schließen → Client sieht EOF.
+fn stub(
+    listener: TcpListener,
+    tile: Vec<u8>,
+    expect: usize,
+) -> std::thread::JoinHandle<Vec<ClientMsg>> {
     std::thread::spawn(move || {
         let (mut s, _) = listener.accept().unwrap();
         let mut fr = FrameReader::new();
@@ -39,8 +44,14 @@ fn stub(listener: TcpListener, tile: Vec<u8>) -> std::thread::JoinHandle<()> {
             },
         )
         .unwrap();
-        std::thread::sleep(Duration::from_millis(500));
-        // `s` fällt hier: Client sieht EOF und verbindet neu.
+        let mut got = Vec::new();
+        while got.len() < expect {
+            match fr.read_msg::<ClientMsg>(&mut s).unwrap() {
+                Some(m) => got.push(m),
+                None => panic!("Timeout beim Warten auf Client-Nachrichten"),
+            }
+        }
+        got
     })
 }
 
@@ -62,7 +73,19 @@ fn hello_text_tile_and_reconnect() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let addr = format!("127.0.0.1:{port}");
-    let stub1 = stub(listener, tile);
+    let sent = vec![
+        ClientMsg::MouseMove { x: 10, y: 20 },
+        ClientMsg::Button {
+            button: 1,
+            down: true,
+        },
+        ClientMsg::Button {
+            button: 1,
+            down: false,
+        },
+        ClientMsg::Text("ab".into()),
+    ];
+    let stub1 = stub(listener, tile, sent.len());
 
     let net = Net::connect(&addr);
 
@@ -92,7 +115,12 @@ fn hello_text_tile_and_reconnect() {
         connected >= 1 && clear >= 1 && texts >= 1 && tiles >= 1
     });
     assert_eq!((connected, clear, texts, tiles), (1, 1, 1, 1));
-    stub1.join().unwrap();
+
+    // Gegenrichtung: Net::send muss vollständig beim Server ankommen.
+    for m in &sent {
+        net.send(m.clone());
+    }
+    assert_eq!(stub1.join().unwrap(), sent);
 
     // Abriss bemerken, neu verbinden.
     let mut down = false;
@@ -107,7 +135,7 @@ fn hello_text_tile_and_reconnect() {
 
     let listener2 = TcpListener::bind(&addr).unwrap();
     let tile2 = lbw_server::av1::encode_rgb(&rgb, 64, 64, Default::default()).unwrap();
-    let stub2 = stub(listener2, tile2);
+    let stub2 = stub(listener2, tile2, 0);
     let mut reconnected = false;
     recv_until(&net, Instant::now() + Duration::from_secs(10), &mut |e| {
         if matches!(e, Event::Connected) {
