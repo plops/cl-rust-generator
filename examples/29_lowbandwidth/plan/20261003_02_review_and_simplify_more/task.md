@@ -43,3 +43,10 @@ grün + 1 ignoriert).
   Architektur-Änderungen, Learnings, Dockerfile-Pakete) in diesem
   Plan-Ordner. Validierung: `cargo build --release`,
   `cargo fmt --all -- --check`, `git log --oneline` zeigt T1–T6-Commits.
+- [x] **T7 `--dump`/`--no-input` streichen (Follow-up)**: Felder aus
+  `01_config.rs`, Dump-Block aus `main.rs`, Eingabe-Zweig aus
+  `07_session.rs` (eleganter Fallback bleibt: `Injector::open`-Fehler →
+  Session ohne Eingabe); Loopback-`test_cfg` ohne Flag; Smoke ohne
+  `--dump`-Aufruf und PNG-Prüfung; README-Diagnose zeigt auf Probe-Log
+  und Padding-Capture. Validierung: `cargo test --workspace`,
+  `cargo clippy -- -D warnings`, `scripts/smoke_xvfb.sh`.

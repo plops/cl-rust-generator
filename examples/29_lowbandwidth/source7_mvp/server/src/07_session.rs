@@ -72,18 +72,11 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
     rd.set_read_timeout(Some(Duration::from_millis(200)))
         .map_err(|e| e.to_string())?;
     let stop = Arc::new(AtomicBool::new(false));
-    let input = if cfg.no_input {
-        if cfg.verbose {
-            eprintln!("[input] deaktiviert (--no-input)");
-        }
-        None
-    } else {
-        match Injector::open((cfg.x, cfg.y)) {
-            Ok(inj) => Some(spawn_input(rd, fr, inj, stop.clone(), cfg.verbose)),
-            Err(e) => {
-                eprintln!("[input] {e} — laufe ohne Eingabe");
-                None
-            }
+    let input = match Injector::open((cfg.x, cfg.y)) {
+        Ok(inj) => Some(spawn_input(rd, fr, inj, stop.clone(), cfg.verbose)),
+        Err(e) => {
+            eprintln!("[input] {e} — laufe ohne Eingabe");
+            None
         }
     };
 

@@ -21,16 +21,9 @@ pub struct Config {
     /// AV1-Quantizer 0..=255 (höher = kleiner/schlechter).
     #[arg(long, default_value_t = 180)]
     pub quantizer: usize,
-    /// Modellverzeichnis (PP-OCRv6). Fehlt es, läuft der Server ohne Text.
+    /// Modellverzeichnis (PP-OCRv6). Fehlt es, startet der Server nicht.
     #[arg(long, default_value = "models")]
     pub models: String,
-    /// Schreibt das erste Capture-Bild hierher (z. B. `frame.png`) und
-    /// startet danach normal (Diagnose: was sieht der Server?).
-    #[arg(long)]
-    pub dump: Option<String>,
-    /// Eingaben des Clients ignorieren.
-    #[arg(long)]
-    pub no_input: bool,
     /// Pipeline-Log.
     #[arg(short, long)]
     pub verbose: bool,
@@ -62,8 +55,7 @@ mod tests {
     fn defaults_are_local() {
         let c = Config::try_parse_from(["lbw-server"]).unwrap();
         assert_eq!((c.listen.as_str(), c.quantizer), ("127.0.0.1:7878", 180));
-        assert!(!c.is_public() && !c.no_input && !c.verbose);
-        assert!(c.dump.is_none());
+        assert!(!c.is_public() && !c.verbose);
         c.validate().unwrap();
     }
 
@@ -81,17 +73,13 @@ mod tests {
             "99",
             "--models",
             "/m",
-            "--dump",
-            "/tmp/x.png",
-            "--no-input",
             "-v",
         ])
         .unwrap();
         assert!(c.is_public());
         assert_eq!((c.x, c.y, c.quantizer), (10, 20, 99));
         assert_eq!(c.models, "/m");
-        assert_eq!(c.dump.as_deref(), Some("/tmp/x.png"));
-        assert!(c.no_input && c.verbose);
+        assert!(c.verbose);
         c.validate().unwrap();
     }
 
@@ -100,6 +88,8 @@ mod tests {
         // Unbekannte Option scheitert schon beim Parsen.
         assert!(Config::try_parse_from(["lbw-server", "--bogus"]).is_err());
         assert!(Config::try_parse_from(["lbw-server", "--no-ocr"]).is_err());
+        assert!(Config::try_parse_from(["lbw-server", "--dump"]).is_err());
+        assert!(Config::try_parse_from(["lbw-server", "--no-input"]).is_err());
         assert!(Config::try_parse_from(["lbw-server", "--size"]).is_err());
         assert!(Config::try_parse_from(["lbw-server", "--quantizer", "x"]).is_err());
         // Falsche Wertebereiche scheitern bei validate().

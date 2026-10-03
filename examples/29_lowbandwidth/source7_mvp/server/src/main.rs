@@ -6,7 +6,7 @@ use std::net::TcpListener;
 use clap::Parser;
 use lbw_common::SIZE;
 
-use lbw_server::capture::{FrameSource, ScrapSource};
+use lbw_server::capture::ScrapSource;
 use lbw_server::config::Config;
 use lbw_server::ocr::Ocr;
 use lbw_server::session::serve_client;
@@ -42,11 +42,6 @@ fn run(cfg: Config) -> Result<(), String> {
         );
     }
     let mut src = ScrapSource::open(cfg.x, cfg.y, SIZE, SIZE)?;
-    if let Some(path) = &cfg.dump {
-        let img = src.grab()?;
-        img.save(path).map_err(|e| format!("{path}: {e}"))?;
-        eprintln!("[server] Startbild nach {path} geschrieben");
-    }
     let mut ocr = Ocr::load(&cfg.models, OCR_THREADS)?;
     let listener = TcpListener::bind(&cfg.listen).map_err(|e| format!("{}: {e}", cfg.listen))?;
     eprintln!(

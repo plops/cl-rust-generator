@@ -49,7 +49,8 @@ entspricht.
 | 64er-Raster | durch BBox ersetzen (Review) | Zwei weit entfernte Änderungen spannen eine große Box (z. B. Cursor oben + Uhr unten). AV1 kodiert den unveränderten Rest als Skip-Blöcke (~0 B) — unterm Strich billiger als N×Header. |
 | `Av1Params::{speed, threads}` | fest verdrahten (10, 4) | Nicht mehr tunbar; Werte waren ohnehin nie per CLI erreichbar. |
 | `Scene::last_rx`, `Down`-Zeitpunkt | streichen | HUD zeigt keine „offline seit“-Dauer — zeigte es auch bisher nicht (Feld wurde nur geschrieben). |
-| `--dump`, `--no-input`, `-v`, `is_public`-Warnung | **behalten** | Je ~5 Zeilen, aber Diagnose/Sicherheit/Tests (`no_input` macht Loopback displaylos). Streichen spart fast nichts. |
+| `-v`, `is_public`-Warnung | **behalten** | Je ~5 Zeilen Diagnose/Sicherheit. Streichen spart fast nichts. |
+| `--dump`, `--no-input` | Nachtrag T7: **gestrichen** | Diagnose via Probe-Log/Padding-Capture; Loopback bleibt via `Injector`-Fallback displaylos. |
 | `ClientMsg::Hello{version}` | **behalten** | Eine Zeile je Seite gegen Protokoll-Mix. |
 | Heartbeat, Zoom, Clipboard, YOLO, Auth | **nicht** einbauen | Wie im MVP: dokumentierte Nicht-Ziele (vgl. Walkthrough §3). |
 

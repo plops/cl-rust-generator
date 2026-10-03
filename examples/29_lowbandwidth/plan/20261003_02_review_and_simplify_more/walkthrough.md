@@ -8,9 +8,9 @@ Parameter verloren. Es ist bewusst didaktisch geschrieben: Fachbegriffe werden
 erklärt, Architektur wird mit Diagrammen gezeigt, und alle wichtigen Stellen
 kommen mit Code-Beispielen.
 
-**Das Ergebnis in einem Satz:** kaum weniger Zeilen (2.758 statt 2.763 im
-`src/`-Baum), aber deutlich weniger Konzepte — und das Vollbild kostet nur
-noch **1,2 kB statt 6,8 kB**.
+**Das Ergebnis in einem Satz:** kaum weniger Zeilen (2.736 statt 2.763 im
+`src/`-Baum, T7 inkl.), aber deutlich weniger Konzepte — und das Vollbild
+kostet nur noch **1,2 kB statt 6,8 kB**.
 
 ## 0. Die Idee in einem Bild
 
@@ -179,8 +179,12 @@ als `0` — beides relative Aussagen, robust gegen Fontwechsel.
 | `ScrapSource::fh` | nur durchgereicht, nie benutzt |
 | `Decoder::new(threads)` → `new()` | immer 1 gewesen |
 
-Behalten (bewusst, je ~5 Zeilen): `--dump`, `--no-input` (macht Loopback
-displaylos), `-v`, `is_public`-Warnung, `Hello{version}`-Handshake.
+Behalten (bewusst, je ~5 Zeilen): `-v`, `is_public`-Warnung,
+`Hello{version}`-Handshake. Nachtrag (T7): Auch `--dump` und `--no-input`
+sind gefallen — `--dump` ersetzte der Padding-Test (`/tmp/padding_frame.png`)
+plus Probe-Log, `--no-input` der elegante Fallback (`Injector::open`
+scheitert headless, die Session läuft ohne Eingabe weiter, Loopback bleibt
+displaylos).
 
 ### 1.5 Tests und Messwerte
 
@@ -204,7 +208,7 @@ Der Xvfb-Smoke beweist Ende-zu-Ende-Betrieb (Threadripper PRO 7955WX):
 | Standbild danach | 0 B | 0 B (unverändert) |
 | Text im ersten Frame | `SMOKE-TEST-640` | dito (gepaddetes Rechteck 93×19) |
 | Eingabe → Klick im xev | OK | OK |
-| `src/`-Zeilen | 2.763 | **2.758** |
+| `src/`-Zeilen | 2.763 | **2.736** (T7 inkl.) |
 | Dateien über 600 Zeilen | 0 | 0 (größte: `03_ocr.rs`, 500) |
 
 ## 2. Architektur-Entscheidungen, die Messungen erzwungen haben
@@ -304,6 +308,7 @@ ungewollter Xvfb-Bedarf in normalen CI-Läufen.
 
 ---
 
-*Erstellt nach Abschluss aller Tasks (T1–T6): 46 Tests grün, 2 ignorierte
-Nachweise grün, Clippy sauber, Smoke bestanden, 7 Commits (Conventional
-Commits). Quellcode: `source7_mvp/`, Plan: `plan/20261003_02_review_and_simplify_more/`.*
+*Erstellt nach Abschluss aller Tasks (T1–T6, Nachtrag T7): 46 Tests grün,
+2 ignorierte Nachweise grün, Clippy sauber, Smoke bestanden, 8 Commits
+(Conventional Commits). Quellcode: `source7_mvp/`, Plan:
+`plan/20261003_02_review_and_simplify_more/`.*

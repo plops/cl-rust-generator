@@ -22,9 +22,8 @@ impl Recognize for StubOcr {
 }
 
 fn test_cfg() -> Config {
-    let mut c = Config::try_parse_from(["lbw-server"]).unwrap();
-    c.no_input = true; // kein Display nötig
-    c
+    // Ohne Display: Injector::open scheitert, die Session läuft ohne Eingabe.
+    Config::try_parse_from(["lbw-server"]).unwrap()
 }
 
 fn item() -> TextItem {

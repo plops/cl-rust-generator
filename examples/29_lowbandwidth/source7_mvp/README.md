@@ -39,8 +39,9 @@ nicht kompatibel zu source6. Details: Walkthrough im Plan-Ordner.
 Capture (`scrap`) und Eingabe (`enigo`/XTEST) sprechen reines X11. In einer
 Wayland-Sitzung sieht der Server nur den schwarzen XWayland-Root — das Bild
 bleibt stehen, obwohl Eingaben fehlerfrei ankommen. Der Server warnt beim
-Start, wenn er eine Wayland-Sitzung erkennt. Mit `--dump frame.png` lässt
-sich prüfen, was der Server tatsächlich sieht.
+Start, wenn er eine Wayland-Sitzung erkennt. Ob er Bildinhalt sieht, zeigt
+die Headless-Probe im Smoke (`probe: OK (… Texte, … Kacheln …)`); ein
+Standbild-Capture schreibt der Padding-Test nach `/tmp/padding_frame.png`.
 
 ## Hinweis: mehrere Monitore
 
