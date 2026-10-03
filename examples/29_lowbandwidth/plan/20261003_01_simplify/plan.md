@@ -67,7 +67,7 @@ source7_mvp/
   server/src/
     lib.rs, main.rs           # nur Verdrahtung
     01_config.rs              # clap-Config (listen, x/y/size, quantizer, models, no-ocr, no-input)
-    02_capture.rs             # FrameSource-Trait, XcapSource, SharedSource
+    02_capture.rs             # FrameSource-Trait, ScrapSource (BGRX→RGB), SharedSource
     03_ocr.rs                 # serde_yaml-Dict, Detector, Recognizer, Ocr (optional)
     04_tiles.rs               # Fest-Raster-Dirty (64px) + Maskierung
     05_av1.rs                 # rav1e-Still-Picture (Av1Params, encode_rgb)
@@ -132,11 +132,19 @@ struct Config {
 }
 ```
 
-xcap (liefert direkt `image::RgbaImage`, Region mit Bounds-Check):
+scrap (MIT-SHM, BGRX-Bytes; `xcap` 0.9 verworfen: Wayland+EGL-Systemlibs
+ohne Feature-Gate, siehe T2-Commit):
 
 ```rust
-let mon = xcap::Monitor::all()?.into_iter().find(|m| m.is_primary().unwrap_or(false)).unwrap();
-let img: image::RgbaImage = mon.capture_region(x as i32, y as i32, w, h)?;
+let d = scrap::Display::primary()?;
+let mut cap = scrap::Capturer::new(d)?;
+let frame: Vec<u8> = loop {
+    match cap.frame() {
+        Ok(f) => break f.to_vec(), // BGRX, Stride = Breite*4
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+        Err(e) => Err(e)?,
+    }
+};
 ```
 
 enigo (X11-Display via `Settings::x11_display` setzbar):
