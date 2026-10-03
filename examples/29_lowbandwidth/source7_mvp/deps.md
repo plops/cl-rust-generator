@@ -29,6 +29,13 @@ Bekannte Auffälligkeiten:
 - `x11rb` 0.14.0 evaluiert (2026-10-03) und verworfen: `protocol::randr`
   löst dort nicht mehr auf — wir bleiben auf 0.13.2, bis der Importpfad
   geklärt ist (eine Zeile in `06_input.rs`).
+- `block` 0.1.6 (via `scrap`): Future-Incompat-Warnung bei jedem Build
+  (`static of uninhabited type`). Nicht per Upgrade behebbar — `block`
+  0.1.6 und `scrap` 0.5.0 sind jeweils final/aktuell (Upstream stale),
+  `scrap` zieht `block` unbedingt herein, obwohl nur macOS-Code es nutzt.
+  Harmlos (Build erfolgreich, Pfad auf Linux ungenutzt); Entfernung
+  verworfen: Vendor-Patch (~700 Zeilen), Hand-SHM-Capture (~100 Zeilen +
+  unsafe) oder `--cap-lints allow` (maskiert alle Dep-Warnungen).
 
 Bewusst **nicht** übernommen (evaluiert, verworfen):
 
