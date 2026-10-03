@@ -9,5 +9,8 @@ license.workspace = true
 clap = { version = "4.6.7", features = ["derive"] }
 image = "0.25.10"
 lbw-common = { path = "../common" }
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["download-binaries", "copy-dylibs", "tls-native", "std"] }
 rav1e = { version = "0.8.1", default-features = false, features = ["threading"] }
 scrap = "0.5.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_yaml = "0.9.34"

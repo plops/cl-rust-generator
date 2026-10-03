@@ -18,9 +18,6 @@ pub struct Config {
     /// Linke obere Ecke des Ausschnitts.
     #[arg(long, default_value_t = 0)]
     pub y: u32,
-    /// Kantenlänge des quadratischen Ausschnitts (Vielfaches von 64).
-    #[arg(long, default_value_t = 640)]
-    pub size: u32,
     /// AV1-Quantizer 0..=255 (höher = kleiner/schlechter).
     #[arg(long, default_value_t = 180)]
     pub quantizer: usize,
@@ -41,9 +38,6 @@ pub struct Config {
 impl Config {
     /// Prüft Wertebereiche (clap parst nur Typen).
     pub fn validate(&self) -> Result<(), String> {
-        if self.size < 64 || self.size > 2048 || !self.size.is_multiple_of(64) {
-            return Err("--size muss ein Vielfaches von 64 zwischen 64 und 2048 sein".into());
-        }
         if self.quantizer > 255 {
             return Err("--quantizer muss zwischen 0 und 255 liegen".into());
         }
@@ -64,12 +58,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_are_local_and_640() {
+    fn defaults_are_local() {
         let c = Config::try_parse_from(["lbw-server"]).unwrap();
-        assert_eq!(
-            (c.listen.as_str(), c.size, c.quantizer),
-            ("127.0.0.1:7878", 640, 180)
-        );
+        assert_eq!((c.listen.as_str(), c.quantizer), ("127.0.0.1:7878", 180));
         assert!(!c.is_public() && !c.no_ocr && !c.no_input && !c.verbose);
         c.validate().unwrap();
     }
@@ -84,8 +75,6 @@ mod tests {
             "10",
             "--y",
             "20",
-            "--size",
-            "512",
             "--quantizer",
             "99",
             "--models",
@@ -96,7 +85,7 @@ mod tests {
         ])
         .unwrap();
         assert!(c.is_public());
-        assert_eq!((c.x, c.y, c.size, c.quantizer), (10, 20, 512, 99));
+        assert_eq!((c.x, c.y, c.quantizer), (10, 20, 99));
         assert_eq!(c.models, "/m");
         assert!(c.no_ocr && c.no_input && c.verbose);
         c.validate().unwrap();
@@ -106,17 +95,10 @@ mod tests {
     fn bad_values_are_rejected() {
         // Unbekannte Option scheitert schon beim Parsen.
         assert!(Config::try_parse_from(["lbw-server", "--bogus"]).is_err());
-        assert!(Config::try_parse_from(["lbw-server", "--size", "x"]).is_err());
+        assert!(Config::try_parse_from(["lbw-server", "--size"]).is_err());
+        assert!(Config::try_parse_from(["lbw-server", "--quantizer", "x"]).is_err());
         // Falsche Wertebereiche scheitern bei validate().
-        for args in [
-            vec!["--size", "100"],
-            vec!["--size", "0"],
-            vec!["--quantizer", "256"],
-        ] {
-            let mut v = vec!["lbw-server"];
-            v.extend(args);
-            let c = Config::try_parse_from(v).unwrap();
-            assert!(c.validate().is_err());
-        }
+        let c = Config::try_parse_from(["lbw-server", "--quantizer", "256"]).unwrap();
+        assert!(c.validate().is_err());
     }
 }

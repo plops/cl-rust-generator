@@ -7,6 +7,9 @@ pub mod config;
 #[path = "02_capture.rs"]
 pub mod capture;
 
+#[path = "03_ocr.rs"]
+pub mod ocr;
+
 #[path = "04_tiles.rs"]
 pub mod tiles;
 

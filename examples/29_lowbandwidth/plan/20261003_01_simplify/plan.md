@@ -7,7 +7,8 @@ direkt in Rust (Edition 2024) geschrieben, im neuen Workspace
 
 ## 1. Was der MVP können muss (Requirements)
 
-1. Server captured einen `size×size`-Ausschnitt (Default 640) des X11-Desktops.
+1. Server captured einen festen 640×640-Ausschnitt des X11-Desktops
+   (Bildgröße fix — kein `--size`, weniger Code).
 2. Text wird per PP-OCRv6 erkannt und als (Box, Farben, String) übertragen;
    erkannte Stellen werden im Bild mit ihrer Hintergrundfarbe maskiert.
 3. Der Rest wird in einem festen 64er-Raster auf Änderung geprüft; nur
@@ -66,7 +67,7 @@ source7_mvp/
     03_yuv.rs                 # BT.601 Full-Range RGB↔YUV420 (aus source6)
   server/src/
     lib.rs, main.rs           # nur Verdrahtung
-    01_config.rs              # clap-Config (listen, x/y/size, quantizer, models, no-ocr, no-input)
+    01_config.rs              # clap-Config (listen, x/y, quantizer, models, no-ocr, no-input)
     02_capture.rs             # FrameSource-Trait, ScrapSource (BGRX→RGB), SharedSource
     03_ocr.rs                 # serde_yaml-Dict, Detector, Recognizer, Ocr (optional)
     04_tiles.rs               # Fest-Raster-Dirty (64px) + Maskierung

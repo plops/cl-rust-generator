@@ -12,6 +12,8 @@ pub const PROTO_VERSION: u16 = 1;
 pub const DEFAULT_PORT: u16 = 7878;
 /// Kantenlänge einer festen AV1-Kachel.
 pub const TILE: u16 = 64;
+/// Feste Kantenlänge des quadratischen Bildes (MVP: immer 640×640).
+pub const SIZE: u32 = 640;
 /// Max. Nachrichtengröße in Byte (Schutz vor OOM bei korrupten Längen).
 pub const MAX_MSG: usize = 8 * 1024 * 1024;
 
@@ -126,7 +128,7 @@ mod tests {
     }
 
     #[test]
-    fn tile_divides_default_size() {
-        assert_eq!(640 % u32::from(TILE), 0);
+    fn tile_divides_fixed_size() {
+        assert_eq!(SIZE % u32::from(TILE), 0);
     }
 }
