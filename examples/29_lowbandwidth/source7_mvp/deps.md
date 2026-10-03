@@ -36,7 +36,7 @@ Bewusst **nicht** übernommen (evaluiert, verworfen):
 | `x11rb` | `psychon/x11rb` | Ersetzt durch `scrap` (Capture) + `enigo` (Input) |
 | `miniquad` (direkt) | `not-fl3/miniquad` | Nur transitiv via `macroquad`; kein Clipboard im MVP |
 
-Modelle (Laufzeit, nicht im Git — aus `source6/models` wiederverwendet):
+Modelle (Laufzeit, nicht im Git — aus `../source6/models` wiederverwendet):
 
 | Datei | Quelle |
 |---|---|
