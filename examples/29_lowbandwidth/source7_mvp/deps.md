@@ -7,7 +7,7 @@ Stand: 2026-10-03, alle auf neuester lauffähiger Version (`cargo upgrade`).
 | `serde` | 1.0.229 | `serde-rs/serde` | common, server | Derive für Protokoll-Typen (ersetzt Hand-Codec) |
 | `bincode` | 2.0.1 | `bincode-org/bincode` | common | `bincode::serde::{encode_to_vec, decode_from_slice}` mit `config::standard()` (ersetzt `common/02_codec.rs`) |
 | `clap` | 4.6.7 | `clap-rs/clap` | server, client | `#[derive(Parser)]` CLI (ersetzt `01_config.rs` handgeparst) |
-| `image` | 0.24.9 | `image-rs/image` | server | `RgbImage`, Crop, PPM (ersetzt `server/03_image.rs`). Bewusst 0.24 wie `macroquad` (statt 0.25): eine Version im Baum statt zwei. |
+| `image` | 0.24.9 | `image-rs/image` | server | `RgbImage`, Crop (ersetzt `server/03_image.rs`). Bewusst 0.24 wie `macroquad` (statt 0.25): eine Version im Baum. `default-features = false` — Produktion nutzt nur `Rgb`/`RgbImage` ohne jedes Format; `png`/`pnm` nur als Dev-Dep für Tests (PPM-Testbild öffnen, PNG-Capture speichern). |
 | `scrap` | 0.5.0 | `quadrupleslap/scrap` | server | MIT-SHM-Capture, BGRX→RGB (ersetzt `x11rb`-`GetImage` in `02_capture.rs`) |
 | `enigo` | 0.6.1 | `enigo-rs/enigo` | server | Maus/Tastatur-Injektion (ersetzt `x11rb`-XTEST in `13_input.rs`) |
 | `serde_yaml` | 0.9.34 | `dtolnay/serde-yaml` | server | `character_dict` aus `inference.yml` (ersetzt `load_dict`-Handparser) |
@@ -23,12 +23,20 @@ Bekannte Auffälligkeiten:
   (einzige Zeile: `compile_error!("https://xkcd.com/2347/")`). Wir bleiben
   bewusst auf 2.0.1, bis ein lauffähiges 3.x erscheint.
 - `image` ist seit 2026-10-03 einheitlich 0.24.9 (direkt + via
-  `macroquad` — davor 0.25.10/0.24.9 doppelt). Es werden weiterhin keine
-  `image`-Typen über die macroquad-Grenze gereicht (nur `Vec<u8>`).
+  `macroquad` — davor 0.25.10/0.24.9 doppelt) und ohne Default-Features:
+  Server-Produktion ohne Formate (147 statt 181 Crates im Graphen),
+  `exr`/`half`/`tiff`/`jpeg`/`gif`/… entfallen ersatzlos. Es werden
+  weiterhin keine `image`-Typen über die macroquad-Grenze gereicht (nur
+  `Vec<u8>`).
+- Dadurch aufgelöst: `zerocopy` 0.7/0.8 (0.8 kam nur via `half` ← `exr`
+  ← `image`-Defaults; übrig ist 0.7 via `rav1d`).
 - Verbleibende Doppelversionen sind rein transitiv und von uns nicht
-  behebbar (`cargo tree -d`): u. a. `bitflags` 1/2, `cfg-if` 0.1/1,
-  `syn` 2/3, `zerocopy` 0.7/0.8 — jeweils Versions-Spreizung tief in
-  Dritt-Crates, kein direktes Dep von uns betroffen.
+  behebbar (`cargo tree -d`): `bitflags` 1 (via `png` ← `macroquad`) / 2
+  (via `rav1d`/`x11rb`/…), `miniz_oxide` 0.8/0.9 (beide via `png` 0.17
+  selbst), `hashbrown` 0.15 (via `fontdue` ← `macroquad`) / 0.17 (via
+  `indexmap` ← `serde_yaml`), `cfg-if` 0.1 (via `scrap`, stale) / 1,
+  `syn` 2 (Derive-Helfer von `rav1e`/`rav1d`) / 3 (nur Build-Zeit,
+  kein Binary-Anteil). Keine dieser Spreizungen betrifft ein direktes Dep.
 - `ort` ist weiterhin nur als Release-Candidate aktuell (rc.13).
 - `x11rb` 0.14.0 evaluiert (2026-10-03) und verworfen: `protocol::randr`
   löst dort nicht mehr auf — wir bleiben auf 0.13.2, bis der Importpfad
