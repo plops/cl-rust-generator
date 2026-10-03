@@ -15,3 +15,9 @@ pub mod tiles;
 
 #[path = "05_av1.rs"]
 pub mod av1;
+
+#[path = "06_input.rs"]
+pub mod input;
+
+#[path = "07_session.rs"]
+pub mod session;
