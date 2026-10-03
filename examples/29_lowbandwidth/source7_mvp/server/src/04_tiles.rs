@@ -10,21 +10,25 @@ use image::RgbImage;
 use lbw_common::{Rect, TILE};
 
 /// Alle Raster-Kacheln, deren Bytes sich gegenüber `prev` unterscheiden.
-/// `prev = None` liefert alle Kacheln (Vollbild nach Connect).
+/// `prev = None` liefert alle Kacheln (Vollbild nach Connect). Das Bild muss
+/// ins [`TILE`]-Raster passen (640 tut das exakt: 10×10 ohne Randfälle).
 #[must_use]
 pub fn dirty_tiles(prev: Option<&RgbImage>, cur: &RgbImage) -> Vec<Rect> {
     let (w, h) = cur.dimensions();
     let t = u32::from(TILE);
+    debug_assert!(
+        w.is_multiple_of(t) && h.is_multiple_of(t),
+        "Bild {w}x{h} passt nicht ins {t}er-Raster"
+    );
     let mut out = Vec::new();
     for y in (0..h).step_by(t as usize) {
         for x in (0..w).step_by(t as usize) {
-            let (tw, th) = (t.min(w - x), t.min(h - y));
             let dirty = match prev {
                 None => true,
-                Some(p) => tile_changed(p, cur, x, y, tw, th),
+                Some(p) => tile_changed(p, cur, x, y, t, t),
             };
             if dirty {
-                out.push(Rect::new(x as u16, y as u16, tw as u16, th as u16));
+                out.push(Rect::new(x as u16, y as u16, TILE, TILE));
             }
         }
     }

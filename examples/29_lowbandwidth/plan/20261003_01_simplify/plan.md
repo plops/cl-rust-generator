@@ -87,12 +87,12 @@ source7_mvp/
 ## 5. Protokoll (neu, nicht kompatibel zu `source6`)
 
 ```rust
-// Server → Client
+// Server → Client (Bild fix 640×640, Kachel fix 64×64 — keine Größen!)
 enum ServerMsg {
-    Hello { w: u16, h: u16 },
+    Hello,
     ClearText,
     AddText(TextItem),              // TextItem { rect, fg, bg, text } — keine ID
-    Tile { x: u16, y: u16, w: u16, h: u16, data: Vec<u8> }, // ganze Kachel
+    Tile { x: u16, y: u16, data: Vec<u8> }, // ganze Kachel an Rasterpos.
 }
 // Client → Server
 enum ClientMsg {
@@ -103,6 +103,11 @@ enum ClientMsg {
     Key { key: String, down: bool },// Sonder-Tasten als Name ("Enter","Esc",...)
 }
 ```
+
+Begründung für die Streichungen siehe `fixed-size.md`: 640/64 = exaktes
+10×10-Raster ohne Randfälle; Client ohne Skalierungscode (kein Zoom,
+festes 640×640-Fenster). Bewusst behalten: `ClientMsg::Hello` mit
+Versionsprüfung (eine Zeile je Seite, schützt vor Protokoll-Mix).
 
 Leitung: `[u32 LE Länge][bincode-2 `config::standard()`-Body]`, max. 8 MiB.
 Client sendet `Hello` zuerst; Server antwortet mit `Hello` + Vollbild, danach

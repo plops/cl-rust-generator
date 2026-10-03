@@ -78,20 +78,20 @@ fn full_frame_then_single_dirty_tile() {
     .unwrap();
 
     // Hello + Vollbild: ClearText, AddText, 4 Kacheln (128² / 64²).
-    let mut hello = None;
+    let mut hello = false;
     read_until(
         &mut fr,
         &mut s,
         Instant::now() + Duration::from_secs(10),
         &mut |m| {
-            if let ServerMsg::Hello { w, h } = m {
-                hello = Some((*w, *h));
+            if matches!(m, ServerMsg::Hello) {
+                hello = true;
                 return true;
             }
             false
         },
     );
-    assert_eq!(hello, Some((128, 128)));
+    assert!(hello);
 
     let (mut clear, mut texts, mut tiles) = (0, 0, 0);
     read_until(
@@ -123,15 +123,15 @@ fn full_frame_then_single_dirty_tile() {
         &mut s,
         Instant::now() + Duration::from_secs(10),
         &mut |m| {
-            if let ServerMsg::Tile { x, y, w, h, data } = m {
+            if let ServerMsg::Tile { x, y, data } = m {
                 assert!(!data.is_empty());
-                found = Some((*x, *y, *w, *h));
+                found = Some((*x, *y));
                 return true;
             }
             false
         },
     );
-    assert_eq!(found, Some((64, 0, 64, 64)));
+    assert_eq!(found, Some((64, 0)));
 
     server.join().unwrap().unwrap();
 }

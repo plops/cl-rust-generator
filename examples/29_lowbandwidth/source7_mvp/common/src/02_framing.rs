@@ -128,14 +128,12 @@ mod tests {
 
     fn server_samples() -> Vec<ServerMsg> {
         vec![
-            ServerMsg::Hello { w: 640, h: 640 },
+            ServerMsg::Hello,
             ServerMsg::ClearText,
             ServerMsg::AddText(item("Hallo Welt ä€𝄞")),
             ServerMsg::Tile {
                 x: 0,
                 y: 64,
-                w: 64,
-                h: 64,
                 data: vec![1, 2, 3, 255],
             },
         ]
@@ -223,7 +221,7 @@ mod tests {
     #[test]
     fn partial_reads_with_timeouts_lose_nothing() {
         let mut wire = Vec::new();
-        write_msg(&mut wire, &ServerMsg::Hello { w: 1, h: 2 }).unwrap();
+        write_msg(&mut wire, &ServerMsg::Hello).unwrap();
         write_msg(&mut wire, &ClientMsg::Text("hi".into())).unwrap();
         let mut t = Trickle(wire, 0, false);
         let mut fr = FrameReader::new();
@@ -236,10 +234,7 @@ mod tests {
             }
         }
         assert!(idles > 5);
-        assert_eq!(
-            decode_msg::<ServerMsg>(&got[0]).unwrap(),
-            ServerMsg::Hello { w: 1, h: 2 }
-        );
+        assert_eq!(decode_msg::<ServerMsg>(&got[0]).unwrap(), ServerMsg::Hello);
     }
 
     #[test]

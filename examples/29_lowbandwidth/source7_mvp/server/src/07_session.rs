@@ -66,15 +66,7 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
     if version != PROTO_VERSION {
         return Err(format!("Protokoll {version}, erwartet {PROTO_VERSION}"));
     }
-    let (w, h) = src.size();
-    write_msg(
-        &mut wr,
-        &ServerMsg::Hello {
-            w: w as u16,
-            h: h as u16,
-        },
-    )
-    .map_err(|e| e.to_string())?;
+    write_msg(&mut wr, &ServerMsg::Hello).map_err(|e| e.to_string())?;
 
     // Eingaben laufen in eigenem Thread, damit Tippen nie auf AV1 wartet.
     rd.set_read_timeout(Some(Duration::from_millis(200)))
@@ -149,8 +141,6 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
             let msg = ServerMsg::Tile {
                 x: r.x,
                 y: r.y,
-                w: r.w,
-                h: r.h,
                 data,
             };
             match write_msg(&mut wr, &msg) {

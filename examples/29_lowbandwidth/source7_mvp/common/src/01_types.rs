@@ -65,22 +65,18 @@ pub struct TextItem {
 /// Maustaste (X11-Nummerierung: 1 links, 2 mitte, 3 rechts).
 pub type Button = u8;
 
-/// Nachrichten Server → Client.
+/// Nachrichten Server → Client. Das Bild ist immer [`SIZE`]×[`SIZE`],
+/// Kacheln immer [`TILE`]×[`TILE`] — deshalb trägt keine Nachricht Größen.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ServerMsg {
-    Hello {
-        w: u16,
-        h: u16,
-    },
+    Hello,
     /// Alle bisherigen Texte verwerfen.
     ClearText,
     AddText(TextItem),
-    /// Ganze AV1-Kachel (Still-Picture, rohe OBUs) in einer Nachricht.
+    /// Ganze AV1-Kachel (Still-Picture, rohe OBUs) an Rasterposition.
     Tile {
         x: u16,
         y: u16,
-        w: u16,
-        h: u16,
         data: Vec<u8>,
     },
 }
