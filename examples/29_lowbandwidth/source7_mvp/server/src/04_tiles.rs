@@ -68,8 +68,11 @@ pub fn dirty_bbox(prev: Option<&RgbImage>, cur: &RgbImage) -> Option<Rect> {
 
 /// Maskierungs-Zuschlag je Seite (zusätzlich zum Erkennungs-Padding im
 /// `TextItem`-Rechteck): löscht Glyphen-Fransen, die sonst als AV1-Reste
-/// Bandbreite kosten. Per Xvfb/xterm-Sweep bestimmt (vgl. `tests/padding.rs`).
-pub const MASK_PAD: u16 = 2;
+/// Bandbreite kosten. Per Xvfb/xterm-Sweep bestimmt (vgl. `tests/padding.rs`):
+/// 6 entfernt die Fransensäume beider Testfonts; größere Werte sparen nur noch
+/// dadurch, dass sie den benachbarten Textcursor verschlucken — das bleibt
+/// sichtbar, darum ist hier Schluss.
+pub const MASK_PAD: u16 = 6;
 
 /// Weitet `r` um `pad` Pixel je Seite auf (im `w`×`h`-Bild gehalten).
 /// Detektions-Boxen schneiden Glyphen haarscharf ab — ohne Rand leidet die
