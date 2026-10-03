@@ -15,6 +15,7 @@ Stand: 2026-10-03, alle auf neuester lauffähiger Version (`cargo upgrade`).
 | `rav1d` | 1.1.0 | `memorysafety/rav1d` | client | AV1-Decoder (`bitdepth_8`), wie bisher |
 | `ort` | 2.0.0-rc.13 | `pykeio/ort` | server | ONNX Runtime für PP-OCRv6 (nur Detektion+Erkennung, kein YOLO mehr) |
 | `macroquad` | 0.4.16 | `not-fl3/macroquad` | client | Fenster, Textur, Default-Font-Text, Eingabe (ohne Unifont, ohne Clipboard) |
+| `x11rb` | 0.13.2 | `psychon/x11rb` | server | RandR-`GetMonitors` für den Maus-Ursprung (war schon transitiv via `enigo` dabei; kein neues Crate, keine neuen Systemlibs) |
 
 Bekannte Auffälligkeiten:
 
@@ -33,7 +34,6 @@ Bewusst **nicht** übernommen (evaluiert, verworfen):
 | `governor` | `antifuchs/governor` | Kein Rate-Limit im MVP nötig; direktes TCP-Schreiben genügt |
 | `xcap` | `nashaofu/xcap` | Verworfene Alternative zu `scrap`: 0.9 braucht Wayland+EGL-Systemlibs ohne Feature-Gate; `scrap` braucht nur libxcb |
 | `imageproc` | `image-rs/imageproc` | Maskieren sind 10 Zeilen mit `image` allein; keine extra Dep |
-| `x11rb` | `psychon/x11rb` | Ersetzt durch `scrap` (Capture) + `enigo` (Input) |
 | `miniquad` (direkt) | `not-fl3/miniquad` | Nur transitiv via `macroquad`; kein Clipboard im MVP |
 
 Modelle (Laufzeit, nicht im Git — aus `../source6/models` wiederverwendet):

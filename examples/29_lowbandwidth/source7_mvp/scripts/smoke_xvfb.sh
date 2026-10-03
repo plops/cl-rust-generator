@@ -37,7 +37,7 @@ sleep 1
 
 cargo build --release -p lbw-server -p lbw-client 2>&1 | tail -n 2
 DISPLAY="$DISP" ./target/release/lbw-server \
-  --listen "127.0.0.1:$PORT" --models "$MODELS" -v > /tmp/smoke_server.log 2>&1 &
+  --listen "127.0.0.1:$PORT" --models "$MODELS" --dump /tmp/smoke_frame.png -v > /tmp/smoke_server.log 2>&1 &
 SERVER_PID=$!
 sleep 2
 
@@ -54,6 +54,14 @@ if ! grep -q "ButtonPress" /tmp/smoke_xev.log; then
 fi
 if ! grep -q "\[input\] Button" /tmp/smoke_server.log; then
   echo "smoke: FEHLER — Server loggt keine Eingabe-Events (-v)" >&2
+  exit 1
+fi
+if [ ! -f /tmp/smoke_frame.png ]; then
+  echo "smoke: FEHLER — kein --dump-Startbild geschrieben" >&2
+  exit 1
+fi
+if ! grep -q "Monitor-Ursprung +0+0" /tmp/smoke_server.log; then
+  echo "smoke: FEHLER — Server loggt keinen RandR-Monitor-Ursprung" >&2
   exit 1
 fi
 echo "smoke: OK (Server-Log: /tmp/smoke_server.log)"

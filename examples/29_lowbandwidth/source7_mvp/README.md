@@ -33,3 +33,18 @@ cargo test --release -p lbw-server --test models -- --ignored  # echte Modelle
 Android-Client, YOLO-GUI-Detektor, Scheduler/Drosselung, stabile Text-IDs,
 Resume/Ack/Heartbeat, Zwischenablage, Zoom, Unifont. Das Protokoll ist
 nicht kompatibel zu source6. Details: Walkthrough im Plan-Ordner.
+
+## Hinweis: Xorg erforderlich (kein Wayland)
+
+Capture (`scrap`) und Eingabe (`enigo`/XTEST) sprechen reines X11. In einer
+Wayland-Sitzung sieht der Server nur den schwarzen XWayland-Root — das Bild
+bleibt stehen, obwohl Eingaben fehlerfrei ankommen. Der Server warnt beim
+Start, wenn er eine Wayland-Sitzung erkennt. Mit `--dump frame.png` lässt
+sich prüfen, was der Server tatsächlich sieht.
+
+## Hinweis: mehrere Monitore
+
+Erfasst wird der primäre Monitor (`scrap`). Der Server fragt dessen Ursprung
+per RandR ab und rechnet ihn auf die Mauskoordinaten (`[input]
+Monitor-Ursprung …` im Log); sonst landen Klicks auf dem falschen Monitor.
+Schlägt die Abfrage fehl, gilt +0+0 (Ein-Monitor-Verhalten).
