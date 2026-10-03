@@ -3,9 +3,7 @@
 //! Fest 640×640, ohne Skalierungscode. Rein, ohne Grafik-Kontext
 //! testbar; `05_app` zeichnet daraus.
 
-use std::time::Instant;
-
-use lbw_common::{SIZE, TILE, TextItem};
+use lbw_common::{SIZE, TextItem};
 
 use crate::net::Event;
 
@@ -14,8 +12,7 @@ use crate::net::Event;
 pub enum Link {
     Connecting,
     Up,
-    /// Getrennt seit … (Grund).
-    Down(Instant, String),
+    Down(String),
 }
 
 /// Zustand der Anzeige (immer 640×640 RGBA).
@@ -25,13 +22,11 @@ pub struct Scene {
     /// Canvas seit dem letzten Upload verändert.
     pub dirty: bool,
     pub link: Link,
-    pub last_rx: Instant,
     pub tiles: u32,
     pub tile_bytes: u64,
 }
 
 const N: usize = SIZE as usize;
-const T: usize = TILE as usize;
 
 impl Scene {
     #[must_use]
@@ -41,41 +36,46 @@ impl Scene {
             texts: Vec::new(),
             dirty: true,
             link: Link::Connecting,
-            last_rx: Instant::now(),
             tiles: 0,
             tile_bytes: 0,
         }
     }
 
-    /// Kopiert eine 64×64-RGBA-Kachel an (`x`, `y`). Kaputte Kacheln
+    /// Kopiert eine `w`×`h`-RGBA-Box an (`x`, `y`). Kaputte Boxen
     /// werden ignoriert statt den Client abstürzen zu lassen.
-    pub fn blit(&mut self, x: u16, y: u16, rgba: &[u8]) {
+    pub fn blit(&mut self, x: u16, y: u16, w: usize, h: usize, rgba: &[u8]) {
         let (x0, y0) = (x as usize, y as usize);
-        if x0 + T > N || y0 + T > N || rgba.len() < T * T * 4 {
+        if x0 + w > N || y0 + h > N || rgba.len() < w * h * 4 {
             return;
         }
-        for row in 0..T {
-            let s = row * T * 4;
+        for row in 0..h {
+            let s = row * w * 4;
             let d = ((y0 + row) * N + x0) * 4;
-            self.canvas[d..d + T * 4].copy_from_slice(&rgba[s..s + T * 4]);
+            self.canvas[d..d + w * 4].copy_from_slice(&rgba[s..s + w * 4]);
         }
         self.dirty = true;
     }
 
     /// Wendet ein Netz-Ereignis an.
     pub fn apply(&mut self, e: Event) {
-        self.last_rx = Instant::now();
         match e {
             Event::Connected => self.link = Link::Up,
             Event::Disconnected(why) => {
-                if !matches!(self.link, Link::Down(..)) {
-                    self.link = Link::Down(Instant::now(), why);
+                if !matches!(self.link, Link::Down(_)) {
+                    self.link = Link::Down(why);
                 }
             }
             Event::ClearText => self.texts.clear(),
             Event::AddText(t) => self.texts.push(t),
-            Event::Tile { x, y, rgba, bytes } => {
-                self.blit(x, y, &rgba);
+            Event::Tile {
+                x,
+                y,
+                w,
+                h,
+                rgba,
+                bytes,
+            } => {
+                self.blit(x, y, w, h, &rgba);
                 self.tiles += 1;
                 self.tile_bytes += bytes as u64;
             }
@@ -126,15 +126,25 @@ mod tests {
     fn blit_places_tile_and_ignores_garbage() {
         let mut s = Scene::new();
         s.dirty = false;
-        s.blit(64, 0, &[200, 100, 50, 255].repeat(T * T));
+        s.blit(64, 0, 64, 64, &[200, 100, 50, 255].repeat(64 * 64));
         assert!(s.dirty);
         assert_eq!(s.pixel(64, 0), [200, 100, 50]);
         assert_eq!(s.pixel(127, 63), [200, 100, 50]);
         assert_eq!(s.pixel(63, 0), [24, 24, 32]);
         // Außerhalb und zu kurz: ignoriert.
-        s.blit(640, 0, &[0; T * T * 4]);
-        s.blit(0, 0, &[0; 10]);
+        s.blit(640, 0, 64, 64, &[0; 64 * 64 * 4]);
+        s.blit(0, 0, 64, 64, &[0; 10]);
         assert_eq!(s.pixel(0, 0), [24, 24, 32]);
+    }
+
+    #[test]
+    fn blit_handles_arbitrary_box_sizes() {
+        let mut s = Scene::new();
+        s.blit(100, 100, 16, 92, &[10, 20, 30, 255].repeat(16 * 92));
+        assert_eq!(s.pixel(100, 100), [10, 20, 30]);
+        assert_eq!(s.pixel(115, 191), [10, 20, 30]);
+        assert_eq!(s.pixel(116, 100), [24, 24, 32]);
+        assert_eq!(s.pixel(100, 192), [24, 24, 32]);
     }
 
     #[test]
@@ -143,10 +153,8 @@ mod tests {
         s.apply(Event::Connected);
         assert_eq!(s.link, Link::Up);
         s.apply(Event::Disconnected("x".into()));
-        let Link::Down(t, _) = s.link.clone() else {
-            panic!()
-        };
+        assert_eq!(s.link, Link::Down("x".into()));
         s.apply(Event::Disconnected("y".into()));
-        assert_eq!(s.link, Link::Down(t, "x".into()), "erste Trennung zählt");
+        assert_eq!(s.link, Link::Down("x".into()), "erste Trennung zählt");
     }
 }

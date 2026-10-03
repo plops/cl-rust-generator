@@ -1,50 +1,89 @@
-//! `04_tiles` — Fest-Raster-Dirty plus Text-Maskierung.
+//! `04_tiles` — Änderungserkennung als einzelne Bounding Box plus Text-Maskierung.
 //!
-//! Statt Connected Components: Der Bildschirm ist in 64px-Kacheln gerastert;
-//! jede Kachel, deren Bytes sich gegenüber dem letzten Frame unterscheiden,
-//! wird neu kodiert. Der Vergleich läuft zeilenweise über ganze Slices
-//! (vom Compiler vektorisiert).
+//! Statt eines Kachelrasters: Die kleinste Box über allen geänderten Pixeln
+//! geht als genau ein AV1-Still-Picture raus — ein Header-Overhead pro Frame
+//! (~50 B) statt N×, den unveränderten Rest in der Box komprimiert AV1 als
+//! Skip-Blöcke. Der Vergleich läuft zeilenweise über ganze Slices (vom
+//! Compiler vektorisiert); nur geänderte Zeilen werden pixelweise vermessen.
 
 use image::RgbImage;
 
-use lbw_common::{Rect, TILE};
+use lbw_common::Rect;
 
-/// Alle Raster-Kacheln, deren Bytes sich gegenüber `prev` unterscheiden.
-/// `prev = None` liefert alle Kacheln (Vollbild nach Connect). Das Bild muss
-/// ins [`TILE`]-Raster passen (640 tut das exakt: 10×10 ohne Randfälle).
+use crate::av1::MIN_TILE;
+
+/// Kleinste Box über allen Änderungen; `prev = None` liefert Vollbild.
+/// Kanten werden gerade und mindestens [`MIN_TILE`] (rav1e-Bedingung);
+/// `None` heißt Standbild (Funkstille). Beide Bilder müssen gleich groß sein
+/// und gerade Kanten ≥ [`MIN_TILE`] haben (640×640 tut das).
 #[must_use]
-pub fn dirty_tiles(prev: Option<&RgbImage>, cur: &RgbImage) -> Vec<Rect> {
+pub fn dirty_bbox(prev: Option<&RgbImage>, cur: &RgbImage) -> Option<Rect> {
     let (w, h) = cur.dimensions();
-    let t = u32::from(TILE);
-    debug_assert!(
-        w.is_multiple_of(t) && h.is_multiple_of(t),
-        "Bild {w}x{h} passt nicht ins {t}er-Raster"
-    );
-    let mut out = Vec::new();
-    for y in (0..h).step_by(t as usize) {
-        for x in (0..w).step_by(t as usize) {
-            let dirty = match prev {
-                None => true,
-                Some(p) => tile_changed(p, cur, x, y, t, t),
-            };
-            if dirty {
-                out.push(Rect::new(x as u16, y as u16, TILE, TILE));
+    let prev = match prev {
+        Some(p) => p,
+        None => return Some(Rect::new(0, 0, w as u16, h as u16)),
+    };
+    debug_assert_eq!((prev.width(), prev.height()), (w, h));
+    debug_assert!(w >= MIN_TILE as u32 && h >= MIN_TILE as u32 && w % 2 == 0 && h % 2 == 0);
+    let stride = w as usize * 3;
+    let (a, b) = (prev.as_raw(), cur.as_raw());
+    let (mut x0, mut x1, mut y0, mut y1) = (w, 0, h, 0);
+    for y in 0..h {
+        let s = y as usize * stride;
+        let (ra, rb) = (&a[s..s + stride], &b[s..s + stride]);
+        if ra == rb {
+            continue;
+        }
+        y0 = y0.min(y);
+        y1 = y1.max(y);
+        for x in 0..w {
+            let o = x as usize * 3;
+            if ra[o..o + 3] != rb[o..o + 3] {
+                x0 = x0.min(x);
+                break;
+            }
+        }
+        for x in (0..w).rev() {
+            let o = x as usize * 3;
+            if ra[o..o + 3] != rb[o..o + 3] {
+                x1 = x1.max(x);
+                break;
             }
         }
     }
-    out
+    if x0 > x1 {
+        return None;
+    }
+    // Auf Mindestgröße und gerade Kanten erweitern, im Bild halten.
+    let t = MIN_TILE as u32;
+    let mut bw = (x1 - x0 + 1).max(t).min(w);
+    let mut bh = (y1 - y0 + 1).max(t).min(h);
+    bw += bw & 1;
+    bh += bh & 1;
+    let (bw, bh) = (bw.min(w), bh.min(h));
+    let bx = x0.min(w - bw);
+    let by = y0.min(h - bh);
+    Some(Rect::new(bx as u16, by as u16, bw as u16, bh as u16))
 }
 
-fn tile_changed(a: &RgbImage, b: &RgbImage, x: u32, y: u32, w: u32, h: u32) -> bool {
-    let (stride, raw_a, raw_b) = (a.width() * 3, a.as_raw(), b.as_raw());
-    for row in 0..h {
-        let s = ((y + row) * stride + x * 3) as usize;
-        let e = s + (w * 3) as usize;
-        if raw_a[s..e] != raw_b[s..e] {
-            return true;
-        }
-    }
-    false
+/// Maskierungs-Zuschlag je Seite (zusätzlich zum Erkennungs-Padding im
+/// `TextItem`-Rechteck): löscht Glyphen-Fransen, die sonst als AV1-Reste
+/// Bandbreite kosten. Per Xvfb/xterm-Sweep bestimmt (vgl. `tests/padding.rs`):
+/// 6 entfernt die Fransensäume beider Testfonts; größere Werte sparen nur noch
+/// dadurch, dass sie den benachbarten Textcursor verschlucken — das bleibt
+/// sichtbar, darum ist hier Schluss.
+pub const MASK_PAD: u16 = 6;
+
+/// Weitet `r` um `pad` Pixel je Seite auf (im `w`×`h`-Bild gehalten).
+/// Detektions-Boxen schneiden Glyphen haarscharf ab — ohne Rand leidet die
+/// Erkennung und Fransensäume bleiben als AV1-Reste stehen.
+#[must_use]
+pub fn pad_rect(r: Rect, pad: u16, w: u32, h: u32) -> Rect {
+    let x0 = u32::from(r.x).saturating_sub(u32::from(pad));
+    let y0 = u32::from(r.y).saturating_sub(u32::from(pad));
+    let x1 = (u32::from(r.x) + u32::from(r.w) + u32::from(pad)).min(w);
+    let y1 = (u32::from(r.y) + u32::from(r.h) + u32::from(pad)).min(h);
+    Rect::new(x0 as u16, y0 as u16, (x1 - x0) as u16, (y1 - y0) as u16)
 }
 
 /// Füllt `r` (aufs Bild begrenzt) mit `c` — für die Text-Maskierung.
@@ -83,24 +122,61 @@ mod tests {
     #[test]
     fn first_frame_is_full_screen() {
         let cur = solid(128, 128, [1; 3]);
-        let d = dirty_tiles(None, &cur);
-        assert_eq!(d.len(), 4);
-        assert_eq!(d[0], Rect::new(0, 0, 64, 64));
+        assert_eq!(dirty_bbox(None, &cur), Some(Rect::new(0, 0, 128, 128)));
     }
 
     #[test]
-    fn identical_frames_have_no_dirty_tiles() {
+    fn identical_frames_are_silent() {
         let a = solid(128, 128, [7; 3]);
         let b = solid(128, 128, [7; 3]);
-        assert!(dirty_tiles(Some(&a), &b).is_empty());
+        assert_eq!(dirty_bbox(Some(&a), &b), None);
     }
 
     #[test]
-    fn single_pixel_dirties_exactly_one_tile() {
+    fn scattered_pixels_yield_single_box() {
         let a = solid(128, 128, [0; 3]);
         let mut b = a.clone();
-        b.put_pixel(100, 10, image::Rgb([9; 3]));
-        assert_eq!(dirty_tiles(Some(&a), &b), vec![Rect::new(64, 0, 64, 64)]);
+        b.put_pixel(10, 10, image::Rgb([9; 3]));
+        b.put_pixel(100, 100, image::Rgb([9; 3]));
+        // 10..=100 → 91 px, auf gerade Kanten erweitert.
+        assert_eq!(dirty_bbox(Some(&a), &b), Some(Rect::new(10, 10, 92, 92)));
+    }
+
+    #[test]
+    fn single_pixel_is_padded_to_minimum() {
+        let a = solid(128, 128, [0; 3]);
+        let mut b = a.clone();
+        b.put_pixel(5, 5, image::Rgb([9; 3]));
+        assert_eq!(dirty_bbox(Some(&a), &b), Some(Rect::new(5, 5, 16, 16)));
+    }
+
+    #[test]
+    fn box_clamps_at_image_edge() {
+        let a = solid(128, 128, [0; 3]);
+        let mut b = a.clone();
+        b.put_pixel(127, 127, image::Rgb([9; 3]));
+        assert_eq!(dirty_bbox(Some(&a), &b), Some(Rect::new(112, 112, 16, 16)));
+    }
+
+    #[test]
+    fn pad_expands_and_clamps() {
+        assert_eq!(
+            pad_rect(Rect::new(10, 10, 20, 8), 4, 128, 128),
+            Rect::new(6, 6, 28, 16)
+        );
+        assert_eq!(
+            pad_rect(Rect::new(10, 10, 20, 8), 0, 128, 128),
+            Rect::new(10, 10, 20, 8)
+        );
+        // Am Rand klemmen statt überlaufen.
+        assert_eq!(
+            pad_rect(Rect::new(0, 0, 10, 10), 4, 128, 128),
+            Rect::new(0, 0, 14, 14)
+        );
+        assert_eq!(
+            pad_rect(Rect::new(120, 120, 8, 8), 4, 128, 128),
+            Rect::new(116, 116, 12, 12)
+        );
     }
 
     #[test]

@@ -65,7 +65,7 @@ fn hud(s: &Scene) -> String {
     let link = match &s.link {
         Link::Connecting => "verbinde…".to_owned(),
         Link::Up => "online".to_owned(),
-        Link::Down(_, why) => format!("offline ({why})"),
+        Link::Down(why) => format!("offline ({why})"),
     };
     format!(
         "{link} | {} Texte | {} Kacheln ({} B) | F1 HUD",

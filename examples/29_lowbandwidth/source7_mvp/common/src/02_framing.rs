@@ -50,8 +50,6 @@ pub enum Read1 {
 #[derive(Default)]
 pub struct FrameReader {
     buf: Vec<u8>,
-    /// Summe aller vollständig empfangenen Frame-Bytes (inkl. Header).
-    pub rx_bytes: u64,
 }
 
 impl FrameReader {
@@ -77,7 +75,6 @@ impl FrameReader {
         }
         let body = self.buf[HEADER..HEADER + n].to_vec();
         self.buf.drain(..HEADER + n);
-        self.rx_bytes += (HEADER + n) as u64;
         Ok(Some(body))
     }
 
@@ -211,7 +208,6 @@ mod tests {
             let got: Option<ServerMsg> = fr.read_msg(&mut c).unwrap();
             assert_eq!(got.as_ref(), Some(&m));
         }
-        assert!(fr.rx_bytes > 0);
         assert_eq!(
             fr.read(&mut c).unwrap_err().kind(),
             ErrorKind::UnexpectedEof

@@ -10,8 +10,6 @@ use serde::{Deserialize, Serialize};
 pub const PROTO_VERSION: u16 = 1;
 /// Default-TCP-Port.
 pub const DEFAULT_PORT: u16 = 7878;
-/// Kantenlänge einer festen AV1-Kachel.
-pub const TILE: u16 = 64;
 /// Feste Kantenlänge des quadratischen Bildes (MVP: immer 640×640).
 pub const SIZE: u32 = 640;
 /// Max. Nachrichtengröße in Byte (Schutz vor OOM bei korrupten Längen).
@@ -65,15 +63,15 @@ pub struct TextItem {
 /// Maustaste (X11-Nummerierung: 1 links, 2 mitte, 3 rechts).
 pub type Button = u8;
 
-/// Nachrichten Server → Client. Das Bild ist immer [`SIZE`]×[`SIZE`],
-/// Kacheln immer [`TILE`]×[`TILE`] — deshalb trägt keine Nachricht Größen.
+/// Nachrichten Server → Client. Das Bild ist immer [`SIZE`]×[`SIZE`];
+/// die AV1-Box hat variable Größe (steht im Bitstrom, nicht im Protokoll).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ServerMsg {
     Hello,
     /// Alle bisherigen Texte verwerfen.
     ClearText,
     AddText(TextItem),
-    /// Ganze AV1-Kachel (Still-Picture, rohe OBUs) an Rasterposition.
+    /// AV1-Box (Still-Picture, rohe OBUs) an Position (`x`, `y`).
     Tile {
         x: u16,
         y: u16,
@@ -121,10 +119,5 @@ mod tests {
                 h: 10
             }
         );
-    }
-
-    #[test]
-    fn tile_divides_fixed_size() {
-        assert_eq!(SIZE % u32::from(TILE), 0);
     }
 }

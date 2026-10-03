@@ -8,8 +8,6 @@ use image::RgbImage;
 /// Liefert RGB-Frames fester Größe. Läuft im Session-Thread (kein `Send`:
 /// `scrap::Capturer` ist `!Send`).
 pub trait FrameSource {
-    /// Breite/Höhe jedes Frames.
-    fn size(&self) -> (u32, u32);
     /// Aktuelles Bild.
     fn grab(&mut self) -> Result<RgbImage, String>;
 }
@@ -19,7 +17,6 @@ pub trait FrameSource {
 pub struct ScrapSource {
     cap: scrap::Capturer,
     fw: u32,
-    fh: u32,
     x: u32,
     y: u32,
     w: u32,
@@ -38,7 +35,6 @@ impl ScrapSource {
         Ok(Self {
             cap,
             fw,
-            fh,
             x,
             y,
             w,
@@ -62,21 +58,17 @@ impl ScrapSource {
 }
 
 impl FrameSource for ScrapSource {
-    fn size(&self) -> (u32, u32) {
-        (self.w, self.h)
-    }
-
     fn grab(&mut self) -> Result<RgbImage, String> {
         let f = self.frame()?;
         Ok(crop_bgrx_to_rgb(
-            &f, self.fw, self.fh, self.x, self.y, self.w, self.h,
+            &f, self.fw, self.x, self.y, self.w, self.h,
         ))
     }
 }
 
 /// Schneidet `(x, y, w, h)` aus einem BGRX-Vollbild (`fw*4` Stride) und
 /// wandelt nach RGB.
-fn crop_bgrx_to_rgb(f: &[u8], fw: u32, _fh: u32, x: u32, y: u32, w: u32, h: u32) -> RgbImage {
+fn crop_bgrx_to_rgb(f: &[u8], fw: u32, x: u32, y: u32, w: u32, h: u32) -> RgbImage {
     let mut out = RgbImage::new(w, h);
     for dy in 0..h {
         for dx in 0..w {
@@ -114,10 +106,6 @@ impl SharedSource {
 }
 
 impl FrameSource for SharedSource {
-    fn size(&self) -> (u32, u32) {
-        (self.w, self.h)
-    }
-
     fn grab(&mut self) -> Result<RgbImage, String> {
         Ok(self.img.lock().unwrap().clone())
     }
@@ -140,7 +128,6 @@ mod tests {
         assert_eq!(reader.grab().unwrap().get_pixel(0, 0).0, [0; 3]);
         s.set(solid(4, 4, [5; 3]));
         assert_eq!(reader.grab().unwrap().get_pixel(3, 3).0, [5; 3]);
-        assert_eq!(reader.size(), (4, 4));
     }
 
     #[test]
@@ -150,7 +137,7 @@ mod tests {
             0, 0, 0, 0, 3, 2, 1, 0, //
             0, 0, 0, 0, 0, 0, 0, 0, //
         ];
-        let img = crop_bgrx_to_rgb(&f, 2, 2, 1, 0, 1, 1);
+        let img = crop_bgrx_to_rgb(&f, 2, 1, 0, 1, 1);
         assert_eq!(img.get_pixel(0, 0).0, [1, 2, 3]);
     }
 }

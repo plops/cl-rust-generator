@@ -24,10 +24,12 @@ pub enum Event {
     Disconnected(String),
     ClearText,
     AddText(TextItem),
-    /// Dekodierte Kachel (RGBA8, 64×64).
+    /// Dekodierte AV1-Box (RGBA8, `w`×`h`).
     Tile {
         x: u16,
         y: u16,
+        w: usize,
+        h: usize,
         rgba: Vec<u8>,
         bytes: usize,
     },
@@ -67,7 +69,7 @@ impl Net {
 }
 
 fn run(addr: &str, ev: Sender<Event>, out: Receiver<ClientMsg>, stop: &AtomicBool) {
-    let mut decoder = match Decoder::new(1) {
+    let mut decoder = match Decoder::new() {
         Ok(d) => d,
         Err(e) => {
             let _ = ev.send(Event::Disconnected(format!("rav1d: {e}")));
@@ -152,6 +154,8 @@ fn session(
                         let _ = ev.send(Event::Tile {
                             x,
                             y,
+                            w: rgba.w,
+                            h: rgba.h,
                             rgba: rgba.data,
                             bytes: data.len(),
                         });
