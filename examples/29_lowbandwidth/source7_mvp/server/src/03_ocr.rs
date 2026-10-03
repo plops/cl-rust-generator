@@ -362,7 +362,13 @@ pub fn sample_colors(img: &RgbImage, r: Rect) -> ([u8; 3], [u8; 3]) {
 /// Texterkennung: echt (Modelle geladen) oder abgeschaltet.
 pub enum Ocr {
     Disabled,
-    Enabled { det: Detector, rec: Recognizer },
+    Enabled(Box<OcrInner>),
+}
+
+/// Geladene OCR-Modelle (geboxt: Enum bleibt klein).
+pub struct OcrInner {
+    det: Detector,
+    rec: Recognizer,
 }
 
 impl Ocr {
@@ -380,18 +386,19 @@ impl Ocr {
                 return Ok(Self::Disabled);
             }
         }
-        Ok(Self::Enabled {
+        Ok(Self::Enabled(Box::new(OcrInner {
             det: Detector::new(&det, threads)?,
             rec: Recognizer::new(&rec, &dict, threads)?,
-        })
+        })))
     }
 
     /// Textzeilen mit Farben; unsichere/leere Erkennungen fallen weg
     /// (die bleiben dann Bildinhalt). Ohne Modelle: leere Liste.
     pub fn text(&mut self, img: &RgbImage) -> Result<Vec<TextItem>, String> {
-        let Self::Enabled { det, rec } = self else {
+        let Self::Enabled(inner) = self else {
             return Ok(Vec::new());
         };
+        let (det, rec) = (&mut inner.det, &mut inner.rec);
         let mut out = Vec::new();
         for r in det.detect(img)?.into_iter().take(MAX_LINES) {
             let (text, conf) = rec.recognize(img, r)?;
