@@ -502,6 +502,380 @@ lbw-server = { path = \"../server\" }
              (assert_eq! (dot s link) (scope Link (Down (dot (string "x") (into))))
                          (string "erste Trennung zählt"))))))))
 
+(defun app-image-expr ()
+  "Shared `&Image { bytes, width, height }` expr for the app texture
+init and update (macroquad `Image` literal, same shape twice)."
+  '(ref (make-instance Image
+                       :bytes (dot (dot scene canvas) (clone))
+                       :width (coerce SIZE u16)
+                       :height (coerce SIZE u16))))
+
+(defun send-input-defun ()
+  "Private `send_input` as backquoted data (`,@` splices `+key-table+`)."
+  `(defun send_input ("net: &Net" "last_mouse: &mut (u16, u16)" "show_hud: &mut bool")
+       ;; Tupel-`let` → `.0`/`.1` (Emitter-Limit, siehe T5).
+       ;; Tasten-Tabelle per `,@`-Splice aus `+key-table+` (eine Quelle
+       ;; für Client- und Server-Tasten, siehe `00_util.lisp`).
+       (let ((mp (mouse_position)))
+         (let ((mx (dot mp 0)))
+           (let ((my (dot mp 1)))
+             (let ((pos (paren (coerce (dot mx (clamp "0.0" (coerce (paren (- SIZE 1)) f32))) u16)
+                                (coerce (dot my (clamp "0.0" (coerce (paren (- SIZE 1)) f32))) u16))))
+               (when (!= pos (deref last_mouse))
+                 (dot net (send (make-instance (scope ClientMsg MouseMove)
+                                               :x (dot pos 0) :y (dot pos 1))))
+                 (setf (deref last_mouse) pos))
+               (for ((paren btn code)
+                      (bracket (paren (scope MouseButton Left) 1)
+                               (paren (scope MouseButton Middle) 2)
+                               (paren (scope MouseButton Right) 3)))
+                 (when (is_mouse_button_pressed btn)
+                   (dot net (send (make-instance (scope ClientMsg Button)
+                                                 :button code :down true))))
+                 (when (is_mouse_button_released btn)
+                   (dot net (send (make-instance (scope ClientMsg Button)
+                                                 :button code :down false)))))
+               (while-let ((Some c) (get_char_pressed))
+                 (when (not (dot c (is_control)))
+                   (dot net (send (scope ClientMsg (Text (dot c (to_string))))))))
+               (for ((paren key name) (bracket ,@(client-key-pairs)))
+                 (when (is_key_pressed key)
+                   (dot net (send (make-instance (scope ClientMsg Key)
+                                                 :key (dot name (into)) :down true))))
+                 (when (is_key_released key)
+                   (dot net (send (make-instance (scope ClientMsg Key)
+                                                 :key (dot name (into)) :down false)))))
+               (when (is_key_pressed (scope KeyCode F1))
+                 (setf (deref show_hud) (not (deref show_hud))))))))))
+
+(defun client-app-rs ()
+  `(do0
+    ,(doc "`05_app` — macroquad-Schleife: Textur + Text + HUD rendern,"
+          "Maus/Tastatur an den Server schicken. Fest 640×640, ohne Skalierung.")
+    ,*blank*
+    (use (lbw_common (curly ClientMsg SIZE)))
+    (use (macroquad prelude "*"))
+    ,*blank*
+    (use (crate config Config))
+    (use (crate net Net))
+    (use (crate scene (curly Link Scene)))
+    ,*blank*
+    "/// Startet den Client (läuft bis zum Fensterschluss)."
+    ,(pub_ `(defun-async run ("cfg: Config")
+              (let ((net (Net--connect (ref (dot cfg connect)))))
+                (let ((scene (Scene--new)))
+                  (declare (mutable scene))
+                  (let ((texture (Texture2D--from_image ,(app-image-expr))))
+                    (setf (dot scene dirty) false)
+                    (let ((show_hud true))
+                      (declare (mutable show_hud))
+                      (let ((last_mouse (paren (scope u16 MAX) (scope u16 MAX))))
+                        (declare (mutable last_mouse))
+                        (loop
+                          (while-let ((Ok e) (dot (dot net events) (try_recv)))
+                            (dot scene (apply e)))
+                          (when (dot scene dirty)
+                            (dot texture (update ,(app-image-expr)))
+                            (setf (dot scene dirty) false))
+                          (clear_background BLACK)
+                          (draw_texture (ref texture) "0.0" "0.0" WHITE)
+                          (for (t (ref (dot scene texts)))
+                            (let ((r (dot t rect)))
+                              (draw_rectangle (coerce (dot r x) f32)
+                                              (coerce (dot r y) f32)
+                                              (coerce (dot r w) f32)
+                                              (coerce (dot r h) f32)
+                                              (Color--from_rgba (aref (dot t bg) 0)
+                                                                (aref (dot t bg) 1)
+                                                                (aref (dot t bg) 2)
+                                                                255))
+                              (stmt (draw_text (ref (dot t text))
+                                                (coerce (dot r x) f32)
+                                                (coerce (dot r y) f32)
+                                                (coerce (dot r h) f32)
+                                                (Color--from_rgba (aref (dot t fg) 0)
+                                                                  (aref (dot t fg) 1)
+                                                                  (aref (dot t fg) 2)
+                                                                  255)))))
+                          (when show_hud
+                            (stmt (draw_text (dot (hud (ref scene)) (as_str)) "8.0" "16.0" "16.0" YELLOW)))
+                          (send_input (ref net) (ref-mut last_mouse) (ref-mut show_hud))
+                          (await (next_frame))))))))))
+    ,*blank*
+    (defun hud ("s: &Scene")
+      (declare (values String))
+      (let ((link (case (ref (dot s link))
+                    ((scope Link Connecting)
+                     (dot (string "verbinde…") (to_owned)))
+                    ((scope Link Up)
+                     (dot (string "online") (to_owned)))
+                    ((scope Link (Down why))
+                     (format! (string "offline ({why})"))))))
+        (format! (string "{link} | {} Texte | {} Kacheln ({} B) | F1 HUD")
+                 (dot (dot s texts) (len))
+                 (dot s tiles)
+                 (dot s tile_bytes))))
+    ,*blank*
+    "/// Liest macroquad-Eingaben und schickt Deltas an den Server."
+    ,(send-input-defun)))
+
+(defun client-main-rs ()
+  `(do0
+    ,(doc "`lbw-client` — nur Verdrahtung: Konfiguration → Fenster → App-Schleife.")
+    ,*blank*
+    (use (clap Parser))
+    (use (lbw_common SIZE))
+    (use (macroquad window Conf))
+    ,*blank*
+    (use (lbw_client app run))
+    (use (lbw_client config Config))
+    ,*blank*
+    (defun window_conf ()
+      (declare (values Conf))
+      ;; `..Default::default()` passt in kein `make-instance`: Struct-Literal
+      ;; als `space`/`curly` (eine Stelle, rustfmt expandiert).
+      (space Conf (curly "window_title: \"lbw-client\".into()"
+                         "window_width: SIZE as i32"
+                         "window_height: SIZE as i32"
+                         "window_resizable: false"
+                         "..Default::default()")))
+    ,*blank*
+    (attr "macroquad::main(window_conf)"
+      (defun-async main ()
+        (await (run (Config--parse)))))
+    ,*blank*
+    ,(testmod
+      "use super::*;"
+      *blank*
+      '(attr "test"
+         (defun window_is_fixed_640 ()
+           (let ((c (window_conf)))
+             (assert_eq! (paren (dot c window_width) (dot c window_height))
+                         (paren 640 640))
+             (assert! (not (dot c window_resizable)))))))))
+
+(defun client-probe-rs ()
+  `(do0
+    ,(doc "Headless-Smoke-Client: verbindet, wartet auf Text + Kachel, schickt"
+          "Eingaben und meldet Erfolg. Mit zweitem Argument bleibt er noch N"
+          "Sekunden verbunden und meldet Summen (Durchsatz-Messung). Nutzung:"
+          "`cargo run --release -p lbw-client --example probe -- 127.0.0.1:7878 [N]`")
+    ,*blank*
+    (use (std time (curly Duration Instant)))
+    ,*blank*
+    (use (lbw_client net (curly Event Net)))
+    (use (lbw_client scene Scene))
+    (use (lbw_common ClientMsg))
+    ,*blank*
+    (defun main ()
+      (let ((args (dot (std--env--args) (skip 1))))
+        (declare (mutable args))
+        (let ((addr (dot (dot args (next))
+                         (unwrap_or_else (lambda ()
+                                           (dot (string "127.0.0.1:7878") (into)))))))
+          (let ((stay (dot (dot (dot args (next))
+                                    (and_then (lambda (s)
+                                                (dot (dot s (parse)) (ok)))))
+                               (unwrap_or 0))))
+            (declare (type u64 stay))
+            (let ((net (Net--connect (ref addr))))
+              (let ((scene (Scene--new)))
+                (declare (mutable scene))
+                (let ((deadline (+ (Instant--now) (Duration--from_secs 60))))
+                  (let ((sent_input false))
+                    (declare (mutable sent_input))
+                    (let ((connected false))
+                      (declare (mutable connected))
+                      (while (< (Instant--now) deadline)
+                        (case (dot (dot net events) (recv_timeout (Duration--from_millis 500)))
+                          ((Ok (scope Event Connected))
+                           (progn
+                             (setf connected true)
+                             (println! (string "probe: verbunden"))))
+                          ((Ok e)
+                           (dot scene (apply e)))
+                          ((Err _)))
+                        (let ((got_text (not (dot (dot scene texts) (is_empty)))))
+                          (let ((got_tile (> (dot scene tiles) 0)))
+                            (when (and connected got_tile (not sent_input))
+                              (dot net (send (make-instance (scope ClientMsg MouseMove) :x 100 :y 100)))
+                              (dot net (send (make-instance (scope ClientMsg Button) :button 1 :down true)))
+                              (dot net (send (make-instance (scope ClientMsg Button) :button 1 :down false)))
+                              (dot net (send (scope ClientMsg (Text (dot (string "hi") (into))))))
+                              (dot net (send (make-instance (scope ClientMsg Key)
+                                                            :key (dot (string "Enter") (into)) :down true)))
+                              (dot net (send (make-instance (scope ClientMsg Key)
+                                                            :key (dot (string "Enter") (into)) :down false)))
+                              (setf sent_input true)
+                              (println! (string "probe: Eingaben geschickt")))
+                            (when (and connected got_text got_tile sent_input)
+                              "// Netz-Thread braucht einen Schleifendurchlauf (≤50 ms), um die"
+                              "// eben geschickten Eingaben zu flushen — sonst sterben sie mit"
+                              "// dem Prozess, bevor der Server sie sieht."
+                              (std--thread--sleep (Duration--from_secs 1))
+                              (println! (string "probe: OK ({} Texte, {} Kacheln, {} B)")
+                                        (dot (dot scene texts) (len))
+                                        (dot scene tiles)
+                                        (dot scene tile_bytes))
+                              (for (t (dot (dot (dot scene texts) (iter)) (take 5)))
+                                (println! (string "probe: Text {:?} {:?}") (dot t rect) (dot t text)))
+                              (when (== stay 0)
+                                (return))
+                              (let ((end (+ (Instant--now) (Duration--from_secs stay))))
+                                (while (< (Instant--now) end)
+                                  (if-let ((Ok e) (dot (dot net events) (recv_timeout (Duration--from_millis 500))))
+                                    (dot scene (apply e))))
+                                (println! (string "probe: nach {stay}s: {} Texte, {} Kacheln, {} B ({} B/s)")
+                                          (dot (dot scene texts) (len))
+                                          (dot scene tiles)
+                                          (dot scene tile_bytes)
+                                          (/ (dot scene tile_bytes) (dot stay (max 1))))
+                                (return))))))
+                      (eprintln! (string "probe: TIMEOUT (connected={connected} texte={} kacheln={})")
+                                 (dot (dot scene texts) (len))
+                                 (dot scene tiles))
+                      (std--process--exit 1))))))))))))
+
+(defun client-test-loopback-rs ()
+  `(do0
+    ,(doc "Loopback: `Net` gegen einen Stub-Server (Hello, Text, echte AV1-Kachel,"
+          "Abriss + Reconnect). Läuft ohne Display und ohne Modelle.")
+    ,*blank*
+    (use (std net TcpListener))
+    (use (std time (curly Duration Instant)))
+    ,*blank*
+    (use (lbw_client net (curly Event Net)))
+    (use (lbw_common framing (curly FrameReader write_msg)))
+    (use (lbw_common (curly ClientMsg Rect ServerMsg TextItem)))
+    ,*blank*
+    (defun item ()
+      (declare (values TextItem))
+      (make-instance TextItem
+                     :rect (Rect--new 8 8 32 16)
+                     :fg (array-repeat 0 3)
+                     :bg (array-repeat 255 3)
+                     :text (dot (string "hi") (into))))
+    ,*blank*
+    "/// Stub: Hello lesen, Hello + Text + Kachel schicken, dann `expect`"
+    "/// Client-Nachrichten lesen und zurückgeben. Schließen → Client sieht EOF."
+    (defun stub ("listener: TcpListener" "tile: Vec<u8>" "expect: usize")
+      (declare (values "std::thread::JoinHandle<Vec<ClientMsg>>"))
+      (std--thread--spawn
+       (space "move" (lambda ()
+                       ;; Tupel-`let` → `.0` (Emitter-Limit, siehe T5).
+                       (let ((acc (dot (dot listener (accept)) (unwrap))))
+                         (let ((s (dot acc 0)))
+                           (declare (mutable s))
+                           (let ((fr (FrameReader--new)))
+                             (declare (mutable fr))
+                             (dot (dot s (set_read_timeout (Some (Duration--from_secs 10)))) (unwrap))
+                             (assert! (matches! (dot (dot fr ("read_msg::<ClientMsg>" (ref-mut s))) (unwrap))
+                                                "Some(ClientMsg::Hello { version: 1 })"))
+                             (dot (write_msg (ref-mut s) (ref (scope ServerMsg Hello))) (unwrap))
+                             (dot (write_msg (ref-mut s) (ref (scope ServerMsg ClearText))) (unwrap))
+                             (dot (write_msg (ref-mut s) (ref (scope ServerMsg (AddText (item))))) (unwrap))
+                             (dot (write_msg (ref-mut s)
+                                             (ref (make-instance (scope ServerMsg Tile)
+                                                                 :x 0 :y 0 :data tile)))
+                                  (unwrap))
+                             (let ((got (Vec--new)))
+                               (declare (mutable got))
+                               (while (< (dot got (len)) expect)
+                                 (case (dot (dot fr ("read_msg::<ClientMsg>" (ref-mut s))) (unwrap))
+                                   ((Some m)
+                                    (dot got (push m)))
+                                   (None
+                                    (panic! (string "Timeout beim Warten auf Client-Nachrichten")))))
+                               got))))))))
+    ,*blank*
+    (defun recv_until ("net: &Net" "until: Instant" "want: &mut dyn FnMut(Event) -> bool")
+      (while (< (Instant--now) until)
+        ;; Let-Chain (`if let ... && ...`) desugared (Emitter-Limit, vgl. T4).
+        (attr "allow(clippy::collapsible_if)"
+          (if-let ((Ok e) (dot (dot net events) (recv_timeout (Duration--from_millis 200))))
+            (when (want e)
+              (return))))))
+    ,*blank*
+    (attr "test"
+      (defun hello_text_tile_and_reconnect ()
+        (let ((rgb (dot (bracket "40u8" 80 160) (repeat (* 64 64)))))
+          (let ((tile (dot (lbw_server--av1--encode_rgb (ref rgb) 64 64 180) (unwrap))))
+            (let ((listener (dot (TcpListener--bind (string "127.0.0.1:0")) (unwrap))))
+              (let ((port (dot (dot (dot listener (local_addr)) (unwrap)) (port))))
+                (let ((addr (format! (string "127.0.0.1:{port}"))))
+                  (let ((sent (vec! (make-instance (scope ClientMsg MouseMove) :x 10 :y 20)
+                                    (make-instance (scope ClientMsg Button) :button 1 :down true)
+                                    (make-instance (scope ClientMsg Button) :button 1 :down false)
+                                    (scope ClientMsg (Text (dot (string "ab") (into)))))))
+                    (let ((stub1 (stub listener tile (dot sent (len)))))
+                      (let ((net (Net--connect (ref addr))))
+                        "// Erste Verbindung: Hello → Clear → Text → Kachel."
+                        ;; Tupel-`let` → vier `let`s (Emitter-Limit, siehe T5).
+                        (let ((connected 0))
+                          (declare (mutable connected))
+                          (let ((clear 0))
+                            (declare (mutable clear))
+                            (let ((texts 0))
+                              (declare (mutable texts))
+                              (let ((tiles 0))
+                                (declare (mutable tiles))
+                                (recv_until (ref net) (+ (Instant--now) (Duration--from_secs 10))
+                                            (ref-mut (lambda (e)
+                                                       (case e
+                                                         ((scope Event Connected)
+                                                          (incf connected))
+                                                         ((scope Event (Disconnected _)))
+                                                         ((scope Event ClearText)
+                                                          (incf clear))
+                                                         ((scope Event (AddText t))
+                                                          (progn
+                                                            (assert_eq! (dot t text) (string "hi"))
+                                                            (incf texts)))
+                                                         ("Event::Tile { x, y, w, h, rgba, bytes }"
+                                                          (progn
+                                                            (assert_eq! (paren x y) (paren 0 0))
+                                                            (assert_eq! (paren w h) (paren 64 64))
+                                                            (assert_eq! (dot rgba (len)) (* 64 64 4))
+                                                            (assert! (> bytes 0))
+                                                            "// Flache Kachel: überall fast die Quellfarbe, Alpha 255."
+                                                            (assert! (dot (dot rgba (chunks 4))
+                                                                          (all (lambda (p) (== (aref p 3) 255)))))
+                                                            (for ((paren got want)
+                                                                   (dot (dot (aref rgba (space 0 ".." 3)) (iter))
+                                                                        (zip (bracket 40 80 160))))
+                                                              (assert! (<= (dot got (abs_diff want)) 3) (string "{rgba:?}")))
+                                                            (incf tiles))))
+                                                       (and (>= connected 1) (>= clear 1) (>= texts 1) (>= tiles 1)))))
+                                (assert_eq! (paren connected clear texts tiles) (paren 1 1 1 1))
+                                "// Gegenrichtung: Net::send muss vollständig beim Server ankommen."
+                                (for (m (ref sent))
+                                  (dot net (send (dot m (clone)))))
+                                (assert_eq! (dot (dot stub1 (join)) (unwrap)) sent)
+                                "// Abriss bemerken, neu verbinden."
+                                (let ((down false))
+                                  (declare (mutable down))
+                                  (recv_until (ref net) (+ (Instant--now) (Duration--from_secs 5))
+                                              (ref-mut (lambda (e)
+                                                         (when (matches! e (scope Event (Disconnected _)))
+                                                           (setf down true)
+                                                           (return true))
+                                                         false)))
+                                  (assert! down (string "Abriss muss als Event kommen"))
+                                  (let ((listener2 (dot (TcpListener--bind (ref addr)) (unwrap))))
+                                    (let ((tile2 (dot (lbw_server--av1--encode_rgb (ref rgb) 64 64 180) (unwrap))))
+                                      (let ((stub2 (stub listener2 tile2 0)))
+                                        (let ((reconnected false))
+                                          (declare (mutable reconnected))
+                                          (recv_until (ref net) (+ (Instant--now) (Duration--from_secs 10))
+                                                      (ref-mut (lambda (e)
+                                                                 (when (matches! e (scope Event Connected))
+                                                                   (setf reconnected true)
+                                                                   (return true))
+                                                                 false)))
+                                          (assert! reconnected (string "Client muss neu verbinden"))
+                                          (dot (dot stub2 (join)) (unwrap))
+                                          (drop net))))))))))))))))))))))
+
 (defun client-lib-rs ()
   `(do0
     ,(doc "`lbw-client` — schlanker MVP-Client: Empfang, AV1-Dekodierung,"
@@ -510,7 +884,8 @@ lbw-server = { path = \"../server\" }
     ,@(loop for (file name) in '(("01_config.rs" "config")
                                  ("02_av1.rs" "av1")
                                  ("03_net.rs" "net")
-                                 ("04_scene.rs" "scene"))
+                                 ("04_scene.rs" "scene")
+                                 ("05_app.rs" "app"))
             append `((attr ,(format nil "path = ~s" file)
                         (space "pub" ,(format nil "mod ~a;" name)))
                      ,*blank*))))

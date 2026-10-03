@@ -76,11 +76,11 @@ Erst weiter, wenn der Schritt grün ist. Baseline: `source7_mvp`
 
 ## T6 — `client`-Crate (App, Main, Probe, Tests)
 
-- [ ] `gen/client.lisp` (Teil 2): `05_app.rs` (Nutzt `+key-table+` für
+- [x] `gen/client.lisp` (Teil 2): `05_app.rs` (Nutzt `+key-table+` für
       `send_input`!), `main.rs` (`macroquad::main`),
       `examples/probe.rs`, `tests/loopback.rs`, `lib.rs` um `app`
       erweitern (`client/Cargo.toml` existiert bereits aus T5).
-- [ ] Prüfen: `cargo test -p lbw-client` (6 lib + 1 main + 1 loopback);
+- [x] Prüfen: `cargo test -p lbw-client` (6 lib + 1 main + 1 loopback);
       Protokoll gegen `source7` stichprobenhaft verglichen (kein Byte-Diff).
 - [ ] Commit: `feat(source8): client-app, probe und loopback-test`.
 

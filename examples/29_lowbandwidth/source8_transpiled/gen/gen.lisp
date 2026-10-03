@@ -36,7 +36,11 @@
     (write-source (s8-path "client/src/02_av1.rs") (client-av1-rs))
     (write-source (s8-path "client/src/03_net.rs") (client-net-rs))
     (write-source (s8-path "client/src/04_scene.rs") (client-scene-rs))
+    (write-source (s8-path "client/src/05_app.rs") (client-app-rs))
     (write-source (s8-path "client/src/lib.rs") (client-lib-rs))
+    (write-source (s8-path "client/src/main.rs") (client-main-rs))
+    (write-source (s8-path "client/examples/probe.rs") (client-probe-rs))
+    (write-source (s8-path "client/tests/loopback.rs") (client-test-loopback-rs))
     (write-text-file "client/Cargo.toml" (client-cargo-toml))))
 
 (generate-all)
