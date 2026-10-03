@@ -26,6 +26,9 @@ Bekannte Auffälligkeiten:
   es werden keine `image`-Typen über die macroquad-Grenze gereicht (nur
   `Vec<u8>`), daher unkritisch.
 - `ort` ist weiterhin nur als Release-Candidate aktuell (rc.13).
+- `x11rb` 0.14.0 evaluiert (2026-10-03) und verworfen: `protocol::randr`
+  löst dort nicht mehr auf — wir bleiben auf 0.13.2, bis der Importpfad
+  geklärt ist (eine Zeile in `06_input.rs`).
 
 Bewusst **nicht** übernommen (evaluiert, verworfen):
 
