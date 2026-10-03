@@ -40,16 +40,23 @@ Datei `rs.lisp`, Einstieg `write-source`/`emit-rs`) verwendet:
 
 1. `source8_transpiled/gen/` mit Lisp-Quellen:
    `gen.lisp` (Einstieg, schreibt alles), `00_util.lisp` (Helfer),
-   je ein Modul pro Crate-Datei (`common_*.lisp`, `server_*.lisp`,
-   `client_*.lisp`), jeweils < 600 Zeilen.
+   eine Datei pro Crate (`common.lisp`, `server.lisp`,
+   `client.lisp`). Die 600-Zeilen-Regel aus dem Prompt gilt nur für
+   die Rust-Output-Dateien, nicht für die Lisp-Generator-Inputs
+   (dort wäre ein Zeilen-Split reine Fragmentierung).
 2. Der Generator erzeugt den kompletten Workspace: `Cargo.toml`
    (Workspace + 3 Crates), alle `src/*.rs`, `tests/*.rs`,
    `examples/probe.rs`, `scripts/smoke_xvfb.sh`, `README.md`,
    `collect.sh` — per `sbcl --load gen/gen.lisp` reproduzierbar.
-3. Der erzeugte Code ist **verhaltensgleich** zu `source7_mvp`
-   (gleiche Dateien, gleiche Tests, gleiche Testanzahlen:
+3. Der erzeugte Code löst **dasselbe Problem** wie `source7_mvp`
+   (`source7` ist Demo/Vorbild, keine Byte-Vorlage): gleiches
+   Draht-Protokoll, gleiche Test-Suite grün (Richtwerte:
    common 9, server-lib 26, server-loopback 3, client-lib 6,
-   client-main 1, client-loopback 1; 2 ignored).
+   client-main 1, client-loopback 1; 2 ignored). Innere Struktur
+   darf abweichen, wenn der Transpiler sie kürzer, eleganter oder
+   wartbarer macht (Präzedenz: `07_session` mit `handshake`/
+   `push_texts`/`mask_text`/`push_tile` + `TileOut` statt
+   9-fach-geschachteltem `let`).
 4. Transpiler-Vorteile sind sichtbar genutzt (keine 1:1-String-Kopie):
    - Eine Lisp-Tabelle `+key-table+` erzeugt **beide** Seiten des
      Tasten-Mappings (Server-`key_code`-Match + Client-`send_input`-Liste)
@@ -68,10 +75,11 @@ Datei `rs.lisp`, Einstieg `write-source`/`emit-rs`) verwendet:
 
 Offene Punkte, die der Prompt nicht nennt, die ich empfehle:
 
-- **Byte-Vergleich als Abnahmekriterium**: Nach dem Generieren wird
-  `diff -r source7_mvp source8_transpiled` (ohne `target/`, `gen/`,
-  `Cargo.lock`) gefahren; Abweichungen werden einzeln begründet oder
-  beseitigt. Das beweist Verhaltensgleichheit stärker als Tests allein.
+- **Kein Byte-Vergleich als Abnahmekriterium** (gestrichen auf
+  User-Wunsch): `diff -r source7_mvp source8_transpiled` ist kein Ziel
+  mehr — `source7` ist Demo, Umstrukturierungen sind erlaubt.
+  Abnahme ist: gleiches Protokoll, Tests grün, Smoke grün.
+  `diff` dient nur noch als stichprobenhafter Plausibilitäts-Check.
 - **Determinismus-Test**: Generator zweimal laufen lassen —
   byte-identische Ausgabe (der Transpiler schreibt nur bei Änderung).
 - **`gen/README.md`**: Einstieg für Leser (SBCL-Aufruf, Dateiübersicht).

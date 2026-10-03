@@ -1,7 +1,7 @@
 (load (merge-pathnames "00_util.lisp" *load-pathname*))
 (load (merge-pathnames "texts.lisp" *load-pathname*))
 (load (merge-pathnames "common.lisp" *load-pathname*))
-(load (merge-pathnames "server_a.lisp" *load-pathname*))
+(load (merge-pathnames "server.lisp" *load-pathname*))
 
 (in-package :cl-rust-generator)
 
@@ -21,6 +21,11 @@
     (write-source (s8-path "server/src/01_config.rs") (server-config-rs))
     (write-source (s8-path "server/src/02_capture.rs") (server-capture-rs))
     (write-source (s8-path "server/src/05_av1.rs") (server-av1-rs))
-    (write-source (s8-path "server/src/06_input.rs") (server-input-rs))))
+    (write-source (s8-path "server/src/06_input.rs") (server-input-rs))
+    (write-source (s8-path "server/src/04_tiles.rs") (server-tiles-rs))
+    (write-source (s8-path "server/src/07_session.rs") (server-session-rs))
+    (write-source (s8-path "server/src/lib.rs") (server-lib-rs))
+    (write-source (s8-path "server/src/main.rs") (server-main-rs))
+    (write-text-file "server/Cargo.toml" (server-cargo-toml))))
 
 (generate-all)

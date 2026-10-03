@@ -20,12 +20,8 @@ Inhaltsänderung neu geschrieben (danach läuft `rustfmt --edition 2024`).
 |---|---|
 | `00_util.lisp` | Pfade (`s8-path`), `pub_`, `doc`, `testmod`, `+key-table+` (+ `server-key-arms`, `client-key-pairs`), `write-text-file`. Zuerst laden. |
 | `common.lisp` | `lbw-common`: Typen, Framing, YUV, `lib.rs`, Manifest (T1). |
-| `server_a.lisp` | `01_config`, `02_capture`, `05_av1`, `06_input` (T2). |
-| `server_b.lisp` | `04_tiles`, `07_session`, `lib.rs`, `main.rs`, Manifest (T3). |
-| `server_c.lisp` | `03_ocr` (T4). |
-| `server_tests.lisp` | `tests/loopback.rs`, `tests/models.rs`, `tests/padding.rs` (T4). |
-| `client_a.lisp` | `01_config`, `02_av1`, `03_net`, `04_scene`, `lib.rs` (T5). |
-| `client_b.lisp` | `05_app`, `main.rs`, Manifest, `examples/probe.rs`, `tests/loopback.rs` (T6). |
+| `server.lisp` | `lbw-server`: Manifest, `01_config`, `02_capture`, `03_ocr`, `04_tiles`, `05_av1`, `06_input`, `07_session`, `lib.rs`, `main.rs`, Integrationstests (T2–T4). Eine Datei pro Crate — kein Zeilen-Split (die 600-Zeilen-Regel gilt nur für Rust-Output). |
+| `client.lisp` | `lbw-client`: Manifest, Module, `examples/probe.rs`, Tests (T5–T6). |
 | `texts.lisp` | Nicht-Rust-Ausgaben (`Cargo.toml`, Skripte, README …). |
 | `gen.lisp` | Einstieg: lädt alles, ruft `write-source` je Datei. |
 

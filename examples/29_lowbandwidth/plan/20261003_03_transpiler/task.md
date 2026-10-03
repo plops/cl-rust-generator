@@ -32,48 +32,51 @@ Erst weiter, wenn der Schritt grün ist. Baseline: `source7_mvp`
 
 ## T2 — `server`-Crate, Teil 1 (Config, Capture, AV1, Input)
 
-- [ ] `gen/server_a.lisp`: `01_config.rs` (via `clap-struct`-Helfer),
+- [x] `gen/server.lisp` (Teil 1): `01_config.rs` (via `clap-struct`-Helfer),
       `02_capture.rs` (Trait, `scrap`, Tests), `05_av1.rs` (rav1e,
       Tests), `06_input.rs` (Nutzt `+key-table+` für `key_code`!).
-- [ ] Prüfen: `cargo test -p lbw-server --lib` für diese Module grün;
-      `diff` gegen `source7_mvp` je Datei.
-- [ ] Commit: `feat(source8): server-module config/capture/av1/input`.
+- [x] Prüfen: `cargo test -p lbw-server --lib` für diese Module grün (12 Tests);
+      `diff` gegen `source7_mvp` je Datei (nur Let-Blöcke, Tail-`;`, Guard-Umschreibung).
+- [x] Commit: `56fd4ad feat(source8): server_a transpiliert (...)`
+      (Datei hieß damals noch `server_a.lisp`, seit T3 in `server.lisp` gemergt).
 
 ## T3 — `server`-Crate, Teil 2 (Tiles, Session)
 
-- [ ] `gen/server_b.lisp`: `04_tiles.rs` (BBox, Maskierung, Tests),
-      `07_session.rs` (Handshake, Threads, beide `input_loop`-Tests
-      vorbereiten), `lib.rs`, `main.rs`, `server/Cargo.toml`.
-- [ ] Prüfen: `cargo test -p lbw-server --lib` gesamt grün (26 Tests);
-      `diff` je Datei.
-- [ ] Commit: `feat(source8): server-module tiles/session/main`.
+- [x] `gen/server.lisp` (Merge aus `server_a`+`server_b`, eine Datei
+      pro Crate): `04_tiles.rs`, `07_session.rs` (flach umgebaut:
+      `handshake`/`push_texts`/`mask_text`/`push_tile` + `TileOut`),
+      `lib.rs`, `main.rs`, `server/Cargo.toml`.
+- [x] Prüfen: `cargo test -p lbw-server --lib` grün (19 Tests);
+      `clippy --all-targets -- -D warnings` + `fmt --check` grün;
+      Merge-Neutralität: 01/02/04/05/06 + Manifest byte-identisch.
+- [x] Commit: `feat(source8): server-module tiles/session/main`.
 
 ## T4 — `server`-Crate, Teil 3 (OCR) + Server-Integrationstests
 
-- [ ] `gen/server_c.lisp`: `03_ocr.rs` (Detektor, Erkenner, `sample_colors`,
+- [ ] `gen/server.lisp` erweitern: `03_ocr.rs` (Detektor, Erkenner, `sample_colors`,
       `Ocr`, Tests).
-- [ ] `gen/server_tests.lisp`: `tests/loopback.rs` (Let-Chains als Strings),
+- [ ] `gen/server.lisp` erweitern: `tests/loopback.rs` (Let-Chains als Strings),
       `tests/models.rs`, `tests/padding.rs`.
 - [ ] Prüfen: `cargo test -p lbw-server` (26 lib + 3 loopback, 2 ignored);
-      `diff` je Datei.
+      Protokoll gegen `source7` stichprobenhaft verglichen (kein Byte-Diff).
 - [ ] Commit: `feat(source8): server-modul ocr + integrationstests`.
 
 ## T5 — `client`-Crate (ohne App-Fenster)
 
-- [ ] `gen/client_a.lisp`: `01_config.rs` (via `clap-struct`),
+- [ ] `gen/client.lisp` (Teil 1): `01_config.rs` (via `clap-struct`),
       `02_av1.rs` (`unsafe`-Decoder 1:1), `03_net.rs` (Reconnect-Thread),
       `04_scene.rs` (Canvas, Tests), `lib.rs`.
 - [ ] Prüfen: `cargo test -p lbw-client --lib` (6 Tests);
-      `diff` je Datei.
+      Protokoll gegen `source7` stichprobenhaft verglichen (kein Byte-Diff).
 - [ ] Commit: `feat(source8): client-module config/av1/net/scene`.
 
 ## T6 — `client`-Crate (App, Main, Probe, Tests)
 
-- [ ] `gen/client_b.lisp`: `05_app.rs` (Nutzt `+key-table+` für
+- [ ] `gen/client.lisp` (Teil 2): `05_app.rs` (Nutzt `+key-table+` für
       `send_input`!), `main.rs` (`macroquad::main`), `client/Cargo.toml`,
       `examples/probe.rs`, `tests/loopback.rs`.
 - [ ] Prüfen: `cargo test -p lbw-client` (6 lib + 1 main + 1 loopback);
-      `diff` je Datei.
+      Protokoll gegen `source7` stichprobenhaft verglichen (kein Byte-Diff).
 - [ ] Commit: `feat(source8): client-app, probe und loopback-test`.
 
 ## T7 — Gesamtverifikation und Smoke
@@ -86,9 +89,9 @@ Erst weiter, wenn der Schritt grün ist. Baseline: `source7_mvp`
 - [ ] Prüfen, alles aus `source8_transpiled/`:
       `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`,
       `cargo test --workspace` (46 + 2 ignored),
-      `./scripts/smoke_xvfb.sh` (braucht `xvfb`, `xterm`, Modelle),
-      `diff -r` gegen `source7_mvp` (Whitelist: `target/`, `gen/`,
-      `Cargo.lock`, `README.md`-Generator-Abschnitt, `out`/`outq`).
+      `./scripts/smoke_xvfb.sh` (braucht `xvfb`, `xterm`, Modelle).
+      Kein `diff -r` als Abnahme (nur Stichproben); Abnahme =
+      Protokoll + Tests + Smoke grün.
 - [ ] Commit: `feat(source8): texte, skripte, gesamtverifikation`.
 
 ## T8 — Walkthrough und Abschluss
@@ -99,4 +102,4 @@ Erst weiter, wenn der Schritt grün ist. Baseline: `source7_mvp`
       Learnings+Erweiterungen / Dockerfile-Pakete).
 - [ ] `plan/20261003_03_transpiler/deps.md` final prüfen.
 - [ ] Letzter Commit: `docs(plan): walkthrough transpiler-migration`.
-- [ ] Abschlussmeldung mit Testübersicht und Diff-Ergebnis.
+- [ ] Abschlussmeldung mit Testübersicht und Verifikationsergebnis.

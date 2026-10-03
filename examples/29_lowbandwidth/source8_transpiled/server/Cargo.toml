@@ -1,0 +1,23 @@
+[package]
+name = "lbw-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+enigo = "0.6.1"
+image = { version = "0.24", default-features = false }
+lbw-common = { path = "../common" }
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["download-binaries", "copy-dylibs", "tls-native", "std"] }
+rav1e = { version = "0.8.1", default-features = false, features = ["threading"] }
+scrap = "0.5.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_yaml = "0.9.34"
+x11rb = "0.13"
+
+[dev-dependencies]
+# Nur Tests lesen/schreiben Dateien (PPM-Testbild öffnen, PNG-Capture
+# speichern); Produktion nutzt nur Rgb/RgbImage ohne jedes Format.
+image = { version = "0.24", default-features = false, features = ["png", "pnm"] }
