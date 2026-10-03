@@ -24,6 +24,10 @@ pub struct Config {
     /// Modellverzeichnis (PP-OCRv6). Fehlt es, läuft der Server ohne Text.
     #[arg(long, default_value = "models")]
     pub models: String,
+    /// Schreibt das erste Capture-Bild hierher (z. B. `frame.png`) und
+    /// startet danach normal (Diagnose: was sieht der Server?).
+    #[arg(long)]
+    pub dump: Option<String>,
     /// Kein OCR (nur AV1-Kacheln).
     #[arg(long)]
     pub no_ocr: bool,
@@ -62,6 +66,7 @@ mod tests {
         let c = Config::try_parse_from(["lbw-server"]).unwrap();
         assert_eq!((c.listen.as_str(), c.quantizer), ("127.0.0.1:7878", 180));
         assert!(!c.is_public() && !c.no_ocr && !c.no_input && !c.verbose);
+        assert!(c.dump.is_none());
         c.validate().unwrap();
     }
 
@@ -79,6 +84,8 @@ mod tests {
             "99",
             "--models",
             "/m",
+            "--dump",
+            "/tmp/x.png",
             "--no-ocr",
             "--no-input",
             "-v",
@@ -87,6 +94,7 @@ mod tests {
         assert!(c.is_public());
         assert_eq!((c.x, c.y, c.quantizer), (10, 20, 99));
         assert_eq!(c.models, "/m");
+        assert_eq!(c.dump.as_deref(), Some("/tmp/x.png"));
         assert!(c.no_ocr && c.no_input && c.verbose);
         c.validate().unwrap();
     }
