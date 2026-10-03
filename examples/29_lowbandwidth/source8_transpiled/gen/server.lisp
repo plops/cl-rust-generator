@@ -987,6 +987,1139 @@ image = { version = \"0.24\", default-features = false, features = [\"png\", \"p
                 (eprintln! (string "[input] {e}"))))))
         ")"))))
 
+;;;; OCR pieces, batches A-C (T4). Each returns emitter forms; assembled
+;;;; by server-ocr-rs below. Verified piece by piece via emit-probes.
+
+(defun ocr-consts ()
+  (loop for (name ty val . docs) in
+        '(("REC_PAD" "u16" "4"
+           "Erkennungs-Rand je Seite: Detektions-Boxen schneiden Glyphen (z. B."
+           "Umlaut-Punkte) haarscharf ab — mit Weißraum liest das Netz deutlich besser"
+           "(Befund aus `26_onnx`: CER 69→4 %). Per Xvfb/xterm-Sweep bestimmt.")
+          ("DET_THRESH" "f32" "0.3"
+           "Pixel-Schwelle für Textkandidaten.")
+          ("BOX_THRESH" "f32" "0.6"
+           "Mindest-Mittelscore einer Komponente.")
+          ("UNCLIP_RATIO" "f32" "1.5"
+           "Aufweitungsfaktor der Boxen.")
+          ("MIN_TEXT_CONF" "f32" "0.5"
+           "Mindest-Konfidenz, sonst bleibt die Zeile Bildinhalt.")
+          ("MAX_LINES" "usize" "160"
+           "Max. erkannte Zeilen je Frame (Rechenzeit-Deckel).")
+          ("REC_H" "usize" "48"
+           "Eingabehöhe des Erkenners.")
+          ("MAX_W" "usize" "960"
+           "Max. Eingabebreite des Erkenners."))
+        append (append (mapcar (lambda (d) (format nil "/// ~a" d)) docs)
+                       (list (list 'space
+                                   (format nil "const ~a: ~a =" name ty)
+                                   (format nil "~a;" val))))))
+
+(defun ocr-session-fn ()
+  '(defun session (path threads)
+     (declare (type "&str" path)
+              (type usize threads)
+              (values "Result<Session, String>"))
+     (let ((b (? (dot (dot (Session--builder)
+                               (map_err (lambda (e) (format! (string "{path}: {e}")))))))))
+       (declare (mutable b))
+       (= b (? (dot (dot b (with_optimization_level (scope GraphOptimizationLevel Level3)))
+                       (map_err (lambda (e) (format! (string "{path}: {e}")))))))
+       (when (> threads 0)
+         (= b (? (dot (dot b (with_intra_threads threads))
+                         (map_err (lambda (e) (format! (string "{path}: {e}"))))))))
+       (dot (dot b (commit_from_file path))
+            (map_err (lambda (e) (format! (string "{path}: {e}"))))))))
+
+(defun ocr-px-fn ()
+  '(defun px (img x y)
+     (declare (type "&RgbImage" img)
+              (type usize x)
+              (type usize y)
+              (values "[u8; 3]"))
+     (let ((i (* (+ (* y (coerce (dot img (width)) usize)) x) 3)))
+       (dot (dot (aref (dot img (as_raw)) (space i ".." (+ i 3)))
+                 (try_into))
+            (unwrap)))))
+
+(defun ocr-detector-struct ()
+  '(space pub
+     (defstruct0 Detector
+       (session Session)
+       (input "Vec<f32>")
+       (visited "Vec<u32>")
+       (tag u32)
+       (queue "Vec<(usize, usize)>"))))
+
+(defun ocr-detector-impl ()
+  '(impl Detector
+     (space pub
+       (defun new (path threads)
+         (declare (type "&str" path)
+                  (type usize threads)
+                  (values "Result<Self, String>"))
+         (Ok (make-instance Self
+               :session (? (session path threads))
+               :input (Vec--new)
+               :visited (Vec--new)
+               :tag 0
+               :queue (Vec--with_capacity 512)))))
+     "/// Textzeilen-Boxen im Bild (Breite/Höhe Vielfache von 32)."
+     (space pub
+       (defun detect ("&mut self" img)
+         (declare (type "&RgbImage" img)
+                  (values "Result<Vec<Rect>, String>"))
+         (let (((paren w h) (paren (coerce (dot img (width)) usize)
+                                   (coerce (dot img (height)) usize))))
+           (when (or (not (dot w (is_multiple_of 32)))
+                     (not (dot h (is_multiple_of 32))))
+             (return (Err (format! (string "DBNet braucht Vielfache von 32, nicht {w}x{h}")))))
+           (normalize_imagenet img (ref-mut (dot self input)))
+           (when (!= (dot (dot self visited) (len)) (* w h))
+             (dot (dot self visited) (clear))
+             (dot (dot self visited) (resize (* w h) 0)))
+           (let ((out (? (dot (dot (dot self session)
+                                       (run (space "ort::inputs!"
+                                             (bracket
+                                              (? (dot (TensorRef--from_array_view
+                                                       (paren (bracket 1 3 h w)
+                                                              (ref (aref (dot self input)
+                                                                         (space "..")))))
+                                                      (map_err (lambda (e)
+                                                                 (dot e (to_string))))))))))
+                                  (map_err (lambda (e)
+                                             (format! (string "det: {e}"))))))))
+             (let (((paren _ prob) (? (dot (dot (aref out 0)
+                                                    ("try_extract_tensor::<f32>"))
+                                               (map_err (lambda (e)
+                                                          (dot e (to_string))))))))
+               (= (dot self tag) (dot (dot self tag) (wrapping_add 1)))
+               (when (== (dot self tag) 0)
+                 (dot (dot self visited) (fill 0))
+                 (= (dot self tag) 1))
+               (Ok (postprocess prob
+                                w
+                                h
+                                (ref-mut (dot self visited))
+                                (dot self tag)
+                                (ref-mut (dot self queue)))))))))))
+
+(defun ocr-normalize-fn ()
+  '(defun normalize_imagenet (img out)
+     (declare (type "&RgbImage" img)
+              (type "&mut Vec<f32>" out))
+     (space "const MEAN: [f32; 3] =" "[0.485, 0.456, 0.406];")
+     (space "const STD: [f32; 3] =" "[0.229, 0.224, 0.225];")
+     (let ((plane (* (coerce (dot img (width)) usize)
+                     (coerce (dot img (height)) usize))))
+       (dot out (resize (* 3 plane) 0.0))
+       (let ((raw (dot img (as_raw))))
+         (let ((chunks (dot (dot raw ("as_chunks::<3>")) 0)))
+           (for ((paren i p) (dot (dot chunks (iter)) (enumerate)))
+             (for ((paren c (ref v)) (dot (dot p (iter)) (enumerate)))
+               (= (aref out (+ (* c plane) i))
+                  (/ (- (/ (f32--from v) 255.0) (aref MEAN c))
+                     (aref STD c))))))))))
+
+(defun ocr-flood-fn ()
+  '(defun flood_component (prob w h visited tag queue x y)
+     (declare (type "&[f32]" prob)
+              (type usize w)
+              (type usize h)
+              (type "&mut [u32]" visited)
+              (type u32 tag)
+              (type "&mut Vec<(usize, usize)>" queue)
+              (type usize x)
+              (type usize y)
+              (values "Option<Rect>"))
+     (= (aref visited (+ (* y w) x)) tag)
+     (dot queue (clear))
+     (dot queue (push (paren x y)))
+     (let (((paren "mut x0" "mut x1" "mut y0" "mut y1") (paren x x y y)))
+       (let (((paren "mut sum" "mut head") (paren "0.0f32" 0)))
+         (while (< head (dot queue (len)))
+           (let (((paren cx cy) (aref queue head)))
+             (incf head)
+             (= x0 (dot x0 (min cx)))
+             (= x1 (dot x1 (max cx)))
+             (= y0 (dot y0 (min cy)))
+             (= y1 (dot y1 (max cy)))
+             (incf sum (aref prob (+ (* cy w) cx)))
+             (for ((paren dx dy) (bracket (paren "-1isize" "0isize")
+                                          (paren 1 0)
+                                          (paren 0 "-1isize")
+                                          (paren 0 1)))
+               (let (((paren nx ny) (paren (+ (coerce cx isize) dx)
+                                           (+ (coerce cy isize) dy))))
+                 (when (and (>= nx 0)
+                            (>= ny 0)
+                            (< nx (coerce w isize))
+                            (< ny (coerce h isize)))
+                   (let ((n (+ (* (coerce ny usize) w) (coerce nx usize))))
+                     (when (and (!= (aref visited n) tag)
+                                (>= (aref prob n) DET_THRESH))
+                       (= (aref visited n) tag)
+                       (dot queue (push (paren (coerce nx usize)
+                                                      (coerce ny usize)))))))))))
+         (let ((bw (coerce (+ (- x1 x0) 1) f32)))
+           (let ((bh (coerce (+ (- y1 y0) 1) f32)))
+             (let ((avg (/ sum (coerce (dot queue (len)) f32))))
+               (when (or (< (dot queue (len)) 16)
+                         (< avg BOX_THRESH)
+                         (< bw 8.0)
+                         (< bh 6.0))
+                 (return None))
+               (let ((dist (/ (* (* bw bh) UNCLIP_RATIO) (* 2.0 (+ bw bh)))))
+                 (let ((dist_y (dot (dot (* dist 0.4) (min (* bh 0.15))) (max 1.0))))
+                   (let ((fx0 (dot (- (coerce x0 f32) dist) (max 0.0))))
+                     (let ((fy0 (dot (- (coerce y0 f32) dist_y) (max 0.0))))
+                       (let ((fx1 (dot (+ (+ (coerce x1 f32) 1.0) dist) (min (coerce w f32)))))
+                         (let ((fy1 (dot (+ (+ (coerce y1 f32) 1.0) dist_y) (min (coerce h f32)))))
+                           (let (((paren rx ry) (paren (coerce (dot fx0 (floor)) u16)
+                                                       (coerce (dot fy0 (floor)) u16))))
+                             (Some (Rect--new rx
+                                              ry
+                                              (- (coerce (dot fx1 (ceil)) u16) rx)
+                                              (- (coerce (dot fy1 (ceil)) u16) ry)))))))))))))))))
+
+(defun ocr-postprocess-fn ()
+  '(defun postprocess (prob w h visited tag queue)
+     (declare (type "&[f32]" prob)
+              (type usize w)
+              (type usize h)
+              (type "&mut [u32]" visited)
+              (type u32 tag)
+              (type "&mut Vec<(usize, usize)>" queue)
+              (values "Vec<Rect>"))
+     (let ((boxes (Vec--new)))
+       (declare (mutable boxes))
+       (for (y (range 0 h))
+         (for (x (range 0 w))
+           (let ((idx (+ (* y w) x)))
+             (when (or (< (aref prob idx) DET_THRESH)
+                       (== (aref visited idx) tag))
+               (continue))
+             (if-let ((Some r) (flood_component prob
+                                                w
+                                                h
+                                                (ref-mut (deref visited))
+                                                tag
+                                                (ref-mut (deref queue))
+                                                x
+                                                y))
+               (dot boxes (push r))))))
+       (dot boxes (sort_by_key (lambda (b) (paren (/ (dot b y) 16) (dot b x)))))
+       boxes)))
+
+;;;; OCR pieces, batches D-F (T4): dict/recognizer, ctc/colors, Ocr, tests.
+
+(defun ocr-load-dict-fn ()
+  '(defun load_dict (yaml)
+     (declare (type "&str" yaml)
+              (values "Result<Vec<String>, String>"))
+     (let ((y (? (dot (serde_yaml--from_str yaml)
+                          (map_err (lambda (e) (dot e (to_string))))))))
+       (declare (type InferenceYml y))
+       (Ok (dot (dot y post_process) character_dict)))))
+
+(defun ocr-recognizer-struct ()
+  '(space pub
+     (defstruct0 Recognizer
+       (session Session)
+       (dict "Vec<String>")
+       (input "Vec<f32>"))))
+
+(defun ocr-rec-method-new ()
+  '(space pub
+     (defun new (path dict_path threads)
+       (declare (type "&str" path)
+                (type "&str" dict_path)
+                (type usize threads)
+                (values "Result<Self, String>"))
+       (let ((yaml (? (dot (std--fs--read_to_string dict_path)
+                               (map_err (lambda (e) (format! (string "{dict_path}: {e}"))))))))
+         (let ((dict (? (load_dict (ref yaml)))))
+           (when (dot dict (is_empty))
+             (return (Err (format! (string "{dict_path}: kein character_dict")))))
+           (Ok (make-instance Self
+                 :session (? (session path threads))
+                 dict
+                 :input (Vec--new))))))))
+
+(defun ocr-rec-method-recognize ()
+  '(space pub
+     (defun recognize ("&mut self" img r)
+       (declare (type "&RgbImage" img)
+                (type Rect r)
+                (values "Result<(String, f32), String>"))
+       (let ((tw (dot self (preprocess img r))))
+         (let ((out (? (dot (dot (dot self session)
+                                     (run (space "ort::inputs!"
+                                           (bracket
+                                            (? (dot (TensorRef--from_array_view
+                                                     (paren (bracket 1 3 REC_H tw)
+                                                            (ref (aref (dot self input)
+                                                                       (space ".." (* (* 3 REC_H) tw))))))
+                                                    (map_err (lambda (e)
+                                                               (dot e (to_string))))))))))
+                                (map_err (lambda (e)
+                                           (format! (string "rec: {e}"))))))))
+           (let (((paren shape preds) (? (dot (dot (aref out 0)
+                                                       ("try_extract_tensor::<f32>"))
+                                                  (map_err (lambda (e)
+                                                             (dot e (to_string))))))))
+             (Ok (ctc_decode preds shape (ref (dot self dict))))))))))
+
+(defun ocr-rec-method-preprocess ()
+  '(defun preprocess ("&mut self" img r)
+     (declare (type "&RgbImage" img)
+              (type Rect r)
+              (values usize))
+     (let (((paren cw ch) (paren (f32--from (dot (dot r w) (max 1)))
+                                 (f32--from (dot (dot r h) (max 1))))))
+       (let ((raw_w (coerce (dot (/ (* (coerce REC_H f32) cw) ch) (round)) usize)))
+         (let ((tw (dot (* (dot raw_w (div_ceil 32)) 32) (clamp 32 MAX_W))))
+           (let ((rw (dot raw_w (clamp 1 tw))))
+             (let ((plane (* REC_H tw)))
+               (dot (dot self input) (clear))
+               (dot (dot self input) (resize (* 3 plane) 0.0))
+               (let (((paren iw ih) (paren (coerce (dot img (width)) usize)
+                                           (coerce (dot img (height)) usize))))
+                 (for (dy (range 0 REC_H))
+                   (let ((sy (dot (coerce (dot (dot (- (+ (f32--from (dot r y))
+                                                           (/ (* (+ (coerce dy f32) 0.5) ch)
+                                                              (coerce REC_H f32)))
+                                                        0.5)
+                                                     (round))
+                                                  (max 0.0))
+                                             usize)
+                                       (min (- ih 1)))))
+                     (for (dx (range 0 rw))
+                       (let ((sx (dot (coerce (dot (dot (- (+ (f32--from (dot r x))
+                                                               (/ (* (+ (coerce dx f32) 0.5) cw)
+                                                                  (coerce rw f32)))
+                                                            0.5)
+                                                         (round))
+                                                      (max 0.0))
+                                                 usize)
+                                           (min (- iw 1)))))
+                         (for ((paren c (ref v)) (dot (dot (px img sx sy) (iter)) (enumerate)))
+                           (= (aref (dot self input) (+ (* c plane) (+ (* dy tw) dx)))
+                              (- (/ (f32--from v) 127.5) 1.0))))))))
+                 tw)))))))
+
+(defun ocr-recognizer-impl ()
+  `(impl Recognizer
+     "/// `dict_path`: `inference.yml` mit `PostProcess.character_dict`."
+     ,(ocr-rec-method-new)
+     "/// Erkennt den Text in `r`; liefert (Text, Konfidenz 0..1)."
+     ,(ocr-rec-method-recognize)
+     "/// Crop mit Nearest-Resize auf `REC_H × tw`, Werte in [-1, 1]."
+     ,(ocr-rec-method-preprocess)))
+
+(defun ocr-ctc-fn ()
+  '(defun ctc_decode (data shape dict)
+     (declare (type "&[f32]" data)
+              (type "&[i64]" shape)
+              (type "&[String]" dict)
+              (values "(String, f32)"))
+     (let ((last (dot (dot (dot shape (last)) (copied)) (unwrap_or 0))))
+       (let ((n (coerce (dot last (max 0)) usize)))
+         (when (== n 0)
+           (return (paren (String--new) 0.0)))
+         (let (((paren "mut text" "mut prev" "mut conf" "mut cnt")
+                (paren (String--new) "0usize" "0.0f32" "0usize")))
+           (for (row (dot data (chunks_exact n)))
+             (let ((it (dot (dot (dot row (iter)) (copied)) (enumerate))))
+               (let (((paren idx p) (dot (dot it (max_by (lambda (a b)
+                                                           (dot (dot a 1)
+                                                                (total_cmp (ref (dot b 1)))))))
+                                                 (unwrap_or (paren 0 0.0)))))
+                 (when (and (!= idx 0) (!= idx prev))
+                   (case (dot dict (get (- idx 1)))
+                     ((Some s) (dot text (push_str s)))
+                     (None (when (== (- idx 1) (dot dict (len)))
+                             (dot text (push (char " "))))))
+                   (incf conf p)
+                   (incf cnt))
+                 (= prev idx))))
+           (paren text (if (> cnt 0) (/ conf (coerce cnt f32)) 0.0)))))))
+
+(defun ocr-dist2-fn ()
+  '(defun dist2 (a b)
+     (declare (type "[u8; 3]" a)
+              (type "[u8; 3]" b)
+              (values u32))
+     (let ((it (dot (dot a (iter)) (zip b))))
+       (dot (dot it (map (lambda ((paren x y))
+                           (dot (u32--from (dot x (abs_diff y))) (pow 2)))))
+            (sum)))))
+
+(defun ocr-acc-fn ()
+  '(defun acc (s p)
+     (declare (type "&mut [u32; 3]" s)
+              (type "[u8; 3]" p))
+     (for ((paren a v) (dot (dot s (iter_mut)) (zip p)))
+       (incf (deref a) (u32--from v)))))
+
+(defun ocr-sample-fn ()
+  '(defun sample_colors (img r)
+     (declare (type "&RgbImage" img)
+              (type Rect r)
+              (values "([u8; 3], [u8; 3])"))
+     (let (((paren w h) (paren (coerce (dot img (width)) usize)
+                               (coerce (dot img (height)) usize))))
+       (let (((paren x0 y0) (paren (dot (coerce (dot r x) usize)
+                                         (min (dot w (saturating_sub 1))))
+                                    (dot (coerce (dot r y) usize)
+                                         (min (dot h (saturating_sub 1)))))))
+         (let (((paren x1 y1) (paren (dot (dot (dot (+ x0 (coerce (dot r w) usize))
+                                                     (min w))
+                                                  (saturating_sub 1))
+                                               (max x0))
+                                      (dot (dot (dot (+ y0 (coerce (dot r h) usize))
+                                                     (min h))
+                                                  (saturating_sub 1))
+                                               (max y0)))))
+           (let ((bins (Default--default)))
+             (declare (type "std::collections::HashMap<u16, ([u32; 3], u32)>" bins)
+                      (mutable bins))
+             (let ((add (lambda ("p: [u8; 3]")
+                          (let ((k (logior (logior (<< (u16--from (>> (aref p 0) 4)) 8)
+                                                          (<< (u16--from (>> (aref p 1) 4)) 4))
+                                                   (u16--from (>> (aref p 2) 4)))))
+                            (let ((e (dot (dot bins (entry k)) (or_default))))
+                              (acc (ref-mut (dot e 0)) p)
+                              (incf (dot e 1)))))))
+               (declare (mutable add))
+               (for (x (range-inclusive x0 x1))
+                 (add (px img x y0))
+                 (add (px img x y1)))
+               (for (y (range-inclusive y0 y1))
+                 (add (px img x0 y))
+                 (add (px img x1 y)))
+               (let ((best (dot (dot bins ("values"))
+                                    (max_by_key (lambda ((paren _ n)) (deref n))))))
+                 (let (((paren sum n) (dot (dot best (copied)) (unwrap))))
+                   (let ((bg (dot sum (map (lambda (s)
+                                              (coerce (/ (+ s (/ n 2)) n) u8))))))
+                     (let ((maxd 0))
+                       (declare (mutable maxd))
+                       (for (y (range-inclusive y0 y1))
+                         (for (x (range-inclusive x0 x1))
+                           (= maxd (dot maxd (max (dist2 (px img x y) bg))))))
+                       (when (< maxd (* 30 30))
+                         "// Kaum Kontrast: Schrift in Schwarz/Weiß je nach Helligkeit."
+                         (let ((luma (+ (* (u32--from (aref bg 0)) 3)
+                                        (* (u32--from (aref bg 1)) 6)
+                                        (u32--from (aref bg 2)))))
+                           (return (paren (if (> luma 1280)
+                                              (array-repeat 0 3)
+                                              (array-repeat 255 3))
+                                          bg))))
+                       (let (((paren "mut s" "mut cnt")
+                              (paren (array-repeat "0u32" 3) "0u32")))
+                         (for (y (range-inclusive y0 y1))
+                           (for (x (range-inclusive x0 x1))
+                             (let ((p (px img x y)))
+                               (when (>= (* (dist2 p bg) 4) maxd)
+                                 (acc (ref-mut s) p)
+                                 (incf cnt)))))
+                         (paren (dot s (map (lambda (v)
+                                               (coerce (/ (+ v (/ cnt 2)) cnt) u8))))
+                                bg)))))))))))))
+
+(defun ocr-ocr-struct ()
+  '(space pub
+     (defstruct0 Ocr
+       (det Detector)
+       (rec Recognizer))))
+
+(defun ocr-ocr-impl ()
+  '(impl Ocr
+     "/// Lädt `PP-OCRv6_small_{det,rec}.onnx` + `inference.yml` aus `dir`."
+     "/// Fehlt eine Datei, ist das ein harter Fehler (kein Fallback: ohne"
+     "/// Textmaskierung sprengt AV1-Text das Bandbreiten-Budget)."
+     (space pub
+       (defun load (dir threads)
+         (declare (type "&str" dir)
+                  (type usize threads)
+                  (values "Result<Self, String>"))
+         (let (((paren det rec dict)
+                (paren (format! (string "{dir}/PP-OCRv6_small_det.onnx"))
+                       (format! (string "{dir}/PP-OCRv6_small_rec.onnx"))
+                       (format! (string "{dir}/inference.yml")))))
+           (for (p (bracket (ref det) (ref rec) (ref dict)))
+             (when (not (dot (dot (std--path--Path--new p)) (exists)))
+               (return (Err (format! (string "Modell fehlt: {p}"))))))
+           (Ok (make-instance Self
+                 :det (? (Detector--new (ref det) threads))
+                 :rec (? (Recognizer--new (ref rec) (ref dict) threads)))))))
+     "/// Textzeilen mit Farben; unsichere/leere Erkennungen fallen weg"
+     "/// (die bleiben dann Bildinhalt). Das Rechteck ist bereits um [`REC_PAD`]"
+     "/// erweitert — Erkennung, Farben, Maske und Client malen dasselbe."
+     (space pub
+       (defun text ("&mut self" img)
+         (declare (type "&RgbImage" img)
+                  (values "Result<Vec<TextItem>, String>"))
+         (let ((out (Vec--new)))
+           (declare (mutable out))
+           (let ((boxes (? (dot (dot self det) (detect img)))))
+             (for (r (dot (dot boxes (into_iter)) (take MAX_LINES)))
+               (let ((r (pad_rect r REC_PAD (dot img (width)) (dot img (height)))))
+                 (let (((paren text conf) (? (dot (dot self rec) (recognize img r)))))
+                   (let ((text (dot (dot text (trim)) (to_owned))))
+                     (when (or (dot text (is_empty)) (< conf MIN_TEXT_CONF))
+                       (continue))
+                     (let (((paren fg bg) (sample_colors img r)))
+                       (dot out (push (make-instance TextItem :rect r fg bg text)))))))))
+           (Ok out))))))
+
+(defun ocr-tests-fn ()
+  (testmod "use super::*;"
+           *blank*
+           "use crate::capture::solid;"
+           *blank*
+           '(defun d (v)
+              (declare (type "&[&str]" v)
+                       (values "Vec<String>"))
+              (dot (dot (dot v (iter))
+                        (map (lambda (s) (dot (deref s) (to_owned)))))
+                   (collect)))
+           *blank*
+           '(attr "test"
+              (defun dict_parses_yaml_structure ()
+                (let ((dict (dot (load_dict (string "PostProcess:\\n  name: CTCLabelDecode\\n  character_dict:\\n  - 'a'\\n  - b\\n  - \\\"c\\\"\\n  - ''''\\n")) (unwrap))))
+                  (assert_eq! dict (d (ref (bracket (string "a") (string "b") (string "c") (string "'"))))))))
+           *blank*
+           '(attr "test"
+              (defun dict_rejects_garbage ()
+                (assert! (dot (load_dict (string "kein yaml: [")) (is_err)))
+                (assert! (dot (load_dict (string "PostProcess:\\n  name: x\\n")) (is_err)))))
+           *blank*
+           '(attr "test"
+              (defun ctc_collapses_duplicates_blanks_and_reports_confidence ()
+                (let ((dict (d (ref (bracket (string "a") (string "b"))))))
+                  (let ((data (bracket 0.1 0.9 0.0 0.0
+                                        0.1 0.8 0.1 0.0
+                                        0.9 0.05 0.05 0.0
+                                        0.1 0.1 0.7 0.1
+                                        0.0 0.0 0.0 1.0)))
+                    (let (((paren t c) (ctc_decode (ref data) (ref (bracket 5 4)) (ref dict))))
+                      (assert_eq! t (string "ab "))
+                      (assert! (< (dot (- c (/ (+ 0.9 0.7 1.0) 3.0)) (abs)) 1e-6)))))))
+           *blank*
+           '(attr "test"
+              (defun ctc_empty_inputs ()
+                (assert_eq! (dot (ctc_decode (ref (bracket 0.9 0.1)) (ref (bracket 1 2)) (ref (d (ref (bracket (string "a")))))) 0) (string ""))
+                (assert_eq! (ctc_decode (ref (bracket)) (ref (bracket 4 0)) (ref (d (ref (bracket (string "a")))))) (paren (String--new) 0.0))))
+           *blank*
+           '(attr "test"
+              (defun missing_models_are_an_error ()
+                (let-else ((Err e) (Ocr--load (string "/pfad/den/es/nicht/gibt") 1))
+                  (panic! (string "muss scheitern")))
+                (assert! (dot e (contains (string "Modell fehlt"))) (string "{e}"))))
+           *blank*
+           '(attr "test"
+              (defun colors_follow_contrast ()
+                (let ((img (solid 16 16 (array-repeat 255 3))))
+                  (declare (mutable img))
+                  (for (x (range 4 12))
+                    (dot img (put_pixel x 8 (image--Rgb (array-repeat 0 3)))))
+                  (let (((paren fg bg) (sample_colors (ref img) (Rect--new 0 0 16 16))))
+                    (assert_eq! bg (array-repeat 255 3))
+                    (assert! (< (aref fg 0) 128) (string "{fg:?}"))))
+                (let (((paren fg _) (sample_colors (ref (solid 8 8 (array-repeat 250 3))) (Rect--new 0 0 8 8))))
+                  (assert_eq! fg (array-repeat 0 3)))))
+           *blank*
+           '(attr "test"
+              (defun postprocess_finds_solid_block ()
+                (let (((paren w h) (paren 96 64)))
+                  (let ((prob (space "vec!" (bracket (space 0.0 ";" (* w h))))))
+                    (declare (mutable prob))
+                    (for (y (range 20 32))
+                      (for (x (range 10 60))
+                        (= (aref prob (+ (* y w) x)) 0.9)))
+                    (let ((visited (space "vec!" (bracket (space 0 ";" (* w h))))))
+                      (declare (mutable visited))
+                      (let ((b (postprocess (ref prob) w h (ref-mut visited) 1 (ref-mut (Vec--new)))))
+                        (assert_eq! (dot b (len)) 1)
+                        (assert! (and (<= (dot (aref b 0) x) 10) (>= (dot (aref b 0) (x2)) 60)))))))))))
+
+(defun ocr-yml-structs ()
+  "inference.yml section structs as one string (field attributes fit no
+defstruct0 slot — same reason clap-struct assembles a string)."
+  "/// `PostProcess`-Abschnitt aus `inference.yml`.
+#[derive(serde::Deserialize)]
+struct InferenceYml {
+    #[serde(rename = \"PostProcess\")]
+    post_process: PostProcess,
+}
+
+#[derive(serde::Deserialize)]
+struct PostProcess {
+    character_dict: Vec<String>,
+}")
+
+(defun server-ocr-rs ()
+  `(do0
+    ,(doc "`03_ocr` — PP-OCRv6-Texterkennung: DBNet-Detektion + SVTR/CTC-Erkennung."
+          ""
+          "Aus `source6` (`04_ocr_detect`, `05_ocr_recognize`, Farb-Sampling aus"
+          "`07_layout`) übernommen, aber auf `image::RgbImage` umgestellt, das"
+          "Wörterbuch per `serde_yaml` gelesen und ohne Erkennungs-Cache (MVP)."
+          "OCR ist Pflicht: ohne Modelle startet der Server nicht (reines AV1-Textbild"
+          "würde das 6-kB/s-Budget sprengen).")
+    ,*blank*
+    (use (image RgbImage))
+    (use (ort session Session))
+    (use (ort session builder GraphOptimizationLevel))
+    (use (ort value TensorRef))
+    ,*blank*
+    (use (lbw_common (curly Rect TextItem)))
+    ,*blank*
+    (use (crate tiles pad_rect))
+    ,*blank*
+    ,@(ocr-consts)
+    ,*blank*
+    "/// Lädt ein ONNX-Modell (CPU, Level 3, `threads` Intra-Op-Threads; 0 = Default)."
+    ,(ocr-session-fn)
+    ,*blank*
+    ,(ocr-px-fn)
+    ,*blank*
+    "/// DBNet-Detektor mit wiederverwendbaren Puffern."
+    ,(ocr-detector-struct)
+    ,*blank*
+    ,(ocr-detector-impl)
+    ,*blank*
+    "/// RGB8 → planar, ImageNet-normalisiert."
+    ,(ocr-normalize-fn)
+    ,*blank*
+    "/// Flutet die Schwellen-Komponente ab (`x`, `y`) und liefert die aufgeweitete"
+    "/// Box — oder `None` bei zu klein/schwach. (In `source7` in `postprocess`"
+    "/// eingelagert; als eigene Funktion kürzer und für sich lesbar.)"
+    "/// (8 Parameter sind hier ehrlich — ein Bündel-Struct wäre mehr Code.)"
+    (attr "allow(clippy::too_many_arguments)"
+      ,(ocr-flood-fn))
+    ,*blank*
+    "/// DBNet-Nachverarbeitung: verbundene Schwellen-Pixel → aufgeweitete Boxen,"
+    "/// sortiert nach Zeile (16-px-Bänder), dann x."
+    ,(ocr-postprocess-fn)
+    ,*blank*
+    ,(ocr-yml-structs)
+    ,*blank*
+    "/// Liest `character_dict` aus dem YAML (per `serde_yaml`)."
+    ,(pub_ (ocr-load-dict-fn))
+    ,*blank*
+    "/// CTC-Erkenner mit Wörterbuch."
+    ,(ocr-recognizer-struct)
+    ,*blank*
+    ,(ocr-recognizer-impl)
+    ,*blank*
+    "/// CTC-Greedy: Argmax je Zeitschritt, Blank (0) und Wiederholungen raus."
+    "/// Klasse `dict.len()+1` ist das Leerzeichen."
+    (attr "must_use"
+      ,(pub_ (ocr-ctc-fn)))
+    ,*blank*
+    ,(ocr-dist2-fn)
+    ,*blank*
+    ,(ocr-acc-fn)
+    ,*blank*
+    "/// Dominante Hintergrund- und Schriftfarbe einer Textbox."
+    "/// `bg` = Mittel der häufigsten (auf 4 bit quantisierten) Randfarbe;"
+    "/// `fg` = Mittel der Innenpixel mit ≥ 50 % der maximalen Distanz zu `bg`."
+    (attr "must_use"
+      ,(pub_ (ocr-sample-fn)))
+    ,*blank*
+    "/// Geladene Texterkennung (Pflicht: ohne Modelle kein Serverstart)."
+    ,(ocr-ocr-struct)
+    ,*blank*
+    ,(ocr-ocr-impl)
+    ,*blank*
+    ,(ocr-tests-fn)))
+
+;;;; Integration tests (T4): loopback, models, padding. Every statement
+;;;; shape below was validated with an emit-probe + rustfmt before assembly.
+
+(defun test-models-dir-fn ()
+  "models_dir helper shared by the models and padding tests."
+  '(defun models_dir ()
+     (declare (values String))
+     (format! (string "{}/../../source6/models")
+              (env! (string "CARGO_MANIFEST_DIR")))))
+
+(defun server-test-loopback-rs ()
+  `(do0
+    ,(doc "Loopback: echte Session (`SharedSource` + Stub-OCR) über echtes TCP."
+          "Läuft ohne X11 und ohne Modelle.")
+    ,*blank*
+    (use (std net (curly TcpListener TcpStream)))
+    (use (std sync atomic AtomicBool))
+    (use (std time (curly Duration Instant)))
+    ,*blank*
+    (use (clap Parser))
+    (use (image RgbImage))
+    (use (lbw_common framing (curly FrameReader write_msg)))
+    (use (lbw_common (curly ClientMsg PROTO_VERSION Rect ServerMsg TextItem)))
+    (use (lbw_server capture (curly SharedSource solid)))
+    (use (lbw_server config Config))
+    (use (lbw_server session (curly Recognize input_loop serve_client)))
+    ,*blank*
+    (space "struct StubOcr" (paren "Vec<TextItem>") ";")
+    ,*blank*
+    (impl (space Recognize for StubOcr)
+      (defun text ("&mut self" _img)
+        (declare (type "&RgbImage" _img)
+                 (values "Result<Vec<TextItem>, String>"))
+        (Ok (dot (dot self 0) (clone)))))
+    ,*blank*
+    (defun test_cfg ()
+      (declare (values Config))
+      "// Ohne Display: Injector::open scheitert, die Session läuft ohne Eingabe."
+      (dot (Config--try_parse_from (bracket (string "lbw-server")))
+           (unwrap)))
+    ,*blank*
+    (defun item ()
+      (declare (values TextItem))
+      (make-instance TextItem
+        :rect (Rect--new 8 8 32 16)
+        :fg (array-repeat 0 3)
+        :bg (array-repeat 255 3)
+        :text (dot (string "hi") (into))))
+    ,*blank*
+    "/// Liest bis zur Deadline; `want` zählt relevante Nachrichten."
+    ; `source7` nutzt eine Let-Kette (`if let ... && ...`); der Emitter kennt
+    ; keine Ketten, daher die äquivalente Schachtelung (exakter Desugar).
+    (attr "allow(clippy::collapsible_if)"
+      (defun read_until (fr s until want)
+        (declare (type "&mut FrameReader" fr)
+                 (type "&mut TcpStream" s)
+                 (type Instant until)
+                 (type "&mut dyn FnMut(&ServerMsg) -> bool" want))
+        (dot (dot s (set_read_timeout (Some (Duration--from_millis 200))))
+             (unwrap))
+        (while (< (Instant--now) until)
+          (if-let ((Some m) (dot (dot fr (read_msg s)) (unwrap)))
+            (when (want (ref m))
+              (return (paren)))))))
+    ,*blank*
+    (attr "test"
+      (defun full_frame_then_single_dirty_tile ()
+        (let ((listener (dot (TcpListener--bind (string "127.0.0.1:0"))
+                             (unwrap)))
+              (addr (dot (dot listener (local_addr))
+                         (unwrap)))
+              (shared (SharedSource--new (solid 128 128 (array-repeat 40 3))))
+              (worker_src (dot shared (clone)))
+              (server (std--thread--spawn
+                       (space "move"
+                         (lambda ()
+                           (let (((paren stream _)
+                                  (dot (dot listener (accept))
+                                       (unwrap)))
+                                 (src worker_src)
+                                 (ocr (StubOcr (vec! (item)))))
+                             (declare (mutable src ocr))
+                             (serve_client stream
+                                           (ref (test_cfg))
+                                           (ref-mut src)
+                                           (ref-mut ocr)
+                                           (Some 30)))))))
+              (s (dot (TcpStream--connect addr)
+                      (unwrap)))
+              (fr (FrameReader--new)))
+          (declare (mutable s fr))
+          (dot (write_msg (ref-mut s)
+                          (ref (space "ClientMsg::Hello"
+                                      (curly "version: PROTO_VERSION"))))
+               (unwrap))
+          "// Hello + Vollbild: ClearText, AddText, 1 Box (128×128)."
+          (let ((hello false))
+            (declare (mutable hello))
+            (read_until (ref-mut fr)
+                        (ref-mut s)
+                        (+ (Instant--now) (Duration--from_secs 10))
+                        (ref-mut (lambda (m)
+                                   (when (matches! m (scope ServerMsg Hello))
+                                     (= hello true)
+                                     (return true))
+                                   false)))
+            (assert! hello)
+            (let (((paren "mut clear" "mut texts" "mut tiles") (paren 0 0 0)))
+              (read_until (ref-mut fr)
+                          (ref-mut s)
+                          (+ (Instant--now) (Duration--from_secs 10))
+                          (ref-mut (lambda (m)
+                                     (case m
+                                       ("ServerMsg::ClearText" (incf clear))
+                                       ("ServerMsg::AddText(t)"
+                                        (assert_eq! (dot t text) (string "hi"))
+                                        (incf texts))
+                                       ("ServerMsg::Tile { .. }" (incf tiles))
+                                       (_ (progn)))
+                                     (and (>= clear 1)
+                                          (>= texts 1)
+                                          (>= tiles 1)))))
+              (assert_eq! (paren clear texts tiles) (paren 1 1 1))
+              "// Ein Pixel ändern → genau eine 16×16-Box um den Pixel kommt neu."
+              (let ((img (solid 128 128 (array-repeat 40 3))))
+                (declare (mutable img))
+                (dot img (put_pixel 100 10 (image--Rgb (array-repeat 9 3))))
+                (dot shared (set img))
+                (let ((found None))
+                  (declare (mutable found))
+                  (read_until (ref-mut fr)
+                              (ref-mut s)
+                              (+ (Instant--now) (Duration--from_secs 10))
+                              (ref-mut (lambda (m)
+                                         (if-let ("ServerMsg::Tile { x, y, data }" m)
+                                           (progn
+                                             (assert! (not (dot data (is_empty))))
+                                             (= found (Some (paren (deref x) (deref y))))
+                                             (return true)))
+                                         false)))
+                  (assert_eq! found (Some (paren 100 10)))
+                  (dot (dot (dot server (join)) (unwrap)) (unwrap)))))))))
+    ,*blank*
+    (attr "test"
+      (defun wrong_version_is_rejected ()
+        (let ((listener (dot (TcpListener--bind (string "127.0.0.1:0"))
+                             (unwrap)))
+              (addr (dot (dot listener (local_addr))
+                         (unwrap)))
+              (server (std--thread--spawn
+                       (space "move"
+                         (lambda ()
+                           (let (((paren stream _)
+                                  (dot (dot listener (accept))
+                                       (unwrap)))
+                                 (src (SharedSource--new (solid 128 128 (array-repeat 0 3))))
+                                 (ocr (StubOcr (vec!))))
+                             (declare (mutable src ocr))
+                             (serve_client stream
+                                           (ref (test_cfg))
+                                           (ref-mut src)
+                                           (ref-mut ocr)
+                                           (Some 1))))))))
+          (let ((s (dot (TcpStream--connect addr)
+                        (unwrap)))
+                (fr (FrameReader--new)))
+            (declare (mutable s fr))
+            (dot (write_msg (ref-mut s)
+                            (ref (space "ClientMsg::Hello"
+                                        (curly "version: 999"))))
+                 (unwrap))
+            "// Server schließt: kein Hello, EOF beim Lesen."
+            (dot (dot s (set_read_timeout (Some (Duration--from_secs 5))))
+                 (unwrap))
+            (loop
+              (case (dot fr (read (ref-mut s)))
+                ("Ok(lbw_common::framing::Read1::Frame(_))"
+                 (panic! (string "unerwarteter Frame")))
+                ("Ok(lbw_common::framing::Read1::Idle)" (progn))
+                ("Err(_)" (progn (break) "// EOF: Abweisung bestätigt"))))
+            (let ((r (dot (dot server (join))
+                          (unwrap))))
+              (assert! (dot r (is_err)) (string "falsche Version muss Fehler sein")))))))
+    ,*blank*
+    (attr "test"
+      (defun input_messages_reach_handler_in_order ()
+        (let ((listener (dot (TcpListener--bind (string "127.0.0.1:0"))
+                             (unwrap)))
+              (addr (dot (dot listener (local_addr))
+                         (unwrap)))
+              (sent (vec! (space "ClientMsg::Hello" (curly "version: PROTO_VERSION"))
+                          (space "ClientMsg::MouseMove" (curly "x: 100" "y: 200"))
+                          (space "ClientMsg::Button" (curly "button: 1" "down: true"))
+                          (space "ClientMsg::Button" (curly "button: 1" "down: false"))
+                          (space "ClientMsg::Text" (paren (dot (string "hi") (into))))
+                          (space "ClientMsg::Key" (curly "key: \"Enter\".into()" "down: true"))))
+              (writer (dot sent (clone)))
+              (client (std--thread--spawn
+                       (space "move"
+                         (lambda ()
+                           (let ((s (dot (TcpStream--connect addr)
+                                         (unwrap))))
+                             (declare (mutable s))
+                             (for (m (ref writer))
+                               (stmt (dot (write_msg (ref-mut s) m)
+                                          (unwrap))))
+                             "// Socket fällt hier: input_loop sieht EOF und endet."))))))
+          (let (((paren rd _) (dot (dot listener (accept))
+                                   (unwrap))))
+            (dot (dot rd (set_read_timeout (Some (Duration--from_millis 200))))
+                 (unwrap))
+            (let (((paren tx rx) (std--sync--mpsc--channel))
+                  (stop (AtomicBool--new false)))
+              (input_loop rd
+                          (FrameReader--new)
+                          (ref stop)
+                          false
+                          (lambda (m)
+                            (dot (dot tx (send m))
+                                 (unwrap))))
+              (dot (dot client (join))
+                   (unwrap))
+              (assert_eq! (dot (dot rx (try_iter))
+                               ("collect::<Vec<_>>"))
+                          sent))))))))
+
+(defun server-test-models-rs ()
+  `(do0
+    ,(doc "Modell-Test (ignored): echte PP-OCRv6-Modelle aus `source6/models`."
+          "Laufen lassen mit:"
+          "`cargo test --release -p lbw-server --test models -- --ignored`")
+    ,*blank*
+    (use (lbw_server ocr Ocr))
+    ,*blank*
+    ,(test-models-dir-fn)
+    ,*blank*
+    (attr "test" "ignore"
+      (defun detects_text_on_real_screenshot ()
+        (let ((dir (models_dir))
+              (ppm (format! (string "{dir}/test_screen.ppm"))))
+          (assert! (dot (dot (std--path--Path--new (ref ppm))
+                             (exists)))
+                   (string "Testbild fehlt: {ppm}"))
+          "// Wie der Server: festen 640×640-Ausschnitt verwenden."
+          (let ((full (dot (dot (image--open (ref ppm))
+                                (unwrap))
+                           (to_rgb8)))
+                (img (dot (image--imageops--crop_imm (ref full) 0 0 640 640)
+                          (to_image))))
+            (assert_eq! (paren (dot img (width)) (dot img (height)))
+                        (paren 640 640))
+            (let ((ocr (dot (Ocr--load (ref dir) 8)
+                            (unwrap)))
+                  (texts (dot (dot ocr (text (ref img)))
+                              (unwrap)))
+                  (chars (dot (dot (dot texts (iter))
+                                   (map (lambda (t)
+                                          (dot (dot (dot t text)
+                                                    (chars))
+                                               (count)))))
+                              (sum))))
+              (declare (mutable ocr)
+                       (type usize chars))
+              (assert! (not (dot texts (is_empty)))
+                       (string "kein Text auf dem Testbild erkannt"))
+              (assert! (> chars 20)
+                       (string "zu wenig Text: {texts:?}"))
+              (eprintln! (string "[models] {} Zeilen, {} Zeichen")
+                         (dot texts (len))
+                         chars)
+              (for (t (dot (dot texts (iter)) (take 5)))
+                (eprintln! (string "[models] {:?} {:?}")
+                           (dot t rect)
+                           (dot t text))))))))))
+
+(defun test-at-init (vec)
+  "`|p: u16| ...` lookup closure over apad/value table (padding sweep)."
+  `(lambda ("p: u16")
+     (dot (dot (dot (dot ,vec (iter))
+                        (find (lambda ((paren q _))
+                                (== (deref q) p))))
+               (unwrap))
+          1)))
+
+(defun server-test-padding-rs ()
+  `(do0
+    ,(doc "Padding-Sweep (ignored): misst gute REC_PAD-/MASK_PAD-Werte auf einem"
+          "echten xterm-Screenshot. Startet ein eigenes Xvfb + xterm, braucht echte"
+          "Modelle und läuft nur im Release-Modus sinnvoll schnell:"
+          "`cargo test --release -p lbw-server --test padding -- --ignored --nocapture`"
+          ""
+          "Der Test druckt zwei Tabellen (Erkennung je `pad`, AV1-Bytes je"
+          "Masken-`pad`) und pinnt das Produktverhalten: Der ASCII-Marker muss über"
+          "den echten [`Ocr`]-Pfad gefunden werden, und die Default-Paddings dürfen"
+          "nicht schlechter sein als `0`.")
+    ,*blank*
+    (use (std process (curly Child Command)))
+    (use (std time Duration))
+    ,*blank*
+    (use (clap Parser))
+    (use (image RgbImage))
+    (use (lbw_server av1 encode_rgb))
+    (use (lbw_server capture (curly FrameSource ScrapSource)))
+    (use (lbw_server config Config))
+    (use (lbw_server ocr (curly Detector Ocr Recognizer sample_colors)))
+    (use (lbw_server tiles (curly MASK_PAD crop_rgb fill_rect pad_rect)))
+    ,*blank*
+    "/// Was das xterm anzeigt (ASCII-Anteil wird assertiert, Umlaute nur berichtet)."
+    (space "const MARKER_ASCII: &str =" "\"PADDING-SWEEP-640\";")
+    "/// Display für das eigene Xvfb (muss frei sein)."
+    (space "const DISPLAY: &str =" "\":97\";")
+    "/// Wie `Ocr::text` (dort privat): Mindest-Konfidenz je Zeile."
+    (space "const MIN_CONF: f32 =" "0.5;")
+    ,*blank*
+    ,(test-models-dir-fn)
+    ,*blank*
+    "/// Eigenes Xvfb + xterm; räumt beim Drop auf."
+    (defstruct0 Xterm
+      (xvfb Child)
+      (xterm Child))
+    ,*blank*
+    (impl Xterm
+      (defun start ()
+        (declare (values Self))
+        "// PADDING_XTERM_EXTRA=\"...\" hängt weitere xterm-Argumente an (z. B."
+        "// \"-fa Monospace -fs 14\" für einen zweiten Messpunkt mit Skalierfont)."
+        (let ((xvfb (dot (dot (dot (Command--new (string "Xvfb"))
+                                       (args (bracket DISPLAY
+                                                      (string "-screen")
+                                                      (string "0")
+                                                      (string "1280x1024x24"))))
+                                  (spawn))
+                             (expect (string "Xvfb fehlt (apt install xvfb) oder Display belegt"))))
+              (line (format! (string "echo '{MARKER_ASCII} ÄÖÜäöüß'; exec sleep 120")))
+              (extra (dot (std--env--var (string "PADDING_XTERM_EXTRA"))
+                          (unwrap_or_default)))
+              (args (vec! (string "-u8") (string "-geometry") (string "80x24+10+10"))))
+          (declare (mutable xvfb args))
+          (std--thread--sleep (Duration--from_secs 1))
+          (dot args (extend (dot extra (split_whitespace))))
+          (dot args (extend (bracket (string "-e") (string "sh") (string "-c") (ref line))))
+          (let ((xterm (dot (dot (dot (dot (dot (Command--new (string "xterm"))
+                                                (args (ref args)))
+                                           (env (string "DISPLAY") DISPLAY))
+                                      (env (string "LANG") (string "C.UTF-8")))
+                                 (spawn))
+                            (expect (string "xterm fehlt (apt install xterm)")))))
+            (std--thread--sleep (Duration--from_secs 2))
+            (when (dot (dot (dot xvfb (try_wait))
+                            (expect (string "Xvfb-Status")))
+                       (is_some))
+              (panic! (string "Xvfb startete nicht (Display {DISPLAY} belegt?)")))
+            (make-instance Self xvfb xterm))))
+      ,*blank*
+      (defun capture ("&self")
+        (declare (values RgbImage))
+        (unsafe (std--env--set_var (string "DISPLAY") DISPLAY))
+        (let ((src (dot (ScrapSource--open 0 0 640 640)
+                        (expect (string "Capture öffnen")))))
+          (declare (mutable src))
+          (dot (dot src (grab))
+               (expect (string "Frame lesen"))))))
+    ,*blank*
+    (impl (space Drop for Xterm)
+      (defun drop ("&mut self")
+        (let ((_ (dot (dot self xterm) (kill)))
+              (_ (dot (dot self xvfb) (kill)))))))
+    ,*blank*
+    (attr "test" "ignore"
+      (defun sweep_padding_on_xterm ()
+        (let ((dir (models_dir)))
+          (for (f (bracket (string "PP-OCRv6_small_det.onnx")
+                           (string "PP-OCRv6_small_rec.onnx")
+                           (string "inference.yml")))
+            (assert! (dot (std--path--Path--new (ref (format! (string "{dir}/{f}"))))
+                           (exists))
+                     (string "Modell fehlt: {dir}/{f}")))
+          (let ((xt (Xterm--start))
+                (img (dot xt (capture))))
+            (dot (dot img (save (string "/tmp/padding_frame.png")))
+                 (unwrap))
+            (eprintln! (string "[padding] Capture nach /tmp/padding_frame.png geschrieben"))
+            "// Produktpfad (mit REC_PAD-Default): ASCII-Marker muss gefunden werden."
+            (let ((ocr (dot (Ocr--load (ref dir) 4)
+                            (unwrap)))
+                  (items (dot (dot ocr (text (ref img)))
+                              (unwrap)))
+                  (joined (dot (dot (dot (dot items (iter))
+                                             (map (lambda (t)
+                                                    (dot (dot t text)
+                                                         (as_str)))))
+                                        ("collect::<Vec<_>>"))
+                                   (join (string " ")))))
+              (declare (mutable ocr))
+              (eprintln! (string "[padding] Produkt: {} Zeilen: {joined:?}")
+                         (dot items (len)))
+              (assert! (dot joined (contains MARKER_ASCII))
+                       (string "Marker {MARKER_ASCII:?} nicht erkannt in {joined:?}"))
+              "// Erkennungs-Sweep: Detektion einmal, Recognition je pad."
+              (let ((det (dot (Detector--new (ref (format! (string "{dir}/PP-OCRv6_small_det.onnx"))) 4)
+                              (unwrap)))
+                    (rec (dot (Recognizer--new (ref (format! (string "{dir}/PP-OCRv6_small_rec.onnx")))
+                                               (ref (format! (string "{dir}/inference.yml")))
+                                               4)
+                              (unwrap)))
+                    (boxes (dot (dot det (detect (ref img)))
+                                (unwrap)))
+                    (rec_chars (Vec--new)))
+                (declare (mutable det rec rec_chars))
+                (assert! (not (dot boxes (is_empty)))
+                         (string "keine Box detektiert"))
+                (eprintln! (string "[padding] {} Boxen detektiert")
+                           (dot boxes (len)))
+                (for (pad (bracket "0u16" 2 4 6 8))
+                  (let ((n 0)
+                        (umlauts 0))
+                    (declare (mutable n umlauts))
+                    (for (b (ref boxes))
+                      (let ((r (pad_rect (deref b) pad 640 640))
+                            ((paren t c) (dot (dot rec (recognize (ref img) r))
+                                              (unwrap))))
+                        (when (and (not (dot (dot t (trim)) (is_empty)))
+                                   (>= c MIN_CONF))
+                          (incf n (dot (dot t (chars)) (count)))
+                          (incf umlauts
+                                (dot (dot (dot t (chars))
+                                          (filter (lambda (c)
+                                                    (dot (string "ÄÖÜäöüß")
+                                                         (contains (deref c))))))
+                                     (count))))))
+                    (dot rec_chars (push (paren pad n)))
+                    (eprintln! (string "[padding] rec_pad={pad}: {n} Zeichen, davon {umlauts} Umlaute/ß"))))
+                (let ((at ,(test-at-init 'rec_chars)))
+                  (assert! (>= (at 4) (at 0))
+                           (string "REC_PAD=4 schlechter als 0: {rec_chars:?}"))
+                  "// Masken-Sweep: Textregion maskieren, Rest als AV1 messen."
+                  "// Echter Server-Default statt hartkodierter Zahl."
+                  (let ((quantizer (dot (dot (Config--try_parse_from (bracket (string "lbw-server")))
+                                             (unwrap))
+                                        quantizer))
+                        (mask_bytes (Vec--new)))
+                    (declare (mutable mask_bytes))
+                    (for (mpad (bracket "0u16" 2 4 6 8 10 12))
+                      (let ((masked (dot img (clone))))
+                        (declare (mutable masked))
+                        (for (b (ref boxes))
+                          (let ((r (pad_rect (deref b) 4 640 640))
+                                ((paren _ bg) (sample_colors (ref img) r)))
+                            (fill_rect (ref-mut masked)
+                                       (pad_rect r mpad 640 640)
+                                       bg)))
+                        "// Feste Vergleichsregion: Union aller Boxen (mit Max-Pad), gerade."
+                        (let ((x0 "640u16")
+                              (y0 "640u16")
+                              (x1 "0u16")
+                              (y1 "0u16"))
+                          (declare (mutable x0 y0 x1 y1))
+                          (for (b (ref boxes))
+                            (let ((r (pad_rect (deref b) 16 640 640)))
+                              (= x0 (dot x0 (min (dot r x))))
+                              (= y0 (dot y0 (min (dot r y))))
+                              (= x1 (dot x1 (max (+ (dot r x) (dot r w)))))
+                              (= y1 (dot y1 (max (+ (dot r y) (dot r h)))))))
+                          (let ((w (dot (coerce (+ (- x1 x0) 1) usize)
+                                        (max 16)))
+                                (h (dot (coerce (+ (- y1 y0) 1) usize)
+                                        (max 16))))
+                            (let (((paren w h) (paren (+ w (% w 2)) (+ h (% h 2)))))
+                              (let ((r (lbw_common--Rect--new (dot x0 (min (- 640 (coerce w u16))))
+                                                              (dot y0 (min (- 640 (coerce h u16))))
+                                                              (coerce w u16)
+                                                              (coerce h u16)))
+                                    (rgb (crop_rgb (ref masked) r))
+                                    (bytes (dot (dot (encode_rgb (ref rgb) w h quantizer)
+                                                     (unwrap))
+                                                (len))))
+                                (dot mask_bytes (push (paren mpad bytes)))
+                                (eprintln! (string "[padding] mask_pad={mpad}: Region {w}x{h} = {bytes} B AV1"))))))))
+                    (let ((at ,(test-at-init 'mask_bytes)))
+                      (assert! (<= (at MASK_PAD) (at 0))
+                               (string "MASK_PAD schlechter als 0: {mask_bytes:?}")))))))))))))
+
 (defun server-lib-rs ()
   `(do0
     ,(doc "`lbw-server` — Bildschirm-Capture, OCR-Text, AV1-Kacheln, direktes TCP."

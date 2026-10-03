@@ -53,13 +53,16 @@ Erst weiter, wenn der Schritt grün ist. Baseline: `source7_mvp`
 
 ## T4 — `server`-Crate, Teil 3 (OCR) + Server-Integrationstests
 
-- [ ] `gen/server.lisp` erweitern: `03_ocr.rs` (Detektor, Erkenner, `sample_colors`,
-      `Ocr`, Tests).
-- [ ] `gen/server.lisp` erweitern: `tests/loopback.rs` (Let-Chains als Strings),
-      `tests/models.rs`, `tests/padding.rs`.
-- [ ] Prüfen: `cargo test -p lbw-server` (26 lib + 3 loopback, 2 ignored);
-      Protokoll gegen `source7` stichprobenhaft verglichen (kein Byte-Diff).
-- [ ] Commit: `feat(source8): server-modul ocr + integrationstests`.
+- [x] `gen/server.lisp` erweitert: `03_ocr.rs` (Detektor, Erkenner, `sample_colors`,
+      `Ocr`, 7 Tests). Flood-Fill als eigene `flood_component`-Funktion
+      herausgezogen (in `source7` in `postprocess` eingelagert).
+- [x] `gen/server.lisp` erweitert: `tests/loopback.rs` (Let-Kette als
+      äquivalente Schachtelung, kein String), `tests/models.rs`,
+      `tests/padding.rs`. Alle drei fast vollständig strukturiert
+      (Emit-Probes + `rustfmt`-Gatter pro Idiom).
+- [x] Geprüft: `cargo test -p lbw-server` (26 lib + 3 loopback, 2 ignored);
+      `clippy --all-targets -- -D warnings` + `fmt --check` grün.
+- [x] Commit: `feat(source8): server-modul ocr + integrationstests`.
 
 ## T5 — `client`-Crate (ohne App-Fenster)
 
