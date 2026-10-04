@@ -122,13 +122,13 @@ erDiagram
         text stripe_session_id
     }
     profiles {
-        uuid user_id PK_FK
+        uuid user_id PK, FK
         text first_name
         int age
         text gender
         text looking_for
         text mbti
-        text[] hobbies
+        text hobbies "text array"
         text job_title
         text family_plan
         text bio
