@@ -1,0 +1,21 @@
+[package]
+name = "copernicus-radar"
+version = "0.1.0"
+edition = "2021"
+description = "Sentinel-1 SAR raw space-packet decoder, ported from copernicus-radar (C++)"
+license = "MIT"
+
+[[bin]]
+name = "copernicus-radar"
+path = "src/main.rs"
+
+[lib]
+name = "copernicus_radar"
+path = "src/lib.rs"
+
+[dependencies]
+memmap2 = "0.9"
+num-complex = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
