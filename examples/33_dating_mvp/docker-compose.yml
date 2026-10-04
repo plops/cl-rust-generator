@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: dating_mvp_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dating
+      POSTGRES_PASSWORD: dating_secret_dev
+      POSTGRES_DB: dating_mvp
+    ports:
+      - "5432:5432"
+    volumes:
+      - dating_mvp_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dating -d dating_mvp"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Optional: App-Container für Prod-Parität. Dev läuft nativ via `cargo run`.
+  app:
+    build: .
+    container_name: dating_mvp_app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://dating:dating_secret_dev@db:5432/dating_mvp
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  dating_mvp_pgdata:

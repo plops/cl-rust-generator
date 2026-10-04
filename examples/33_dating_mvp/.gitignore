@@ -1,0 +1,7 @@
+/target
+.env
+__pycache__/
+.pytest_cache/
+e2e_tests/.venv/
+*.pyc
+.sqlx/
