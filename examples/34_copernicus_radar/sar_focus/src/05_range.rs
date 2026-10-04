@@ -20,13 +20,21 @@ pub struct RangeCompressor {
 
 impl RangeCompressor {
     /// Baut den Matched-Filter: Replika einbetten, FFT, konjugieren.
+    ///
+    /// # Panics
+    /// Wenn die Replika länger als die Zeile ist (Filter wäre verstümmelt).
     pub fn new(p: &ChirpParams, n: usize) -> Self {
+        let r = replica(p);
+        assert!(
+            r.len() <= n,
+            "Replika ({} Samples) passt nicht in Zeile ({n})",
+            r.len()
+        );
         let mut planner = FftPlanner::<f32>::new();
         let fwd = planner.plan_fft_forward(n);
         let inv = planner.plan_fft_inverse(n);
-        let r = replica(p);
-        let ntx = r.len().min(n);
-        let start = embed_start(n, ntx).min(n.saturating_sub(ntx));
+        let ntx = r.len();
+        let start = embed_start(n, ntx).min(n - ntx);
         let mut h = vec![Nc32::new(0.0, 0.0); n];
         for (i, c) in r[..ntx].iter().enumerate() {
             h[start + i] = Nc32::new(c.re, c.im);
@@ -45,6 +53,15 @@ impl RangeCompressor {
 
     pub fn filter(&self) -> &[Nc32] {
         &self.filter
+    }
+
+    /// Geplante Zeilen-FFTs (werden im RDA-2D-Fluss wiederverwendet).
+    pub fn row_fft_forward(&self) -> Arc<dyn Fft<f32>> {
+        self.fwd.clone()
+    }
+
+    pub fn row_fft_inverse(&self) -> Arc<dyn Fft<f32>> {
+        self.inv.clone()
     }
 
     pub fn len_range(&self) -> usize {
@@ -88,10 +105,10 @@ pub fn ifftshift<T: Clone>(buf: &mut [T]) {
     buf.rotate_left(n / 2);
 }
 
-/// Exaktes DFT-Frequenzraster (Shift-Konvention): `f[i] = (i−N/2)·fs/N`.
+/// Exaktes DFT-Frequenzraster (Shift-Konvention): `f[i] = (i−⌊N/2⌋)·fs/N`.
 pub fn dft_freqs(n: usize, fs_hz: f64) -> Vec<f64> {
     (0..n)
-        .map(|i| (i as f64 - n as f64 / 2.0) * fs_hz / n as f64)
+        .map(|i| (i as f64 - (n / 2) as f64) * fs_hz / n as f64)
         .collect()
 }
 
@@ -192,5 +209,7 @@ mod tests {
         ifftshift(&mut v);
         assert_eq!(v, vec![0, 1, 2, 3, 4, 5]);
         assert_eq!(dft_freqs(4, 8.0), vec![-4.0, -2.0, 0.0, 2.0]);
+        // Ungerades N: Mitte exakt auf Bin (N−1)/2 (kein Halb-Bin-Versatz).
+        assert_eq!(dft_freqs(5, 10.0), vec![-4.0, -2.0, 0.0, 2.0, 4.0]);
     }
 }

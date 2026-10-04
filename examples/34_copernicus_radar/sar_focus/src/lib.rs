@@ -14,5 +14,9 @@ pub mod ephem;
 pub mod chirp;
 #[path = "05_range.rs"]
 pub mod range;
+#[path = "06_rda.rs"]
+pub mod rda;
+#[path = "07_tdbp.rs"]
+pub mod tdbp;
 
 pub use types::Error;

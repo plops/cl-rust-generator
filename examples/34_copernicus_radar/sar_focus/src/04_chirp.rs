@@ -20,16 +20,40 @@ pub fn num_tx_samples(p: &ChirpParams) -> usize {
     (p.txpl_s * p.fs_hz) as usize
 }
 
-/// Ideale Chirp-Replika (in `f64` gerechnet, als `f32` abgelegt).
+/// Zeitachse der Produktions-Replika: zentriert, exakt im ADC-Raster
+/// (`t[i] = (i − (n−1)/2)/fs`, Chirp-Mitte auf Sample `(n−1)/2`).
+///
+/// SSFocus nimmt stattdessen `linspace(−TXPL/2, +TXPL/2, n)` (s.
+/// [`replica_linspace`]); dessen Schritt `TXPL/(n−1)` ist nie exakt `1/fs`
+/// (hier 21,327 ns statt 21,313 ns) — der Skalenfehler kostet ~18 % Peak
+/// und hebt die Sidelobes auf −6,6 dB (gemessen). Das ADC-Raster trifft die
+/// Echostützstellen exakt (volle Kohärenz, Sinc-Sidelobes −13,3 dB).
+pub fn replica_time(n: usize, fs_hz: f64) -> Vec<f64> {
+    (0..n)
+        .map(|i| (i as f64 - (n - 1) as f64 / 2.0) / fs_hz)
+        .collect()
+}
+
+/// Ideale Chirp-Replika auf der ADC-Zeitachse (in `f64` gerechnet).
 pub fn replica(p: &ChirpParams) -> Vec<Complex32> {
+    replica_on_grid(p, &replica_time(num_tx_samples(p), p.fs_hz))
+}
+
+/// SSFocus-wörtliche Replika (`linspace`, nur für die Gegenprobe).
+pub fn replica_linspace(p: &ChirpParams) -> Vec<Complex32> {
     let n = num_tx_samples(p);
+    let t: Vec<f64> = (0..n)
+        .map(|i| -p.txpl_s / 2.0 + p.txpl_s * i as f64 / (n - 1) as f64)
+        .collect();
+    replica_on_grid(p, &t)
+}
+
+fn replica_on_grid(p: &ChirpParams, t: &[f64]) -> Vec<Complex32> {
     let phi1 = p.txpsf_hz + p.txprr_hz_s * p.txpl_s / 2.0;
     let phi2 = p.txprr_hz_s / 2.0;
-    (0..n)
-        .map(|i| {
-            // linspace(-TXPL/2, +TXPL/2, n) — exakt wie SSFocus.
-            let t = -p.txpl_s / 2.0 + p.txpl_s * i as f64 / (n - 1) as f64;
-            let phase = 2.0 * std::f64::consts::PI * (phi1 * t + phi2 * t * t);
+    t.iter()
+        .map(|&ti| {
+            let phase = 2.0 * std::f64::consts::PI * (phi1 * ti + phi2 * ti * ti);
             Complex32::new(phase.cos() as f32, phase.sin() as f32)
         })
         .collect()
@@ -71,13 +95,31 @@ mod tests {
 
     #[test]
     fn replika_werte_gegen_explizite_formel() {
-        // Unabhängige Gegenprobe: Phase direkt aus t, φ₁, φ₂.
+        // Unabhängige Gegenprobe: Phase direkt aus t, φ₁, φ₂ (ADC-Raster).
         let p = s6();
         let r = replica(&p);
         let n = r.len();
         let phi1 = p.txpsf_hz + p.txprr_hz_s * p.txpl_s / 2.0;
         let phi2 = p.txprr_hz_s / 2.0;
         for &i in &[0usize, 1, n / 4, n / 2, 3 * n / 4, n - 1] {
+            let t = (i as f64 - (n - 1) as f64 / 2.0) / p.fs_hz;
+            let ph = 2.0 * std::f64::consts::PI * (phi1 * t + phi2 * t * t);
+            assert!((r[i].re as f64 - ph.cos()).abs() < 1e-6, "i={i}");
+            assert!((r[i].im as f64 - ph.sin()).abs() < 1e-6, "i={i}");
+        }
+        // Mitte exakt bei t = 0 (ungerades ntx = 2397).
+        assert_eq!(replica_time(n, p.fs_hz)[n / 2], 0.0);
+    }
+
+    #[test]
+    fn linspace_transkription_wie_ssfocus() {
+        // SSFocus-Formel wörtlich: exp(2jπ(φ₁t + φ₂t²)) auf linspace-Achse.
+        let p = s6();
+        let r = replica_linspace(&p);
+        let n = r.len();
+        let phi1 = p.txpsf_hz + p.txprr_hz_s * p.txpl_s / 2.0;
+        let phi2 = p.txprr_hz_s / 2.0;
+        for &i in &[0usize, n / 2, n - 1] {
             let t = -p.txpl_s / 2.0 + p.txpl_s * i as f64 / (n - 1) as f64;
             let ph = 2.0 * std::f64::consts::PI * (phi1 * t + phi2 * t * t);
             assert!((r[i].re as f64 - ph.cos()).abs() < 1e-6, "i={i}");
