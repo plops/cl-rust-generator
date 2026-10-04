@@ -1,0 +1,21 @@
+[package]
+name = "sar_focus"
+version = "0.1.0"
+edition = "2024"
+description = "Sentinel-1 Stripmap SAR focusing (range compression + RDA/TDBP azimuth) with CPU reference and GPU pipeline"
+license = "MIT"
+
+[workspace]
+
+[dependencies]
+# Same pinned revision as the verified sar_tdbp template.
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "a0cc6cc0bc18722ec5cdfbea136c118a7c051977" }
+cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "a0cc6cc0bc18722ec5cdfbea136c118a7c051977" }
+cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "a0cc6cc0bc18722ec5cdfbea136c118a7c051977" }
+# Sibling crate: reuse the L0 decoder as a library (headers, mmap, FDBAQ).
+copernicus-radar = { path = ".." }
+rustfft = "6.4"
+num-complex = "0.4"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[build-dependencies]
