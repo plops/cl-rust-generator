@@ -1,0 +1,188 @@
+**Rolle & Umgebung:**
+
+Du läufst in einem Docker-Image mit Ubuntu auf einem Linux-Host mit
+NVIDIA-GPU (RTX A4000, 16 GB, `cargo-oxide 0.2.1` installiert).
+Falls dir Pakete fehlen, installiere sie selbstständig. Du arbeitest
+im Auftrag von wol pumba (wolpumba@gmail.com).
+
+Das Ziel ist, aus den dekodierten rohen SAR-Echos ein fokussiertes
+Radarbild zu rechnen — auf der GPU. Die Kette ist: rohe Space Packets
+(bereits dekodierbar, siehe unten) → Range-Kompression der Chirps
+(Matched Filter) → Azimut-Fokussierung (Time-Domain-Backprojection
+auf der GPU, Ansatz aus `32_cuda-rust` wiederverwenden) → Bild
+(dB-skaliert, PNG-Quicklook).
+
+## Ausgangslage
+
+1. **Dekodierer (fertig):** `examples/34_copernicus_radar/` liest eine
+   Sentinel-1-Level-0-`.dat`-Datei und liefert pro Puls die komplexen
+   Range-Samples (noch **unfokussiert**: weder Chirp-komprimiert noch
+   azimut-fokussiert) plus Header-Tabellen (`o_range.csv` mit
+   Chirp-Parametern `txpsf`/`txpl`/`txprr`, `swst`, `data_delay`).
+   Doku: `plan/20261004_01_rust_port/walkthrough.md`.
+   Nutze den Dekodierer als Bibliothek oder lies seine `.cf`-Dateien.
+
+2. **GPU-TDBP (fertig, aber nur simuliert):** `examples/32_cuda-rust/sar_tdbp/`
+   rechnet Time-Domain-Backprojection mit `cuda-oxide` (nightly-Toolchain,
+   siehe `rust-toolchain.toml` dort), inkl. CPU-Referenz, Headless-PNG,
+   GUI und Benchmark. Lies unbedingt
+   `32_cuda-rust/plan/20261004_01_sar_tdbp/walkthrough.md`: Dort stehen
+   die wiederverwendbaren Muster (Kernel-ABI, Upload-einmalig,
+   `pulse_limit`-Apertur) und die Fallstricke (Nadir→Seitenblick,
+   Azimut-Abtasttheorem, „Nahbereich oben", ungerade Test-Grids,
+   eigener `Complex32` statt Fremd-Crate auf dem Device,
+   libdevice-Rundungsdifferenzen).
+
+3. **Daten (echt):** `examples/34_copernicus_radar/data/` enthält das
+   S1C-Produkt (Stripmap S6, 2026-09-29): `.SAFE.zip`, extrahierte
+   VV-Dateien (`*.dat`, `*-annot.dat`, `*-index.dat`) und
+   `2026-10-04-220713_467x696_scrot.png` — ein Low-Resolution-Screenshot
+   einer Referenz-Rekonstruktion (Region Santos/São Paulo, Brasilien):
+   Schiffe als helle Punkte auf dunklem Meer, Land mit Stadt und Wald.
+   Dieses PNG ist die **visuelle Zielvorstellung**: Dein Bild muss
+   dieselben Strukturen zeigen (helle Punktziele im Meer, Küstenlinie,
+   Landtextur). Es ist geokodiert über eine Basiskarte gelegt — deins
+   muss das nicht sein (siehe Nicht-Ziele), also kein Pixel-Vergleich,
+   sondern Strukturvergleich.
+
+4. **Referenz-Dokus (in diesem Plan-Ordner, per DeepWiki vertieft):**
+   `l0-processing.md` (SentiWiki: L0/L1-Verarbeitung) und
+   `l0-processor-github.md` (Steckbriefe zu `dm6718/RITSAR` und
+   `sirbastiano/SSFocus`). Wichtigste Funde:
+   - SentiWiki bestätigt: Noise- und Kalibrierdaten nutzen BAQ5 (passt
+     zu unseren 16 `baq_mode=5`-Paketen); SLC-Fokussierung ist
+     Range-Doppler mit hyperbolischer Range-Gleichung, RCMC in
+     Range-/Azimut-Frequenz, phasenerhaltend.
+   - SSFocus (`SARProcessor/focus.py`) liefert die einsatzbereiten
+     Filterformeln: Chirp-Replika `exp(2jπ(φ₁t + φ₂t²))` mit
+     `φ₁ = TXPSF + TXPRR·TXPL/2`, `φ₂ = TXPRR/2`; RCMC-Phasenfilter
+     mit D-Faktor aus Wellenlänge, Azimutfrequenz und effektiver
+     Geschwindigkeit; Azimut-Matched-Filter aus `slant_range_vec`.
+     Input: 2D-komplex (Azimut × Range) — exakt unser `.cf`-Format.
+     Chunking via `split_radar_data`/`get_partition` als
+     Streaming-Vorbild; Torch-Backend als GPU-FFT-Vorbild.
+   - RITSAR (`imgTools`) liefert die Backprojection-Familie (plain BP
+     → DSBP → FFBP) plus das Adapter-Rezept für Stripmap: `phs`-Matrix
+     plus `platform`-Dict mit Position pro Puls, `f_0`, `chirprate`,
+     `k_r`, `R_c`. FFBP ist die effiziente Alternative zu plain-TDBP
+     für große Szenen.
+
+## Umfang
+
+- **Metadaten-Mapping (liegt bereit):** `TXPSF`/`TXPL`/`TXPRR`/`SWST`/
+  `PRI`/`RGDEC`/`Rank` aus `o_range.csv` speisen Range-Filter und
+  `slant_range_vec`; Orbit-Ephemeriden (ECEF-Position/Geschwindigkeit)
+  aus `*-annot.dat` liefern effektive Geschwindigkeit und
+  Antennenpositionen. Alle Feldnamen sind in `header.rs` dokumentiert.
+- **Range-Kompression:** Chirp-Replika nach SSFocus-Formel
+  (`φ₁ = TXPSF + TXPRR·TXPL/2`, `φ₂ = TXPRR/2`), Matched Filter pro
+  Echo (GPU; CPU-Referenz zum Vergleich). Empfohlen: Replika aus den
+  520 dekodierten Kalibrierpulsen rekonstruieren statt idealem Chirp
+  (SentiWiki: interne Kalibrierung).
+- **Doppler-Centroid-Schätzung (Pflicht):** Azimut-Spektrumsmitte aus
+  Orbit/Lage + Feinschätzung aus den Daten (SentiWiki-Verfahren),
+  als Input für den Azimut-Filter. Ohne sie sitzt die Signalenergie
+  falsch im Doppler-Spektrum.
+- **Azimut-Fokussierung:** Primär TDBP auf der GPU (Muster aus
+  `sar_tdbp`; Start mit gerader Bahn, dann Orbitpositionen).
+  Vergleichsarm: Range-Doppler nach SSFocus (`focus.py`: 2D-FFT →
+  Range-Filter → RCMC → Azimut-Filter → iFFT). RITSAR-FFBP als
+  weitere Option, falls plain-TDBP zu langsam ist.
+- **Ausgabe:** komplexes Slant-Range-Bild (`.cf` oder NPY-ähnlich)
+  plus PNG-Quicklook (Betrag, dB, Farbtabelle) und gern die
+  TDBP-GUI-Muster (Apertur-Schieberegler, Schnitte) wiederverwenden.
+  Streaming-fähig bauen (volle 44.917 Echos statt 512er-Cap),
+  Chunking nach SSFocus-Vorbild.
+
+## Nicht-Ziele (ausdrücklich)
+
+- **Kein Geokodieren, keine Terrain-Korrektur.** Koordinaten und Berge
+  werden nicht entzerrt; Slant-Range-Geometrie genügt.
+- Keine radiometrische Kalibrierung (optional, falls trivial).
+- Zuerst nur VV-Polarisation; VH/Dual-Pol später.
+
+## Code-Anforderungen
+
+Lege das neue Crate als `sar_focus/` in `examples/34_copernicus_radar/`
+an (nah an Daten und Dekodierer), mit eigener Toolchain-Pinning-Datei
+und Workspace-Abgrenzung wie `sar_tdbp`. Du sollst direkt Rust-Code
+erzeugen (kein Transpiler-Input).
+
+Ich möchte kleinen/übersichtlichen und effizienten Code und möglichst
+wenig Abhängigkeiten. Datei-Aufteilung wie gehabt: nummerierte Module
+in Datenflussreihenfolge (`01_...`, `02_...`), keine Datei über ca.
+300 Zeilen mit mehr als einer Zuständigkeit, `lib.rs`/`main.rs` nur
+Deklarationen und Verdrahtung. Vorgehensweise: `cargo fmt`, `cargo
+clippy` (Ziel: `--all-targets -- -D warnings` grün), neueste
+Dependency-Versionen.
+
+Der Datensatz (~1,8 GB mit Zip) darf **niemals** committet werden
+(`.gitignore` beachten); Tests müssen ohne ihn grün bleiben.
+
+## Tests
+
+- **Physik-Tests (CPU):** Simuliertes Punktziel (Chirp + bekannte
+  Geometrie) muss nach Kompression+Fokussierung exakt auf seinem Pixel
+  liegen; PSF-Breiten (Range/Azimut) gegen Theorie prüfen.
+- **GPU-gegen-CPU-Vergleich (Pflicht):** Jede GPU-Rechnung braucht eine
+  schlichte CPU-Referenz mit Schranke für die maximale relative
+  Abweichung (Vorbild: TDBP-Tabelle, dort 2,4·10⁻⁴).
+- **Filter-Gegenprobe:** Range-, RCMC- und Azimut-Filter auf kleinen
+  Arrays gegen die SSFocus-Referenzformeln prüfen (Wertevergleich,
+  nicht nur Form); bei Bedarf per DeepWiki (`sirbastiano/SSFocus`,
+  `dm6718/RITSAR`) und SentiWiki-ATBDs nachschlagen.
+- **E2E auf Echtdaten:** Fokussiertes Bild der VV-Datei zeigen —
+  quantitativ (Energie/Kontrast-Kennzahlen) und qualitativ (Quicklook
+  mit Schiffen/Küste/Land wie im Referenz-PNG, per Augenschein plus
+  abgelegtem PNG-Artefakt).
+- Gates: `cargo test`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo fmt --check` (jeweils im neuen Crate; `cargo oxide ...`
+  wo nötig).
+
+## Plan
+
+Schreibe einen Implementierungsplan. Dieser Implementierungsplan soll
+einen unabhängigen AI-Agenten dazu befähigen, selbstständig einen
+Kontext aufzubauen, der die wesentlichen Quellen beinhaltet. Das
+heisst, der Implementierungsplan hat eine Liste von Dateien, die der
+Agent sich anschauen sollte, mit einer kurzen Beschreibung für jede
+Datei. Weiterhin soll der Implementierungsplan erklären, wie Commit
+Messages gesendet werden sollen. Und zwar sollen diese mit einer
+umfassenden Beschreibung und als Conventional Commit formatiert
+ausgeführt werden.
+
+Lege den Plan als `plan.md` neben diese `prompt.txt` in
+`plan/20261004_02_gpu_decode_sar/`.
+
+## Dokumentation am Ende
+
+Nach der vollständigen Implementierung, wenn alle Tests abgeschlossen
+sind, soll auch ein Walkthrough-Dokument geschrieben und als
+`walkthrough.md` im selben Ordner abgelegt werden. Dieses soll
+zusammenfassen, was wirklich implementiert wurde (Kompression,
+Fokussierung, GPU-Anbindung, Verifikation gegen Referenz-PNG), welche
+Stellen aufgrund der Tests anders gemacht wurden als geplant, dazu
+Learnings und mögliche Erweiterungen. Liste auch die neuen Programme,
+die mit in den Docker-Container aufgenommen werden sollten.
+
+Lege für den ausführenden Agenten folgende strikte Regeln für das
+Schreiben dieses Dokuments fest:
+- **Sprache und Stil:** Das Dokument *muss zwingend auf Deutsch*
+  verfasst sein. Es soll den Leser didaktisch gut abholen, mitnehmen
+  und flüssig lesbar sein.
+- **Erklärungen:** Fachbegriffe müssen kurz und verständlich erklärt
+  werden (Chirp, Matched Filter, Slant Range, Azimut, TDBP, dB …).
+- **Visualisierung:** Verwende reichlich Code-Beispiele und nutze
+  **Mermaid-Diagramme**, um die Architektur, den Datenfluss und
+  komplexe Konzepte visuell zu veranschaulichen. Lege Quicklook-PNGs
+  als Artefakte ab und verlinke sie.
+- **Inhaltliche Struktur:**
+  1. Was exakt implementiert wurde.
+  2. Welche Architektur-Entscheidungen aufgrund von Tests spontan
+     geändert werden mussten.
+  3. Learnings und mögliche zukünftige Erweiterungen.
+  4. Eine Liste der neuen Programme/Pakete, die dauerhaft in das
+     Dockerfile aufgenommen werden sollten.
+
+Halte außerdem den Token-Verbrauch der Session in `plan_effort.md` im
+selben Ordner fest (Input/Output/Cached/Total, Turns, Subagents).
