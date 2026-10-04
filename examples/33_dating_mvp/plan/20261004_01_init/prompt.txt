@@ -84,6 +84,7 @@ Da das Frontend auf HTMX basiert und asynchrone DOM-Updates durchführt, müssen
 ## Externe Dokumentation & DeepWiki MCP
 * Führe eine `deps.md`, in der alle Abhängigkeiten in der Notation `<organization>/<project>` erfasst sind.
 * Nutze das DeepWiki MCP gezielt, um aktuelle Usage-Examples für Crates wie `axum`, `sqlx` oder `askama`/`htmx` zu suchen, bevor du rätst.
+* Lies deps-proposal.md und deps-details.md fuer einen ersten ueberblick ueber moeglich dependencies
 
 ## Planung & Umsetzung (Die 3 Pflichtdokumente)
 1. **Implementierungsplan (`plan.md`):**
