@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Anti-Tinder MVP{% endblock %}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+<script src="/static/htmx.min.js"></script>
+</head>
+<body>
+<main class="container">
+<nav>
+<ul><li><strong><a href="/">Anti-Tinder</a></strong></li></ul>
+<ul>
+<li><a href="/matches">Matches</a></li>
+<li><a href="/profile/edit">Profil</a></li>
+<li><a href="/login">Login</a></li>
+<li><a href="/register">Registrieren</a></li>
+</ul>
+</nav>
+{% block content %}{% endblock %}
+<hr>
+<footer><small>Anti-Tinder MVP: Matching statt Swiping. Kein In-App-Chat &mdash; bei Match geht es per Signal weiter.</small></footer>
+</main>
+</body>
+</html>

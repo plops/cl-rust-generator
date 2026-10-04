@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Zahlung &mdash; Anti-Tinder{% endblock %}
+{% block content %}
+<h1>Einmalgebühr: {{ price_label }}</h1>
+<p>Konto: <strong>{{ email }}</strong></p>
+{% if real_stripe %}
+<p><mark>Echter Stripe-Key konfiguriert (Preis {{ price_id }}) &mdash; Produktiv-Checkout folgt in der nächsten Ausbaustufe. Für dieses MVP wird die Zahlung simuliert.</mark></p>
+{% else %}
+<p><small>Testmodus: Die Zahlung wird simuliert, es fließt kein echtes Geld.</small></p>
+{% endif %}
+<form id="pay-form" method="post" action="/pay/confirm">
+<input type="hidden" name="session" value="{{ session_id }}">
+<button type="submit">10&nbsp;&euro; zahlen (Testmodus)</button>
+</form>
+<p><a href="/pay/cancel">Abbrechen</a></p>
+{% endblock %}

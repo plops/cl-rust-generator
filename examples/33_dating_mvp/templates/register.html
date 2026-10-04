@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Registrieren &mdash; Anti-Tinder{% endblock %}
+{% block content %}
+<h1>Registrieren</h1>
+<p>Einmalige Gebühr von <strong>10&nbsp;&euro;</strong> hält Bots und Scammer fern. Danach: Profil anlegen, täglich 5 Matches erhalten.</p>
+{% if error.is_some() %}<p><mark>{{ error.as_ref().unwrap() }}</mark></p>{% endif %}
+<form id="register-form" method="post" action="/register">
+<label>E-Mail <input type="email" name="email" required autocomplete="email"></label>
+<label>Passwort (min. 8 Zeichen) <input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+<button type="submit">Weiter zur Zahlung</button>
+</form>
+<p><small>Bereits dabei? <a href="/login">Einloggen</a></small></p>
+{% endblock %}

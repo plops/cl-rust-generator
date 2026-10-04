@@ -1,0 +1,15 @@
+{% if computed_today %}
+<p id="matches-fresh"><small>Stand: heute, max. 5 Profile.</small></p>
+{% endif %}
+{% if matches.is_empty() %}
+<p id="no-matches">Noch keine passenden Profile heute. Lege dein Profil vollständig an und versuche es morgen erneut &mdash; oder rechne neu.</p>
+{% else %}
+{% for m in matches %}
+<article class="match-card" data-user="{{ m.user_id }}">
+<header><strong>{{ m.first_name }}, {{ m.age }}</strong> &middot; {{ m.mbti }} &middot; {{ m.job_title }}</header>
+<p>Match-Score: <strong>{{ m.score }}&nbsp;%</strong></p>
+<p><a href="/profile/{{ m.user_id }}">Profil ansehen</a></p>
+<form method="post" action="/like/{{ m.user_id }}"><button type="submit">Liken</button></form>
+</article>
+{% endfor %}
+{% endif %}

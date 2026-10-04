@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Deine Matches &mdash; Anti-Tinder{% endblock %}
+{% block content %}
+<h1>Deine Top-5 des Tages</h1>
+<p><small>Maximal 5 Profile pro Tag &mdash; in Ruhe entscheiden statt swipen.</small></p>
+<form method="post" action="/matches/recompute" style="margin-bottom:1rem">
+<button type="submit" class="secondary">Neu berechnen</button>
+</form>
+<div id="matches-list" hx-get="/matches/list" hx-trigger="load" hx-swap="innerHTML">
+<p><em>Matches werden geladen&hellip;</em></p>
+</div>
+{% endblock %}

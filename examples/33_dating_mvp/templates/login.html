@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Login &mdash; Anti-Tinder{% endblock %}
+{% block content %}
+<h1>Login</h1>
+{% if error.is_some() %}<p><mark>{{ error.as_ref().unwrap() }}</mark></p>{% endif %}
+<form id="login-form" method="post" action="/login">
+<label>E-Mail <input type="email" name="email" required autocomplete="email"></label>
+<label>Passwort <input type="password" name="password" required autocomplete="current-password"></label>
+<button type="submit">Einloggen</button>
+</form>
+<p><small>Noch kein Konto? <a href="/register">Registrieren</a></small></p>
+{% endblock %}

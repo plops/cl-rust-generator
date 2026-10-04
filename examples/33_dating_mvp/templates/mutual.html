@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Match mit {{ other_name }} &mdash; Anti-Tinder{% endblock %}
+{% block content %}
+<h1>Es passt &mdash; {{ other_name }} mag dich auch</h1>
+<p>Ab hier geht es <strong>außerhalb</strong> weiter: Wir haben keinen Chat, dafür direkten Draht per Signal.</p>
+<dl id="signal-exchange">
+<dt>Signal-Kontakt von {{ other_name }}</dt><dd><strong id="their-signal">{{ their_signal }}</strong></dd>
+<dt>Dein hinterlegter Signal-Kontakt</dt><dd id="my-signal">{{ my_signal }}</dd>
+</dl>
+<p><a id="signal-button" href="https://signal.me/" role="button">Chat via Signal</a>
+<a href="/matches" role="button" class="secondary">Zurück zu Matches</a></p>
+{% endblock %}

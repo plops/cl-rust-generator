@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{% if success %}Zahlung erfolgreich{% else %}Zahlung abgebrochen{% endif %} &mdash; Anti-Tinder{% endblock %}
+{% block content %}
+<h1>{% if success %}Zahlung erfolgreich{% else %}Abgebrochen{% endif %}</h1>
+<p>{{ message }}</p>
+{% if success %}
+<p><a href="/profile/edit" role="button">Profil anlegen</a></p>
+{% else %}
+<p><a href="/pay/checkout" role="button">Erneut versuchen</a></p>
+{% endif %}
+{% endblock %}

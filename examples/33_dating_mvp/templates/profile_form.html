@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{% if is_new %}Profil anlegen{% else %}Profil bearbeiten{% endif %} &mdash; Anti-Tinder{% endblock %}
+{% block content %}
+<h1>{% if is_new %}Profil anlegen{% else %}Profil bearbeiten{% endif %}</h1>
+<p><small>Felder mit <span class="vault" title="Nur für den Algorithmus, verschlüsselt gespeichert">&#128274; Tresor</small> sind für andere unsichtbar und dienen nur dem Matching.</small></p>
+{% if error.is_some() %}<p><mark>{{ error.as_ref().unwrap() }}</mark></p>{% endif %}
+<form id="profile-form" method="post" action="/profile">
+<label>Vorname <input type="text" name="first_name" value="{{ first_name }}" required></label>
+<label>Alter <input type="number" name="age" value="{{ age }}" min="18" max="120" required></label>
+<label>Geschlecht
+<select name="gender">
+{% for o in genders %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>
+{% endfor %}</select></label>
+<label>Wen suchst du?
+<select name="looking_for">
+{% for o in looking_fors %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>
+{% endfor %}</select></label>
+<label>MBTI-Typ
+<select name="mbti">
+{% for o in mbtis %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>
+{% endfor %}</select></label>
+<label>Hobbys (kommagetrennt) <input type="text" name="hobbies" value="{{ hobbies }}" placeholder="Klettern, Kochen, Lesen"></label>
+<label>Beruf <input type="text" name="job_title" value="{{ job_title }}"></label>
+<label>Familienplanung
+<select name="family_plan">
+{% for o in family_plans %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>
+{% endfor %}</select></label>
+<label>Über mich (ohne Links/Kontaktdaten) <textarea name="bio" maxlength="500">{{ bio }}</textarea></label>
+<label>Foto-URL <input type="url" name="photo_url" value="{{ photo_url }}" placeholder="https://&hellip;"></label>
+<fieldset>
+<legend>&#128274; Tresor &mdash; nur für den Algorithmus</legend>
+<label>Signal-Name oder Telefonnummer (wird erst bei Match gezeigt) <input type="text" name="signal_contact" autocomplete="off"></label>
+<label>Einkommensstufe
+<select name="income">
+<option value="">(leer lassen)</option>
+<option value="low">eher niedrig</option>
+<option value="medium">mittel</option>
+<option value="high">eher hoch</option>
+</select></label>
+<label>Vermögensstufe
+<select name="wealth">
+<option value="">(leer lassen)</option>
+<option value="low">eher niedrig</option>
+<option value="medium">mittel</option>
+<option value="high">eher hoch</option>
+</select></label>
+<label>Intime Präferenzen (Freitext, verschlüsselt) <input type="text" name="intimate_prefs" autocomplete="off"></label>
+</fieldset>
+<label>Deine Einkommenserwartung ans Gegenüber
+<select name="income_expectation">
+{% for o in income_expectations %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>
+{% endfor %}</select></label>
+<button type="submit">Profil speichern</button>
+</form>
+{% endblock %}

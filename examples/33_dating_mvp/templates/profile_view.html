@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ profile.first_name }} &mdash; Anti-Tinder{% endblock %}
+{% block content %}
+<article id="profile-card">
+<header><h1>{{ profile.first_name }}, {{ profile.age }}</h1>
+<p>{{ profile.mbti }} &middot; {{ profile.job_title }}</p></header>
+<dl>
+<dt>Familienplanung</dt><dd>{{ profile.family_plan }}</dd>
+<dt>Hobbys</dt><dd>{% for h in profile.hobbies %}{{ h }}{% if !loop.last %}, {% endif %}{% endfor %}</dd>
+<dt>Über mich</dt><dd>{{ profile.bio }}</dd>
+{% if own_stats.is_some() %}<dt>Statistik</dt><dd>{{ own_stats.as_ref().unwrap() }}</dd>{% endif %}
+{% if profile.has_vault %}
+<dt>Verschlüsselte Angaben</dt><dd><span class="vault" title="Einkommen, Vermögen, Präferenzen: nur für den Algorithmus">&#128274; Tresor &mdash; nur für den Algorithmus sichtbar</span></dd>
+{% endif %}
+</dl>
+{% if is_own %}
+<p><a href="/profile/edit" role="button" class="secondary">Profil bearbeiten</a></p>
+{% else if is_mutual %}
+<p><a href="/mutual/{{ profile.user_id }}" role="button">Chat via Signal</a></p>
+{% else if liked_by_viewer %}
+<p><em>Du hast dieses Profil gelikt. Bei Gegenliebe erscheint hier der Signal-Kontakt.</em></p>
+{% else %}
+<form method="post" action="/like/{{ profile.user_id }}"><button type="submit">Liken</button></form>
+{% endif %}
+</article>
+{% endblock %}
