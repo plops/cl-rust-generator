@@ -1,0 +1,292 @@
+# Synthetic Aperture Radar (SAR): Time-Domain Backprojection (TDBP)
+*Ein Paradebeispiel für Signalverarbeitung mit massiver Parallelisierung.*
+
+* **Das Problem:** Bei der TDBP-Bildrekonstruktion muss für jedes Pixel $(x, y)$ im Zielgebiet der Abstand zu jeder Antennenposition $(x_a, y_a, z_a)$ berechnet, das zugehörige Rohsignal-Chirp interpoliert und phasenrichtig akkumuliert werden:
+  $$I(x, y) = \sum_{p} s_p\left(\tau_p(x, y)\right) \cdot e^{j \omega_0 \tau_p(x, y)}$$
+* **Warum es sich für dein Setup eignet:**
+  * **Mit `cuda-oxide`:** Jedes Pixel wird von einem Rust-Thread berechnet. Du kannst Rusts mathematische Typen (`Complex<f32>`) direkt im `#[kernel]` nutzen.
+  * **Mit `cutile-rs`:** Das 2D-Zielbild wird in disjunkte Kacheln (Tiles) zerlegt. Die Antennen-Pulspakete werden sequentiell geladen und gekachelt akkumuliert – ideal, um das Memory-Safety-Modell von `cutile-rs` ohne Data Races zu testen.
+  * **Async / Streams:** Über `cuda-async` streamst du kontinuierlich neue Radar-Sweeps auf die GPU, während der Akkumulations-Kernel läuft.
+
+setze diese  projekt ohne gemessene rohdaten an anschaulichen phantomsimulationen simulieren und visualisiere die ergebnisse mit  macroquad.
+
+Damit verifiziert man die **Punktspreizfunktion (PSF)**, die räumliche Auflösung (Range- und Azimuth-Resolution) sowie Nebenzipfel (Sidelobes).
+
+In Kombination mit **Macroquad** ergibt das ein interaktives Projekt: Du kannst zuschauen, wie sich das Bild mit jedem zusätzlichen Antennenpuls schärft und die synthetische Apertur "fokussiert".
+
+---
+
+### Der Ablauf in 4 Schritten
+
+```text
+[1. Phantom]           [2. Vorwärtssimulation]       [3. TDBP-Kernel (rust-cuda)]      [4. Macroquad UI]
+Diskrete Punkte   -->  Synthetische Pulse        -->  GPU akkumuliert Phasen       -->  Interaktives dB-Bild
+(z. B. "RUST")         (Range-Chirps erzeugen)        auf Pixelfeld (RTX A4000)         (Pan/Zoom, Colormaps)
+```
+
+---
+
+### 1. Das Phantom (Ground Truth)
+
+Ein Phantom besteht einfach aus einer Liste von 3D-Koordinaten mit einer komplexen Reflektivität $\sigma$:
+* **Idee A:** Ein $5 \times 5$-Gitter aus isolierten Punktstreuern (ideal, um Verzerrungen am Rand des Sichtfelds zu sehen).
+* **Idee B:** Ein Schriftzug wie `"RUST"` oder `"λ"`, zusammengesetzt aus 50–100 Einzelpunkten.
+
+```rust
+pub struct PointTarget {
+    pub x: f32, // Meter im Boden-Koordinatensystem
+    pub y: f32,
+    pub z: f32,
+    pub sigma: f32, // Radarquerschnitt / Amplitude
+}
+```
+
+---
+
+### 2. Die Vorwärtssimulation (Chirp-Echo-Erzeugung)
+
+Die Radarplattform (z. B. ein Flugzeug oder Satellit) fliegt auf Höhe $h$ entlang der $x$-Achse (Azimuth):
+* Für jeden Puls $p$ an Position $\mathbf{r}_p = (x_p, 0, h)$:
+  * Berechne für jeden Streuer $k$ den Abstand: $R_k(p) = \|\mathbf{r}_p - \mathbf{r}_k\|$.
+  * Die Zweiwege-Laufzeit ist $\tau_k = \frac{2 R_k(p)}{c}$.
+
+**Pragmatischer Trick für den Einstieg:**
+Statt die rohen, unkomprimierten Frequenz-Chirps zu simulieren und dann mühsam per Fast Convolution (FFT) im Range zu komprimieren, simulierst du direkt das **range-komprimierte Signal**. Das spart dir die Puls-Kompression und ist mathematisch exakt:
+
+$$s(p, t) = \sum_{k} \sigma_k \cdot \text{sinc}\left( B \cdot (t - \tau_k) \right) \cdot \exp\left( -j 2\pi f_0 \tau_k \right)$$
+
+* $B$: Bandbreite des Radars (bestimmt die Entfernungsauflösung $\Delta R = \frac{c}{2B}$).
+* $f_0$: Mittenfrequenz (z. B. X-Band $10\text{ GHz} \implies \lambda = 3\text{ cm}$).
+
+Das erzeugt eine Matrix `raw_data[num_pulses][num_fast_time_samples]` als komplexe Zahlen (`Complex<f32>`). Das kannst du in wenigen Millisekunden auf der CPU oder vorab auf der GPU berechnen.
+
+---
+
+### 3. Der Time-Domain Backprojection Kernel (`cuda-oxide`)
+
+Das ist der Kern deines GPU-Experiments. Jedes Pixel $(x, y)$ deines Ausgabebildes wird einem GPU-Thread zugewiesen.
+
+Auf der GPU läuft vereinfacht folgendes ab:
+
+```rust
+// Pseudocode im cuda-oxide Kernel
+#[kernel]
+pub unsafe fn tdbp_kernel(
+    raw_data: *const Complex<f32>,
+    platform_pos: *const Vec3,
+    output_image: *mut Complex<f32>,
+    width: u32,
+    height: u32,
+    num_pulses: u32,
+    lambda: f32,
+    c: f32,
+    dt: f32,
+    t0: f32,
+) {
+    let px = thread_idx_x() + block_idx_x() * block_dim_x();
+    let py = thread_idx_y() + block_idx_y() * block_dim_y();
+    if px >= width || py >= height { return; }
+
+    let pixel_pos = get_ground_coordinate(px, py);
+    let mut acc = Complex::new(0.0, 0.0);
+
+    for p in 0..num_pulses {
+        let ant_pos = *platform_pos.add(p as usize);
+        let dist = distance(ant_pos, pixel_pos);
+        let tau = 2.0 * dist / c;
+
+        // Schnelle lineare Interpolation im Range-Signal
+        let sample_idx = (tau - t0) / dt;
+        let signal = interpolate_sample(raw_data, p, sample_idx);
+
+        // Phasendrehung rückgängig machen (Fokussierung!)
+        let phase = 4.0 * PI * dist / lambda;
+        let matched_filter = Complex::new(phase.cos(), phase.sin());
+
+        acc += signal * matched_filter;
+    }
+
+    *output_image.add((py * width + px) as usize) = acc;
+}
+```
+
+* **Warum die A4000 hier glänzt:** Bei einem $1024 \times 1024$ Bild und $1000$ Pulsen sind das über **1 Milliarde komplexe Operationen**. Deine RTX A4000 berechnet das in wenigen Millisekunden.
+
+---
+
+### 4. Visualisierung mit Macroquad
+
+Macroquad ist für sowas ideal, weil es keine gigantische GUI-Engine mitschleppt. Du renderst das GPU-Ausgabearray direkt als dynamische Textur:
+
+```rust
+use macroquad::prelude::*;
+
+#[macroquad::main("SAR TDBP Simulation")]
+async fn main() {
+    let width = 512;
+    let height = 512;
+
+    // 1. Phantom & Rohdaten initialisieren
+    // 2. CUDA-Kontext & Kernel über cuda-core/cuda-oxide bereitstellen
+    let mut image = Image::gen_image_color(width, height, BLACK);
+    let texture = Texture2D::from_image(&image);
+
+    let mut current_pulse_limit = 10; // Ermöglicht "Live-Wachsen" der Apertur
+
+    loop {
+        clear_background(DARKGRAY);
+
+        // Optional: Interaktiv Pulse hinzunehmen (Taste RECHTS)
+        if is_key_pressed(KeyCode::Right) && current_pulse_limit < 1000 {
+            current_pulse_limit += 10;
+            // Starte Kernel auf A4000 mit Limit: current_pulse_limit
+            // Kopiere Ausgabearray von Device auf Host zurück
+            // update_image_pixels(&mut image, &device_output);
+            texture.update(&image);
+        }
+
+        // Texture zentriert zeichnen
+        draw_texture_ex(
+            &texture,
+            100.0, 50.0,
+            WHITE,
+            DrawTextureParams {
+                dest_size: Some(vec2(600.0, 600.0)),
+                ..Default::default()
+            },
+        );
+
+        draw_text(&format!("Apertur-Pulse: {}", current_pulse_limit), 20.0, 30.0, 24.0, WHITE);
+        draw_text("Druecke [RECHTS] fuer mehr Pulse", 20.0, 680.0, 20.0, LIGHTGRAY);
+
+        next_frame().await;
+    }
+}
+```
+
+#### Spannende Features, die du mit Macroquad einbauen kannst:
+1. **dB-Farbpalette (Viridis / Turbo / Heatmap):** Radarbilder werden logarithmisch dargestellt ($20 \log_{10}(|I| / I_{\max})$). Ein dynamischer Schwellwert-Slider (z. B. $-30\text{ dB}$ bis $0\text{ dB}$) filtert Rauschen und Nebenzipfel heraus.
+2. **Interaktive Apertur-Animation:** Lasse die Pulse einzeln durchlaufen. Du siehst live, wie aus bogenförmigen Hyperbeln scharfe Punkte werden.
+3. **Point Spread Function (PSF) Profil-Graph:** Klicke auf einen Punkt im Bild und zeichne darunter einen 1D-Schnitt durch die PSF, um die Haupt- und Nebenzipfelbreite (Sidelobe Ratio) zu vermessen.
+
+---
+
+### Praxishinweis: Macroquad & Docker
+
+Da dein CUDA-Code im Docker-Container läuft, gibt es für Macroquad (das ein X11/Wayland-Fenster benötigt) zwei saubere Wege um den code auszufuehren:
+
+* **Weg 1 (Alles im Docker-Container mit X11-Forwarding):**
+  Wenn du Docker mit deinem lokalen X11-Socket startest:
+  ```bash
+  docker run --gpus all \
+    -e DISPLAY=$DISPLAY \
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
+    ...
+  ```
+  Dann kann dein Rust-Binary das Macroquad-Fenster direkt aus dem Container auf deinem Desktop öffnen.
+* **Weg 2 (Trennung: Compute in Docker, UI auf dem Host):**
+  Wenn X11-Forwarding im Docker zickt: Schreibe die rekonstruierten Float-Frames in ein Shared-Memory-Segment (`/dev/shm`) oder eine `.bin`-Datei. Das Macroquad-Programm läuft nativ auf deinem Host und liest die Frames mit 60 FPS ein.
+
+
+Fuer die Entwicklung und tests im container sollst du xvfb nutzen.
+
+
+**Rolle & Umgebung:**
+
+Du läufst in einem Docker-Image mit Ubuntu 26 auf einem Linux-Host. Du
+hast Zugriff auf Kernel-Messages vom Host und auf USB-Geräte.
+Docker-Referenz:
+`/workspace/src/cl-cl-generator/example/05_dockerfile_meta/source01/examples/03_ai_env/Dockerfile`
+Falls dir Pakete fehlen, installiere sie selbstständig. Du arbeitest
+im Auftrag von wol pumba (wolpumba@gmail.com).
+
+## Code Anforderungen
+
+ich moechte kleinen/uebersichtlichen und effizienten code und
+moeglichst wenig abhaengigkeiten (aber baue nichts neu, was es besser
+in einer abhaengigkeit gibt).
+
+fuers testen kannst du xvfb installieren.
+
+in deps.md sollst du die pfade der abhaengigkeiten auf github in der
+<organization>/<projekt> notation auflisten. dies kannst du benutzen
+um in deepwiki mcp nach weiteren informationen zu suchen / fragen.
+
+ordnerstruktur: arbeite im ordner
+/workspace/src/cl-rust-generator/examples/32_cuda-rust/
+
+
+### anforderungen an den generierten rust code
+
+vorgehensweise: arbeite mit dem neuesten rust (2024). nutze tools um
+konsistenten und aufgeraeumten quellcode zu gewaehrleisten (also
+`cargo fmt` um formatierung zu normalisieren, `cargo clippy` um
+moegliche fehler oder verbesserungen zu finden, cargo-edit mit `cargo
+upgrade` um bei den abhaengigkeiten die neueste version zu verwenden,
+...)
+
+schreibe den code in rust (nicht in der lisp input language fur den
+cl-rust-generator transpiler)
+
+### zusatz dokumentation mit deepwiki
+
+Schaue dir den Quellcode an und die Architektur dieser Software. Nutze
+deepwiki mcp fuer plops/cl-cl-generator (fuer den transpiler frage
+nach dem polyglot generator) um dokumentation zu bekommen und fragen
+beantworten zu lassen. falls abhaengigkeiten eingefuehrt werden sind
+diese mitsamt ihrer github organisation in deps.md aufzuschreiben, so
+dass wir spaeter einfach die deepwiki abfragen konstruieren
+koennen. nutze rust tools um auf die neueste vorhandene version zu
+switchen (auch wenn vor kompatibilitaet gewarnt wird, wenn wir gerade
+eine dependency einfuehren ist es wichtig, die neueste version zu
+nehmen) und schon vorab usage examples in den plan aufzunehmen (mit
+deepwiki mcp zu erfragen)
+
+### gelegentlicher review
+
+Schlage vor, wie wir dieses Feature implementieren können. Habe ich
+alle Requirements aufgelistet, die wichtig sind, oder kannst du dir
+vorstellen, dass noch andere Dinge beachtet werden sollen? Liste mir diese auf
+als Vorschläge, was man am besten umsetzen könnte.
+
+Schreibe einen Implementierungsplan (z.B. in `plan.md`).
+Dieser Implementierungsplan soll einen unabhängigen AI-Agenten dazu befähigen,
+selbstständig einen Kontext aufzubauen, der die wesentlichen Quellen beinhaltet.
+Das heißt, der Implementierungsplan hat eine Liste von Dateien, die sich der Agent
+anschauen sollte, mit einer kurzen Beschreibung für jede Datei.
+Weiterhin soll der Plan die Architektur und Lösungsansätze skizzieren und
+Code-Beispiele (z.B. für Lisp-Makros) zeigen, ohne jedoch den kompletten Code
+vorwegzunehmen. Zudem soll der Plan erklären, wie Commit Messages formuliert
+werden sollen: Diese müssen eine umfassende Beschreibung haben und im
+"Conventional Commits"-Format verfasst werden.
+
+Schreibe zusätzlich eine `task.md`. Diese Datei hat eine orthogonale Aufgabe zum
+Implementierungsplan. In der `task.md` sollst du die Implementierungs- und Test-Schritte
+seriell aufeinander abfolgen lassen, sodass ein Agent die Tasks nacheinander
+abarbeiten kann und die Arbeit in jedem Schritt getestet und validiert wird.
+Die `task.md` referenziert die Abschnitte des Implementierungsplans.
+Jede Phase bekommt eigene Tasks (z. B. Lisp-Codegenerierung, lokaler Rust-Build,
+GUI-Tests mit xvfb, Netzwerk-Integration gegen den bereitgestellten Server).
+
+Neue Unit-Tests und Integration-Tests sollen wie erforderlich
+eingeführt werden. Diese sollen auch ausgeführt werden.
+
+### dokumentation nach abschluss der arbeiten
+
+Nach der vollständigen Implementierung, wenn alle Tests abgeschlossen
+sind und alles committed ist, soll auch ein Walkthrough-Dokument geschrieben
+werden und als `walkthrough.md` in dem Ordner abgelegt werden, in dem
+du diese `prompt.txt` Datei findest. Dieses Dokument soll zusammenfassen,
+was wirklich implementiert wurde, welche Architektur-Entscheidungen aufgrund von
+Tests spontan geändert werden mussten, sowie Learnings und mögliche
+Erweiterungen für die Zukunft.
+
+Lege für den ausführenden Agenten folgende strikte Regeln für das Schreiben dieses Dokuments fest:
+- **Sprache und Stil:** Das Dokument *muss zwingend auf Deutsch* verfasst sein. Es soll den Leser didaktisch gut abholen, mitnehmen und flüssig lesbar sein.
+- **Erklärungen:** Fachbegriffe müssen kurz und verständlich erklärt werden.
+- **Visualisierung:** Verwende reichlich Code-Beispiele und nutze **Mermaid-Diagramme**, um die Architektur, den Datenfluss und komplexe Konzepte visuell zu veranschaulichen.
+- **Inhaltliche Struktur:**
+  1. Was exakt implementiert wurde.
+  2. Welche Architektur-Entscheidungen aufgrund von Tests spontan geändert werden mussten.
+  3. Learnings und mögliche zukünftige Erweiterungen.
+  4. Eine Liste der neuen Linux-Programme/Pakete, die dauerhaft in das Dockerfile aufgenommen werden sollten.
