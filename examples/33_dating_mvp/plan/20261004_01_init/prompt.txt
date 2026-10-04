@@ -1,0 +1,94 @@
+# TEIL 1: AUFGABENSPEZIFISCHER TEIL
+
+# Anti-Tinder MVP: Eine effiziente, Privatsphäre-zentrierte Partnerbörse in Rust
+*Ein ressourcenschonendes System, das auf echtes Matching statt auf "Engagement-Baiting" ausgelegt ist.*
+
+* **Das Ziel:** Eine MVP-Webanwendung, die Nutzer basierend auf psychologischen Profilen (MBTI), Lebenszielen und Interessen zusammenbringt. Die Plattform soll Nutzer nicht binden, sondern erfolgreich vermitteln und dann verabschieden.
+* **Tech-Stack:** 
+  * **Backend:** Rust mit `axum` (für maximale Performance und geringen RAM-Bedarf).
+  * **Datenbank:** PostgreSQL via `sqlx` (Typsichere Queries).
+  * **Frontend:** `HTMX` kombiniert mit einer Rust-Templating-Engine (`Askama` oder `Tera` oder `Maud`), um SPA-Feeling ohne schweres JavaScript zu erzeugen. CSS über Tailwind oder ein minimalistisches Framework (z.B. PicoCSS).
+  * **Logging/Telemetrie:** `tracing` und `tracing-subscriber`, um Nutzerflüsse (Anonymisiert) und Fehlerstrukturen beim MVP-Start sauber zu erfassen.
+
+---
+
+### Kernkonzepte & Features
+
+#### 1. Datenmodell & Privatsphäre ("Sensible Defaults")
+Es gibt hochsensible Daten. Das System muss transparent kommunizieren, was sichtbar ist und was nur dem Algorithmus dient.
+* **Immer öffentlich (Sichtbar für Matches):** Profilfoto(s), Vorname, Alter, MBTI-Typ, Hobbies, Job-Titel, Familienplanung (Dealbreaker).
+* **Versteckt (Nur für den Algorithmus, UI zeigt ein "Tresor"-Symbol):** Einkommen, Vermögen, exakte sexuelle Vorlieben.
+* **Datenverschlüsselung:** Sensible "versteckte" Daten sollen in der PostgreSQL-Datenbank verschlüsselt abgelegt werden (z.B. AES-GCM / `chacha20poly1305` auf Applikationsebene vor dem DB-Insert).
+
+#### 2. Der Matching-Algorithmus (Weighted Scoring)
+Wir verzichten auf komplexe statische Algorithmen wie Gale-Shapley. Stattdessen implementieren wir einen dynamischen Score (0-100%):
+* **Harte Filter (Dealbreaker):** Alter, Geschlecht, Familienplanung (Kinderwunsch). Wer hier nicht passt $\to$ Score 0.
+* **Scoring:** 
+  * MBTI-Kompatibilitäts-Matrix (gibt x Punkte).
+  * Schnittmenge bei Hobbies/Interessen (gibt y Punkte).
+  * Passung bei den versteckten Attributen (z.B. Einkommenserwartung vs. reales Einkommen des anderen) (gibt z Punkte).
+* **Anti-Swiping:** Ein täglicher Cronjob (bzw. asynchroner Task) berechnet die Top 5 Matches für aktive Nutzer. Nutzer sehen maximal 5 Profile pro Tag.
+
+#### 3. Kommunikation (Off-Platform via Signal)
+* Implementiere **keinen** In-App-Chat!
+* Wenn zwei Nutzer sich liken (Match), wird beiden ein Button *"Chat via Signal"* angezeigt. Hierfür hinterlegt der Nutzer seine Telefonnummer oder seinen Signal-Nutzernamen (verschlüsselt in der DB). Das entlastet das System und schützt die Privatsphäre.
+
+#### 4. Anti-Abuse, Trust & Finanzierung
+Um das MVP vor Bots und Scammern zu schützen (da es keine Ads oder teure Abos gibt):
+* **Paywall-Eintrittsbarriere (Mock/Stripe):** Registrierung erfordert eine einmalige Gebühr (z.B. 10€). Implementiere einen Stripe-Checkout-Flow (fürs MVP reicht der Stripe-Testmodus).
+* **AI-Text-Check:** Profiltexte werden vor dem Speichern an eine günstige LLM-API gesendet (Mock für jetzt, bereit für OpenAI/Anthropic), um Werbung, OnlyFans-Links oder Spam zu filtern (gibt bool `is_clean` zurück).
+* **Rate Limiting:** `tower-governor` oder ähnliches nutzen, um API-Abuse zu verhindern.
+
+---
+
+# TEIL 2: GENERELLER TEIL (UMGEBUNG & QUALITÄTSSTANDARDS)
+
+**Rolle & Umgebung:**
+* Du läufst in einem Docker-Image mit Ubuntu 26 auf einem Linux-Host.
+* Docker-Referenz: `/workspace/src/cl-cl-generator/example/05_dockerfile_meta/source01/examples/03_ai_env/Dockerfile`.
+* Eine PostgreSQL-Datenbank steht dir via Docker/lokal zur Verfügung (richte bei Bedarf in deinen Tasks eine `docker-compose.yml` dafür ein).
+* Arbeitsverzeichnis: `/workspace/src/cl-rust-generator/examples/33_dating_mvp/`.
+* Du arbeitest im Auftrag von wol pumba (wolpumba@gmail.com).
+
+## Code-Anforderungen
+* Schreibe extrem sauberen, übersichtlichen und effizienten direkten Rust-Code (Rust Edition 2024). Kein Lisp-Transpiler-Input.
+* Werkzeuge zwingend nutzen: `cargo fmt`, `cargo clippy`, und `cargo upgrade` (für stets aktuelle Abhängigkeiten, beachte aber Breaking Changes).
+* Bevorzuge kleine, bewährte Crates statt monolithischer Frameworks, wo möglich.
+
+## Datei-Aufteilung (verbindlich)
+* Lange Quelldateien (> 600 Zeilen) oder Dateien mit gemischten Zuständigkeiten sind verboten.
+* Dateinamen beginnen mit einer zweistelligen Nummer, die dem logischen Init/Datenfluss folgt.
+* Beispiel-Struktur:
+  * `01_config.rs` (Umgebungsvariablen, Secrets)
+  * `02_db.rs` (Postgres Pool, Verschlüsselungs-Hilfsfunktionen)
+  * `03_models.rs` (User, Match, Structs mit Sichtbarkeits-Flags)
+  * `04_scoring.rs` (Der Weighted-Scoring Algorithmus)
+  * `05_handlers_auth.rs` (Login, Stripe-Mock)
+  * `06_handlers_profile.rs` (Profil anlegen, HTMX Views)
+  * `07_telemetry.rs` (Tracing/Logging Setup)
+* `main.rs` enthält nur Modul-Deklarationen, Konfigurations-Laden und das Starten des Axum-Servers.
+
+## Externe Dokumentation & DeepWiki MCP
+* Führe eine `deps.md`, in der alle Abhängigkeiten in der Notation `<organization>/<project>` erfasst sind.
+* Nutze das DeepWiki MCP gezielt, um aktuelle Usage-Examples für Crates wie `axum`, `sqlx` oder `askama`/`htmx` zu suchen, bevor du rätst.
+
+## Planung & Umsetzung (Die 3 Pflichtdokumente)
+1. **Implementierungsplan (`plan.md`):**
+   * Muss einen unabhängigen AI-Agenten befähigen, sofort den Kontext zu verstehen.
+   * Liste aller geplanten Dateien mit Kurzbeschreibung.
+   * Datenbankschema als Mermaid ER-Diagramm.
+   * Definiert die Commit-Regeln: Zwingend **Conventional Commits** mit detaillierter Beschreibung.
+2. **Aufgabenliste (`task.md`):**
+   * Schritt-für-Schritt Abarbeitung, beginnend bei DB/Modellen, über den Algorithmus bis zum Axum/HTMX-Frontend.
+   * Jeder Schritt muss einen Test-Nachweis enthalten (Unit-Tests für den Scoring-Algorithmus sind zwingend!). Erst wenn grün, geht es weiter.
+3. **Dokumentation nach Abschluss (`walkthrough.md`):**
+   * Nach vollständiger Implementierung im Verzeichnis `plan/walkthrough.md` abzulegen.
+   * **Sprache & Didaktik:** Zwingend auf **Deutsch**, flüssig lesbar, Fachbegriffe (wie HTMX, Weighted Scoring) kurz erklärt. Hohle den Leser ab und nimm ihn mit. Nutze Beispiele und Diagramme zur Veranschaulichung.
+   * **Visualisierung:** Mindestens ein Mermaid-Diagramm zum Architektur-Aufbau (Axum $\leftrightarrow$ Postgres $\leftrightarrow$ HTMX) und zum User-Flow (Anmeldung $\to$ AI-Check $\to$ Match $\to$ Signal).
+   * **Inhalt:**
+     1. Was exakt implementiert wurde.
+     2. Architektur-Entscheidungen, die spontan (z.B. wegen Rust-Borrow-Checker oder SQLx-Eigenheiten) getroffen wurden.
+     3. Learnings und nächste Ausbaustufen.
+     4. Liste nötiger CLI-Tools / Pakete (z.B. `sqlx-cli`, `stripe-cli`), die ins Dockerfile müssen.
+
+Bitte starte nun mit der Analyse, stelle Rückfragen falls nötig, und beginne dann mit der Erstellung von `plan.md` und `task.md`.
