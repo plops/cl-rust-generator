@@ -55,6 +55,19 @@ Um das MVP vor Bots und Scammern zu schützen (da es keine Ads oder teure Abos g
 * Werkzeuge zwingend nutzen: `cargo fmt`, `cargo clippy`, und `cargo upgrade` (für stets aktuelle Abhängigkeiten, beachte aber Breaking Changes).
 * Bevorzuge kleine, bewährte Crates statt monolithischer Frameworks, wo möglich.
 
+## End-to-End (E2E) & Frontend-Integrationstests
+Da das Frontend auf HTMX basiert und asynchrone DOM-Updates durchführt, müssen echte Browser-Tests (Headless) geschrieben werden.
+* **Technologie-Stack:** Wir nutzen **Python mit Playwright**, verwaltet über den extrem schnellen Paketmanager `uv`. 
+* **Einrichtung (durch den Agenten auszuführen):**
+  1. Erstelle einen Ordner `e2e_tests/` im Projektverzeichnis.
+  2. Initialisiere dort ein Python-Projekt mit `uv`: `uv init`
+  3. Füge die Abhängigkeiten hinzu: `uv add pytest playwright pytest-playwright`
+  4. Installiere die Browser-Binaries: `uv run playwright install chromium`
+* **Test-Ablauf:**
+  * Der Rust-Axum-Server (Backend) muss für die Tests lokal als Hintergrundprozess hochgefahren werden (inkl. einer leeren Test-PostgreSQL-Datenbank).
+  * Die Tests prüfen kritische User-Flows: Registrierung, Ausblenden von sensiblen Daten (Tresor-Funktion prüfen) und das Laden der Matches via HTMX.
+  * Führe die Tests mit `uv run pytest` (bei GUI-Bedarf im Container via `xvfb`) aus. Erst wenn diese Integrationstests grün sind, gilt ein Feature als abgeschlossen.
+
 ## Datei-Aufteilung (verbindlich)
 * Lange Quelldateien (> 600 Zeilen) oder Dateien mit gemischten Zuständigkeiten sind verboten.
 * Dateinamen beginnen mit einer zweistelligen Nummer, die dem logischen Init/Datenfluss folgt.

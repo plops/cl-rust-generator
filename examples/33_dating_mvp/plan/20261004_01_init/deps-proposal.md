@@ -28,3 +28,8 @@ Diese Datei trackt die verwendeten Bibliotheken und ihre GitHub-Repositories im 
 
 ## Konfiguration
 * `allan2/dotenvy` - Um `.env` Dateien beim lokalen Entwickeln und im Docker-Container zu laden (für Stripe-Keys, LLM-Keys, Database-URL).
+
+## End-to-End Testing (Python Tooling)
+* `astral-sh/uv` - Ein extrem schneller Python-Paket- und Projektmanager (geschrieben in Rust), der pip/virtualenv ersetzt.
+* `microsoft/playwright-python` - Das moderne Framework für Headless-Browser-Testing. Ideal für HTMX, da es Auto-Waiting für asynchrone DOM-Updates beherrscht.
+* `pytest-dev/pytest` - Das Standard-Testing-Framework in Python zur Strukturierung der Playwright-Tests.
