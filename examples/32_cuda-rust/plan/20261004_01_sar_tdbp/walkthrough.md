@@ -9,11 +9,12 @@ Der Clou: Man kann zuschauen, wie das Bild mit jedem zusätzlichen Puls
 schärfer wird, weil die GPU das Bild live neu „fokussiert“.
 
 Konkret wurde eine Crate namens `sar_tdbp` gebaut (Rust Edition 2024,
-rund 2000 Zeilen, jede Datei unter 310 Zeilen). Starten geht so:
+rund 2100 Zeilen, jede Datei unter 330 Zeilen). Starten geht so:
 
 ```bash
 cargo oxide run -- --headless bild.png --phantom rust   # ohne Fenster: rechnet und speichert bild.png
 cargo oxide run -- --phantom rust                       # mit Fenster: interaktiv (siehe unten)
+cargo oxide run -- --bench                              # CPU/GPU-Zeitvergleich mit fester Last
 ```
 
 Im Fenster: `←`/`→` verändert die Pulszahl (das Bild schärft sich live
@@ -21,10 +22,11 @@ nach), `R` stellt die volle Apertur wieder her, ein Mausklick zeigt
 Helligkeits-Schnitte durch das angeklickte Pixel, `Esc` beendet.
 
 Wegweiser durch dieses Dokument: Abschnitt 1 erzählt, was das Programm
-Schritt für Schritt tut. Abschnitt 2 erzählt, welche Fehler die Tests
-gefunden haben und wie sie behoben wurden. Abschnitt 3 hält fest, was wir
-dabei gelernt haben und was man noch ausbauen könnte. Abschnitt 4 listet
-die Systempakete für das Docker-Image.
+Schritt für Schritt tut und wie wir seine Richtigkeit nachgewiesen haben.
+Abschnitt 2 erzählt, welche Fehler die Tests gefunden haben und wie sie
+behoben wurden. Abschnitt 3 hält fest, was wir dabei gelernt haben und was
+man noch ausbauen könnte. Abschnitt 4 listet die Systempakete für das
+Docker-Image.
 
 ## 1. Was exakt implementiert wurde
 
@@ -56,7 +58,8 @@ steht, erfindet das Programm seine Szene selbst: eine Liste von Punktstreuern,
 also idealisierten Reflektoren mit Position und Helligkeit. Es gibt drei
 Szenarien: einen einzelnen Punkt (zum Vermessen der Schärfe), ein 5×5-Gitter
 (zum Prüfen der Geometrie) und den Schriftzug „RUST“ aus 58 Einzelpunkten
-(zum Anschauen — man erkennt sofort, ob das Bild fokussiert ist).
+(zum Anschauen — man erkennt sofort, ob das Bild fokussiert ist und ob es
+aufrecht steht).
 
 **Stufe 2 — Die Echosimulation (`03_simulator`, auf der CPU).** Für jeden der
 1024 Pulse und jeden Streuer berechnet das Programm die Entfernung, daraus die
@@ -76,10 +79,12 @@ rechnet ein eigener GPU-Thread, daher dauert ein kompletter Durchgang nur
 Millisekunden.
 
 **Stufe 4 — Anzeige (`06_gui`, Macroquad) und Headless-Modus.** Das komplexe
-Bild wird in Helligkeit umgerechnet, logarithmisch skaliert (dB-Skala: `20·log10`,
-damit man schwache Ziele neben starken noch sieht) und mit der Turbo-Farbkarte
-eingefärbt. Ohne Fenster (`--headless`) speichert das Programm stattdessen ein
-PNG, druckt Kennzahlen und eine ASCII-Vorschau fürs Terminal.
+Bild wird in Helligkeit umgerechnet, logarithmisch skaliert (dB-Skala:
+`20·log10`, damit man schwache Ziele neben starken noch sieht) und mit der
+Turbo-Farbkarte eingefärbt. Ohne Fenster (`--headless`) speichert das Programm
+stattdessen ein PNG, druckt Kennzahlen und eine ASCII-Vorschau fürs Terminal.
+Alle drei Darstellungen (PNG, GUI, ASCII) zeigen einheitlich den Nahbereich
+oben — so wie SAR-Bilder üblicherweise dargestellt werden.
 
 Der zeitliche Ablauf für den Standardfall (`--phantom rust`, 256×256,
 1024 Pulse) sieht so aus — beachte, dass der teure Upload nur einmal
@@ -150,7 +155,7 @@ was er prüft. Wir prüfen auf drei Ebenen:
    Hier wird das fertige GPU-Bild vermessen — beim Gitter und beim
    RUST-Schriftzug.
 
-Alle 28 Tests sind grün (`cargo oxide test`). Die Tabelle fasst die
+Alle 31 Tests sind grün (`cargo oxide test`). Die Tabelle fasst die
 Kern-Messwerte zusammen; die rechte Spalte erklärt jeweils, was die Zeile
 bedeutet:
 
@@ -164,12 +169,41 @@ bedeutet:
 | GPU vs. CPU (max. rel.) | 2,4·10⁻⁴ | Schranke 10⁻³ | Größte Abweichung zwischen GPU- und CPU-Bild, geteilt durch die Peak-Höhe: 0,024 % — beide rechnen dasselbe. |
 | Gitter-Energie an Streuern | 74 % | Schranke 50 % | Fast drei Viertel der Bildenergie liegt dicht bei den 25 Streuern statt verschmiert in der Szene. |
 | RUST-Kontrast (1024 Pulse) | 52,7× | Schranke 20× | Buchstaben-Pixel sind im Mittel 53-mal heller als der Hintergrund — der Schriftzug ist klar lesbar. |
+| RUST aufrecht | 14 Punkte am y-Minimum | 14 (verdreht: 10) | Die Buchstaben-Oberkante liegt im Nahbereich (= oben in der Darstellung). Wäre der Schriftzug verdreht, zählte man nur 10. |
 | GUI-Screenshot (xvfb) | 800×600, Varianz > 0 | Layout-Check | Die GUI rendert unter virtuellem Display ein nicht-leeres Fenster mit Bild und Panel. |
+
+### 1.4 Benchmark: CPU gegen GPU
+
+`--bench` misst eine feste Last (128×128 Pixel, 256 Pulse, RUST-Phantom):
+Simulation, einmaligen Upload, GPU-Lauf (Median aus 5 nach Warm-up) und
+CPU-Läufe mit 1/2/4/8/allen Strängen — plus eine GPU-vs-CPU-Gegenprobe.
+Die CPU-Parallelisierung nutzt nur `std::thread::scope` (keine neue
+Abhängigkeit) und ist bit-identisch zur seriellen Rechnung. Gemessen auf
+RTX A4000 mit 32 CPU-Strängen:
+
+```text
+Benchmark: 128x128 Pixel, 256 Pulse, RUST-Phantom
+Simulation (CPU, 1 Strang):     26.2 ms
+Upload (Kontext+Buffer):       233.8 ms
+GPU TDBP+Download (Median):      0.2 ms  [0.2 .. 0.2]
+CPU TDBP ( 1 Stränge):          68.3 ms  ( 357.3x vs. GPU)
+CPU TDBP ( 2 Stränge):          34.5 ms  ( 180.7x vs. GPU)
+CPU TDBP ( 4 Stränge):          18.0 ms  (  94.0x vs. GPU)
+CPU TDBP ( 8 Stränge):          10.0 ms  (  52.1x vs. GPU)
+CPU TDBP (32 Stränge):           4.6 ms  (  23.9x vs. GPU)
+GPU-vs-CPU max. rel. Abw.: 3.631e-4
+```
+
+Lesart: Die CPU skaliert fast linear mit der Strangzahl (68 → 34 → 18 ms),
+die GPU ist selbst gegen 32 CPU-Stränge noch 24-mal schneller — und der
+Upload (234 ms, einmalig) dominiert jeden Einzellauf, weshalb die Pipeline
+ihn bewusst nur einmal ausführt. Die Gegenprobe (3,6·10⁻⁴) bestätigt
+nebenbei erneut die Kernel-Richtigkeit.
 
 ## 2. Architektur-Entscheidungen aus Testergebnissen
 
-Jede dieser Entscheidungen begann mit einem roten Test. Muster: Symptom,
-Diagnose, Behebung, Beleg.
+Jede dieser Entscheidungen begann mit einem roten Test oder einer
+Beobachtung. Muster: Symptom, Diagnose, Behebung, Beleg.
 
 1. **Nadir → Seitenblick.** *Symptom:* Der erste PSF-Test fand den Peak bei
    `(32, 17)` statt `(32, 32)` — in Flugrichtung (x) scharf, quer dazu (y)
@@ -187,26 +221,33 @@ Diagnose, Behebung, Beleg.
    Azimuth-Abtasttheorem, das Analogon zum Audio-Sampling-Theorem. *Behebung:*
    Default auf 1024 Pulse (3,9-cm-Abtastung, Keulen erst bei ±38 m, also
    außerhalb). *Beleg:* Energieanteil 0,85, Kontrast 52,7.
-3. **1D- statt 2D-Grid.** TDBP-Pixel brauchen keine Nachbarschaftsdaten, also
+3. **RUST aufrecht + einheitliche Orientierung.** *Symptom:* Der Schriftzug
+   stand auf dem Kopf — und die ASCII-Vorschau zeigte ihn andersherum als PNG
+   und GUI. *Diagnose:* Die Glyph-Oberkante lag im Fernbereich, der unten
+   dargestellt wird; die ASCII-Vorschau hatte zusätzlich eine eigene,
+   gegenläufige Konvention. *Behebung:* Glyph-Zeile 0 in den Nahbereich gelegt
+   und überall (PNG, GUI, ASCII) „Nahbereich oben“ festgeschrieben. *Beleg:*
+   Neuer Test `rust_text_aufrecht` plus ASCII-Sichtkontrolle (T-Balken oben).
+4. **1D- statt 2D-Grid.** TDBP-Pixel brauchen keine Nachbarschaftsdaten, also
    bringt ein 2D-Grid keinen Vorteil. Der 1D-Start (`index_1d`,
    `DisjointSlice<Complex32>`) spiegelt exakt das verifizierte
    `my_first_kernel`-Template — minimales Risiko bei gleicher Leistung.
-4. **Eigener `Complex32` statt `num-complex`.** Der Device-Compiler braucht
+5. **Eigener `Complex32` statt `num-complex`.** Der Device-Compiler braucht
    den Code (MIR) jeder aufgerufenen Funktion; bei Fremd-Crates ist das nicht
    garantiert. Ein eigener `repr(C)`-Typ mit `DeviceCopy` und reiner
    Kern-Arithmetik eliminiert dieses Risiko vollständig.
-5. **Flache Skalar-Kernel-ABI.** Der Kernel nimmt 16 einzelne Zahlen statt
+6. **Flache Skalar-Kernel-ABI.** Der Kernel nimmt 16 einzelne Zahlen statt
    eines Parameter-Structs (per `#[allow]` dokumentiert): So liest er die
    Geometrie direkt aus dem PTX-Parameterraum, ohne Umwege.
-6. **Kein `cutile-rs`, kein `cuda-async`.** TDBP ist pixelparallel und braucht
+7. **Kein `cutile-rs`, kein `cuda-async`.** TDBP ist pixelparallel und braucht
    kein Tiling — eine zweite Kernel-Sprache wäre Ballast. Und die inkrementelle
    Apertur funktioniert über einen einzigen Zahlen-Parameter (`pulse_limit`),
    sodass auch kein Async-Gerüst nötig ist.
-7. **Ungerade Test-Grids (33/65).** Bei geraden Grids liegt der Test-Streuer
+8. **Ungerade Test-Grids (33/65).** Bei geraden Grids liegt der Test-Streuer
    exakt zwischen vier Pixeln; dann kippt der hellste Punkt schon bei
    minimalsten Rundungsunterschieden zwischen CPU- und GPU-Rechnung hin und
    her. Ungerade Grids legen ihn auf eine Pixelmitte — eindeutig vergleichbar.
-8. **`Window::new` statt `#[macroquad::main]`.** Das Standard-Makro öffnet
+9. **`Window::new` statt `#[macroquad::main]`.** Das Standard-Makro öffnet
    immer ein Fenster. Der manuelle Start erlaubt `--headless` ganz ohne
    Display — wichtig für Server und CI.
 
@@ -222,12 +263,16 @@ Diagnose, Behebung, Beleg.
 - **Gelernt — ein Flake im Werkzeug:** `cargo oxide test` bricht gelegentlich
   beim allerersten Lauf mit `llvm-link … libdevice` ab (parallele
   Device-Codegenerierung); ein einfacher Re-Run war bisher immer grün.
+- **Gelernt — Orientierung früh festschreiben:** Drei Darstellungen (PNG, GUI,
+  ASCII) hatten stillschweigend zwei verschiedene Konventionen. Seit dem
+  Lagefix gilt überall „Nahbereich oben“, abgesichert durch einen Test.
 - **Ausbau-Ideen:** Die Apertur symmetrisch von der Mitte her wachsen lassen
   (statt „erste K Pulse“ von links) — physikalisch schöner beim Zuschauen;
   `1/R²`-Amplitudenabfall und ein Antennendiagramm für mehr Realismus;
   kubische statt lineare Sinc-Interpolation; dB-Dynamik per Tastatur;
-  Pan/Zoom; und als Alternative eine Range-Doppler-Verarbeitung zum
-  Laufzeitvergleich mit TDBP.
+  Pan/Zoom; die Simulation mehrsträngig machen (sie ist derzeit seriell und
+  bei großen Szenen der Flaschenhals); und als Alternative eine
+  Range-Doppler-Verarbeitung zum Laufzeitvergleich mit TDBP.
 
 ## 4. Pakete fürs Dockerfile
 
@@ -247,7 +292,8 @@ Während der gesamten Aufgabe lief kein einziges `apt install`.
 
 ## Commits
 
-Umgesetzt als zwei Conventional Commits auf `master`:
+Umgesetzt als Conventional Commits auf `master`:
 
 - `2fc0632` docs(plan): Plan, Tasks, Deps, Walkthrough
 - `7924365` feat(sar): SAR-TDBP-Crate mit Kernel, Pipeline, GUI, Tests
+- (ausstehend) Lagefix + Benchmark aus Phase 6

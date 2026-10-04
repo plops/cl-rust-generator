@@ -4,7 +4,7 @@
 //! `run(limit)`-Aufrufe hinweg — die GUI variiert nur `pulse_limit`.
 //! Dazu reine Ausgabe-Helfer (dB→RGB, PNG, ASCII-Vorschau).
 
-use crate::kernel::{kernels, peak_power};
+use crate::kernel::{kernels, peak_power, tdbp_cpu_parallel};
 use crate::phantom::{PhantomKind, build as build_phantom};
 use crate::simulator::{RawData, simulate};
 use crate::types::{
@@ -153,14 +153,15 @@ pub fn save_png(path: &Path, rgb: &[u8], width: u32, height: u32) -> Result<(), 
 }
 
 /// ASCII-Vorschau fürs Terminal (Headless-Kontrolle ohne Display).
-/// Gibt `rows` Zeilen à `cols` Zeichen zurück (y oben = fernes Range).
+/// Gibt `rows` Zeilen à `cols` Zeichen zurück, gleiche Orientierung wie
+/// PNG und GUI (Nahbereich oben).
 pub fn ascii_preview(img: &[Complex32], width: u32, height: u32, cols: u32, rows: u32) -> String {
     const RAMP: &[u8] = b" .:-=+*#%@";
     let max = img.iter().fold(0.0f32, |m, c| m.max(c.norm()));
     let mut out = String::new();
     for r in 0..rows {
-        // Oberste Ausgabezeile = ferne Range-Zeilen (hohes py).
-        let py = (height - 1) - (height - 1) * r / rows.max(1).saturating_sub(1).max(1);
+        // Oberste Ausgabezeile = Nahbereich (py 0), wie in PNG/GUI.
+        let py = (height - 1) * r / rows.max(1).saturating_sub(1).max(1);
         for c in 0..cols {
             let px = width * c / cols.max(1);
             let v = img[(py * width + px) as usize].norm();
@@ -223,6 +224,76 @@ pub fn run_headless(job: &HeadlessJob) -> Result<HeadlessReport, PipelineError> 
     })
 }
 
+/// Feste Benchmark-Last (Vergleichbarkeit über Läufe/Rechner hinweg):
+/// 128²-Bild, 256 Pulse, RUST-Phantom.
+pub const BENCH_SIZE: u32 = 128;
+pub const BENCH_PULSES: u32 = 256;
+
+/// CPU-GPU-Vergleich: misst Simulation, Upload, GPU-Lauf (Median aus 5
+/// nach einem Warm-up) und CPU-Läufe mit 1/2/4/8/allen Strängen.
+/// Gibt einen druckfertigen Bericht zurück (inkl. Korrektheits-Gegenprobe).
+pub fn run_benchmark() -> Result<String, PipelineError> {
+    use std::time::Instant;
+    let mut rep = String::new();
+    rep.push_str(&format!(
+        "Benchmark: {BENCH_SIZE}x{BENCH_SIZE} Pixel, {BENCH_PULSES} Pulse, RUST-Phantom\n"
+    ));
+    let geo = SceneGeometry::default_scene(BENCH_SIZE, BENCH_SIZE, BENCH_PULSES);
+    let radar = RadarParams::x_band();
+    let targets = build_phantom(PhantomKind::Rust, geo);
+
+    let t = Instant::now();
+    let raw = simulate(geo, radar, &targets);
+    let sim_ms = t.elapsed().as_secs_f64() * 1000.0;
+    rep.push_str(&format!("Simulation (CPU, 1 Strang): {sim_ms:8.1} ms\n",));
+
+    let t = Instant::now();
+    let mut pipe = SarPipeline::new(geo, radar, &raw)?;
+    let up_ms = t.elapsed().as_secs_f64() * 1000.0;
+    rep.push_str(&format!("Upload (Kontext+Buffer):    {up_ms:8.1} ms\n",));
+
+    pipe.run(u32::MAX)?; // Warm-up (GPU-Takt, Caches).
+    let mut gpu_ms = Vec::with_capacity(5);
+    let mut gpu_img = Vec::new();
+    for _ in 0..5 {
+        let t = Instant::now();
+        gpu_img = pipe.run(u32::MAX)?;
+        gpu_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+    }
+    gpu_ms.sort_by(|a, b| a.total_cmp(b));
+    let gpu_med = gpu_ms[2];
+    rep.push_str(&format!(
+        "GPU TDBP+Download (Median): {gpu_med:8.1} ms  [{:.1} .. {:.1}]\n",
+        gpu_ms[0], gpu_ms[4]
+    ));
+
+    let max_t = std::thread::available_parallelism()
+        .map(|n| n.get() as u32)
+        .unwrap_or(4);
+    let mut counts = vec![1, 2, 4, 8, max_t];
+    counts.sort_unstable();
+    counts.dedup();
+    let mut cpu_img = Vec::new();
+    for n in counts {
+        let t = Instant::now();
+        cpu_img = tdbp_cpu_parallel(&raw, geo, radar, u32::MAX, n);
+        let ms = t.elapsed().as_secs_f64() * 1000.0;
+        rep.push_str(&format!(
+            "CPU TDBP ({n:2} Stränge):          {ms:8.1} ms  ({:6.1}x vs. GPU)\n",
+            ms / gpu_med.max(1e-9)
+        ));
+    }
+
+    // Gegenprobe: GPU-Bild gegen schnellsten CPU-Lauf.
+    let (_, peak) = peak_power(&cpu_img);
+    let mut max_rel = 0.0f32;
+    for (g, c) in gpu_img.iter().zip(cpu_img.iter()) {
+        max_rel = max_rel.max((g.re - c.re).hypot(g.im - c.im) / peak.sqrt());
+    }
+    rep.push_str(&format!("GPU-vs-CPU max. rel. Abw.: {max_rel:.3e}\n"));
+    Ok(rep)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,9 +320,9 @@ mod tests {
         let lines: Vec<&str> = art.lines().collect();
         assert_eq!(lines.len(), 16);
         assert!(art.contains('@'));
-        // Peak bei (8, 8): Zeile r mit py = 15 − r = 8, also r = 7.
-        // (Oberste Zeile = fernes Range.)
-        assert!(lines[7].contains('@'));
-        assert_eq!(lines[7].as_bytes()[8], b'@');
+        // Peak bei (8, 8): Zeile r mit py = r = 8.
+        // (Oberste Zeile = Nahbereich, wie in PNG/GUI.)
+        assert!(lines[8].contains('@'));
+        assert_eq!(lines[8].as_bytes()[8], b'@');
     }
 }

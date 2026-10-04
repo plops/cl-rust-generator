@@ -107,7 +107,9 @@ const GLYPH_T: [[u8; 5]; 7] = [
 ];
 
 /// Schriftzug „RUST“ aus Einzelpunkten, zentriert, über ~60 % der
-/// Szenenbreite. y wächst nach oben (Zeile 0 = oben).
+/// Szenenbreite. Glyph-Zeile 0 (Buchstaben-Oberkante) liegt im Nahbereich
+/// (kleines y), da die Darstellung den Nahbereich oben zeigt — so steht
+/// der Schriftzug aufrecht.
 pub fn rust_text(geo: SceneGeometry) -> Vec<PointTarget> {
     const GLYPHS: [[[u8; 5]; 7]; 4] = [GLYPH_R, GLYPH_U, GLYPH_S, GLYPH_T];
     const COLS: f32 = 4.0 * 5.0 + 3.0; // 4 Glyphen + 3 Spalten Abstand
@@ -126,7 +128,7 @@ pub fn rust_text(geo: SceneGeometry) -> Vec<PointTarget> {
                 let gx = gi as f32 * 6.0 + col as f32;
                 out.push(PointTarget {
                     x: cx + (gx - (COLS - 1.0) / 2.0) * step,
-                    y: cy + ((ROWS - 1.0) / 2.0 - row as f32) * step,
+                    y: cy + (row as f32 - (ROWS - 1.0) / 2.0) * step,
                     z: 0.0,
                     sigma: 1.0,
                 });
@@ -192,5 +194,17 @@ mod tests {
         }
         assert!(((x0 + x1) / 2.0).abs() < 1e-3);
         assert!(((y0 + y1) / 2.0 - 60.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn rust_text_aufrecht() {
+        // Die Buchstaben-Oberkante (Glyph-Zeile 0) muss im Nahbereich
+        // (minimales y) liegen, weil die Darstellung den Nahbereich oben
+        // zeigt. Zeile 0 hat R:3 + U:2 + S:4 + T:5 = 14 Punkte; bei
+        // verdrehter Lage wären es am Minimum nur 10 (Zeile 6).
+        let pts = rust_text(geo());
+        let ymin = pts.iter().map(|p| p.y).fold(f32::MAX, f32::min);
+        let top = pts.iter().filter(|p| (p.y - ymin).abs() < 1e-4).count();
+        assert_eq!(top, 14);
     }
 }

@@ -24,6 +24,9 @@ cargo oxide run -- --headless bild.png --phantom grid --size 128 --pulses 512 --
 # Interaktiv: ←/→ Apertur, R = voll, Klick = Schnitte, Esc = Ende
 cargo oxide run -- --phantom rust
 
+# Benchmark: CPU (1/2/4/8/alle Stränge) vs. GPU, feste Last
+cargo oxide run -- --bench
+
 # GUI-Headless (Tests/CI): N Frames, Screenshot, Exit 0
 xvfb-run -a ./target/release/sar_tdbp --frames 5 --screenshot shot.png
 ```

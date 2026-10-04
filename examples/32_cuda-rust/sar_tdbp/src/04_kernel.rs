@@ -31,6 +31,51 @@ pub fn matched_phase(dist: f32, lambda: f32) -> Complex32 {
     Complex32::from_polar(1.0, 4.0 * PI * dist / lambda)
 }
 
+/// Mehrthread-CPU-Referenz: Die Bildzeilen werden auf `threads` Stränge
+/// verteilt (`std::thread::scope`, keine zusätzliche Abhängigkeit).
+/// Bit-identisch zu [`tdbp_cpu`], da jedes Pixel unabhängig ist.
+pub fn tdbp_cpu_parallel(
+    raw: &RawData,
+    geo: SceneGeometry,
+    radar: RadarParams,
+    pulse_limit: u32,
+    threads: u32,
+) -> Vec<Complex32> {
+    let w = geo.width as usize;
+    let h = geo.height as usize;
+    if w == 0 || h == 0 {
+        return Vec::new();
+    }
+    let threads = threads.max(1).min(geo.height) as usize;
+    let mut out = vec![Complex32::zero(); w * h];
+    let rows_per = h.div_ceil(threads);
+    std::thread::scope(|s| {
+        for (chunk, slice) in out.chunks_mut(rows_per * w).enumerate() {
+            let start_py = chunk * rows_per;
+            s.spawn(move || {
+                let lambda = radar.lambda();
+                let np = pulse_limit.min(raw.num_pulses);
+                for (r, row) in slice.chunks_mut(w).enumerate() {
+                    let py = (start_py + r) as u32;
+                    for (px, cell) in row.iter_mut().enumerate() {
+                        // Gleiche Formel wie `tdbp_cpu` (siehe dort).
+                        let pos = geo.pixel_pos(px as u32, py);
+                        let mut acc = Complex32::zero();
+                        for p in 0..np {
+                            let d = geo.pulse_pos(p).dist(pos);
+                            let tau = 2.0 * d / SPEED_OF_LIGHT;
+                            let ss = (tau - raw.t0) / raw.dt;
+                            acc = acc + interp_linear(raw, p, ss) * matched_phase(d, lambda);
+                        }
+                        *cell = acc;
+                    }
+                }
+            });
+        }
+    });
+    out
+}
+
 /// CPU-Referenz der Backprojection über die ersten `pulse_limit` Pulse.
 pub fn tdbp_cpu(
     raw: &RawData,
@@ -267,6 +312,18 @@ mod tests {
         }
         let sidelobe_db = 10.0 * (side / peak_v).log10();
         assert!(sidelobe_db < -8.0, "Nebenzipfel {sidelobe_db} dB");
+    }
+
+    #[test]
+    fn parallel_bitidentisch() {
+        let (geo, radar, targets) = psf_setup();
+        let raw = simulate(geo, radar, &targets);
+        let serial = tdbp_cpu(&raw, geo, radar, u32::MAX);
+        // Auch krumme Strangzahlen (Restzeilen!) und Überbelegung.
+        for threads in [0, 1, 2, 3, 4, 7, 64, 1000] {
+            let par = tdbp_cpu_parallel(&raw, geo, radar, u32::MAX, threads);
+            assert_eq!(par, serial, "threads={threads}");
+        }
     }
 
     #[test]

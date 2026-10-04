@@ -5,7 +5,7 @@
 
 use sar_tdbp::gui::{GuiConfig, run_gui};
 use sar_tdbp::phantom::PhantomKind;
-use sar_tdbp::pipeline::{HeadlessJob, run_headless};
+use sar_tdbp::pipeline::{HeadlessJob, run_benchmark, run_headless};
 use std::path::PathBuf;
 
 /// Betriebsmodus der Anwendung.
@@ -16,6 +16,8 @@ pub enum Mode {
     Gui,
     /// Ohne Fenster: Pipeline laufen lassen, PNG + Kennzahlen schreiben.
     Headless { output: PathBuf },
+    /// Fester CPU/GPU-Vergleichslauf (128², 256 Pulse) mit Zeit-Tabelle.
+    Bench,
 }
 
 /// Vollständig geparste Konfiguration.
@@ -57,6 +59,7 @@ fn usage() -> &'static str {
      \x20 --pulses N                   Anzahl Antennenpulse (default: 1024)\n\
      \x20 --limit K                    nur erste K Pulse nutzen (default: alle)\n\
      \x20 --headless OUT.png           ohne GUI rechnen, PNG schreiben\n\
+     \x20 --bench                      CPU/GPU-Vergleich (feste Last)\n\
      \x20 --frames N --screenshot F    GUI: nach N Frames F speichern + beenden\n\
      \x20 --help                       diese Hilfe"
 }
@@ -96,6 +99,9 @@ pub fn parse_args(args: &[String]) -> Result<Config, String> {
                 cfg.mode = Mode::Headless {
                     output: PathBuf::from(v),
                 };
+            }
+            "--bench" => {
+                cfg.mode = Mode::Bench;
             }
             "--frames" => {
                 i += 1;
@@ -165,6 +171,13 @@ fn main() {
                 }
             }
         }
+        Mode::Bench => match run_benchmark() {
+            Ok(rep) => print!("{rep}"),
+            Err(e) => {
+                eprintln!("Fehler: {e}");
+                std::process::exit(1);
+            }
+        },
         Mode::Gui => {
             let fut = run_gui(GuiConfig {
                 phantom: cfg.phantom,
@@ -220,6 +233,12 @@ mod tests {
                 output: PathBuf::from("out.png")
             }
         );
+    }
+
+    #[test]
+    fn bench_mode() {
+        let cfg = parse(&["--bench"]).unwrap();
+        assert_eq!(cfg.mode, Mode::Bench);
     }
 
     #[test]

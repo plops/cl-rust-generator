@@ -53,3 +53,12 @@ Seriell abarbeiten. Jeder Schritt: implementieren → Tests schreiben →
     -Build eingeschlossen), `cargo upgrade --dry-run`-Sichtung,
     Voll-Lauf aller Tests. `walkthrough.md` (Deutsch, Mermaid, Snippets,
     Dockerfile-Paketliste) schreiben.
+
+## Phase 6 — Lagefix + Benchmark (Nachforderung)
+
+12. RUST-Phantom aufrecht stellen (Oberkante in den Nahbereich) +
+    ASCII-Vorschau an PNG/GUI-Orientierung angleichen. Test:
+    `rust_text_aufrecht` (14 Punkte am y-Minimum; verdreht wären es 10).
+13. `tdbp_cpu_parallel` (`std::thread::scope`, bit-identisch, Test für
+    0/1/2/3/4/7/64/1000 Stränge) + `--bench` (feste Last 128²/256,
+    GPU-Median aus 5, CPU mit 1/2/4/8/allen Strängen, GPU-vs-CPU-Gegenprobe).
