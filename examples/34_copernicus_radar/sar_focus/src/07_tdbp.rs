@@ -158,7 +158,7 @@ impl LocalFrame {
         let re = (WGS84_A_M + WGS84_B_M) / 2.0;
         let origin = pos.scale(re / pos.norm());
         let z = origin.scale(1.0 / re);
-        let x = vel.sub(z.scale(vel.dot(z)));
+        let x = vel - z.scale(vel.dot(z));
         let x = x.scale(1.0 / x.norm());
         // y = x × z zeigt rechts der Flugrichtung (S1-Standard).
         let y = Vec3d::new(
@@ -171,7 +171,7 @@ impl LocalFrame {
 
     /// ECEF → lokal.
     pub fn to_local(self, p: Vec3d) -> Vec3d {
-        let d = p.sub(self.origin);
+        let d = p - self.origin;
         Vec3d::new(d.dot(self.x), d.dot(self.y), d.dot(self.z))
     }
 }
@@ -191,7 +191,10 @@ mod tests {
     fn lokaler_rahmen_aequator() {
         // Äquator, prograd: Ursprung (Re,0,0), x = Ost, y = Süd (rechts), z = oben.
         let re = (WGS84_A_M + WGS84_B_M) / 2.0;
-        let f = LocalFrame::from_orbit(Vec3d::new(re + 693_000.0, 0.0, 0.0), Vec3d::new(0.0, 7590.0, 0.0));
+        let f = LocalFrame::from_orbit(
+            Vec3d::new(re + 693_000.0, 0.0, 0.0),
+            Vec3d::new(0.0, 7590.0, 0.0),
+        );
         assert!((f.origin.x - re).abs() < 1e-6 && f.origin.y == 0.0);
         assert!((f.x.y - 1.0).abs() < 1e-12);
         assert!((f.y.z + 1.0).abs() < 1e-12); // Süd = rechts bei Ost-Flug

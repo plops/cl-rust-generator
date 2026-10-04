@@ -45,11 +45,7 @@ fn setup() -> (Vec<sar_focus::types::Complex32>, TdbpGrid, Vec<Vec3d>, f64) {
     (data, grid, plat, t0)
 }
 
-fn input<'a>(
-    data: &'a [sar_focus::types::Complex32],
-    plat: &'a [Vec3d],
-    t0: f64,
-) -> TdbpInput<'a> {
+fn input<'a>(data: &'a [sar_focus::types::Complex32], plat: &'a [Vec3d], t0: f64) -> TdbpInput<'a> {
     TdbpInput {
         data: &data[..NP * NR],
         npulse: NP,
@@ -89,7 +85,10 @@ fn tdbp_kohaerenz_und_parallel() {
     let part = tdbp_cpu(&grid, &inp, 32);
     let c = 32 * WIN + 32;
     let ratio = full[c].norm_sqr() / part[c].norm_sqr();
-    assert!((12.0..20.0).contains(&ratio), "Gewinn {ratio}, erwartet ≈ 16");
+    assert!(
+        (12.0..20.0).contains(&ratio),
+        "Gewinn {ratio}, erwartet ≈ 16"
+    );
     // Parallel bit-identisch (auch krumme Strangzahlen).
     for threads in [1, 3, 64] {
         let par = tdbp_cpu_parallel(&grid, &inp, NP, threads);

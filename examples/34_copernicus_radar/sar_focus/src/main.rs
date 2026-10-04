@@ -27,19 +27,15 @@ fn cmd_meta(path: &str) -> Result<(), String> {
     let mut n_echo = 0u64;
     for (i, h) in packets.headers.iter().enumerate() {
         let h = PacketHeader::parse(h).map_err(|e| e.to_string())?;
-        stream.push((
-            h.sub_commutated_index as u8,
-            h.sub_commutated_data as u16,
-        ));
+        stream.push((h.sub_commutated_index as u8, h.sub_commutated_data as u16));
         if !h.is_calibration() {
             *beams.entry(h.elevation()).or_insert(0) += u64::from(h.number_of_quads);
         }
         if meta::is_imaging_echo(&h) {
             n_echo += 1;
             if first_echo.is_none() {
-                first_echo = Some(
-                    meta::parse_echo(&h, i, packets.offsets[i]).map_err(|e| e.to_string())?,
-                );
+                first_echo =
+                    Some(meta::parse_echo(&h, i, packets.offsets[i]).map_err(|e| e.to_string())?);
             }
         }
     }
@@ -91,7 +87,12 @@ fn main() {
         .next()
         .unwrap_or_else(|| "sar_focus".to_string());
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let res = match args.iter().map(|s| s.as_str()).collect::<Vec<_>>().as_slice() {
+    let res = match args
+        .iter()
+        .map(|s| s.as_str())
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
         ["meta", path] => cmd_meta(path),
         ["--help" | "-h"] | [] => {
             println!("{}", usage(&program));

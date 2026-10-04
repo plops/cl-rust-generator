@@ -130,9 +130,10 @@ mod tests {
     #[test]
     fn einbettung_wie_ssfocus() {
         // N=19950, ntx=2397 → Start ceil(17553/2)−1 = 8776.
-        assert_eq!(embed_start(19950, 2397), 8776);
+        let s = embed_start(19950, 2397);
+        assert_eq!(s, 8776);
         // Replika passt vollständig in die Zeile.
-        assert!(8776 + 2397 <= 19950);
+        assert!(s + 2397 <= 19950);
         // Winzige Zeile: Start klemmt bei 0.
         assert_eq!(embed_start(10, 100), 0);
     }

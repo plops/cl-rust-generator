@@ -20,7 +20,7 @@ pub const TX_WAVELENGTH_M: f64 = SPEED_OF_LIGHT / TX_FREQ_HZ;
 /// WGS84 große Halbachse in m.
 pub const WGS84_A_M: f64 = 6_378_137.0;
 /// WGS84 kleine Halbachse in m.
-pub const WGS84_B_M: f64 = 6_356_752.3142;
+pub const WGS84_B_M: f64 = 6_356_752.314_2;
 
 /// Komplexe Zahl (`f32`), GPU-kompatibel.
 #[repr(C)]
@@ -136,20 +136,26 @@ impl Vec3d {
         (dx * dx + dy * dy + dz * dz).sqrt()
     }
 
-    pub fn sub(self, other: Self) -> Self {
-        Self::new(self.x - other.x, self.y - other.y, self.z - other.z)
-    }
-
-    pub fn add(self, other: Self) -> Self {
-        Self::new(self.x + other.x, self.y + other.y, self.z + other.z)
-    }
-
     pub fn scale(self, s: f64) -> Self {
         Self::new(self.x * s, self.y * s, self.z * s)
     }
 
     pub fn dot(self, other: Self) -> f64 {
         self.x * other.x + self.y * other.y + self.z * other.z
+    }
+}
+
+impl std::ops::Add for Vec3d {
+    type Output = Self;
+    fn add(self, other: Self) -> Self {
+        Self::new(self.x + other.x, self.y + other.y, self.z + other.z)
+    }
+}
+
+impl std::ops::Sub for Vec3d {
+    type Output = Self;
+    fn sub(self, other: Self) -> Self {
+        Self::new(self.x - other.x, self.y - other.y, self.z - other.z)
     }
 }
 

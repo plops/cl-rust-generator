@@ -25,7 +25,13 @@ fn processor(slant: &[f64], veff_range: &[f64], apply_rcmc: bool) -> RdaProcesso
 fn punktziel_fokussiert_exakt() {
     let (mut data, slant, _) = simulate_raw();
     // Sanity: slant_range_vec aus 02_meta reproduziert dieselbe Achse.
-    let check = slant_range_vec(0, 0.0, slant[0] * 2.0 / sar_focus::types::SPEED_OF_LIGHT, FS, 3);
+    let check = slant_range_vec(
+        0,
+        0.0,
+        slant[0] * 2.0 / sar_focus::types::SPEED_OF_LIGHT,
+        FS,
+        3,
+    );
     assert!((check[1] - check[0] - (slant[1] - slant[0])).abs() < 1e-9);
     let veff = vec![V; NR];
     processor(&slant, &veff, true).focus(&mut data);

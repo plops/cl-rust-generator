@@ -135,8 +135,7 @@ pub fn effective_velocity(space_vel: f64, pos: Vec3d, slant_range: f64) -> f64 {
     let local_re = (((a * a * cos).powi(2) + (b * b * sin).powi(2))
         / ((a * cos).powi(2) + (b * sin).powi(2)))
     .sqrt();
-    let cos_beta = (local_re * local_re + h * h - slant_range * slant_range)
-        / (2.0 * local_re * h);
+    let cos_beta = (local_re * local_re + h * h - slant_range * slant_range) / (2.0 * local_re * h);
     let ground_vel = local_re * w * cos_beta.clamp(-1.0, 1.0);
     (space_vel * ground_vel).sqrt()
 }
@@ -153,8 +152,7 @@ pub fn look_unit_zero_squint(pos: Vec3d, vel: Vec3d, slant_range: f64) -> Vec3d 
     let h = pos.norm();
     let re = (WGS84_A_M + WGS84_B_M) / 2.0;
     // Winkel am Satelliten zwischen Nadir und Ziel (Kosinussatz).
-    let cos_theta = (h * h + slant_range * slant_range - re * re)
-        / (2.0 * h * slant_range);
+    let cos_theta = (h * h + slant_range * slant_range - re * re) / (2.0 * h * slant_range);
     let theta = cos_theta.clamp(-1.0, 1.0).acos();
     let nadir = pos.scale(-1.0 / h);
     // Rechts = V × P (prograd: Blick nach rechts, S1-Standard).
@@ -165,7 +163,7 @@ pub fn look_unit_zero_squint(pos: Vec3d, vel: Vec3d, slant_range: f64) -> Vec3d 
     );
     let rn = right.norm();
     let right = right.scale(1.0 / rn);
-    nadir.scale(theta.cos()).add(right.scale(theta.sin()))
+    nadir.scale(theta.cos()) + right.scale(theta.sin())
 }
 
 #[cfg(test)]

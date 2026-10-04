@@ -178,7 +178,11 @@ mod tests {
         assert!(is_imaging_echo(&h));
         let m = parse_echo(&h, 268, 0).unwrap();
         // PRI = 22564/F_REF ≈ 601,150 µs → PRF ≈ 1663,5 Hz.
-        assert!((m.pri_s - 22_564.0 / 37_534_722.24).abs() < 1e-12, "pri = {}", m.pri_s);
+        assert!(
+            (m.pri_s - 22_564.0 / 37_534_722.24).abs() < 1e-12,
+            "pri = {}",
+            m.pri_s
+        );
         assert!((m.pri_s.recip() - 1663.5).abs() < 0.5);
         // SWST = 3128/F_REF ≈ 83,337 µs.
         assert!((m.swst_s - 8.3337e-5).abs() < 1e-9);
@@ -186,7 +190,11 @@ mod tests {
         assert!((m.txpl_s - 1918.0 / 37_534_722.24).abs() < 1e-18);
         assert!((m.txpl_s * 1e6 - 51.10).abs() < 0.01);
         // TXPRR ≈ −0,826 MHz/µs = −8,26·10¹¹ Hz/s.
-        assert!((m.txprr_hz_s + 8.264e11).abs() < 2e9, "txprr = {}", m.txprr_hz_s);
+        assert!(
+            (m.txprr_hz_s + 8.264e11).abs() < 2e9,
+            "txprr = {}",
+            m.txprr_hz_s
+        );
         // Bandbreite ≈ 42,2 MHz → Slant-Auflösung ≈ 3,55 m.
         let bw = chirp_bandwidth_hz(m.txprr_hz_s, m.txpl_s);
         assert!((bw - 42.2e6).abs() < 0.3e6, "bw = {bw}");

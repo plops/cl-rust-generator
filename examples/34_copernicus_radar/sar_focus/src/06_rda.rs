@@ -87,9 +87,9 @@ pub fn rcmc_filter(
     veff_range: &[f64],
 ) -> Vec<Nc32> {
     let mut h = Vec::with_capacity(naz * nrange);
-    for a in 0..naz {
+    for &f in fa {
         for r in 0..nrange {
-            let d = d_factor(fa[a], veff_range[r]);
+            let d = d_factor(f, veff_range[r]);
             let shift = r0 * (1.0 / d - 1.0);
             let ph = 4.0 * std::f64::consts::PI * fr[r] * shift / SPEED_OF_LIGHT;
             h.push(Nc32::new(ph.cos() as f32, ph.sin() as f32));
@@ -108,9 +108,9 @@ pub fn azimuth_filter(
     veff_range: &[f64],
 ) -> Vec<Nc32> {
     let mut h = Vec::with_capacity(naz * nrange);
-    for a in 0..naz {
+    for &f in fa {
         for r in 0..nrange {
-            let d = d_factor(fa[a], veff_range[r]);
+            let d = d_factor(f, veff_range[r]);
             let ph = 4.0 * std::f64::consts::PI * slant_m[r] * d / TX_WAVELENGTH_M;
             h.push(Nc32::new(ph.cos() as f32, ph.sin() as f32));
         }
@@ -181,12 +181,15 @@ impl RdaProcessor {
         self.process_columns(&mut buf, &self.col_fwd, true);
         // 3. Range- und RCMC-Filter multiplizieren.
         let rf = self.range_comp.filter();
+        let apply_rcmc = self.apply_rcmc;
         for a in 0..naz {
-            for r in 0..nr {
-                let i = a * nr + r;
-                buf[i] *= rf[r];
-                if self.apply_rcmc {
-                    buf[i] *= self.rcmc[i];
+            let base = a * nr;
+            let brow = &mut buf[base..base + nr];
+            let crow = &self.rcmc[base..base + nr];
+            for ((v, &f), &c) in brow.iter_mut().zip(rf.iter()).zip(crow.iter()) {
+                *v *= f;
+                if apply_rcmc {
+                    *v *= c;
                 }
             }
         }

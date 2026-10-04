@@ -57,6 +57,7 @@ pub fn simulate_raw() -> (Vec<Complex32>, Vec<f64>, f64) {
 }
 
 /// Stärkstes Pixel als `(az, range, Leistung)`.
+#[allow(dead_code)] // nicht jede Testdatei nutzt alle Helfer
 pub fn peak(img: &[Complex32], nrange: usize) -> (usize, usize, f32) {
     let (mut bi, mut bv) = (0, 0.0f32);
     for (i, c) in img.iter().enumerate() {
@@ -69,6 +70,7 @@ pub fn peak(img: &[Complex32], nrange: usize) -> (usize, usize, f32) {
 }
 
 /// −3-dB-Breite eines 1D-Leistungsschnitts in Pixeln.
+#[allow(dead_code)] // nicht jede Testdatei nutzt alle Helfer
 pub fn fwhm(cut: &[f32], at: usize) -> usize {
     let half = cut[at] / 2.0;
     let mut lo = at;
