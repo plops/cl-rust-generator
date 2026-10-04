@@ -1,0 +1,3 @@
+# Ignore inference dumps (already-tracked files like source5/inference.yml
+# are unaffected by this).
+*.yml

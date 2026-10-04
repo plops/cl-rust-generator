@@ -1,0 +1,4 @@
+# Symlinks to ../source6/models (large binary assets, re-fetchable).
+# Git only sees the link itself, so ignore the link paths, not their contents.
+source7_mvp/models
+source8_transpiled/models
