@@ -1,0 +1,15 @@
+[package]
+name = "my_first_kernel"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git" }
+cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git" }
+# Must come from the same git checkout as cuda-host/cuda-device.
+# crates.io cuda-core 0.4.0 is a distinct crate instance from the git
+# cuda-core that cuda-host path-depends on, which breaks type unification
+# (CudaContext, DeviceBuffer, CudaModule) with E0277/E0308.
+cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git" }
