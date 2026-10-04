@@ -14,7 +14,7 @@ details to CSV files.
 Signal packets dispatch on `baq_mode`: 12/13/14 carry per-block bit-rate
 codes (FDBAQ), 3/4/5 are fixed-rate BAQ, and 0 is raw bypass; calibration
 packets use bypass. Validated end to end on a real S1C SM S6
-`SDV` product (`../34_copernicus/data`, VV: 44,901 echoes + 16 noise packets
+`SDV` product (`data/`, VV: 44,901 echoes + 16 noise packets
 + 520 calibration packets, zero decode failures).
 
 ## Build and run
@@ -31,7 +31,7 @@ Without arguments the program uses the default path hard-coded in the C++
 version. `cargo test` runs the unit tests, binary tests and end-to-end tests
 that decode synthetic packets and verify the CSV/`.cf` outputs, plus
 real-data regression tests (`tests/real_data.rs`) that decode packets from
-`../34_copernicus/data` when the dataset is present (skipped otherwise).
+`data/` when the dataset is present (skipped otherwise).
 
 ## Outputs
 

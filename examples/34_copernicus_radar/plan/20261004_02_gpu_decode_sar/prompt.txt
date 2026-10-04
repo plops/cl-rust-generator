@@ -74,30 +74,59 @@ auf der GPU, Ansatz aus `32_cuda-rust` wiederverwenden) → Bild
   `slant_range_vec`; Orbit-Ephemeriden (ECEF-Position/Geschwindigkeit)
   aus `*-annot.dat` liefern effektive Geschwindigkeit und
   Antennenpositionen. Alle Feldnamen sind in `header.rs` dokumentiert.
-- **Range-Kompression:** Chirp-Replika nach SSFocus-Formel
-  (`φ₁ = TXPSF + TXPRR·TXPL/2`, `φ₂ = TXPRR/2`), Matched Filter pro
-  Echo (GPU; CPU-Referenz zum Vergleich). Empfohlen: Replika aus den
-  520 dekodierten Kalibrierpulsen rekonstruieren statt idealem Chirp
-  (SentiWiki: interne Kalibrierung).
-- **Doppler-Centroid-Schätzung (Pflicht):** Azimut-Spektrumsmitte aus
-  Orbit/Lage + Feinschätzung aus den Daten (SentiWiki-Verfahren),
-  als Input für den Azimut-Filter. Ohne sie sitzt die Signalenergie
-  falsch im Doppler-Spektrum.
+**WICHTIGE VEREINFACHUNGEN (MVP-Fokus):**
+- **Daten-Modus: Stripmap.** Die Daten stammen aus dem Stripmap-Modus
+  (S6). Du musst **kein** TOPSAR-Deramping, Burst-Stitching,
+  Burst-Synchronisation oder Scalloping implementieren. Ignoriere
+  TOPSAR-spezifische Literatur (im SentiWiki klar als solche markiert).
+- **Chirp-Replika: idealer Chirp (Pflicht).** Generiere die Replika
+  mathematisch aus `TXPSF`/`TXPRR`/`TXPL` (SSFocus-Formel, siehe
+  Ausgangslage). Die Rekonstruktion aus den 520 Kalibrierpulsen
+  (Drift-Derivation, Replica Whitening) ist physikalisch schöner,
+  aber strikt out-of-scope für dieses MVP — als Ausbaustufe
+  dokumentieren, nicht implementieren.
+- **Range-Kompression: zwingend Frequenzbereich.** Eine
+  Zeitbereichs-Faltung ist O(N²) und bei tausenden Samples pro Puls
+  selbst auf der A4000 absurd langsam. Kette pro Echo:
+  `FFT(Echo) · conj(FFT(Chirp)) → iFFT`. FFT immer via Bibliothek
+  (siehe Dependencies), niemals handgeschrieben.
+- **Doppler-Centroid: geometrisch zuerst.** Berechne den DC primär
+  geometrisch aus den Ephemeriden (Orbit/Lage). Eine datengetriebene
+  Feinschätzung (Phase-Correlation, Unwrapping) ist fehleranfällig
+  (Aliasing) — baue sie nur ein, wenn das Bild in Azimut sichtbar
+  verschmiert ist.
 - **Azimut-Fokussierung:** Primär TDBP auf der GPU (Muster aus
-  `sar_tdbp`; Start mit gerader Bahn, dann Orbitpositionen).
-  Vergleichsarm: Range-Doppler nach SSFocus (`focus.py`: 2D-FFT →
-  Range-Filter → RCMC → Azimut-Filter → iFFT). RITSAR-FFBP als
-  weitere Option, falls plain-TDBP zu langsam ist.
+  `sar_tdbp`; Start mit gerader Bahn, dann Orbitpositionen). TDBP ist
+  exakt (keine Bahn-Näherungen), aber O(N³) und teuer — daher als
+  Vergleichsarm ein Frequenzbereichs-Verfahren: **Chirp Scaling (CSA)
+  bevorzugt**, da es nur aus FFTs und elementweisen Multiplikationen
+  besteht (keine Interpolation, GPU-freundlich). Klassischer
+  Range-Doppler nach SSFocus als Alternative (Achtung: RCMC per
+  Interpolation = unregelmäßige Speicherzugriffe, langsam auf GPU).
+  RITSAR-FFBP als weitere Option, falls plain-TDBP zu langsam ist.
 - **Ausgabe:** komplexes Slant-Range-Bild (`.cf` oder NPY-ähnlich)
   plus PNG-Quicklook (Betrag, dB, Farbtabelle) und gern die
   TDBP-GUI-Muster (Apertur-Schieberegler, Schnitte) wiederverwenden.
   Streaming-fähig bauen (volle 44.917 Echos statt 512er-Cap),
   Chunking nach SSFocus-Vorbild.
 
+**Empfohlene Dependencies (nichts neu erfinden):**
+- `cudarc` (sichere Rust-Bindings für NVIDIAs `cuFFT`) bzw.
+  `cufft`-FFI — GPU-FFT für Range-Kompression und
+  Frequenzverfahren. Falls `cuda-oxide` FFT-Bindings mitbringt,
+  diese zuerst prüfen.
+- `rustfft` — CPU-FFT (rein Rust, schnell) für Referenz und Fallback.
+- `ndarray` — komplexe Datenmatrizen auf der CPU (NumPy-Analogon;
+  Chunking/Slicing, z.B. Overlap-Save).
+- `image` (+ ggf. `palette`) — PNG-Quicklooks; dB-Amplituden auf
+  Farbskala (Viridis/Graustufen) mappen.
+
 ## Nicht-Ziele (ausdrücklich)
 
 - **Kein Geokodieren, keine Terrain-Korrektur.** Koordinaten und Berge
   werden nicht entzerrt; Slant-Range-Geometrie genügt.
+- **Kein TOPSAR.** Kein Deramping, kein Burst-Stitching, kein
+  Scalloping — die Daten sind Stripmap (siehe MVP-Fokus oben).
 - Keine radiometrische Kalibrierung (optional, falls trivial).
 - Zuerst nur VV-Polarisation; VH/Dual-Pol später.
 
@@ -135,6 +164,24 @@ Der Datensatz (~1,8 GB mit Zip) darf **niemals** committet werden
   quantitativ (Energie/Kontrast-Kennzahlen) und qualitativ (Quicklook
   mit Schiffen/Küste/Land wie im Referenz-PNG, per Augenschein plus
   abgelegtem PNG-Artefakt).
+- **Fokussierungs-Verifikation anhand realer Punktziele (Schiffe):**
+  Die Szene besteht zu ca. 2/3 aus Land/Stadt und 1/3 aus Meer mit
+  mehreren Schiffen. Ruhiges Meer streut schwach zurück, Schiffe aus
+  Metall extrem stark — sie verhalten sich wie nahezu ideale
+  Punktziele (Dirac-Impulse) und sind der empfindlichste
+  Fokus-Indikator (Land verzeiht Fehler optisch, Punktziele nichts):
+  - *Qualitativ:* Schiffe müssen als nadelscharfe, isolierte helle
+    Punkte erscheinen. Verschmieren sie in Azimut-Richtung
+    (Flugbahn) zu Strichen oder Kreuzen, stimmen Doppler-Centroid,
+    effektive Geschwindigkeit oder RCMC nicht.
+  - *Quantitativ (empfohlen):* Hellsten Pixel im Meerbereich nehmen,
+    Querprofile in Range und Azimut messen (Impulse Response):
+    schmaler Peak (kleine FWHM), Sidelobes einer 2D-Sinc-Funktion.
+    Diese Peakbreite ist auch die Metrik für etwaigen Autofokus
+    (minimieren!).
+  - *Land:* Wegen Speckle/Volumenstreuung kein Fokus-Maß; hier nur
+    prüfen, ob Makrostrukturen (Küstenlinie, Stadtgrenzen) wie im
+    Referenz-PNG erhalten bleiben.
 - Gates: `cargo test`, `cargo clippy --all-targets -- -D warnings`,
   `cargo fmt --check` (jeweils im neuen Crate; `cargo oxide ...`
   wo nötig).
