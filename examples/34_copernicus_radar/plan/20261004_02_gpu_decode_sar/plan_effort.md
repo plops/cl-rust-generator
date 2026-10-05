@@ -146,3 +146,66 @@ try to fix doc and benchmark
 │                                                                               │
 │  BILLING        Subscription · Muse Code Everyday Usage                       │
 └───────────────────────────────────────────────────────────────────────────────┘
+
+
+try to fix the non-working reconstruction
+
+  Code (3 Commits):
+  • c158893 Chirp-Vorzeichen: Polarität 1 = positiv, S6 ist Up-Chirp (TXPRR +8.26e11). Vorher: FWHM 50 px statt 2, Kurtosis 20 statt 202. Plus Regressionstests.
+  • 37e8f60 Clutterlock: Lag-1 auf range-komprimierten Daten + Phasen-Mittelung (Stadtziele verbogen die Schätzung um ±300 Hz).
+  • 3141357 TDBP-Geometrie: neues Modul 13_tdbp_geo.rs (Epochen-Derotation ECEF(t_mid), Echozeit-Glättung aufs PRI-Raster, Kugel-Bogen), tdbp-CLI mit --compare/--no-rcmc, Warnung bei Fenster < 2048,
+    Doppel-ntx-Fix.
+
+  Doku (1 Commit): 16453cc Walkthrough v3 (~1040 Zeilen Prosa, keine Stichpunkte): Chirp-Story, Verfahren mit Diagrammen + Santos-Beispielen, TDBP-Benchmarks (2048×3400: CPU 34 s, GPU 5.5 s, 3.2×, CPU↔GPU 8.4e-8),
+  13 Funde mit Messwerten, Glossar + Erstverwendungs-Erklärungen. Artefakte regeneriert (AVIF 103 KB, Schiffs-PNG mit Sinc-Kreuz).
+
+  Gates: 47 sar_focus-Tests + 41 Decoder-Tests grün, Clippy -D warnings beidseitig grün, cargo fmt --check grün. /tmp von ~8 GB Diagnose-Dateien befreit (Platte war 100 % voll, jetzt 98 %).
+
+  Offen (für später, wenn du willst)
+
+  • TDBP-Az-Defokus: 34 rad konvexe Restphase über 512 Pulse, wächst mit Apertur. Kandidat: Map-Drift-Autofokus oder Ellipsoid-Punktsimulation.
+  • PNG-Historie: quicklook_full.png liegt noch in origin/master — braucht koordinierten Force-Push.
+  • f_DC-Streuung: Clutterlock streut auf Stadtgebieten (-102…+80 Hz), dokumentiert aber nicht stabilisiert.
+
+◆ Worked for 1h 54m 21s · 7:39 AM
+
+┌────────────────────────────────────────────────────────┐
+│  Session usage                                         │
+│                                                        │
+│    Input      187,830,869                              │
+│    Cached     184,988,784                              │
+│    Output         838,741                              │
+│    Total      188,669,610                              │
+│                                                        │
+│    Turns               886                             │
+│    Subagents          none                             │
+│                                                        │
+│  Subscription · Muse Code Everyday Usage               │
+│    Current        38% used · Resets at 9:44 AM         │
+│    Weekly         14% used · Resets Oct 12 at 12:00 AM │
+└────────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────────────────────────────┐
+│  MUSE CODE 1.4.2 / brook-asterism                                   COMPLETED │
+│                                                                               │
+│  MODEL          muse-spark-1.3-contributor · max                              │
+│                 meta · native-basic                                           │
+│                                                                               │
+│  WORKSPACE      /workspace/src/cl-rust-generator/examples/34_copernicus_radar │
+│                 trusted · not found                                           │
+│  ACCESS         Unrestricted                                                  │
+│                 sandbox disabled (--yolo)                                     │
+│                 Meta account                                                  │
+│  ACCOUNT        Wol Pumba (wolpumba@gmail.com)                                │
+│                                                                               │
+│  USAGE          188,669,610 tokens · 886 turns · 0 subagents                  │
+│  CONTEXT        95% left · 52.5K used / 1008K · normal                        │
+│                                                                               │
+│  SESSION        01a10912-b7e9-7473-818f-451872c1e9f7                          │
+│  ACTIVITY       no tasks                                                      │
+│                 0 terminals · inbox clear                                     │
+│                                                                               │
+│  BILLING        Subscription · Muse Code Everyday Usage                       │
+└───────────────────────────────────────────────────────────────────────────────┘
+
+To continue this session, run muse resume 01a10912-b7e9-7473-818f-451872c1e9f7
