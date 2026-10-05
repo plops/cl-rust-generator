@@ -1,95 +1,84 @@
 //! GPU-Prozessoren: RDA- und TDBP-Fokus auf dem Device.
 //!
 //! Gleiche Mathematik wie die CPU-Referenzen: RDA nutzt cuFFT für die vier
-//! FFT-Stufen und Kernel für Filter/Shifts (Ping-Pong-Puffer), TDBP den
-//! `f64`-Kernel aus `09_kernel`. Filter werden hostseitig mit denselben
-//! Funktionen wie CPU gebaut und einmalig hochgeladen.
+//! FFT-Stufen und Fusions-Kernel für Filter/Shifts (Ping-Pong-Puffer), TDBP
+//! den `f64`-Kernel aus `09_kernel`. Die RDA-Filter werden pro Zelle
+//! on-the-fly aus 1D-Vektoren berechnet — keine 2D-Filtermatrizen, kein
+//! mehrfacher PCIe-Transfer. Der Prozessor wird einmal je Geometrie erzeugt
+//! und über alle Chunks wiederverwendet (Pläne + Puffer persistent).
 
 use crate::cufft::{CufftPlan, Direction};
 use crate::kernel::GpuContext;
 use crate::range::RangeCompressor;
 use crate::rda::{self, RdaParams};
 use crate::tdbp::TdbpGrid;
-use crate::types::{Complex32, Error, Vec3d};
+use crate::types::{Complex32, Error, SPEED_OF_LIGHT, TX_WAVELENGTH_M, Vec3d};
 use cuda_core::DeviceBuffer;
 
-/// RDA-Fokus auf GPU (ein Prozessor je Chunk-Geometrie).
+/// RDA-Fokus auf GPU (ein Prozessor je Chunk-Geometrie, über Chunks geteilt).
 pub struct RdaGpuProcessor {
     g: GpuContext,
-    row_fwd: CufftPlan,
-    row_inv: CufftPlan,
-    col_fwd: CufftPlan,
-    col_inv: CufftPlan,
-    /// Fusionierter Range×RCMC-Filter (2D, device-resident).
-    filt_rr: DeviceBuffer<Complex32>,
-    /// Azimut-Filter (2D, device-resident).
-    filt_az: DeviceBuffer<Complex32>,
+    /// Zeilen-FFTs (Richtung ist Exec-Parameter, daher je Geometrie einer).
+    row: CufftPlan,
+    /// Spalten-FFTs (Schrittweite = Zeilenlänge).
+    col: CufftPlan,
+    /// Range-Matched-Filter (1D, `nrange`).
+    rf: DeviceBuffer<Complex32>,
+    /// Schrägentfernung, `v_eff`, Doppler-Centroid je Range-Bin (1D).
+    slant: DeviceBuffer<f64>,
+    veff: DeviceBuffer<f64>,
+    fdc: DeviceBuffer<f64>,
     cur: DeviceBuffer<Complex32>,
     tmp: DeviceBuffer<Complex32>,
     naz: usize,
     nrange: usize,
     shift: usize,
+    prf_hz: f64,
+    fs_hz: f64,
+    r0_m: f64,
+    apply_rcmc: bool,
 }
 
 impl RdaGpuProcessor {
     pub fn new(p: &RdaParams) -> Result<Self, Error> {
         let g = GpuContext::new()?;
         let n = p.naz * p.nrange;
-        // Filter hostseitig (identische Funktionen wie CPU) bauen + laden.
+        // Nur 1D-Vektoren bauen + laden (< 1 MB statt 2,64 GB 2D-Filter).
         let comp = RangeCompressor::new(&p.chirp, p.nrange);
-        let fa = rda::az_freqs(p.naz, p.pri_s);
-        let fr = rda::range_freqs_unshifted(p.nrange, p.chirp.fs_hz);
-        let rcmc = rda::rcmc_filter(
-            p.naz,
-            p.nrange,
-            &fa,
-            &fr,
-            p.slant_m[p.nrange / 2],
-            p.veff_range,
-            p.fdc_range,
-        );
-        let az = rda::azimuth_filter(p.naz, p.nrange, &fa, p.slant_m, p.veff_range, p.fdc_range);
-        let rf = comp.filter();
-        let mut rr = Vec::with_capacity(n);
-        let mut azh = Vec::with_capacity(n);
-        for a in 0..p.naz {
-            let base = a * p.nrange;
-            for (r, &f) in rf.iter().enumerate().take(p.nrange) {
-                let i = base + r;
-                let mut v = f;
-                if p.apply_rcmc {
-                    v *= rcmc[i];
-                }
-                rr.push(Complex32::new(v.re, v.im));
-                azh.push(Complex32::new(az[i].re, az[i].im));
-            }
-        }
-        let filt_rr = g.upload(&rr)?;
-        let filt_az = g.upload(&azh)?;
+        let rf: Vec<Complex32> = comp
+            .filter()
+            .iter()
+            .map(|c| Complex32::new(c.re, c.im))
+            .collect();
+        let rf = g.upload(&rf)?;
+        let slant = g.upload_f64(p.slant_m)?;
+        let veff = g.upload_f64(p.veff_range)?;
+        let fdc = g.upload_f64(p.fdc_range)?;
         let cur = g.alloc(n)?;
         let tmp = g.alloc(n)?;
-        // cuFFT-Pläne (Zeilen kontiguierlich, Spalten mit Schrittweite).
-        let mut row_fwd = CufftPlan::plan_rows(p.nrange, p.naz)?;
-        let mut row_inv = CufftPlan::plan_rows(p.nrange, p.naz)?;
-        let mut col_fwd = CufftPlan::plan_strided(p.naz, p.nrange, 1, p.nrange)?;
-        let mut col_inv = CufftPlan::plan_strided(p.naz, p.nrange, 1, p.nrange)?;
-        for plan in [&mut row_fwd, &mut row_inv, &mut col_fwd, &mut col_inv] {
-            plan.set_stream(&g.stream)?;
-        }
+        // cuFFT-Pläne (einmalig; Richtung wählt `exec_inplace`).
+        let mut row = CufftPlan::plan_rows(p.nrange, p.naz)?;
+        let mut col = CufftPlan::plan_strided(p.naz, p.nrange, 1, p.nrange)?;
+        row.set_stream(&g.stream)?;
+        col.set_stream(&g.stream)?;
         let ntx = crate::chirp::num_tx_samples(&p.chirp);
         Ok(Self {
             g,
-            row_fwd,
-            row_inv,
-            col_fwd,
-            col_inv,
-            filt_rr,
-            filt_az,
+            row,
+            col,
+            rf,
+            slant,
+            veff,
+            fdc,
             cur,
             tmp,
             naz: p.naz,
             nrange: p.nrange,
             shift: rda::correlation_shift_samples(ntx, p.nrange),
+            prf_hz: 1.0 / p.pri_s,
+            fs_hz: p.chirp.fs_hz,
+            r0_m: p.slant_m[p.nrange / 2],
+            apply_rcmc: p.apply_rcmc,
         })
     }
 
@@ -109,44 +98,67 @@ impl RdaGpuProcessor {
         let (naz, nr) = (self.naz, self.nrange);
         // SAFETY: Pläne passen zu den Puffern (Konstruktor), Stream gebunden.
         unsafe {
-            self.row_fwd
+            self.row
                 .exec_inplace(self.cur.cu_deviceptr(), Direction::Forward)?;
         }
         unsafe {
-            self.col_fwd
+            self.col
                 .exec_inplace(self.cur.cu_deviceptr(), Direction::Forward)?;
         }
         // fftshift: um ceil(naz/2) nach oben.
         self.g
             .launch_shift_cols(&self.cur, &mut self.tmp, naz, nr, naz.div_ceil(2))?;
         std::mem::swap(&mut self.cur, &mut self.tmp);
-        self.g
-            .launch_cmul_2d(&self.cur, &self.filt_rr, &mut self.tmp, naz * nr)?;
+        self.g.launch_range_rcmc(
+            &self.cur,
+            &self.rf,
+            &self.veff,
+            &self.fdc,
+            &mut self.tmp,
+            naz,
+            nr,
+            self.prf_hz,
+            self.fs_hz,
+            self.r0_m,
+            TX_WAVELENGTH_M,
+            SPEED_OF_LIGHT,
+            self.apply_rcmc,
+        )?;
         std::mem::swap(&mut self.cur, &mut self.tmp);
         unsafe {
-            self.row_inv
+            self.row
                 .exec_inplace(self.cur.cu_deviceptr(), Direction::Inverse)?;
         }
         self.g
             .launch_rotate_rows(&self.cur, &mut self.tmp, nr, naz, self.shift)?;
         std::mem::swap(&mut self.cur, &mut self.tmp);
-        self.g
-            .launch_cmul_2d(&self.cur, &self.filt_az, &mut self.tmp, naz * nr)?;
+        self.g.launch_az(
+            &self.cur,
+            &self.slant,
+            &self.veff,
+            &self.fdc,
+            &mut self.tmp,
+            naz,
+            nr,
+            self.prf_hz,
+            TX_WAVELENGTH_M,
+        )?;
         std::mem::swap(&mut self.cur, &mut self.tmp);
         // ifftshift: um floor(naz/2) nach oben.
         self.g
             .launch_shift_cols(&self.cur, &mut self.tmp, naz, nr, naz / 2)?;
         std::mem::swap(&mut self.cur, &mut self.tmp);
         unsafe {
-            self.col_inv
+            self.col
                 .exec_inplace(self.cur.cu_deviceptr(), Direction::Inverse)?;
         }
-        let mut out = self.g.download(&self.cur)?;
+        // Normierung auf dem Device, Download direkt in den Zielpuffer.
         let s = 1.0 / (naz * nr) as f32;
-        for v in out.iter_mut() {
-            *v = v.scale(s);
-        }
-        data.copy_from_slice(&out);
+        self.g.launch_scale(&self.cur, &mut self.tmp, naz * nr, s)?;
+        std::mem::swap(&mut self.cur, &mut self.tmp);
+        self.cur
+            .copy_to_host(&self.g.stream, data)
+            .map_err(crate::types::err)?;
         Ok(())
     }
 }

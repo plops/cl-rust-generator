@@ -369,25 +369,27 @@ fn focus_gpu_chunked(
         s += step;
     }
     println!("GPU-Chunks: {} à {chunk} (Overlap {ov})", starts.len());
+    // Persistenter Prozessor: Pläne + Puffer einmalig, über alle Chunks
+    // wiederverwendet (keine Allokations-/Planungsschleife mehr). Alle Chunks
+    // haben volle Größe (letzter zurückgeschoben, s. oben).
+    let p = rda::RdaParams {
+        chirp: *chirp,
+        naz: chunk,
+        nrange: n0,
+        pri_s,
+        slant_m: slant,
+        veff_range: veff,
+        fdc_range: fdc,
+        apply_rcmc: !cfg.no_rcmc,
+    };
+    let mut proc = sar_focus::gpu::RdaGpuProcessor::new(&p).map_err(|e| e.to_string())?;
     for (ci, &cs) in starts.iter().enumerate() {
         let ce = (cs + chunk).min(naz);
         let cn = ce - cs;
+        debug_assert_eq!(cn, chunk, "Chunk-Geometrie wechselt (Prozessor teilen!)");
         println!("  Chunk {}/{}, Zeilen {cs}..{ce} …", ci + 1, starts.len());
         let mut buf = img[cs * n0..ce * n0].to_vec();
-        let p = rda::RdaParams {
-            chirp: *chirp,
-            naz: cn,
-            nrange: n0,
-            pri_s,
-            slant_m: slant,
-            veff_range: veff,
-            fdc_range: fdc,
-            apply_rcmc: !cfg.no_rcmc,
-        };
-        sar_focus::gpu::RdaGpuProcessor::new(&p)
-            .map_err(|e| e.to_string())?
-            .focus(&mut buf)
-            .map_err(|e| e.to_string())?;
+        proc.focus(&mut buf).map_err(|e| e.to_string())?;
         // Gültig: Mitte ohne Overlap-Rand (erster/letzter Chunk: Kante dazu).
         let keep0 = if cs == 0 { 0 } else { ov / 2 };
         let keep1 = if ce == naz { cn } else { cn - ov / 2 };

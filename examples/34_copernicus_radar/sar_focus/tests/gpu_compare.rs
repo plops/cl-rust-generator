@@ -111,6 +111,42 @@ fn rda_gpu_stimmt_mit_cpu() {
 }
 
 #[test]
+fn rda_gpu_stimmt_mit_cpu_schief() {
+    // Schielende Geometrie: Die On-the-fly-Kernel indizieren `fdc`/`veff` je
+    // Range-Bin — mit konstanten Vektoren (Test oben) fiele ein Indexfehler
+    // nicht auf. Rampen + Offset zwingen jede Zelle auf eigenen Pfad.
+    use sar_focus::rda::{RdaParams, RdaProcessor};
+    let (data, slant, _) = simulate_raw();
+    let veff: Vec<f64> = (0..NR)
+        .map(|r| V + (r as f64 - NR as f64 / 2.0) * 0.05)
+        .collect();
+    let fdc: Vec<f64> = (0..NR)
+        .map(|r| -35.0 + 70.0 * r as f64 / NR as f64)
+        .collect();
+    for apply_rcmc in [true, false] {
+        let mk = RdaParams {
+            chirp: chirp(),
+            naz: NAZ,
+            nrange: NR,
+            pri_s: PRI,
+            slant_m: &slant,
+            veff_range: &veff,
+            fdc_range: &fdc,
+            apply_rcmc,
+        };
+        let mut cpu = data.clone();
+        RdaProcessor::new(&mk).focus(&mut cpu);
+        let mut gpu = data.clone();
+        sar_focus::gpu::RdaGpuProcessor::new(&mk)
+            .unwrap()
+            .focus(&mut gpu)
+            .unwrap();
+        let d = max_rel_diff(&gpu, &cpu);
+        assert!(d < 1e-3, "RDA schief (rcmc={apply_rcmc}) max rel. Abw. {d}");
+    }
+}
+
+#[test]
 fn tdbp_gpu_stimmt_mit_cpu() {
     use sar_focus::chirp::num_tx_samples;
     use sar_focus::rda::correlation_shift_samples;
