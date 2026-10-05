@@ -81,7 +81,7 @@ cd sar_focus
 cargo oxide build
 DAT=../data/vv/s1c-s6-raw-s-vv-20260929t214300-20260929t214327-009667-0133f4.dat
 
-cargo oxide run --release -- meta "$DAT"
+cargo oxide run -- meta "$DAT"
 ```
 
 `meta` decodes nothing — it counts packets/echoes and prints PRF, chirp and
@@ -89,17 +89,17 @@ slant-range parameters plus orbit blocks, so you see immediately whether a
 newly downloaded file is readable and plausible.
 
 Then focus. Full frame on the GPU (reference file: ~28 s decode + ~11 s
-focus, needs ~21 GB host RAM and ~3 GB VRAM, writes a 6.3 GB `.cf`):
+focus, needs ~16 GB host RAM and ~3 GB VRAM, writes a 6.3 GB `.cf`):
 
 ```sh
-cargo oxide run --release -- focus "$DAT" /tmp/s1_image --compare
+cargo oxide run -- focus "$DAT" /tmp/s1_image --compare
 ```
 
 On a small machine, or without a GPU, focus a window on the CPU instead
 (2,048 echoes: ~2–4 s total, ~1.4 GB RAM):
 
 ```sh
-cargo oxide run --release -- focus "$DAT" /tmp/s1_window --cpu --az0 4000 --az1 6048
+cargo oxide run -- focus "$DAT" /tmp/s1_window --cpu --az0 4000 --az1 6048
 ```
 
 `focus` writes `<prefix>.cf` (the complex image: raw little-endian `f32`
@@ -127,7 +127,7 @@ are German too); the READMEs are in English.
 |---|---|
 | Decoder | Stable Rust (`cargo build`, `cargo test`); ~1 GB free disk for CSV + `.cf` outputs |
 | `sar_focus` CPU (`--cpu`) | Stable Rust + `cargo oxide` build wrapper; 3 GB RAM for windows, ~29 GB for the full frame |
-| `sar_focus` GPU | NVIDIA GPU + CUDA toolkit (cuFFT), `libclang-dev`, pinned nightly toolchain (see `sar_focus/rust-toolchain.toml`), `cargo-oxide`; ~21 GB host RAM + ~3 GB VRAM for the full frame, ~7 GB free disk for the `.cf` |
+| `sar_focus` GPU | NVIDIA GPU + CUDA toolkit (cuFFT), `libclang-dev`, pinned nightly toolchain (see `sar_focus/rust-toolchain.toml`), `cargo-oxide`; ~16 GB host RAM + ~3 GB VRAM for the full frame, ~7 GB free disk for the `.cf` |
 
 Quality gates (both crates): `cargo clippy --all-targets -- -D warnings`
 and `cargo fmt --check` are green; `cargo test` (decoder, 41 tests incl. 3

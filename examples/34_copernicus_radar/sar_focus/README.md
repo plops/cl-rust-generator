@@ -33,7 +33,9 @@ Note: the CLI prints German help and diagnostics; the walkthroughs
 All commands run from this directory (`sar_focus/`). `cargo oxide` is the
 `cuda-oxide` wrapper that builds the Rust CUDA kernels before the host code
 (pinned nightly in `rust-toolchain.toml`); plain `cargo` is used for
-lint/format, which have no `oxide` counterparts.
+lint/format, which have no `oxide` counterparts. `cargo oxide build`/`run`
+have no `--release` flag — they build the optimized release profile by
+default (note the `Finished 'release' profile` line).
 
 ```sh
 cargo oxide build                    # CPU code + GPU kernels
@@ -46,6 +48,37 @@ Requirements for the GPU path: NVIDIA GPU + CUDA toolkit (cuFFT),
 `libclang-dev` (for the build), `cargo-oxide`. Everything also runs with
 `--cpu` on any machine.
 
+## Distributable binary (copy to another machine)
+
+The kernels are embedded in the binary (`cuda_module!`), so distribution is
+one file plus its runtime libraries:
+
+```sh
+# Bake the kernels for the target GPU architecture into the binary,
+# so it needs no JIT compiler (libNVVM/nvJitLink) at runtime.
+cargo oxide build --arch sm_86 --materialize-cubin
+ls -la target/release/sar_focus   # ~3 MB, this is the file to copy
+```
+
+Use the target machine's compute capability for `--arch` (here `sm_86` =
+RTX A4000; find it via `nvidia-smi --query-gpu=compute_cap --format=csv`).
+Without `--materialize-cubin` the binary embeds portable NVVM IR instead and
+JIT-compiles at startup, which requires the CUDA toolkit's compiler
+libraries on the target — the cubin build avoids that.
+
+The target machine (x86_64 Linux) needs, besides the binary:
+
+- An NVIDIA driver with a CUDA-capable GPU (the driver API is loaded at
+  runtime — no toolkit install needed for that part).
+- `libcufft.so.12` (CUDA toolkit library, linked by `build.rs` — the only
+  non-system entry in `ldd target/release/sar_focus`). Either install the
+  CUDA toolkit there, or copy `libcufft.so.12` next to the binary and set
+  `LD_LIBRARY_PATH`.
+
+Check with `ldd target/release/sar_focus` and a smoke run
+(`./sar_focus meta <file.dat>`, then a small `--cpu` or GPU `focus` window)
+after copying.
+
 ## Usage
 
 ```sh
@@ -57,7 +90,7 @@ downloaded dataset: packet/echo census, PRF, chirp parameters, slant range,
 orbit blocks.
 
 ```sh
-cargo oxide run --release -- meta "$DAT"
+cargo oxide run -- meta "$DAT"
 # Packets: 45437, imaging echoes (FDBAQ): 44901, PRF 1663.48 Hz, ...
 ```
 
@@ -65,9 +98,9 @@ cargo oxide run --release -- meta "$DAT"
 
 ```sh
 # Full frame on the GPU (reference file: ~28 s decode + ~11 s focus)
-cargo oxide run --release -- focus "$DAT" /tmp/s1_image --compare
+cargo oxide run -- focus "$DAT" /tmp/s1_image --compare
 # Window on the CPU (2,048 echoes, seconds, ~2-3 GB RAM)
-cargo oxide run --release -- focus "$DAT" /tmp/s1_window --cpu --az0 4000 --az1 6048
+cargo oxide run -- focus "$DAT" /tmp/s1_window --cpu --az0 4000 --az1 6048
 ```
 
 Flags: `--cpu` (CPU reference instead of GPU), `--az0 N --az1 M` (echo
@@ -89,7 +122,7 @@ optional `--compare <rda.cf> <naz> <n0> <az0>` for peak-offset + registered
 difference against an RDA image:
 
 ```sh
-cargo oxide run --release -- tdbp "$DAT" /tmp/tdbp_win \
+cargo oxide run -- tdbp "$DAT" /tmp/tdbp_win \
   --az0 4000 --az1 6048 --waz0 4000 --waz1 6048 --wrg0 2800 --wrg1 4500 \
   --compare /tmp/s1_image.cf 44901 17634 0
 ```
@@ -99,14 +132,14 @@ per azimuth quarter, FWHM + contrast; `SCHIFF` = point-like with > 10 dB
 contrast on dark background; with `az0 az1` a deep ocean search):
 
 ```sh
-cargo oxide run --release -- ships /tmp/s1_image.cf 44901 17634
+cargo oxide run -- ships /tmp/s1_image.cf 44901 17634
 ```
 
 **`ql` — re-render a quicklook** from a stored `.cf` (full frame or
 `az0 az1 r0 r1` crop; RFI rows dropped from the stretch):
 
 ```sh
-cargo oxide run --release -- ql /tmp/s1_image.cf 44901 17634 /tmp/ship.png 4195 4695 3411 3911
+cargo oxide run -- ql /tmp/s1_image.cf 44901 17634 /tmp/ship.png 4195 4695 3411 3911
 ```
 
 ## Performance (reference file, RTX A4000, 32 CPU cores)
@@ -115,7 +148,7 @@ cargo oxide run --release -- ql /tmp/s1_image.cf 44901 17634 /tmp/ship.png 4195 
 |---|---|---|---|
 | 2,048 | 2.8 s | 0.8 s | ~1.4 / ~1.2 GB |
 | 8,192 | 11.3 s | 1.9 s | ~6 / ~4 GB |
-| 44,901 (full) | 66.5 s | 10.8 s | ~29 / ~21 GB |
+| 44,901 (full) | 66.5 s | ~11–14 s | ~29 / ~16 GB |
 
 Decoding (~27 s full frame, always on CPU) dominates the total runtime now
 (~39 s GPU end to end). TDBP window 2,048 × 2,048×1,700: 17.3 s CPU /
