@@ -136,7 +136,7 @@ dieses Projekts ist bewusst der VV-Kanal.
 Weder das ZIP (1,25 GB) noch die `.dat` (631 MB) gehören ins
 Repository — sie sind groß, binär und öffentlich nachladbar. Das
 Repository enthält nur Code, Tests, diesen Text und zwei kleine
-Bild-Artefakte (45 und 40 Kilobyte, siehe Kapitel 7).
+Bild-Artefakte (103 und 251 Kilobyte, siehe Kapitel 7).
 
 ### 2.3 Was der Decoder aus der `.dat` holt
 
@@ -149,18 +149,28 @@ der Instrumentenüberwachung und werden aussortiert.
 
 Pro Echo liest der Decoder aus dem Paketkopf die Metadaten, die alles
 Weitere steuern: die Pulswiederholrate, englisch Pulse Repetition
-Frequency (PRF) (rund 1.660 Hz — so oft pro Sekunde sendet das
-Radar), ihr Kehrwert PRI (die Zeit zwischen zwei Pulsen), die
-Fensterposition SWST (Sampling Window Start Time — ab wann nach dem
-Puls das Empfangsfenster öffnet), den Rang (in welche Pulspause das
-Echo fällt), die Chirp-Parameter (Dauer TXPL, Steigung TXPRR) und den
-BAQ-Modus (Block-Adaptive Quantisierung — das Kompressionsverfahren
-der Rohdaten: Die Modi 12/13/14 tragen Flexible-BAQ mit
-Bitraten-Code pro Block, die Modi 3/4/5 feste BAQ-Raten, Modus 0
-ist unkomprimierter Bypass). Dazu kommen sub-kommutierte Hilfsdaten:
+Frequency (PRF) (1.663,48 Hz — so oft pro Sekunde sendet das
+Radar), ihr Kehrwert PRI (die Zeit zwischen zwei Pulsen, 601,150
+Mikrosekunden), die Fensterposition SWST (Sampling Window Start Time
+— ab wann nach dem Puls das Empfangsfenster öffnet), den Rang (in
+welche Pulspause das Echo fällt — hier 10), die Chirp-Parameter
+(Dauer TXPL, Startfrequenz TXPSF, Steigung TXPRR, jeweils mit
+Vorzeichen-Bit für die Chirp-Richtung) und den BAQ-Modus
+(Block-Adaptive Quantisierung — das Kompressionsverfahren der
+Rohdaten: Die Modi 12/13/14 tragen Flexible-BAQ mit Bitraten-Code
+pro Block, die Modi 3/4/5 feste BAQ-Raten, Modus 0 ist
+unkomprimierter Bypass). Dazu kommen sub-kommutierte Hilfsdaten:
 kleine Häppchen (je 2 Byte), über viele Paketköpfe verteilt, die
 zusammengesetzt die Orbitposition und -geschwindigkeit des Satelliten
-(Ephemeriden) ergeben.
+(Ephemeriden) ergeben. Die Chirp-Richtung verdient einen eigenen
+Satz, weil sie uns einen ganzen Tag kostete (Kapitel 8, Fund 7):
+Das Polaritäts-Bit `1` bedeutet **positiven** Chirp (Up-Chirp —
+die Frequenz steigt während des Pulses), kodiert als
+TXPRR = +8,26·10¹¹ Hz/s bei TXPSF = −21,09 MHz. Das Vorzeichen
+folgt exakt der Referenzformel des Python-Decoders
+(`Vorzeichen = (−1)^(1−Bit)`) — ein Regressionstest mit hartkodiertem
+Up-Chirp stellt sicher, dass das nie wieder kippt. Ein invertierter
+Chirp fokussiert nämlich trotzdem — nur zu Linien statt Punkten.
 
 Die eigentliche Entpackung kehrt die BAQ-Kompression Block für Block
 um und fädelt die vier ADC-Kanäle (IE/IO/QE/QO — gerade/ungerade
@@ -203,10 +213,18 @@ defokussieren.
 
 Drittens die Dopplermitte f_DC (Doppler-Centroid — die mittlere
 Dopplerfrequenz des Bodenechos). Die geometrische Rechnung liefert
-154–163 Hz, doch sie kennt die Yaw-Steuerung der Antenne nicht und
-misst daneben (ausführlich in Kapitel 8, Fund 3). Verwendet wird
-stattdessen der Clutterlock-Wert aus den Daten selbst: 5–18 Hz,
-median-geglättet.
+154–163 Hz, doch sie kennt die Yaw-Steuerung (Gierwinkel-Steuerung)
+der Antenne nicht und misst daneben (ausführlich in Kapitel 8,
+Fund 3). Verwendet wird stattdessen der Clutterlock-Wert aus den
+Daten selbst: über den Vollrahmen −102 bis +80 Hz. Clutterlock
+schätzt die Dopplermitte aus der Lag-1-Azimutkorrelation — der
+mittleren Phasendrehung von Echo zu Echo — und läuft bei uns auf
+zwei Lehren aus der Werkstatt: erstens auf **rangekomprimierten**
+Daten (auf Rohdaten vermisst man die Chirp-Struktur statt des
+Dopplers, ±21 MHz statt ±100 Hz!), zweitens mit
+**phasen-gemittelter** Schätzung (jede Zelle eine Stimme — sonst
+dominiert ein einziger heller Stadt-Pixel den ganzen Block). Beide
+Lehren stehen in Kapitel 8 (Fund 3 und 8).
 
 Viertens die FFT-Längen. Die natürliche Spaltenzahl 20.015 zerfällt
 in 5·4003 — und cuFFT (NVIDIAs FFT-Bibliothek) scheitert daran mit
@@ -239,7 +257,7 @@ flowchart LR
     RAW --> RC["rangekomprimiert<br/>RAM, pro Chunk"]
     RC --> RD["Range-Doppler-Spektrum<br/>RAM, pro Chunk"]
     RD --> CFB["Bild .cf<br/>44.901 mal 17.634<br/>6,33 GB Datei"]
-    CFB --> QL["Quicklook AVIF<br/>45 KB + ASCII"]
+    CFB --> QL["Quicklook AVIF<br/>103 KB + ASCII"]
     CFB --> SH["Schiffs-Bericht<br/>Peaks und FWHM"]
 ```
 
@@ -251,12 +269,12 @@ Gerätespeicher). Als Datei überlebt nur das fokussierte Bild
 (`.cf`-Format: schlicht aneinandergereihte little-endian
 `f32`-Paare, Real- und Imaginärteil) mit 6,33 Gigabyte — zu groß fürs
 Repository, es bleibt auf der Arbeitsmaschine. Ins Repository schaffen
-es nur die Destillate: der Quicklook als 45-Kilobyte-AVIF, der
-Schiff-Zoom als 40-Kilobyte-PNG und das E2E-Protokoll mit
-ASCII-Bild (Kapitel 7). Für die Validierung (Kapitel 6.1) lagen
-zusätzlich flüchtige NumPy-Felder (`.npy`, 397 MB) und Vergleichsplots
-in `/tmp` — sie sind reproduzierbar und wurden nach der Auswertung
-gelöscht.
+es nur die Destillate: der Quicklook als 103-Kilobyte-AVIF, der
+Schiff-Zoom (500 × 500 Pixel) als 251-Kilobyte-PNG und das
+E2E-Protokoll mit ASCII-Bild (Kapitel 7). Für die Validierung
+(Kapitel 6.1) lagen zusätzlich flüchtige NumPy-Felder (`.npy`,
+397 MB) und Vergleichsplots in `/tmp` — sie sind reproduzierbar und
+wurden nach der Auswertung gelöscht.
 
 ## 3. Die zwei Fokus-Verfahren: RDA und TDBP
 
@@ -311,7 +329,7 @@ Die Stärke des RDA ist seine Geschwindigkeit: Er skaliert wie
 N·log(N) mit der Pixelzahl (FFT-Komplexität) — eine Verdopplung der
 Echos kostet nur wenig mehr als die doppelte Zeit. Auf unserem
 Vollrahmen (44.901 × 20.160) braucht die CPU-Referenz 66,5 Sekunden
-Fokuszeit, die GPU-Pipeline 92,2 Sekunden (warum die GPU hier
+Fokuszeit, die GPU-Pipeline 94,8 Sekunden (warum die GPU hier
 langsamer ist, erklärt Kapitel 6.2 — kurz: Speichertransfer und
 Chunk-Overhead fressen den Rechenvorteil). Weil der RDA so schnell
 ist, eignet er sich auch zum Parametersuchen: Wer die Dopplermitte
@@ -328,8 +346,9 @@ kein Chirp-Echo ist, wird daraus eine kilometerlange Linie statt
 eines Punkts. Echte RDA-Artefakte (falsche f_DC, falsches v_eff)
 zeigten sich als symmetrische Unschärfe oder Geisterziele — die
 gemessenen Halbwertsbreiten (FWHM, Full Width at Half Maximum — die
-Breite eines Punktziels bei halber Spitzenleistung) von 1,1–2,3
-Pixeln in Range beweisen, dass wir davon verschont blieben.
+Breite eines Punktziels bei halber Spitzenleistung) von 1,0–1,9
+Pixeln in Range (E2E-Schiffe: 1,11/1,13/1,60) beweisen, dass wir
+davon verschont blieben.
 
 ### 3.2 TDBP: geometrisch exakt, Puls für Puls
 
@@ -346,38 +365,61 @@ gerechnet.
 
 ```mermaid
 flowchart TB
-    A["Rohmatrix plus<br/>Orbit plus Raster"] --> B["für jeden Bildpunkt<br/>Azimut mal Range"]
-    B --> C["für jeden Puls<br/>44.901 mal"]
-    C --> D["Entfernung aus<br/>Orbitgeometrie"]
-    D --> E["Sample interpolieren<br/>Phase anhängen"]
-    E --> F["aufsummieren"]
-    F --> G["ein fokussierter<br/>Bildpunkt"]
+    A["Rohmatrix plus<br/>Orbit plus Raster"] --> B["Geometrie-Brücke<br/>Rahmen, Erdrotation, Bogen"]
+    B --> C["für jeden Bildpunkt<br/>Fenster-Raster"]
+    C --> D["für jeden Puls<br/>Fenster-Apertur"]
+    D --> E["Entfernung aus<br/>Orbitgeometrie"]
+    E --> F["Sample interpolieren<br/>Phase anhängen"]
+    F --> G["aufsummieren"]
+    G --> H["ein fokussierter<br/>Bildpunkt"]
 ```
+
+Der neue erste Kasten — die Geometrie-Brücke (Modul 13) — ist der
+eigentliche Preis der Exaktheit: Bevor summiert werden kann, muss
+jedes RDA-Pixel in eine dreidimensionale Zielposition übersetzt
+werden. Dafür braucht es einen lokalen Rahmen aus der
+Aperturmitte (mit trägheitsfester Geschwindigkeit), eine Korrektur
+der Erdrotation (die mitrotierenden Orbitpositionen ins
+Epochen-System zurückdrehen — sonst läge jeder Puls bis zu 320 Meter
+daneben!), Kugel-Zielpositionen aus dem Bogen (Flach-Erde wäre 28
+Kilometer falsch — der Schwad liegt 600 Kilometer neben Nadir) und
+geglättete Echozeiten (die Header-Zeitstempel quantisieren ±7,6
+Mikrosekunden). Jede dieser vier Korrekturen hat ihre eigene
+Detektivgeschichte (Kapitel 8, Funde 9–11); ohne sie zeigt die TDBP
+praktisch Rauschen, mit ihnen findet sie dasselbe Schiff wie der RDA
+— in Range auf ±1 Pixel exakt.
 
 Der Preis steht in der Doppelschleife: Die Rechenzeit skaliert mit
 (Pulse × Bildpunkte). Für unseren Vollrahmen wären das rund
 44.901 × 792 Millionen ≈ 3,6·10¹³ Interpolations- und
 Phasenoperationen — Größenordnung Stunden auf der CPU, ein Vielfaches
 des RDA-Laufs selbst auf der GPU. Deshalb läuft die TDBP bei uns nur
-auf kleinen Fenstern: Auf einem synthetischen Testfeld (129 × 4.097
-Samples) braucht die parallele CPU-TDBP 0,009 Sekunden, die GPU-TDBP
-0,002 Sekunden reine Rechenzeit (nach 0,28 Sekunden einmaligem
-Kernel-Start) — der RDA rechnet dasselbe Feld in 0,203 Sekunden.
-Dieser Vergleich ist bewusst kein fairer Wettkampf (Fenster gegen
-Vollfeld), sondern ein Beleg für die Rollenverteilung: Die TDBP ist
-der Schiedsrichter, der am kleinen Fenster beweist, dass die
-RDA-Näherung stimmt — beide fokussieren das synthetische Punktziel
-auf dieselbe theoretische Schärfe (CPU↔GPU-Abweichung unter 10⁻³,
-siehe Kapitel 6.1).
+auf Fenstern — aber auf echten, großen: 2.048 Pulse auf ein
+2.048×1.700-Zielraster um die Schiffe (7,1 Milliarden Puls·Pixel)
+brauchen 17,3 Sekunden CPU-Zeit (5,5 Sekunden GPU-Zeit) — und das
+doppelt so große 2.048×3.400-Fenster 34,3 Sekunden (Kapitel 6.4).
+CPU↔GPU-Abweichung am Echtdaten-Fenster: 8,4·10⁻⁸ (Schranke 10⁻³).
 
 Wo die TDBP darüber hinaus glänzt: Sie braucht keine Parameter außer
 Geometrie. Wer unsicher ist, ob v_eff oder f_DC stimmen, kann am
 TDBP-Fenster prüfen, wie das Bild ohne diese Annahmen aussieht —
-ideal zur Fehlersuche. Und sie kennt keine Näherung — wo der RDA
-bei extremen Geometrien (sehr hohe Auflösung, starkes Schielen)
-irgendwann Geisterziele produzierte, bliebe die TDBP exakt. Für
-unseren Stripmap-Datensatz ist dieser Unterschied akademisch — beide
-Verfahren sind so scharf wie die Physik erlaubt.
+ideal zur Fehlersuche (so bewiesen wir zum Beispiel, dass ein
+Lageversatz nicht von der RCMC kommt — Fund 12). Und sie kennt
+keine Näherung — wo der RDA bei extremen Geometrien (sehr hohe
+Auflösung, starkes Schielen) irgendwann Geisterziele produzierte,
+bliebe die TDBP exakt.
+
+Ehrlichkeitshalber: Gewinne und offene Fragen sind ungleich verteilt.
+In Range ist die TDBP exakt bewiesen (±1 Pixel gegen RDA über das
+Vollfenster, Kreuzkorrelation bei Δrg = −1). In Azimut zeigt sie
+dasselbe Schiff — aber 3–5-fach verbreitert (FWHM 9–14 statt 2
+Pixel) und um rund 100 Pixel versetzt (f_DC-bedingter RDA-Versatz
+plus Rest). Der Phasenfehler dahinter (34 Radiant konvex über 512
+Pulse, direkt aus den Summanden vermessen) ist das größte offene
+Rätsel dieses Projekts — Fund 13 erzählt die ganze
+Ausschlussdiagnose (Doppel-ntx, Krümmung, Geschwindigkeit,
+Symmetrie: alles unschuldig oder mitverantwortlich, nichts allein
+schuldig).
 
 ### 3.3 Direkter Vergleich und Einordnung
 
@@ -385,18 +427,21 @@ Verfahren sind so scharf wie die Physik erlaubt.
 |---|---|---|
 | Idee | Doppler-Sortierung per FFT | Laufzeit-Summierung pro Punkt |
 | Näherungen | v_eff und f_DC pro Block konstant | keine (nur Interpolation) |
-| Skalierung | N·log(N) — Vollrahmen in ~1 Minute | Pulse×Pixel — Vollrahmen unbezahlbar |
-| Vollrahmen S6 (44.901 Echos) | 66,5 s CPU / 92,2 s GPU | nicht gerechnet (nur Fenster) |
-| Fenster (synth. Testfeld) | 0,203 s CPU | 0,009 s CPU / 0,002 s GPU |
+| Skalierung | N·log(N) — Vollrahmen in ~2 Minuten | Pulse×Pixel — linear, ~412 Mio/s (CPU) |
+| Vollrahmen S6 (44.901 Echos) | 66,5 s CPU / 94,8 s GPU | nicht gerechnet (nur Fenster) |
+| Fenster (2.048 × 2.048×1.700, echt) | ~4 s CPU (Anteil) | 17,3 s CPU / 5,5 s GPU (3,2×) |
+| Fenster groß (2.048 × 2.048×3.400) | — | 34,3 s CPU (14,3 Mrd. Puls·Pixel) |
 | Parametersuche | ideal (schnell, viele Läufe) | zu langsam |
 | Fehlersuche | zeigt Modellfehler als Unschärfe | zeigt Wahrheit ohne Modell |
-| Artefakte | RFI-Linien, Geister bei Fehlparametern | praktisch keine |
+| Artefakte | RFI-Linien, Geister bei Fehlparametern | Azimut-Defokus (offen, Fund 13) |
+| Lage gegen RDA (Echtdaten) | Referenz | Δrg ±1 px, Δaz ≈ −100 px (f_DC) |
 
 Die Einordnung in einem Satz: Der RDA ist das Arbeitstier, das den
-Vollrahmen in einer Minute fokussiert; die TDBP ist der
-Schiedsrichter, der am Fenster beweist, dass das Arbeitstier richtig
-liegt. Beide stimmen quantitativ überein — und beide stimmen auf CPU
-und GPU überein (Kapitel 6.1).
+Vollrahmen in zwei Minuten fokussiert; die TDBP ist der
+Schiedsrichter, der am Fenster beweist, dass das Arbeitstier in
+Range richtig liegt — und der in Azimut ehrlich zeigt, wo er selbst
+noch unscharf ist. Beide stimmen auf CPU und GPU überein
+(Kapitel 6.1).
 
 ## 4. Module: Wie der Code aufgebaut ist
 
@@ -415,15 +460,17 @@ die ideale Chirp-Referenz auf dem exakten ADC-Raster
 (Analog-Digital-Wandler-Raster — den tatsächlichen Abtastzeitpunkten).
 Wer wissen will, woher eine Zahl wie die Abtastrate 46,9184 MHz
 kommt, wird in dieser Schicht fündig. Die zweite Schicht (Module
-05–10) ist das Rechenzentrum: Range-Kompression, RDA und TDBP je als
-CPU-Referenz, dazu die GPU-Seite (minimales cuFFT-FFI — Foreign
-Function Interface, also der direkte Aufruf von NVIDIAs
-C-Bibliothek —, die CUDA-Kernel und die GPU-Pipeline, die exakt
-dieselben Filterkoeffizienten verwendet wie die CPU). Die dritte
-Schicht (Modul 11 plus die Kommandozeile) macht das Ergebnis
-sichtbar: Dezibel-Skalierung, Multilook (Mittelung benachbarter
-Pixel zur Rauschglättung), Quicklook-Bilder, ASCII-Vorschau,
-Peak-Suche und Schärfemessung.
+05–10 plus 13) ist das Rechenzentrum: Range-Kompression, RDA und
+TDBP je als CPU-Referenz, dazu die GPU-Seite (minimales
+cuFFT-FFI — Foreign Function Interface, also der direkte Aufruf von
+NVIDIAs C-Bibliothek —, die CUDA-Kernel und die GPU-Pipeline, die
+exakt dieselben Filterkoeffizienten verwendet wie die CPU) und die
+Geometrie-Brücke, die RDA-Pixelfenster in TDBP-Zielraster übersetzt
+(Erdrotation, Kugel-Bogen, Echozeit-Glättung — Kapitel 8, Funde 9
+bis 11). Die dritte Schicht (Modul 11 plus die Kommandozeile) macht
+das Ergebnis sichtbar: Dezibel-Skalierung, Multilook (Mittelung
+benachbarter Pixel zur Rauschglättung), Quicklook-Bilder,
+ASCII-Vorschau, Peak-Suche und Schärfemessung.
 
 | Datei | Modul | Aufgabe in einem Satz |
 |---|---|---|
@@ -438,16 +485,18 @@ Peak-Suche und Schärfemessung.
 | `09_kernel.rs` | `kernel` | CUDA-Kernel in Rust (`cuda-oxide`): komplexe Multiplikation, Shifts, TDBP-Summierung |
 | `10_gpu.rs` | `gpu` | GPU-Pipelines für RDA und TDBP — dieselben Filter, derselbe Codepfad-Gedanke wie CPU |
 | `11_look.rs` | `look` | Dezibel, Multilook, PNG/ASCII-Quicklook, Peak-Suche, FWHM-Schärfemessung |
-| `12_ingest.rs` | `ingest` | Echo-Auswahl: alle Echos des stärksten Beams, ohne 512er-Limit (mit Regressionstest) |
-| `main.rs` | CLI | Kommandozeile: `meta`, `focus`, `ships`, `ql` (siehe Kapitel 5) |
+| `12_ingest.rs` | `ingest` | Echo-Auswahl und -Ausrichtung: alle Echos des stärksten Beams, ohne 512er-Limit (mit Regressionstest), Echozeiten geglättet |
+| `13_tdbp_geo.rs` | `tdbp_geo` | Geometrie-Brücke RDA→TDBP: lokaler Rahmen, Erdrotations-Korrektur, Kugel-Zielraster |
+| `main.rs` | CLI | Kommandozeile: `meta`, `focus`, `ships`, `ql`, `tdbp` (siehe Kapitel 5) |
 
 Faustregel für Leser, die etwas ändern wollen: Physik und Kalibrierung
-stecken in 01–04, Rechenwege in 05–10, Darstellung in 11 und
-`main.rs`. Jede Schicht ist für sich testbar — insgesamt 40 Tests
-(28 Bibliotheks- plus 12 Integrationstests) sichern das ab, darunter
-Punktziel-Beweise, CPU↔GPU-Vergleiche und ein Echtdaten-Vergleich.
+stecken in 01–04, Rechenwege in 05–10 plus 13, Darstellung in 11 und
+`main.rs`. Jede Schicht ist für sich testbar — insgesamt 88 Tests
+(47 in `sar_focus`, 41 im Decoder) sichern das ab, darunter
+Punktziel-Beweise, CPU↔GPU-Vergleiche, ein Chirp-Vorzeichen-
+Regressionstest, ein Erdrotations-Rundtrip und ein Echtdaten-Vergleich.
 
-## 5. Bauen und Starten: `cargo oxide` und die vier Befehle
+## 5. Bauen und Starten: `cargo oxide` und die fünf Befehle
 
 ### 5.1 Was `cargo oxide` ist
 
@@ -473,22 +522,26 @@ NVIDIA-GPU mit installiertem Treiber; die CPU-Vergleichsläufe
 ### 5.2 Die Befehle im Einzelnen
 
 **`cargo oxide test`** baut alles (CPU-Code plus GPU-Kernel) und lässt
-alle 40 Tests laufen — in rund 10 Sekunden. Die Tests brauchen keinen
+alle 47 Tests laufen — in rund 10 Sekunden. Die Tests brauchen keinen
 Datensatz: Sie arbeiten mit synthetischen Punktzielen und kleinen
 Zufallsmatrizen und prüfen Physik (FWHM gegen Theorie), Gleichheit
-(CPU↔GPU unter 10⁻³) und Decoder-Regeln (600-Echo-Regressionstest).
+(CPU↔GPU unter 10⁻³), Geometrie (Erdrotations-Rundtrip) und
+Decoder-Regeln (Chirp-Vorzeichen- und 600-Echo-Regressionstest).
+(Plus 41 Decoder-Tests per normalem `cargo test` — insgesamt 88.)
 
 **`cargo oxide run -- meta <datei.dat>`** ist die Diagnose ohne
 Dekodierung: Sie zählt Pakete und Echos, zeigt PRF, Chirp-Parameter
-und Slant-Bereich und prüft die Orbitblöcke. Beispiel (gekürzt):
+und Slant-Bereich und prüft die Orbitblöcke. Beispiel (unser
+Datensatz, gekürzt):
 
 ```text
 Pakete: 45437
 Abbildende Echos (FDBAQ): 44901
-PRF: 1660.42 Hz  PRI: 602.260 µs  Rang: 6 ...
-Chirp: TXPL 51.041 µs ... B 42.19 MHz ...
-Slant: nah 913.5 km  fern 977.9 km (20031 Samples)
-Ephemeridenblöcke: 1397
+PRF: 1663.48 Hz  PRI: 601.150 µs  Rang: 10 ...
+Chirp: TXPL 51.099 µs ... B 42.19 MHz ...
+Slant: nah 913.8 km  fern 977.5 km (19950 Samples)
+data_delay: 3168 ...
+Ephemeridenblöcke: 684
 ```
 
 Wer einen neuen Datensatz bekommt, startet immer hier — stimmen
@@ -499,13 +552,29 @@ Volllauf: Dekodieren, Ausrichten, Dopplermitte schätzen, fokussieren,
 Bild schreiben, Quicklook und Schiffs-Bericht erzeugen. Die wichtigsten
 Optionen: `--cpu` rechnet die CPU-Referenz statt der GPU-Pipeline
 (läuft ohne GPU und nutzt dafür alle CPU-Kerne); `--az0 N --az1 M`
-beschränkt auf die Echos N bis M (ideal zum Ausprobieren: 512 Echos
-dauern eine Sekunde); `--chunk C --overlap O` steuert die
-GPU-Stückelung (Default 8192/2048, siehe Kapitel 7); `--compare`
-rechnet einen Ausschnitt zusätzlich auf der CPU und meldet die
-Abweichung (4,469·10⁻⁷ im E2E-Lauf). Ergebnis sind `<präfix>.cf`
-(das Bild), `<präfix>.png` (der Quicklook) und der Bericht auf der
-Konsole.
+beschränkt auf die Echos N bis M (ideal zum Ausprobieren — aber
+Achtung: Unter 2.048 Echos warnt das Programm, weil die
+Apertur-Trunkierung Wrap-Linien erzeugt; E2E-Verifikation braucht
+volle Fenster); `--chunk C --overlap O` steuert die GPU-Stückelung
+(Default 8192/2048, siehe Kapitel 7); `--compare` rechnet einen
+Ausschnitt zusätzlich auf der CPU und meldet die Abweichung
+(2,6·10⁻⁷ am 2.048-Echo-Fenster); `--no-rcmc` schaltet die
+Range-Wanderungskorrektur ab (nur zur Diagnose — zum Beispiel um zu
+beweisen, dass ein Lageversatz *nicht* von der RCMC kommt, Kapitel 8,
+Fund 12). Ergebnis sind `<präfix>.cf` (das Bild), `<präfix>.png`
+(der Quicklook) und der Bericht auf der Konsole.
+
+**`cargo oxide run -- tdbp <datei.dat> <präfix> --az0 P0 --az1 P1
+--waz0 A0 --waz1 A1 --wrg0 R0 --wrg1 R1 [--cpu] [--compare ...]`**
+rechnet die Zeitbereichs-Rückprojektion auf einem Fensterausschnitt:
+`--az0/--az1` wählen die Pulse (die Apertur — am besten symmetrisch
+ums Ziel), `--waz/--wrg` das Zielraster in RDA-Output-Pixeln. Mit
+`--cpu` läuft die parallele CPU-Referenz (sonst die GPU), mit
+`--compare <rda.cf> <naz> <n0> <az0>` vergleicht das Programm Lage
+und Helligkeit direkt gegen ein RDA-Bild (Peak-Versatz plus
+registrierte Differenz). Beispiel: 2.048 Pulse auf ein
+2.048×1.700-Zielraster um die Schiffe brauchen 17,3 Sekunden CPU
+(5,5 Sekunden GPU) — siehe Kapitel 6.4.
 
 **`cargo oxide run -- ships <bild.cf> <naz> <n0>`** analysiert ein
 fertiges Bild: Es teilt es in vier Azimut-Viertel, sucht pro Viertel
@@ -514,25 +583,27 @@ Halbwertsbreite in Pixeln und Metern, Kontrast K in Dezibel gegen die
 Umgebung). Als „punktförmig" (= Schiffskandidat) gilt, was in beiden
 Richtungen schmaler als 3 Pixel ist; als Schiffskandidat zusätzlich,
 wer über 10 dB Kontrast auf dunklem Untergrund hat. Beispiel aus dem
-512-Echo-Fenster (Echos 20000–20512):
+E2E-Volllauf:
 
 ```text
-Peak 1: (az 290, rg 301) P=3.225e7,
-        FWHM rg 1.48px/4.7m az 1.65px/7.1m K=13.1dB punktförmig
+Peak 5: (az 4445, rg 3661) P=8.174e9,
+        FWHM rg 1.11px/3.5m az 2.33px/9.9m K=47.9dB SCHIFF
 ```
 
-Lesart: Im Fenster an Zeile 290, Spalte 301 sitzt ein Ziel mit
-13,1 dB Kontrast, in beiden Richtungen 1,5–1,7 Pixel breit — also
-etwa so scharf wie theoretisch möglich (3,15 × 6,15 Meter) und damit
-sehr plausibel ein Schiff auf dunklem Ozean.
+Lesart: An Zeile 4445, Spalte 3661 sitzt ein Ziel mit 47,9 dB
+Kontrast, 1,1 × 2,3 Pixel breit — also etwa so scharf wie
+theoretisch möglich (3,15 × 6,15 Meter) und damit sehr plausibel ein
+Schiff auf dunklem Ozean. Der Schiff-Zoom im Repository (500 × 500
+Pixel, 251 KB) zeigt genau dieses Ziel: einen hellen Kern mit
+Sinc-Kreuz (den typischen Beugungsarmen in Azimut und Range).
 
 **`cargo oxide run -- ql <bild.cf> <naz> <n0> <aus.png> [fenster]`**
 malt nachträglich einen Quicklook aus einem gespeicherten Bild —
 wahlweise das Ganze oder einen Ausschnitt (`az0 az1 r0 r1`). Die
 Helligkeit wird in Dezibel umgerechnet und perzentil-gespreizt
 (siehe Kapitel 2.4, Punkt 6), sodass auch RFI-verseuchte Bilder
-lesbar bleiben. Der Schiff-Zoom im Repository (200 × 199 Pixel,
-40 KB) entstand so.
+lesbar bleiben. Der Schiff-Zoom im Repository entstand so
+(`ql e2e_full.cf 44901 17634 ship.png 4195 4695 3411 3911`).
 
 **`cargo clippy --all-targets -- -D warnings`** und **`cargo fmt
 --check`** sind die zwei Qualitäts-Gates: Clippy muss ohne jede
@@ -561,7 +632,8 @@ liegen weit darunter:
 | cuFFT gegen rustfft (Zeilen und Spalten) | 10⁻⁵ / 10⁻⁴ | grün |
 | RDA-GPU gegen RDA-CPU (Punktziel, synthetisch) | 10⁻³ | grün |
 | TDBP-GPU gegen TDBP-CPU (Punktziel, synthetisch) | 10⁻³ | grün |
-| RDA-GPU gegen RDA-CPU (**Echtdaten**, 2048 × 20160) | 10⁻³ | **4,5·10⁻⁷** |
+| RDA-GPU gegen RDA-CPU (**Echtdaten**, 2.048 Echos) | 10⁻³ | **2,6·10⁻⁷** |
+| TDBP-GPU gegen TDBP-CPU (**Echtdaten**, 2.048×1.700) | 10⁻³ | **8,4·10⁻⁸** |
 
 CPU↔GPU-Gleichheit beweist aber nur, dass beide Pfade denselben
 Algorithmus rechnen — nicht, dass der Algorithmus richtig ist. Daher
@@ -576,11 +648,15 @@ NumPy-RDA (eigene, zweite Implementierung des Algorithmus in Python,
 doppelte Genauigkeit) gegen den Rust-CPU-RDA gestellt: maximale
 relative Differenz 2,4·10⁻⁷ — also identisch bis auf Rundung.
 
-Diese Gold-Validierung entschied auch die Streifen-Frage (siehe
-Kapitel 6.5): Der unabhängige NumPy-Fokus zeigt **dieselben**
-Streifen wie unser Rust-Fokus. Zwei völlig getrennte
+Diese Gold-Validierung entschied auch die halbe Streifen-Frage
+(siehe Kapitel 6.5): Der unabhängige NumPy-Fokus zeigt **dieselben**
+kilometerlangen Linien wie unser Rust-Fokus. Zwei völlig getrennte
 Implementierungen produzieren denselben „Fehler" — also ist es kein
-Verarbeitungsfehler, sondern eine Dateneigenschaft (RFI).
+Verarbeitungsfehler, sondern eine Dateneigenschaft (RFI). Die
+*andere* Hälfte der Streifen — ein flächiges Linienmuster statt
+Punkten — war dagegen ein echter Bug: ein invertiertes
+Chirp-Vorzeichen (Fund 7). Nach dem Fix wurden aus Linien Punkte;
+die RFI-Linien blieben (korrekt).
 
 Ehrlichkeitshalber: Ursprünglich sollten die Python-Prozessoren des
 SSFocus-Projekts den Gold-Standard liefern. Das scheiterte —
@@ -606,16 +682,16 @@ behalten).
 | 512 | 0,4 s / 0,7 s / 1,1 s | 0,4 s / 1,3 s / 1,7 s |
 | 2.048 | 1,4 s / 2,8 s / 4,2 s | 1,4 s / 3,7 s / 5,2 s |
 | 8.192 | 5,4 s / 11,1 s / 16,8 s | 5,5 s / 13,6 s / 19,4 s |
-| 44.901 (Vollrahmen) | 27,2 s / 66,5 s / 95,4 s | 27,2 s / 92,2 s / 121,2 s |
+| 44.901 (Vollrahmen) | 27,2 s / 66,5 s / 95,4 s | 27,0 s / 94,8 s / 122,0 s |
 
 Drei Beobachtungen verdienen Diskussion. Erstens: Die Dekodierung
-kostet auf beiden Pfaden gleich viel (27,2 Sekunden beim Vollrahmen)
-— sie läuft immer auf der CPU, auch im GPU-Lauf. Zweitens: Die
-Skalierung ist fast linear — 88-mal mehr Echos (512 → 44.901) kosten
-rund 87-mal mehr Fokuszeit. Das passt zur N·log(N)-Erwartung des RDA
-(siehe Kapitel 3.1). Drittens, und das überrascht: **Die GPU ist
-durchgehend langsamer als die CPU** — beim Vollrahmen 92,2 gegen
-66,5 Sekunden Fokuszeit.
+kostet auf beiden Pfaden gleich viel (rund 27 Sekunden beim
+Vollrahmen) — sie läuft immer auf der CPU, auch im GPU-Lauf.
+Zweitens: Die Skalierung ist fast linear — 88-mal mehr Echos
+(512 → 44.901) kosten rund 87-mal mehr Fokuszeit. Das passt zur
+N·log(N)-Erwartung des RDA (siehe Kapitel 3.1). Drittens, und das
+überrascht: **Die GPU ist durchgehend langsamer als die CPU** —
+beim Vollrahmen 94,8 gegen 66,5 Sekunden Fokuszeit.
 
 Warum? Der RDA ist im Kern eine Folge riesiger FFTs — speichergebunden
 (memory-bound), nicht rechengebunden: Die meiste Zeit wartet der
@@ -629,8 +705,8 @@ Kernel-Start-Overhead. Fazit: Für diesen RDA auf dieser Maschine ist
 die CPU schlicht die richtige Hardware — die GPU-Implementierung
 bleibt wertvoll als unabhängige Zweitimplementierung (doppelte
 Buchführung) und als Basis für rechengebundene Verfahren wie die
-TDBP, wo die GPU pro Operation deutlich gewinnt (0,002 gegen 0,009
-Sekunden am Fenster, siehe Kapitel 3.2).
+TDBP, wo die GPU klar gewinnt (5,5 gegen 17,3 Sekunden am
+Echtdaten-Fenster, siehe Kapitel 6.4).
 
 ### 6.3 Benchmarks II: Speicher
 
@@ -644,10 +720,10 @@ Gerätespeicher (per `nvidia-smi` mitprotokolliert):
 | 512 | 0,98 GB | 1,34 GB | — |
 | 2.048 | 1,94 GB | 3,00 GB | — |
 | 8.192 | 5,78 GB | 9,72 GB | — |
-| 44.901 (Vollrahmen) | 28,97 GB | 21,37 GB | 8.395 MiB |
+| 44.901 (Vollrahmen) | 28,97 GB | 20,81 GB | 8.395 MiB |
 
 Auffällig: Beim Vollrahmen braucht der GPU-Lauf auf dem Host
-**weniger** Speicher als der CPU-Lauf (21,37 gegen 28,97 GB). Der
+**weniger** Speicher als der CPU-Lauf (20,81 gegen 28,97 GB). Der
 Grund ist das unterschiedliche Allokationsmuster: Die CPU-Pipeline
 hält Rohmatrix, rangekomprimierte Matrix und Bild gleichzeitig im
 RAM, während die GPU-Pipeline die Rohmatrix stückweise zum Gerät
@@ -657,46 +733,80 @@ GPU-Lauf speicherhungriger, aber er verteilt die Last auf zwei
 Speicher. Wer nur 16 GB RAM hat, rechnet den Vollrahmen trotzdem
 nicht — dann helfen `--az0/--az1`-Fenster oder kleinere Chunks.
 
+Die TDBP-Fenster sind daneben fast bescheiden: Das
+2.048×1.700-Fenster (7,1 Milliarden Puls·Pixel) braucht 0,97 GB
+Host-Speicher (CPU wie GPU) plus rund 356 MB Gerätespeicher
+(328 MB Daten, 28 MB Bild). Der Speicher skaliert mit
+Puls×Samples, nicht mit Puls×Pixel — die Zielschleife schreibt
+nur.
+
 ### 6.4 RDA gegen TDBP: Laufzeit im Vergleich
 
-Die Zahlen aus Kapitel 3.2 noch einmal im Zusammenhang: Am
-synthetischen Fenster (129 × 4.097 Samples) braucht der RDA auf der
-CPU 0,203 Sekunden, die CPU-TDBP 0,009 Sekunden, die GPU-TDBP 0,002
-Sekunden (nach 0,28 Sekunden Kernel-Start). Die TDBP gewinnt am
-Fenster, weil sie nur wenige Bildpunkte aus wenigen Pulsen
-summiert — der RDA zahlt dort seine FFT-Grundkosten. Am Vollrahmen
-kehrt sich das um: N·log(N) gegen Pulse×Pixel (3,6·10¹³ Operationen,
-siehe Kapitel 3.2) — der RDA braucht eine Minute, die TDBP würde
-Stunden brauchen und wurde daher nie auf den Vollrahmen angesetzt.
+Jetzt mit echten Zahlen statt synthetischer Spielwiese (alle auf
+Echtdaten, Echos 4000–6048, Schiffs-Region):
+
+| Rechnung | Pulse × Pixel | CPU | GPU |
+|---|---|---|---|
+| TDBP-Fenster (2.048×1.700) | 7,1·10⁹ | 17,3 s (412 Mio/s) | 5,5 s (1.307 Mio/s, 3,2×) |
+| TDBP-Fenster groß (2.048×3.400) | 14,3·10⁹ | 34,3 s (416 Mio/s) | — |
+| RDA-Fenster (2.048, volle Range) | — | ~4 s (Anteil) | — |
+
+Drei Beobachtungen: Erstens skaliert die TDBP exakt linear mit
+Pulse×Pixel (412 gegen 416 Millionen Operationen pro Sekunde —
+doppelte Pixel, doppelte Zeit). Zweitens gewinnt die GPU hier klar
+(Faktor 3,2): Die Rückprojektion ist rechengebunden
+(compute-bound) — pro geladenem Sample Dutzende
+Fließkomma-Operationen (Abstand, Interpolation, Sinus/Kosinus) —,
+genau das Gegenteil zum speichergebundenen RDA (Kapitel 6.2).
+Drittens kehrt sich das Kräfteverhältnis zum RDA um: Am kleinen
+Fenster gewinnt die TDBP pro Pixel (keine FFT-Grundkosten), am
+Vollrahmen wäre sie unbezahlbar (3,6·10¹³ Operationen — Stunden).
 Das ist kein Mangel, sondern Arbeitsteilung: RDA für das Bild, TDBP
 für die Kontrolle.
+
+Die Kontrolle gelingt: Am 2.048×1.700-Fenster findet die TDBP
+dasselbe 48-dB-Schiff wie der RDA — in Range auf ±1 Pixel exakt
+(Kreuzkorrelation des Vollfensters: Δrg = −1, Δaz = −101, Stärke
+0,21). Der Azimut-Versatz von 101 Pixeln entspricht rund 119 Hz
+Doppler-Fehler — genau die Größenordnung, um die der
+Clutterlock-Wert neben der Geometrie liegt (Kapitel 8, Fund 3).
+Umgekehrt gelesen: Die TDBP bestätigt die RDA-Range-Achse
+unabhängig — und der RDA bestätigt, dass die TDBP-Geometrie
+(Erdrotation, Bogen, Echozeiten) stimmt.
 
 ### 6.5 Diskussion der Daten: Schiffe, Küste, Störungen
 
 Was sieht man nun im fokussierten Bild? Drei Dinge: erstens die
-Geografie — im ASCII-Quicklook des E2E-Protokolls (Kapitel 7) zieht
-sich diagonal eine helle Küstenlinie durchs Bild: links oben dunkler
-Ozean (schwache Rückstreuung), rechts unten helles Land. Zweitens
-punktförmige Ziele auf dem Ozean: Der Schiffs-Bericht findet pro
-Bildviertel ein Dutzend Kandidaten mit 11–13 dB Kontrast und
-Halbwertsbreiten um 1,2–1,7 Pixel — also etwa theoretisch scharf
-(3,15 × 6,15 Meter) und damit sehr plausibel Schiffe. Das Beispiel
-aus Kapitel 5.2 (Fenster-Az 290, Range 301, K = 13,1 dB) ist so ein
-Fall; der 200×199-Schiff-Zoom im Repository zeigt einen davon als
-Bild. Drittens die Streifen: helle, kilometerlange Linien über das
-ganze Bild — am auffälligsten bei Azimut 4243.
+Geografie — der Voll-Quicklook (103-KB-AVIF im Repository) zeigt
+oben die Bucht von Santos mit Hafen, davor die Reede mit
+Dutzenden Reede-Liegern als helle Punkte, darunter Stadt
+(São Paulo-Region, hell), Flüsse und Stauseen (dunkel verzweigt)
+und Bergtextur. Zweitens punktförmige Ziele auf dem Ozean: Der
+E2E-Schiffs-Bericht findet drei automatische Schiffskandidaten mit
+41–48 dB Kontrast und Halbwertsbreiten um 1,1–1,6 × 1,5–2,3 Pixel
+— also etwa theoretisch scharf (3,15 × 6,15 Meter) und damit sehr
+plausibel Schiffe. Das hellste (Azimut 4445, Range 3661,
+K = 47,9 dB) zeigt der 500×500-Schiff-Zoom im Repository als
+lehrbuchmäßiges Punktziel: heller Kern mit Sinc-Kreuz (den
+Beugungsarmen in Azimut und Range). Drittens die Streifen: helle,
+kilometerlange Linien über das ganze Bild — am auffälligsten bei
+Azimut 4243.
 
-Diese Streifen sahen zunächst nach einem Algorithmus-Fehler aus.
-Die Untersuchung (Kapitel 6.1) bewies das Gegenteil: In den **Rohdaten**
-sitzt an Echo 4243 ein 70 Echos breiter Höcker — der Satellit hat im
-Vorbeiflug ein Bodenradar (zwei Dauertöne) mitgehört. Der Fokus macht
-daraus, was die Physik vorschreibt: einen ~4.600 Pixel langen,
-1–2 Pixel dicken Strich. Der unabhängige NumPy-Fokus zeigt ihn
-identisch. Auch die Top-5-Peaks des E2E-Laufs (alle bei Azimut
-4241–4246, Leistung ~2·10⁸, Range-FWHM am Messfenster gesättigt)
-sind diese Störung — **keine Schiffe**. Wer Schiffe zählt, muss die
-RFI-Zeilen kennen und ausblenden; wer den Algorithmus bewertet, muss
-wissen, dass die Streifen korrekt fokussierte Realität sind.
+Zu den Streifen gehören zwei Geschichten, die man nicht verwechseln
+darf. Die erste ist ein behobener Bug: Vor dem Chirp-Vorzeichen-Fix
+(Fund 7) war das **ganze** Bild mit einem Linienmuster überzogen —
+jede Energie wurde zu Strichen statt Punkten fokussiert. Nach dem
+Fix wurden daraus Punkte (Küste, Schiffe, Stadt). Die zweite
+Geschichte ist echte Physik und bleibt: In den **Rohdaten** sitzt
+an Echo 4243 ein 70 Echos breiter Höcker — der Satellit hat im
+Vorbeiflug ein Bodenradar (zwei Dauertöne) mitgehört. Der Fokus
+macht daraus, was die Physik vorschreibt: einen ~4.600 Pixel
+langen, 1–2 Pixel dicken Strich. Der unabhängige NumPy-Fokus zeigt
+ihn identisch. Wer Schiffe zählt, muss die RFI-Zeilen (Radio
+Frequency Interference — Funkstörung durch Bodenradare) kennen und
+ausblenden; wer den Algorithmus bewertet, muss wissen, dass die
+übrigen Streifen korrekt fokussierte Realität sind — und dass das
+flächige Linienmuster davor ein Vorzeichenfehler war.
 
 ## 7. E2E-Verifikation: Der Volllauf als Erzählung
 
@@ -706,87 +816,102 @@ Schritt durch — jede Zeile erzählt etwas:
 
 ```text
 Beam 5, Echos 44901 (0..44901)
+Orbit: Δt-Abw max 9.2 µs (Sprünge 0), Quant max 16.9 µs, ...
 Raster-Rest (Zeit→Sample): max. 0.250 Samples
 Range: 20031 + Pad → 20160
 ```
 
 Der Lauf wählt Beam 5 (den stärksten Elevations-Beam) und alle seine
 44.901 Echos — der lebende Beweis, dass kein 512er-Limit greift.
-Die zeitbasierte Ausrichtung (Kapitel 2.4) lässt maximal eine
-Viertelsample Restfehler; die Zeilenlänge wächst per Padding auf die
-cuFFT-verträglichen 20.160 Samples.
+Die neue Orbit-Zeile belegt die Zeitqualität: keine Sprünge in den
+Echoabständen, ±17 Mikrosekunden Header-Quantisierung (deshalb
+werden Echozeiten für die TDBP-Geometrie auf das exakte PRI-Raster
+geglättet — Fund 11), volle Block-Abdeckung. Die zeitbasierte
+Ausrichtung (Kapitel 2.4) lässt über den 27-Sekunden-Rahmen maximal
+eine Viertelsample Restfehler; die Zeilenlänge wächst per Padding
+auf die cuFFT-verträglichen 20.160 Samples.
 
 ```text
 Rohbild: 44901 × 20160 (7.24 GB)
 Slant: 913.5–977.9 km, fs 46.9184 MHz
 v_eff Mitte: 7100.4 m/s, Bandbreite: 42.19 MHz
 f_DC geometrisch: 153.8–162.7 Hz
-f_DC Clutterlock: 5.2–18.0 Hz
+f_DC Clutterlock: -101.5–79.9 Hz
 ```
 
-Nach 27,2 Sekunden Dekodierung liegt die 7,24-GB-Rohmatrix im
+Nach 27,0 Sekunden Dekodierung liegt die 7,24-GB-Rohmatrix im
 Speicher. Die Schrägentfernung läuft von 913,5 km (nah) bis 977,9 km
 (fern) — S6 schaut steil seitlich. Die effektive Geschwindigkeit
 (7.100,4 m/s) und die Chirp-Bandbreite (42,19 MHz) steuern die
 Filter. Und hier steht die folgenreichste Zeile des Protokolls:
-geometrisch 154–163 Hz, gemessen (Clutterlock) 5–18 Hz — verwendet
-wird der Messwert (Kapitel 8, Fund 3).
+geometrisch 154–163 Hz, gemessen (Clutterlock) −102 bis +80 Hz —
+verwendet wird der Messwert (Kapitel 8, Fund 3). Die Spanne wirkt
+groß, aber sie ist ehrlich: Über 27 Sekunden und 64 Kilometer
+Schwad streut die datenbasierte Schätzung — der RDA rechnet pro
+Block mit dem lokalen Wert.
 
 ```text
-CPU↔GPU max. rel. Abw.: 4.469e-7
 GPU-Chunks: 7 à 8192 (Overlap 2048)
   Chunk 1/7, Zeilen 0..8192 …
   ...
   Chunk 7/7, Zeilen 36709..44901 …
-Fokus fertig nach 127.5 s
+Zeit: Dekodierung 27.0 s, Orbit+f_DC 0.2 s, Fokus 94.8 s (gesamt 122.0 s)
+Host-Speicher (Peak): 20.81 GB
 ```
 
-Der Vergleichsausschnitt (`--compare`) bestätigt CPU↔GPU-Gleichheit
-bis auf 4,5·10⁻⁷. Die 44.901 Echos passen nicht am Stück auf die
-GPU, also werden 7 überlappende Chunks gerechnet (Overlap-Save:
-jeder Chunk 8.192 Echos, 2.048 Überlappung, Ränder verwerfen, Mitte
-behalten — das Diagramm in Kapitel 3.1 läuft pro Chunk). Die 127,5
-Sekunden enthalten diesen protokollierten Lauf mit Vergleich; die
-saubere Benchmark-Serie (Kapitel 6.2) misst 92,2 Sekunden reine
-GPU-Fokuszeit.
+Die 44.901 Echos passen nicht am Stück auf die GPU, also werden 7
+überlappende Chunks gerechnet (Overlap-Save: jeder Chunk 8.192
+Echos, 2.048 Überlappung, Ränder verwerfen, Mitte behalten — das
+Diagramm in Kapitel 3.1 läuft pro Chunk). Der CPU↔GPU-Nachweis
+(2,6·10⁻⁷) kommt aus der Fenster-Serie (Kapitel 6.1), nicht aus
+diesem Lauf — der Volllauf rechnet pur, ohne Vergleichs-Overhead.
 
 ```text
 Ausgabe-Raster: 44901 × 17634 (Wrap-Rand 2397 beschnitten)
 geschrieben: /tmp/e2e_full.cf (6.33 GB)
-Leistung: Mittel 6.788e5, Std 1.412e6, Kontrast 2.08
+Leistung: Mittel 6.869e5, Std 2.898e7, Kontrast 42.19
 ```
 
 Nach dem Beschnitt des Wrap-Rands (eine Chirplänge, Kapitel 2.4)
 bleibt das Bild 44.901 × 17.634 — 6,33 GB komplexe Samples als
 `.cf`-Datei (nicht im Repository). Der Bildkontrast (Standard-
-abweichung durch Mittelwert: 2,08) sagt: Das Bild lebt — reines
-Rauschen hätte Kontrast 1, ein fehlerhaft leeres Bild 0.
+abweichung durch Mittelwert: 42,19) wirkt absurd hoch — aber er
+misst nicht Rauschen, sondern RFI: Ein einziger mitgehörter
+Bodenradar-Störer treibt die Standardabweichung auf das 42-fache
+des Mittels. Ohne Störer läge der Kontrast bei ~2 (lebendiges
+Bild mit Stadt und Schiffen); reines Rauschen hätte 1, ein
+fehlerhaft leeres Bild 0.
 
-Es folgen der Quicklook (2.204 × 2.138 Pixel, 42,5–65,7 dB
-Dynamik — im Repository als 45-KB-AVIF `quicklook_full.avif`), das
-ASCII-Bild mit der diagonalen Küstenlinie (dunkler Ozean links oben,
-helles Land rechts unten) und die Theorie-Auflösung (Range 3,15 m,
-Azimut 6,15 m) mit den vermessenen Peaks. Die Top-5-Peaks sind, wie
-in Kapitel 6.5 erklärt, die RFI-Linie bei Azimut 4243 — ein
-wichtiger Warnhinweis im Protokoll: Die hellsten Punkte sind nicht
-automatisch die interessantesten Ziele.
+Es folgen der Quicklook (2.204 × 2.138 Pixel, 41,8–68,1 dB
+Dynamik — im Repository als 103-KB-AVIF `quicklook_full.avif`), das
+ASCII-Bild mit der Bucht von Santos (dunkler Ozean oben mit
+Reede-Liegern, helle Stadt und Flüsse darunter) und die
+Theorie-Auflösung (Range 3,15 m, Azimut 6,15 m) mit den vermessenen
+Peaks. Der Schiffs-Bericht findet drei automatische Kandidaten
+(41–48 dB, 1,1–1,6 × 1,5–2,3 Pixel) — darunter das 47,9-dB-Schiff
+aus Kapitel 5.2. Die allerhellsten Bildpunkte bleiben trotzdem die
+RFI-Linien (Kapitel 6.5) — ein wichtiger Warnhinweis im Protokoll:
+Die hellsten Punkte sind nicht automatisch die interessantesten
+Ziele.
 
 Was beweist dieser Lauf? Dass die komplette Kette — vom 631-MB-
 Paketstrom über 7,24 GB Rohmatrix zum 6,33-GB-Bild — ohne manuellen
-Eingriff durchläuft, dass CPU und GPU dasselbe rechnen, dass die
-Schärfe der Theorie entspricht und dass die sichtbaren Streifen
-validerte Dateneigenschaften sind. Was offen bleibt, steht ehrlich
-dabei: Das Produkt ist Slant-Range (Schrägentfernung, keine
-Geokodierung auf Breite/Länge), der Chirp ist ideal (keine
-Replik aus Kalibrierdaten), und nur der VV-Kanal ist verarbeitet.
+Eingriff durchläuft, dass CPU und GPU dasselbe rechnen (Fenster-
+Serie), dass die Schärfe der Theorie entspricht (Schiffe mit
+1,1 × 2,3 Pixeln) und dass die sichtbaren Streifen validierte
+Dateneigenschaften sind. Was offen bleibt, steht ehrlich dabei:
+Das Produkt ist Slant-Range (Schrägentfernung, keine Geokodierung
+auf Breite/Länge), der Chirp ist ideal (keine Replik aus
+Kalibrierdaten), nur der VV-Kanal ist verarbeitet — und die TDBP
+bleibt in Azimut 3–5-fach über Beugung (Fund 13).
 
 Artefakte in diesem Ordner: [Voll-Quicklook als AVIF
-(45 KB)](quicklook_full.avif), [Schiff-Zoom als PNG
-(200×199, 40 KB)](quicklook_ship.png), [E2E-Protokoll mit
+(103 KB)](quicklook_full.avif), [Schiff-Zoom als PNG
+(500×500, 251 KB)](quicklook_ship.png), [E2E-Protokoll mit
 ASCII-Bild](e2e_full.log). (Das 3,2-MB-PNG des Voll-Quicklooks wurde
-durch das 45-KB-AVIF ersetzt und aus der Historie entfernt.)
+durch das AVIF ersetzt und aus der Historie entfernt.)
 
-## 8. Funde: Sechs Geschichten aus der Werkstatt
+## 8. Funde: Dreizehn Geschichten aus der Werkstatt
 
 **1. Die cuFFT-Typkonstante.** Anfangs produzierte die GPU plausible,
 aber falsche Werte — und kein Test schlug an, weil reelle
@@ -816,10 +941,14 @@ Antennen-Steuergesetz nicht — es rechnet einen Schiel, den die
 Antenne längst kompensiert hat. Die Daten wissen es besser:
 Clutterlock — die Schätzung der Dopplermitte aus der
 Lag-1-Azimutkorrelation (der mittleren Phasendrehung von Echo zu
-Echo, median-geglättet über Range-Blöcke) — misst 5–18 Hz. Dieser
-Wert wird verwendet. Die Lektion „geometrisch zuerst" gilt nur mit
-vollständigem Modell — inklusive Antennensteuerung. Sonst misst man
-mit der Geometrie daneben und muss die Daten sprechen lassen.
+Echo, median-geglättet über Range-Blöcke) — misst über den
+Vollrahmen −102 bis +80 Hz. Dieser Wert wird verwendet — und die
+TDBP bestätigt ihn unabhängig: Der Azimut-Versatz TDBP↔RDA von 101
+Pixeln entspricht rund 119 Hz, genau der Größenordnung des
+Clutterlock-Geometrie-Unterschieds. Die Lektion „geometrisch zuerst"
+gilt nur mit vollständigem Modell — inklusive Antennensteuerung.
+Sonst misst man mit der Geometrie daneben und muss die Daten
+sprechen lassen.
 
 **4. RDA statt CSA.** Der Frequenz-Arm hätte auch ein
 Chirp-Scaling-Algorithmus (CSA) werden können — die SSFocus-
@@ -835,18 +964,121 @@ Heilung: Aufrunden auf 7-glatte Längen (`smooth_fft_len`) — 20.160
 mit nur kleinen Primfaktoren. Das beseitigt den Fehler und
 beschleunigt nebenbei, weil der schnelle Radix-Pfad greift.
 
-**6. Die Streifen sind echt.** Die auffälligste Bilderscheinung —
-helle Linien über das ganze Bild — entpuppte sich als korrekt
-fokussierte Funkstörung (RFI): ein 70 Echos breiter Höcker in den
-Rohdaten bei Azimut 4243 (Bodenradar, zwei Töne, im Vorbeiflug
-mitgehört), fokussiert zu einer ~4.600 Pixel langen, 1–2 Pixel
-dicken Linie. Der unabhängige NumPy-Fokus zeigt sie identisch
+**6. Die Streifen sind echt — die einen.** Die auffälligste
+Bilderscheinung — helle Linien über das ganze Bild — entpuppte sich
+als korrekt fokussierte Funkstörung (RFI): ein 70 Echos breiter
+Höcker in den Rohdaten bei Azimut 4243 (Bodenradar, zwei Töne, im
+Vorbeiflug mitgehört), fokussiert zu einer ~4.600 Pixel langen, 1–2
+Pixel dicken Linie. Der unabhängige NumPy-Fokus zeigt sie identisch
 (2,4·10⁻⁷ Gesamtabweichung). Kein Verarbeitungsfehler — sondern der
-Beweis, dass die Kette auch Unerwartetes korrekt abbildet.
+Beweis, dass die Kette auch Unerwartetes korrekt abbildet. (Die
+*anderen* Streifen — ein flächiges Linienmuster — waren Fund 7.)
+
+**7. Das Chirp-Vorzeichen war invertiert.** Monatelang (gefühlt)
+zeigten alle Bilder Linien statt Punkte — Küste, Schiffe, alles zu
+Strichen verschmiert. Die Ursache: ein einziges Bit. Das
+Polaritäts-Feld im Echo-Header kodiert die Chirp-Richtung
+(Steigungsvorzeichen der Sendefrequenz), und wir lasen es falsch
+herum: Bit `0` als positiv statt Bit `1`. Der Beweis kam aus drei
+Richtungen: erstens die Referenzformel des Python-Decoders
+(`Vorzeichen = (−1)^(1−Bit)` — eindeutig), zweitens die
+Metadaten-Verteilung (alle S6-Echos tragen übereinstimmend
+TXPRR = +8,26·10¹¹ Hz/s), drittens ein Kompressionstest (nur der
+Up-Chirp liefert Kurtosis 202 statt 20 und
+Maximum-zu-Mittel 110 statt 34). Nach dem Ein-Zeichen-Fix
+(`0→1`) wurden aus Linien Punkte. Ein Regressionstest mit
+hartkodiertem Up-Chirp (FWHM-Schranke — vor dem Fix 50 Pixel,
+danach 1–2) stellt sicher, dass das nie wieder kippt. Lektion:
+Bei 1-Bit-Entscheidungen hilft kein Gefühl — nur die
+Referenzformel plus ein Test, der erst rot ist.
+
+**8. Clutterlock braucht komprimierte Daten und faire Stimmen.**
+Zwei Lehren aus einer Schätzung: Erstens lief Clutterlock anfangs
+auf **Rohdaten** — und maß prompt die Chirp-Struktur (±21 MHz
+Frequenzhub!) statt des Dopplers (±100 Hz). Nach Cumming & Wong
+gehört die Schätzung auf rangekomprimierte Daten (dort ist der
+Chirp bereits eingesammelt). Zweitens dominierte anfangs ein
+einziger heller Stadt-Pixel jeden Block (Leistungs-Mittelung).
+Jetzt trägt jede Zelle genau eine Stimme
+(phasen-gemittelt: nur die Phasendrehung zählt, nicht die
+Helligkeit). Beide Lehren sichert je ein Regressionstest
+(`clutterlock_robust_gegen_chirp_bias` u. a.).
+
+**9. Abstände sind nur gleichzeitig rotationsinvariant.** Der
+größte TDBP-Bug versteckte sich in einem harmlosen Kommentar:
+„Abstände sind rotationsinvariant, keine Erdrotations-Korrektur
+nötig." Stimmt — aber nur für **gleichzeitige** Positionen!
+Die Orbitpositionen gelten in ECEF(t_p) — dem mitrotierenden
+Erdfestsystem zum jeweiligen Pulszeitpunkt —, der TDBP-Rahmen
+aber in ECEF(t_mid) der Aperturmitte. Dazwischen dreht sich die
+Erde bis zu ±320 Meter weit (voll in S1-Blickrichtung!). Ohne
+Korrektur lag das TDBP-Bild um elftausend Pixel daneben und zeigte
+nur Nebenkeulen-Chaos. Die Heilung: jede Plattform per
+Z-Rotation um ω·(t_p−t_mid) ins Epochen-System zurückdrehen.
+Ein 512-Puls-Rundtrip-Test (Simulation inertial, Eingabe rotiert)
+ist ohne Fix rot (Peak bei (1,21) statt (3,17)), mit Fix grün.
+
+**10. Der Wrap-Rand wurde doppelt addiert.** Nach der
+Erdrotations-Heilung lag das TDBP-Schiff noch 144 Pixel in Range
+daneben — konstant, scharf, reproduzierbar. Die Jagd (RCMC?
+Krümmung? Geschwindigkeit? suppressed data? data_delay? PRI?)
+führte über t0-Scans und Hyperbel-Vergleiche zu einem
+Abzählfehler: Der RDA-Output-Pixel `r` entspricht dem
+Roh-Sample `ntx+r` (der Wrap-Rand — die durch zyklische Faltung
+kontaminierten ersten `ntx` Samples — wird beschnitten). Die
+Geometrie-Brücke wusste das (`slant[r+ntx]`) — aber die
+Kommandozeile addierte `ntx` **noch einmal** dazu. Ergebnis:
+`slant[r+2·ntx]`, Bogen 10,6 Kilometer falsch, TDBP-Versatz.
+Nach dem Revert: Δrg = +1 Pixel. Lektion: Wer eine Achse an zwei
+Stellen definiert, definiert sie zweimal falsch — und ein
+„Fix" auf Basis konfundierter Peaks (verschiedene Ziele als
+Maxima!) macht Korrektes kaputt.
+
+**11. Echozeiten quantisieren — also glätten.** Die
+Header-Zeitstempel (Sekunde + 1/65536-Bruchteile) quantisieren
+±7,6 Mikrosekunden — das sind ±57 Millimeter Orbitposition.
+Für den RDA egal (er nutzt keine absoluten Zeiten), für die
+TDBP-Phase potentiell tödlich. Die Heilung nutzt, dass das
+PRI-Raster exakt ist (ganzzahlige Referenztakte): Alle
+Pulszeiten werden auf `t_mid + (p−mid)·PRI` geglättet
+(absoluter Offset egal — nur relative Phase zählt). Messbarer
+Gewinn: +14 Prozent Peak-Stärke. Die Orbit-Diagnosezeile
+(`Quant max 16.9 µs`) belegt die Quantisierung offen.
+
+**12. RCMC war unschuldig — bewiesen per Schalter.** Als der
+TDBP-Range-Versatz noch 144 Pixel betrug, war die
+Range-Wanderungskorrektur (RCMC) Hauptverdächtiger: Sie
+interpoliert in Range und hätte konstant verschieben können.
+Der neue `--no-rcmc`-Schalter entschied in 30 Sekunden:
+Mit RCMC: Versatz (−26,+147). Ohne RCMC: (−29,+147).
+Identisch — RCMC unschuldig (erwartbar: Die Migration beträgt
+nur ±3,7 Pixel). Der Schalter bleibt als Diagnose-Werkzeug.
+
+**13. Der TDBP-Azimut-Defokus — offen.** Das größte offene
+Rätsel, ehrlich dokumentiert: Die TDBP findet dasselbe Schiff
+wie der RDA (Range ±1 Pixel, Leistung ∝ N² kohärent!) — aber
+in Azimut 3–5-fach verbreitert (FWHM 9–14 statt 2 Pixel,
+Stärke 30-fach unterm kohärenten Maximum). Direkt aus den
+Summanden vermessen: 34 Radiant konvexer Phasenfehler über 512
+Pulse, bei korrekter Sample-Wahl (±1 Pixel!). Die
+Ausschlussdiagnose ist lang: Doppel-ntx (behoben, Fund 10),
+Krümmungsradius-Scan (Mittelkugel optimal),
+Geschwindigkeits-Scan (±1 % ohne Fokus-Effekt), symmetrische
+Apertur (schlechter, nicht besser!), Viertel-Aperturen
+(Q2 dominiert — Schiff nur über ~512 Pulse sichtbar),
+RDA-Gegenprobe über dieselben 512 Pulse (scharf: 2–3 Pixel!).
+Der Fehler ist TDBP-spezifisch, wächst mit der Apertur und ist
+bei 512 Pulsen schon 3-fach über Beugung — aber weder rein
+quadratisch noch rein eine Lage. Verdacht ohne Beweis:
+zusammengesetzt (Modell-Reste aus Kugel-Näherung plus
+Aspekt-Abhängigkeit des Schiffsziels). Nächster Schritt:
+Autofokus (Map-Drift aus Viertel-Bildern) oder
+Punktziel-Simulation mit Ellipsoid-Geometrie.
 
 ## 9. Glossar
 
 - **ADC**: Analog-Digital-Wandler — tastet das analoge Echo ab.
+- **Autofokus**: Schärfeoptimierung durch Parametersuche (f_DC, v_eff variieren, schärfstes Bild wählen).
 - **Azimut**: Flugrichtung des Satelliten (Bild-Zeilen).
 - **BAQ**: Block-Adaptive Quantisierung — S1-Rohdatenkompression.
 - **Chirp**: Frequenzmodulierter Sendepuls (S1: ~51 µs, 42 MHz).
@@ -858,24 +1090,32 @@ Beweis, dass die Kette auch Unerwartetes korrekt abbildet.
 - **dB**: Dezibel — logarithmisches Helligkeitsmaß.
 - **Doppler-Centroid (f_DC)**: Dopplermitte des Echos (Antennen-Schiel plus Steuerung).
 - **ECEF**: Erdfestes Koordinatensystem (Earth-Centered, Earth-Fixed).
+- **Epochen-System**: Eingefrorenes ECEF zum Apertur-Mittelpunkt (ECEF(t_mid)) — Bezugssystem der TDBP-Geometrie.
 - **FDBAQ**: Flexible BAQ (S1-Rohdatenkompression mit Bitraten-Code).
 - **FFI**: Fremdschnittstelle (Foreign Function Interface) — Aufruf von C-Code aus Rust.
 - **FFT**: Schnelle Fourier-Transformation (Fast Fourier Transform).
 - **FWHM**: Halbwertsbreite (Full Width at Half Maximum) — Schärfemaß eines Punktziels.
 - **GPU**: Grafikkarte als Rechenbeschleuniger (Graphics Processing Unit).
+- **Kurtosis**: Spitzheit einer Verteilung — fokussierte Punktziele haben hohe Kurtosis (scharfer Peak), Rauschen niedrige.
+- **Map-Drift**: Autofokus-Verfahren — Teil-Apertur-Bilder gegeneinander korrelieren, Versatz misst Phasenfehler.
 - **Multilook**: Pixel-Mittelung zur Rauschglättung.
 - **MVP**: Minimalumfang (Minimum Viable Product).
 - **PRF/PRI**: Pulswiederholrate (Pulse Repetition Frequency) und Pulsintervall (ihr Kehrwert).
 - **Quicklook**: Übersichtsbild (dB, verkleinert).
 - **Range**: Schrägentfernung Satellit–Ziel (Bild-Spalten).
+- **Reede**: Ankerplatz vor dem Hafen — Schiffe warten dort als helle Punkte auf dem Ozean.
 - **RCMC**: Korrektur der Range-Wanderung über der synthetischen Apertur (Range-Cell-Migration-Correction).
 - **RDA**: Range-Doppler-Algorithmus (Frequenz-Fokussierung).
 - **RFI**: Funkstörung (Radio Frequency Interference, Bodenradare) — helle Linien im Bild.
 - **RSS**: Belegter Arbeitsspeicher (Resident Set Size); Peak-RSS dessen Spitze.
 - **SAFE**: Copernicus-Archivformat (Standard Archive Format for Europe).
 - **SAR**: Radar mit synthetischer Apertur (Synthetic Aperture Radar).
+- **Sinc**: Beugungsfunktion sin(x)/x — Form eines fokussierten Punktziels (Kern plus Kreuz-Arme).
 - **Slant-Range**: Schrägentfernung ohne Geokodierung (unser Produkt).
 - **Stripmap**: SAR-Modus mit starr seitlich schauender Antenne.
 - **TDBP**: Zeitbereichs-Rückprojektion (Time-Domain Backprojection) — exakt, langsam.
+- **Up-Chirp**: Sendepuls mit steigender Frequenz (S1 S6: TXPRR positiv).
 - **v_eff**: Effektive Geschwindigkeit (Orbit plus Erdrotation plus Geometrie).
+- **Wrap-Rand**: Erste ntx Bildspalten — durch zyklische Faltung kontaminiert, werden beschnitten.
+- **Yaw**: Gierwinkel — Drehung um die Hochachse; S1 steuert per Yaw auf Zero-Doppler.
 - **VV**: Polarisation: vertikal gesendet, vertikal empfangen.

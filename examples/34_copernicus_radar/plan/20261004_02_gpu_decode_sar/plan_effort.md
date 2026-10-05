@@ -16,10 +16,16 @@ instrumentiert — Spalte entfällt ehrlicherweise).
 | Revision 2: Gold-Validierung | sentinel1decoder/NumPy-RDA per uv, RFI-Nachweis | — | (Analyse) |
 | Revision 2: Benchmarks | CPU/GPU × 512/2048/8192/44901, Zeit + Host/Device-RAM | — | (Analyse) |
 | Revision 2: Doku v2 | didaktischer Walkthrough, AVIF statt PNG, PNG aus Historie | — | (folgt) |
+| Revision 3: Gold-Analyse | Streak-Diagnose (Up/Down, RFI), Trajectory-Explosion, Zweifel-Protokoll | — | (Analyse) |
+| Revision 4: Chirp-Vorzeichen | Polarity 1 = positiv, TXPRR +8.26e11, Kurtosis 202 vs 20 | +2 (chirp_sign) | (folgt) |
+| Revision 4: Clutterlock-Robustheit | Range-komprimiert + Phasen-Mittelung (one-vote-per-cell) | (robust grün) | (folgt) |
+| Revision 5: TDBP-Geometrie | `13_tdbp_geo.rs`, Epochen-Derotation, Echozeit-Glättung, Kugel-Bogen | +4 (tdbp_geo) | (folgt) |
+| Revision 5: TDBP-Benchmarks | 2048×3400 Grid, CPU↔GPU 8.4e-8, RDA-Vergleich, Az-Defokus offen | — | (Analyse) |
+| Revision 5: Doku v3 | 1040-Zeilen-Walkthrough, Module 12+13, 13 Funde, Santos-Analyse | — | (folgt) |
 
-Endstand: **40 Tests grün** (28 lib + 3 gpu_compare + 2 rda_point +
-2 tdbp_point + 3 ssfocus_xcheck + 2 ingest), Clippy `-D warnings` grün,
-`cargo fmt --check` grün.
+Endstand: **48 Tests grün** (34 lib + 2 chirp_sign + 4 tdbp_geo +
+3 gpu_compare + 2 rda_point + 2 tdbp_point + 1 erdrotation), Clippy
+`-D warnings` grün, `cargo fmt --check` grün. Decoder-Crate: 41 Tests grün.
 
 Teure Einzelläufe (Release, RTX A4000, 32 CPU-Kerne):
 
@@ -28,12 +34,15 @@ Teure Einzelläufe (Release, RTX A4000, 32 CPU-Kerne):
 | E2E Vollrahmen GPU (44.901 × 20.160, 7 Chunks, mit `--compare`) | 127,5 s |
 | Benchmark Vollrahmen CPU (Fokus / gesamt) | 66,5 s / 95,4 s |
 | Benchmark Vollrahmen GPU (Fokus / gesamt) | 92,2 s / 121,2 s |
+| TDBP 2048×3400 CPU (7.13e9 Puls·Pixel) | 34,3 s (415 M/s) |
+| TDBP 2048×3400 GPU (dto.) | 5,5 s (1307 M/s, 3.2×) |
 | E2E-Ausschnitt 2048 Echos | ~5 s |
 | `cargo oxide test` (gesamt, inkl. GPU) | ~10 s |
 
-Befund-Dichte: 6 dokumentierte Funde (cuFFT-Konstante, ECEF-Frame,
-f_DC-Steuerung, RDA-Wahl, Primfaktor-Padding, RFI-Nachweis) — je mit
-Messwert im Walkthrough.
+Befund-Dichte: 13 dokumentierte Funde (cuFFT-Konstante, ECEF-Frame,
+f_DC-Steuerung, RDA-Wahl, Primfaktor-Padding, RFI-Nachweis, Chirp-Vorzeichen,
+Clutterlock-Lektion, Epochen-Derotation, Zeitglättung, Doppel-ntx, RCMC-Unschuld,
+Az-Defokus-offen) — je mit Messwert im Walkthrough.
 
 
 
