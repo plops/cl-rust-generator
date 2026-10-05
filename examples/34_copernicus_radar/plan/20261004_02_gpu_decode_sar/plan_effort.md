@@ -29,3 +29,62 @@ Teure Einzelläufe (Release, RTX A4000):
 Befund-Dichte: 6 dokumentierte Funde (cuFFT-Konstante, ECEF-Frame,
 f_DC-Steuerung, RDA-Wahl, Primfaktor-Padding, RFI-Nachweis) — je mit
 Messwert im Walkthrough.
+
+
+
+┌───────────────────────────────────────────────────────┐
+│  Session usage                                        │
+│                                                       │
+│    Input      66,722,152                              │
+│    Cached     65,485,596                              │
+│    Output        341,868                              │
+│    Total      67,064,020                              │
+│                                                       │
+│    Turns              350                             │
+│    Subagents         none                             │
+│                                                       │
+│  Subscription · Muse Code Everyday Usage              │
+│    Current        43% used · Resets at 1:06 AM        │
+│    Weekly         0% used · Resets Oct 12 at 12:00 AM │
+└───────────────────────────────────────────────────────┘
+
+◆ Worked for 1h 27m 39s · 12:08 AM
+
+┌───────────────────────────────────────────────────────┐
+│  Session usage                                        │
+│                                                       │
+│    Input      66,722,152                              │
+│    Cached     65,485,596                              │
+│    Output        341,868                              │
+│    Total      67,064,020                              │
+│                                                       │
+│    Turns              350                             │
+│    Subagents         none                             │
+│                                                       │
+│  Subscription · Muse Code Everyday Usage              │
+│    Current        44% used · Resets at 1:06 AM        │
+│    Weekly         1% used · Resets Oct 12 at 12:00 AM │
+└───────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────────────────────────────┐
+│  MUSE CODE 1.4.2 / brook-asterism                                   COMPLETED │
+│                                                                               │
+│  MODEL          muse-spark-1.3-contributor · max                              │
+│                 meta · native-basic                                           │
+│                                                                               │
+│  WORKSPACE      /workspace/src/cl-rust-generator/examples/34_copernicus_radar │
+│                 trusted · not found                                           │
+│  ACCESS         Unrestricted                                                  │
+│                 sandbox disabled (--yolo)                                     │
+│                 Meta account                                                  │
+│  ACCOUNT        Wol Pumba (wolpumba@gmail.com)                                │
+│                                                                               │
+│  USAGE          67,064,020 tokens · 350 turns · 0 subagents                   │
+│  CONTEXT        70% left · 300K used / 1008K · normal                         │
+│                                                                               │
+│  SESSION        01a10912-b7e9-7473-818f-451872c1e9f7                          │
+│  ACTIVITY       no tasks                                                      │
+│                 0 terminals · inbox clear                                     │
+│                                                                               │
+│  BILLING        Subscription · Muse Code Everyday Usage                       │
+└───────────────────────────────────────────────────────────────────────────────┘
