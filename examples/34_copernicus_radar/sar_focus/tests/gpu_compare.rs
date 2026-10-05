@@ -88,6 +88,7 @@ fn rda_gpu_stimmt_mit_cpu() {
     use sar_focus::rda::{RdaParams, RdaProcessor};
     let (data, slant, _) = simulate_raw();
     let veff = vec![V; NR];
+    let fdc = vec![0.0; NR];
     let mk = |apply_rcmc| RdaParams {
         chirp: chirp(),
         naz: NAZ,
@@ -95,7 +96,7 @@ fn rda_gpu_stimmt_mit_cpu() {
         pri_s: PRI,
         slant_m: &slant,
         veff_range: &veff,
-        f_dc_hz: 0.0,
+        fdc_range: &fdc,
         apply_rcmc,
     };
     let mut cpu = data.clone();

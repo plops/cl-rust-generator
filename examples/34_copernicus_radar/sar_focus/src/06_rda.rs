@@ -16,7 +16,7 @@
 //! Bulk-`v_eff` der Chunk-Mitte statt voller Matrix.
 
 use crate::chirp::ChirpParams;
-use crate::ephem::effective_velocity;
+use crate::ephem::{effective_velocity, inertial_vel};
 use crate::range::{RangeCompressor, dft_freqs, fftshift, ifftshift};
 use crate::types::{Complex32, SPEED_OF_LIGHT, TX_WAVELENGTH_M, Vec3d};
 use num_complex::Complex32 as Nc32;
@@ -33,18 +33,77 @@ pub struct RdaParams<'a> {
     pub slant_m: &'a [f64],
     /// Effektive Geschwindigkeit je Range-Bin in m/s (Chunk-Mitte).
     pub veff_range: &'a [f64],
-    /// Doppler-Centroid in Hz (Filter wird um ihn zentriert).
-    pub f_dc_hz: f64,
+    /// Doppler-Centroid je Range-Bin in Hz (Filter werden um ihn zentriert).
+    pub fdc_range: &'a [f64],
     /// RCMC-Phasenfilter anwenden (false nur für Mit/Ohne-Vergleiche).
     pub apply_rcmc: bool,
 }
 
 /// Bulk-`v_eff` je Range-Bin aus dem Orbit der Chunk-Mittellinie.
+///
+/// Die Linien-Geschwindigkeiten sind ECEF — `v_eff` braucht die inertiale
+/// Bahngeschwindigkeit (`|v + ω×r|`, sonst 1,1 % daneben).
 pub fn veff_mid_range(line_pos: &[Vec3d], line_vel: &[Vec3d], slant_m: &[f64]) -> Vec<f64> {
     let mid = line_pos.len() / 2;
+    let vs = inertial_vel(line_pos[mid], line_vel[mid]).norm();
     slant_m
         .iter()
-        .map(|&r| effective_velocity(line_vel[mid].norm(), line_pos[mid], r))
+        .map(|&r| effective_velocity(vs, line_pos[mid], r))
+        .collect()
+}
+
+/// Doppler-Centroid je Range-Bin aus den Daten (Clutterlock).
+///
+/// Lag-1-Azimutkorrelation, leistungsgewichtet über Blöcke gemittelt und
+/// linear auf Range-Bins interpoliert: `f_DC = arg(Σ s̄_a·s_{a+1})/2π·PRI`.
+/// Eindeutig für `|f_DC| < PRF/2` (S1: wenige 10 Hz). Schiedsrichter für
+/// den geometrischen Centroid aus `03_ephem`.
+pub fn clutterlock_fdc(data: &[Complex32], naz: usize, pri_s: f64, nblocks: usize) -> Vec<f64> {
+    let nr = data.len() / naz.max(1);
+    if naz < 2 || nr == 0 {
+        return vec![0.0; nr];
+    }
+    let nb = nblocks.clamp(1, nr);
+    let mut fdc = vec![0.0; nb];
+    for (b, f) in fdc.iter_mut().enumerate() {
+        let r0 = b * nr / nb;
+        let r1 = (b + 1) * nr / nb;
+        let (mut re, mut im) = (0.0f64, 0.0f64);
+        for a in 0..naz - 1 {
+            for r in r0..r1 {
+                let x = data[a * nr + r];
+                let y = data[(a + 1) * nr + r];
+                re += f64::from(x.re * y.re + x.im * y.im);
+                im += f64::from(x.re * y.im - x.im * y.re);
+            }
+        }
+        *f = im.atan2(re) / (2.0 * std::f64::consts::PI * pri_s);
+    }
+    // Median über 5 Blöcke: echte Steuer-Reste sind glatt, SNR-Ausreißer nicht.
+    let med: Vec<f64> = (0..nb)
+        .map(|b| {
+            let mut w: Vec<f64> = (b.saturating_sub(2)..(b + 3).min(nb))
+                .map(|i| fdc[i])
+                .collect();
+            w.sort_by(f64::total_cmp);
+            w[w.len() / 2]
+        })
+        .collect();
+    let fdc = med;
+    // Blockmitten linear auf Bins interpolieren, Ränder konstant.
+    (0..nr)
+        .map(|r| {
+            let x = (r as f64 + 0.5) * nb as f64 / nr as f64 - 0.5;
+            if x <= 0.0 {
+                return fdc[0];
+            }
+            if x >= (nb - 1) as f64 {
+                return fdc[nb - 1];
+            }
+            let b = x.floor() as usize;
+            let f = x - b as f64;
+            fdc[b] * (1.0 - f) + fdc[b + 1] * f
+        })
         .collect()
 }
 
@@ -54,12 +113,12 @@ pub fn d_factor(fa_hz: f64, veff: f64) -> f64 {
     (1.0 - x.min(1.0)).sqrt()
 }
 
-/// Azimut-Frequenzraster in Hz (Shift-Konvention, um `f_dc` zentriert).
-pub fn az_freqs(naz: usize, pri_s: f64, f_dc_hz: f64) -> Vec<f64> {
+/// Azimut-Frequenzraster in Hz (Shift-Konvention, um 0 zentriert).
+///
+/// Der Doppler-Centroid wird je Range-Bin in den Filtern abgezogen
+/// (`D(f_a − f_DC[r])`, RDA mit Schiel nach Cumming & Wong).
+pub fn az_freqs(naz: usize, pri_s: f64) -> Vec<f64> {
     dft_freqs(naz, 1.0 / pri_s)
-        .iter()
-        .map(|f| f - f_dc_hz)
-        .collect()
 }
 
 /// Range-Frequenzraster in Hz (**un**shiftet, FFT-Ausgabeordnung).
@@ -77,7 +136,8 @@ pub fn range_freqs_unshifted(nrange: usize, fs_hz: f64) -> Vec<f64> {
 }
 
 /// RCMC-Phasenfilter (bulk, `R₀` = Schwadmitte):
-/// `exp(4jπ·f_r·R₀(1/D−1)/c)`, zeilenmajor (Azimut, Range).
+/// `exp(4jπ·f_r·R₀(1/D−1)/c)` mit `D = D(f_a − f_DC[r])`,
+/// zeilenmajor (Azimut, Range).
 pub fn rcmc_filter(
     naz: usize,
     nrange: usize,
@@ -85,11 +145,12 @@ pub fn rcmc_filter(
     fr: &[f64],
     r0: f64,
     veff_range: &[f64],
+    fdc_range: &[f64],
 ) -> Vec<Nc32> {
     let mut h = Vec::with_capacity(naz * nrange);
     for &f in fa {
         for r in 0..nrange {
-            let d = d_factor(f, veff_range[r]);
+            let d = d_factor(f - fdc_range[r], veff_range[r]);
             let shift = r0 * (1.0 / d - 1.0);
             let ph = 4.0 * std::f64::consts::PI * fr[r] * shift / SPEED_OF_LIGHT;
             h.push(Nc32::new(ph.cos() as f32, ph.sin() as f32));
@@ -98,19 +159,21 @@ pub fn rcmc_filter(
     h
 }
 
-/// Azimut-Matched-Filter je Range-Linie: `exp(4jπ·R[r]·D/λ)`,
-/// zeilenmajor (Azimut, Range), gilt im Range-Doppler-Bereich.
+/// Azimut-Matched-Filter je Range-Linie: `exp(4jπ·R[r]·D/λ)` mit
+/// `D = D(f_a − f_DC[r])`, zeilenmajor (Azimut, Range), gilt im
+/// Range-Doppler-Bereich.
 pub fn azimuth_filter(
     naz: usize,
     nrange: usize,
     fa: &[f64],
     slant_m: &[f64],
     veff_range: &[f64],
+    fdc_range: &[f64],
 ) -> Vec<Nc32> {
     let mut h = Vec::with_capacity(naz * nrange);
     for &f in fa {
         for r in 0..nrange {
-            let d = d_factor(f, veff_range[r]);
+            let d = d_factor(f - fdc_range[r], veff_range[r]);
             let ph = 4.0 * std::f64::consts::PI * slant_m[r] * d / TX_WAVELENGTH_M;
             h.push(Nc32::new(ph.cos() as f32, ph.sin() as f32));
         }
@@ -145,7 +208,7 @@ impl RdaProcessor {
         let mut planner = FftPlanner::<f32>::new();
         let col_fwd = planner.plan_fft_forward(p.naz);
         let col_inv = planner.plan_fft_inverse(p.naz);
-        let fa = az_freqs(p.naz, p.pri_s, p.f_dc_hz);
+        let fa = az_freqs(p.naz, p.pri_s);
         let fr = range_freqs_unshifted(p.nrange, p.chirp.fs_hz);
         let rcmc = rcmc_filter(
             p.naz,
@@ -154,8 +217,9 @@ impl RdaProcessor {
             &fr,
             p.slant_m[p.nrange / 2],
             p.veff_range,
+            p.fdc_range,
         );
-        let az = azimuth_filter(p.naz, p.nrange, &fa, p.slant_m, p.veff_range);
+        let az = azimuth_filter(p.naz, p.nrange, &fa, p.slant_m, p.veff_range, p.fdc_range);
         let ntx = crate::chirp::num_tx_samples(&p.chirp);
         Self {
             naz: p.naz,
@@ -308,17 +372,57 @@ mod tests {
         assert_eq!(fr[nr / 2], -4.0);
         let slant: Vec<f64> = (0..nr).map(|r| 900_000.0 + r as f64 * 3.0).collect();
         let veff = vec![7100.0; nr];
-        let rcmc = rcmc_filter(naz, nr, &fa, &fr, slant[nr / 2], &veff);
+        let fdc = vec![0.0; nr];
+        let rcmc = rcmc_filter(naz, nr, &fa, &fr, slant[nr / 2], &veff, &fdc);
         for r in 0..nr {
             let c = rcmc[2 * nr + r]; // fa = 0-Zeile
             assert!((c.norm() - 1.0).abs() < 1e-6);
             assert!(c.re > 0.999999 && c.im.abs() < 1e-6, "c = {c}");
         }
-        let az = azimuth_filter(naz, nr, &fa, &slant, &veff);
+        let az = azimuth_filter(naz, nr, &fa, &slant, &veff, &fdc);
         // fa = 0, R = 900006 m: Phase 4πR/λ mod 2π.
         let ph = 4.0 * std::f64::consts::PI * slant[2] / TX_WAVELENGTH_M;
         let c = az[2 * nr + 2];
         assert!((c.re as f64 - ph.cos()).abs() < 1e-5);
         assert!((c.im as f64 - ph.sin()).abs() < 1e-5);
+    }
+
+    #[test]
+    fn clutterlock_misst_ton() {
+        // Azimut-Ton 40 Hz bei PRF 1663 Hz → Schätzung ≈ 40 Hz.
+        let (naz, nr, pri) = (256, 64, 1.0 / 1663.0);
+        let mut data = vec![Complex32::zero(); naz * nr];
+        for a in 0..naz {
+            let ph = 2.0 * std::f64::consts::PI * 40.0 * a as f64 * pri;
+            for r in 0..nr {
+                data[a * nr + r] = Complex32::new(ph.cos() as f32, ph.sin() as f32);
+            }
+        }
+        let f = clutterlock_fdc(&data, naz, pri, 8);
+        assert_eq!(f.len(), nr);
+        for &v in &f {
+            assert!((v - 40.0).abs() < 0.5, "f = {v}");
+        }
+        // Konstante (0 Hz) und leere Daten → 0.
+        let flat = vec![Complex32::new(1.0, 0.5); naz * nr];
+        for &v in &clutterlock_fdc(&flat, naz, pri, 8) {
+            assert!(v.abs() < 1e-3, "f = {v}");
+        }
+    }
+
+    #[test]
+    fn fdc_verschiebt_filter() {
+        // Mit f_DC = fa-Linie steht D = 1 in jener Zeile (RCMC = 1).
+        let naz = 4;
+        let nr = 8;
+        let fa = vec![-300.0, -100.0, 0.0, 100.0];
+        let fr = range_freqs_unshifted(nr, 8.0);
+        let veff = vec![7100.0; nr];
+        let fdc = vec![100.0; nr]; // = fa[3]
+        let rcmc = rcmc_filter(naz, nr, &fa, &fr, 900_000.0, &veff, &fdc);
+        for r in 0..nr {
+            let c = rcmc[3 * nr + r];
+            assert!(c.re > 0.999999 && c.im.abs() < 1e-6, "c = {c}");
+        }
     }
 }

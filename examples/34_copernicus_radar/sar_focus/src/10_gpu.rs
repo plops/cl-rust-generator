@@ -37,7 +37,7 @@ impl RdaGpuProcessor {
         let n = p.naz * p.nrange;
         // Filter hostseitig (identische Funktionen wie CPU) bauen + laden.
         let comp = RangeCompressor::new(&p.chirp, p.nrange);
-        let fa = rda::az_freqs(p.naz, p.pri_s, p.f_dc_hz);
+        let fa = rda::az_freqs(p.naz, p.pri_s);
         let fr = rda::range_freqs_unshifted(p.nrange, p.chirp.fs_hz);
         let rcmc = rda::rcmc_filter(
             p.naz,
@@ -46,8 +46,9 @@ impl RdaGpuProcessor {
             &fr,
             p.slant_m[p.nrange / 2],
             p.veff_range,
+            p.fdc_range,
         );
-        let az = rda::azimuth_filter(p.naz, p.nrange, &fa, p.slant_m, p.veff_range);
+        let az = rda::azimuth_filter(p.naz, p.nrange, &fa, p.slant_m, p.veff_range, p.fdc_range);
         let rf = comp.filter();
         let mut rr = Vec::with_capacity(n);
         let mut azh = Vec::with_capacity(n);
