@@ -54,10 +54,17 @@ pub fn veff_mid_range(line_pos: &[Vec3d], line_vel: &[Vec3d], slant_m: &[f64]) -
 
 /// Doppler-Centroid je Range-Bin aus den Daten (Clutterlock).
 ///
-/// Lag-1-Azimutkorrelation, leistungsgewichtet über Blöcke gemittelt und
-/// linear auf Range-Bins interpoliert: `f_DC = arg(Σ s̄_a·s_{a+1})/2π·PRI`.
-/// Eindeutig für `|f_DC| < PRF/2` (S1: wenige 10 Hz). Schiedsrichter für
-/// den geometrischen Centroid aus `03_ephem`.
+/// Lag-1-Azimutkorrelation, phasen-gemittelt und linear auf Range-Bins
+/// interpoliert: `f_DC = arg(Σ s_{a+1}·s̄_a/|…|)/2π·PRI`. Jede Zelle hat
+/// genau eine Stimme (Betrag normiert) — leistungsgewichtet wuerden
+/// dominante Stadtziele mit asymmetrischem Azimut-Chirp die Schaetzung
+/// um ±300 Hz verbiegen. Dezimiert auf ≈65k Zellen je Block (reicht
+/// statistisch, Vollrahmen hat 905M Zellen). Eindeutig fuer
+/// `|f_DC| < PRF/2` (S1: wenige 10 Hz). Schiedsrichter fuer den
+/// geometrischen Centroid aus `03_ephem`.
+///
+/// Eingang MUSS range-komprimiert sein: Auf Rohdaten misst die
+/// Lag-1-Phase die Chirp-Struktur (±21 MHz) statt Doppler.
 pub fn clutterlock_fdc(data: &[Complex32], naz: usize, pri_s: f64, nblocks: usize) -> Vec<f64> {
     let nr = data.len() / naz.max(1);
     if naz < 2 || nr == 0 {
@@ -68,13 +75,20 @@ pub fn clutterlock_fdc(data: &[Complex32], naz: usize, pri_s: f64, nblocks: usiz
     for (b, f) in fdc.iter_mut().enumerate() {
         let r0 = b * nr / nb;
         let r1 = (b + 1) * nr / nb;
+        let step_a = ((naz - 1) / 256).max(1);
+        let step_r = ((r1 - r0) / 256).max(1);
         let (mut re, mut im) = (0.0f64, 0.0f64);
-        for a in 0..naz - 1 {
-            for r in r0..r1 {
+        for a in (0..naz - 1).step_by(step_a) {
+            for r in (r0..r1).step_by(step_r) {
                 let x = data[a * nr + r];
                 let y = data[(a + 1) * nr + r];
-                re += f64::from(x.re * y.re + x.im * y.im);
-                im += f64::from(x.re * y.im - x.im * y.re);
+                let cr = f64::from(y.re * x.re + y.im * x.im);
+                let ci = f64::from(y.im * x.re - y.re * x.im);
+                let n = cr.hypot(ci);
+                if n > 0.0 {
+                    re += cr / n;
+                    im += ci / n;
+                }
             }
         }
         *f = im.atan2(re) / (2.0 * std::f64::consts::PI * pri_s);
@@ -407,6 +421,40 @@ mod tests {
         let flat = vec![Complex32::new(1.0, 0.5); naz * nr];
         for &v in &clutterlock_fdc(&flat, naz, pri, 8) {
             assert!(v.abs() < 1e-3, "f = {v}");
+        }
+    }
+
+    #[test]
+    fn clutterlock_robust_gegen_chirp_bias() {
+        // Stadt-Szenario: dominante Ziele mit asymmetrischem Azimut-Chirp
+        // duerfen f_DC nicht verbiegen (Echtdaten: −280..110 Hz statt −20 Hz
+        // bei leistungsgewichteter Mittelung ueber 512 Echos).
+        let (naz, nr, nblocks) = (512, 512, 8);
+        let pri = 1.0 / 1663.5;
+        let fdc_wahr = -20.0;
+        let ka = 1912.0; // S6-Doppler-Rate 2v²/(λR) in Hz/s
+        let ac = 100.0; // Ziel-Durchgang (asymmetrisch in der Apertur)
+        let mut data = vec![Complex32::zero(); naz * nr];
+        for a in 0..naz {
+            let t = a as f64 * pri;
+            for r in 0..nr {
+                let block = r * nblocks / nr;
+                let dominant = (2..=4).contains(&block) && r % 64 == 32;
+                let tc = (a as f64 - ac) * pri;
+                let ph = if dominant {
+                    2.0 * std::f64::consts::PI * (fdc_wahr * tc + ka * tc * tc / 2.0)
+                } else {
+                    2.0 * std::f64::consts::PI * fdc_wahr * t
+                        + 0.5 * (a as f64 * 12.9 + r as f64 * 7.7).sin()
+                };
+                let amp = if dominant { 50.0 } else { 1.0 };
+                data[a * nr + r] = Complex32::new((amp * ph.cos()) as f32, (amp * ph.sin()) as f32);
+            }
+        }
+        let f = clutterlock_fdc(&data, naz, pri, nblocks);
+        assert_eq!(f.len(), nr);
+        for &v in &f {
+            assert!((v - fdc_wahr).abs() < 30.0, "f = {v}");
         }
     }
 
