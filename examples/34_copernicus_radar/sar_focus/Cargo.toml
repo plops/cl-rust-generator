@@ -13,7 +13,7 @@ cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "a0cc6cc
 cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "a0cc6cc0bc18722ec5cdfbea136c118a7c051977" }
 cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "a0cc6cc0bc18722ec5cdfbea136c118a7c051977" }
 # Sibling crate: reuse the L0 decoder as a library (headers, mmap, FDBAQ).
-copernicus-radar = { path = ".." }
+copernicus-radar = { path = "../decoder" }
 rustfft = "6.4"
 num-complex = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
