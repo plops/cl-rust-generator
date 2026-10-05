@@ -1,4 +1,9 @@
-# copernicus-radar (Rust port)
+# copernicus-radar (Rust port) — program 1: space-packet decoder
+
+> Part of `34_copernicus_radar`: start at the [overarching README](../README.md)
+> (how to download a dataset, how the two programs fit together). The sibling
+> program [`sar_focus`](../sar_focus/) reuses this crate as a library and turns
+> the decoded echoes into a focused radar image.
 
 Sentinel-1 synthetic-aperture-radar raw space-packet decoder, ported from the
 C++14 project
@@ -14,24 +19,28 @@ details to CSV files.
 Signal packets dispatch on `baq_mode`: 12/13/14 carry per-block bit-rate
 codes (FDBAQ), 3/4/5 are fixed-rate BAQ, and 0 is raw bypass; calibration
 packets use bypass. Validated end to end on a real S1C SM S6
-`SDV` product (`data/`, VV: 44,901 echoes + 16 noise packets
+`SDV` product (`../data/`, VV: 44,901 echoes + 16 noise packets
 + 520 calibration packets, zero decode failures).
 
 ## Build and run
 
+All commands run from this directory (`decoder/`):
+
 ```sh
 cargo build --release
-./target/release/copernicus-radar input.dat
-./target/release/copernicus-radar input.dat --csv-dir out --cf-dir out \
+DAT=../data/vv/s1c-s6-raw-s-vv-20260929t214300-20260929t214327-009667-0133f4.dat
+./target/release/copernicus-radar "$DAT" --csv-dir out --cf-dir out
+./target/release/copernicus-radar "$DAT" --csv-dir out --cf-dir out \
     --max-echoes 512 --export-headers
-./target/release/copernicus-radar input.dat --dump-headers  # module 03
+./target/release/copernicus-radar "$DAT" --dump-headers  # module 03
 ```
 
 Without arguments the program uses the default path hard-coded in the C++
 version. `cargo test` runs the unit tests, binary tests and end-to-end tests
 that decode synthetic packets and verify the CSV/`.cf` outputs, plus
 real-data regression tests (`tests/real_data.rs`) that decode packets from
-`data/` when the dataset is present (skipped otherwise).
+`../data/` when the dataset is present (skipped otherwise, override with
+`S1_DAT`).
 
 ## Outputs
 
