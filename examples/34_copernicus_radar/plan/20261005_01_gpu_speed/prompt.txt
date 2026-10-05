@@ -1,0 +1,101 @@
+**Rolle & Umgebung:**
+
+Du läufst in einem Docker-Image mit Ubuntu auf einem Linux-Host.
+Falls dir Pakete fehlen, installiere sie selbstständig. Du arbeitest
+im Auftrag von wol pumba (wolpumba@gmail.com).
+
+Es existiert bereits code aber die GPU implementierung ist langsamer
+als die CPU implementierung. Beruecksichtige die informationen in der
+datei `review.md` und versuche die GPU implementierung zu
+beschleunigen. Validiere die Ergebnisse und fuehre Benchmarkmessungen
+durch.
+
+## Datensatz
+
+Ein echtes S1C-Produkt (Stripmap S6, Dual-Pol SDV, 2026-09-29) liegt
+heruntergeladen bereit:
+
+`/workspace/src/cl-rust-generator/examples/34_copernicus/data/S1C_S6_RAW__0SDV_20260929T214300_20260929T214327_009667_0133F4_5830.SAFE.zip`
+
+Es enthaelt je eine `.dat`-Datei fuer VH und VV (je gut 600 MB) plus
+Annotationen. Die Datei ist zu gross fuers Repo: Sie darf **niemals**
+committet werden, und Tests muessen ohne sie gruen bleiben (skip statt
+fail). Der alte README-Link auf `scihub.copernicus.eu` ist tot;
+aktuell laedt man Sentinel-1-RAW-Produkte ueber die Copernicus-Data-
+Space-OData-API herunter (bei Bedarf dokumentieren, aber kein
+Pflichtteil).
+
+## Code-Anforderungen
+
+Ich moechte kleinen/uebersichtlichen und effizienten Code und
+moeglichst wenig Abhaengigkeiten. Du sollst in dieser Aufgabe direkt
+Rust-Code erzeugen (nicht den Lisp-artigen Input-Code fuer den
+cl-rust-generator-Transpiler).
+
+Vorgehensweise: Arbeite mit aktuellem Rust (2024). Nutze Tools um
+konsistenten und aufgeraeumten Quellcode zu gewaehrleisten (also
+`cargo fmt` um Formatierung zu normalisieren, `cargo clippy` um
+moegliche Fehler oder Verbesserungen zu finden, `cargo upgrade` um bei
+den Abhaengigkeiten die neueste Version zu verwenden, ...).
+
+Jedes Beispiel-Crate in diesem Repo steht fuer sich (kein Workspace-
+`Cargo.toml` im Repo-Root); `target/` und `*.lock` sind per
+`.gitignore` ausgeschlossen.
+
+## Tests
+
+Neue Unit-Tests und Integration-Tests sollen wie erforderlich
+eingefuehrt werden. Diese sollen auch ausgefuehrt werden. Zusaetzlich
+soll es Regressionstests auf dem echten Datensatz geben (Paketzensus,
+Echo- und Rauschpaket-Dekodierung), die ohne Datensatz uebersprungen
+werden. Gates: `cargo test`, `cargo clippy --all-targets -- -D
+warnings`, `cargo fmt --check`.
+
+## Plan
+
+Schreibe einen Implementierungsplan. Dieser Implementierungsplan soll
+einen unabhaengigen AI-Agenten dazu befaehigen, selbstaendig einen
+Kontext aufzubauen, der die wesentlichen Quellen beinhaltet. Das
+heisst, der Implementierungsplan hat eine Liste von Dateien, die der
+Agent sich anschauen sollte, mit einer kurzen Beschreibung fuer jede
+Datei. Weiterhin soll der Implementierungsplan erklaeren, wie Commit
+Messages gesendet werden sollen. Und zwar sollen diese mit einer
+umfassenden Beschreibung und als Conventional Commit formatiert
+ausgefuehrt werden.
+
+Lege den Plan als `plan.md` neben diese `prompt.txt` in
+`plan/2026.../`.
+
+## Walkthrough
+
+Nach der vollstaendigen Implementierung, wenn alle Tests abgeschlossen
+sind, soll auch ein Walkthrough-Dokument geschrieben und als
+`walkthrough.md` im selben Ordner (wo prompt.txt ist) abgelegt
+werden. Dieses soll zusammenfassen, was wirklich implementiert wurde,
+welche Stellen aufgrund der Tests anders gemacht wurden als geplant,
+dazu Learnings und moegliche Erweiterungen. Liste auch die neuen
+Programme, die mit in den Docker-Container aufgenommen werden sollten.
+
+Lege fuer den ausfuehrenden Agenten folgende strikte Regeln fuer das
+Schreiben dieses Dokuments fest:
+- **Sprache und Stil:** Das Dokument *muss zwingend auf Deutsch*
+  verfasst sein. Es soll den Leser didaktisch gut abholen, mitnehmen
+  und fluessig lesbar sein.
+- **Erklaerungen:** Fachbegriffe muessen kurz und verstaendlich
+  erklaert werden.
+- **Visualisierung:** Verwende reichlich Code-Beispiele und nutze
+  **Mermaid-Diagramme**, um die Architektur, den Datenfluss und
+  komplexe Konzepte visuell zu veranschaulichen.
+- **Inhaltliche Struktur:**
+  1. Was exakt implementiert wurde.
+  2. Welche Architektur-Entscheidungen aufgrund von Tests spontan
+     geaendert werden mussten.
+  3. Learnings und moegliche zukuenftige Erweiterungen.
+  4. Eine Liste der neuen Programme/Pakete, die dauerhaft in das
+     Dockerfile aufgenommen werden sollten.
+
+## Aufwand
+
+Halte den Token-Verbrauch der Session in `plan_effort.md` im selben
+Ordner fest (Input/Output/Cached/Total, Turns, Subagents), damit
+spaeter abschaetzbar ist, was ein solcher Port kostet.
