@@ -10,20 +10,25 @@ instrumentiert — Spalte entfällt ehrlicherweise).
 | Crate-Gerüst (01–05) | Typen/Meta/Ephem/Chirp/Range-CPU | 23 lib | `6cd40bf` |
 | CPU RDA + TDBP (06–07) | gestufte RDA, TDBP f64 | +4 (Punktziele) | `d3079da` |
 | GPU-Pfad (08–10) | cuFFT-FFI, Kernel, Pipeline, Vergleich | +3 (gpu_compare) | `ced1cab` |
-| E2E + Quicklook (11, CLI) | f_DC, Chunking, PNG, Schiffe, XCheck | +8 (look/xcheck/ton) | `86846a2` |
-| Doku | walkthrough.md, Artefakte | — | (folgt) |
+| E2E + Quicklook (11, CLI) | f_DC, Chunking, PNG, Schiffe, XCheck | +8 (look/xcheck/ton) | `ad6ad4a` |
+| Doku v1 | walkthrough.md, Artefakte | — | `949de78` |
+| Revision 2: ingest + Timing | `12_ingest.rs` (kein 512-Limit), Phasen-Zeit, Peak-RSS | +2 (ingest) | (folgt) |
+| Revision 2: Gold-Validierung | sentinel1decoder/NumPy-RDA per uv, RFI-Nachweis | — | (Analyse) |
+| Revision 2: Benchmarks | CPU/GPU × 512/2048/8192/44901, Zeit + Host/Device-RAM | — | (Analyse) |
+| Revision 2: Doku v2 | didaktischer Walkthrough, AVIF statt PNG, PNG aus Historie | — | (folgt) |
 
-Endstand: **38 Tests grün** (28 lib + 3 gpu_compare + 2 rda_point +
-2 tdbp_point + 3 ssfocus_xcheck), Clippy `-D warnings` grün,
+Endstand: **40 Tests grün** (28 lib + 3 gpu_compare + 2 rda_point +
+2 tdbp_point + 3 ssfocus_xcheck + 2 ingest), Clippy `-D warnings` grün,
 `cargo fmt --check` grün.
 
-Teure Einzelläufe (Release, RTX A4000):
+Teure Einzelläufe (Release, RTX A4000, 32 CPU-Kerne):
 
 | Lauf | Zeit |
 |---|---|
-| E2E Vollrahmen (44.901 × 20.160, 7 GPU-Chunks) | 127,5 s |
+| E2E Vollrahmen GPU (44.901 × 20.160, 7 Chunks, mit `--compare`) | 127,5 s |
+| Benchmark Vollrahmen CPU (Fokus / gesamt) | 66,5 s / 95,4 s |
+| Benchmark Vollrahmen GPU (Fokus / gesamt) | 92,2 s / 121,2 s |
 | E2E-Ausschnitt 2048 Echos | ~5 s |
-| `ships`-Tiefensuche Vollrahmen | ~30 s |
 | `cargo oxide test` (gesamt, inkl. GPU) | ~10 s |
 
 Befund-Dichte: 6 dokumentierte Funde (cuFFT-Konstante, ECEF-Frame,
