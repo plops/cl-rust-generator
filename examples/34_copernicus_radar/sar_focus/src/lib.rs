@@ -12,6 +12,8 @@ pub mod cufft;
 pub mod ephem;
 #[path = "10_gpu.rs"]
 pub mod gpu;
+#[path = "12_ingest.rs"]
+pub mod ingest;
 #[path = "09_kernel.rs"]
 pub mod kernel;
 #[path = "11_look.rs"]

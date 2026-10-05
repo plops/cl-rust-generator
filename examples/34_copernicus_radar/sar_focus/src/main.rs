@@ -237,20 +237,24 @@ fn cmd_focus(args: &[&str]) -> Result<(), String> {
     let mapped = MappedFile::open(std::path::Path::new(&cfg.input)).map_err(|e| e.to_string())?;
     let bytes = mapped.bytes();
     let packets = collect_packet_headers(bytes).map_err(|e| e.to_string())?;
-    // Echos des stärksten Beams + SubCom-Strom sammeln.
-    let mut beams: HashMap<u32, u64> = HashMap::new();
+    // Alle Header parsen + SubCom-Strom sammeln …
+    let mut headers = Vec::with_capacity(packets.len());
     let mut stream: Vec<(u8, u16)> = Vec::with_capacity(packets.len());
-    let mut echoes: Vec<(PacketHeader, usize)> = Vec::new();
-    for (i, h) in packets.headers.iter().enumerate() {
+    for h in packets.headers.iter() {
         let h = PacketHeader::parse(h).map_err(|e| e.to_string())?;
         stream.push((h.sub_commutated_index as u8, h.sub_commutated_data as u16));
-        if meta::is_imaging_echo(&h) {
-            *beams.entry(h.elevation()).or_insert(0) += u64::from(h.number_of_quads);
-            echoes.push((h, packets.offsets[i]));
-        }
+        headers.push(h);
     }
-    let (&beam, _) = beams.iter().max_by_key(|&(_, n)| n).ok_or("keine Echos")?;
-    echoes.retain(|(h, _)| h.elevation() == beam);
+    // … und ALLE abbildenden Echos wählen (kein 512er-Cap wie Parent-Main).
+    let sel = sar_focus::ingest::select_beam_echoes(&headers);
+    if sel.is_empty() {
+        return Err("keine Echos".to_string());
+    }
+    let beam = headers[sel[0]].elevation();
+    let echoes: Vec<(PacketHeader, usize)> = sel
+        .iter()
+        .map(|&i| (headers[i].clone(), packets.offsets[i]))
+        .collect();
     let az1 = cfg.az1.min(echoes.len());
     if cfg.az0 >= az1 {
         return Err(format!("leerer Azimut-Ausschnitt {}..{az1}", cfg.az0));
@@ -318,6 +322,7 @@ fn cmd_focus(args: &[&str]) -> Result<(), String> {
         "Rohbild: {naz} × {n0} ({:.2} GB)",
         (raw.len() * 8) as f64 / 1e9
     );
+    let t_decode = t_start.elapsed();
     let slant: Vec<f64> = (0..n0)
         .map(|j| sar_focus::types::SPEED_OF_LIGHT * (t_ref + j as f64 / m0.fs_hz) / 2.0)
         .collect();
@@ -349,6 +354,7 @@ fn cmd_focus(args: &[&str]) -> Result<(), String> {
     println!("f_DC geometrisch: {gmin:.1}–{gmax:.1} Hz");
     println!("f_DC Clutterlock: {cmin:.1}–{cmax:.1} Hz");
     // Fokussieren (CPU einteilig, GPU Overlap-Save-Chunks).
+    let t_pre = t_start.elapsed();
     let mut img = raw;
     if cfg.compare {
         let d = compare_cpu_gpu(&img, &chirp, naz, n0, m0.pri_s, &slant, &veff, &cl)?;
@@ -372,7 +378,15 @@ fn cmd_focus(args: &[&str]) -> Result<(), String> {
             &cfg, &mut img, &chirp, naz, n0, m0.pri_s, &slant, &veff, &cl,
         )?;
     }
-    println!("Fokus fertig nach {:.1} s", t_start.elapsed().as_secs_f64());
+    let t_focus = t_start.elapsed();
+    println!(
+        "Zeit: Dekodierung {:.1} s, Orbit+f_DC {:.1} s, Fokus {:.1} s (gesamt {:.1} s)",
+        t_decode.as_secs_f64(),
+        (t_pre - t_decode).as_secs_f64(),
+        (t_focus - t_pre).as_secs_f64(),
+        t_focus.as_secs_f64()
+    );
+    println!("Host-Speicher (Peak): {:.2} GB", peak_rss_gb());
     // Range-Rand beschneiden: erste ntx Spalten tragen zyklischen Wrap,
     // Pad-Schwanz dahinter fällt ebenfalls weg.
     let ntx = sar_focus::chirp::num_tx_samples(&chirp);
@@ -427,6 +441,19 @@ fn smooth_fft_len(n: usize) -> usize {
         m == 1
     }
     (n..).find(|&m| smooth(m)).unwrap_or(n)
+}
+
+/// Peak-RSS in GB (VmHWM aus /proc, Linux).
+fn peak_rss_gb() -> f64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("VmHWM:"))
+                .and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok())
+        })
+        .map(|kb| kb / 1e6)
+        .unwrap_or(f64::NAN)
 }
 
 /// Minimum/Maximum eines Schnitts.
