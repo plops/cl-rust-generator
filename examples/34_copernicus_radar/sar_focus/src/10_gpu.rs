@@ -226,6 +226,7 @@ impl TdbpGpuProcessor {
             self.grid.y_near,
             self.grid.dx_az,
             self.grid.dy_gr,
+            self.grid.re_m,
         )?;
         self.g.download(&self.out)
     }

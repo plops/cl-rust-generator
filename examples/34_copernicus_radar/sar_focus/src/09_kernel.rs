@@ -172,6 +172,7 @@ impl GpuContext {
         y0: f64,
         dx: f64,
         dy: f64,
+        re: f64,
     ) -> Result<(), Error> {
         let pixels = naz
             .checked_mul(nrange)
@@ -200,6 +201,7 @@ impl GpuContext {
                 y0,
                 dx,
                 dy,
+                re,
             )
             .map_err(err)
     }
@@ -325,6 +327,7 @@ pub mod kernels {
         y0: f64,
         dx: f64,
         dy: f64,
+        re: f64,
     ) {
         if naz == 0 || nrange == 0 {
             return;
@@ -338,7 +341,13 @@ pub mod kernels {
             return;
         }
         let pos_x = x0 + (a as f64 + 0.5) * dx;
-        let pos_y = y0 + (r as f64 + 0.5) * dy;
+        let s = y0 + (r as f64 + 0.5) * dy; // Bogenlänge ab Nadir
+        let (pos_y, pos_z) = if re > 0.0 {
+            let th = s / re;
+            (re * th.sin(), re * th.cos() - re)
+        } else {
+            (s, 0.0)
+        };
         let mut acc_re = 0.0f64;
         let mut acc_im = 0.0f64;
         let np = pulse_limit.min(num_pulses);
@@ -347,7 +356,7 @@ pub mod kernels {
             let ap = plat[p as usize];
             let ddx = ap.x - pos_x;
             let ddy = ap.y - pos_y;
-            let ddz = ap.z - 0.0;
+            let ddz = ap.z - pos_z;
             let d = (ddx * ddx + ddy * ddy + ddz * ddz).sqrt();
             // Range-Interpolation (gleiche Formel wie `07_tdbp`).
             let s = (2.0 * d / c - t0) / dt;

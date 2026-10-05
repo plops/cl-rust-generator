@@ -141,6 +141,7 @@ fn tdbp_gpu_stimmt_mit_cpu() {
         dx_az: dx,
         y_near: yc + (2016.0 - 2048.0) * dy - 0.5 * dy,
         dy_gr: dy,
+        re_m: 0.0,
     };
     let inp = TdbpInput {
         data: &data[..NP * NR],

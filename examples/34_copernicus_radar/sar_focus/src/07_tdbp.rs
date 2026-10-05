@@ -15,19 +15,24 @@ pub struct TdbpGrid {
     /// Azimut der Bildecke (m), Pixelmitten bei `x0 + (i+0,5)·dx`.
     pub x0: f64,
     pub dx_az: f64,
-    /// Ground-Range der Bildecke (m).
+    /// Ground-Range der Bildecke (m, Bogenlänge ab Nadir).
     pub y_near: f64,
     pub dy_gr: f64,
+    /// Erdradius in m (Ziele auf Kugel); 0 = Flach-Erde (legacy/Tests).
+    pub re_m: f64,
 }
 
 impl TdbpGrid {
-    /// Bodenposition der Pixelmitte (z = 0).
+    /// Bodenposition der Pixelmitte (Kugel bei `re_m > 0`, sonst z = 0).
     pub fn pixel_pos(self, i: usize, j: usize) -> Vec3d {
-        Vec3d::new(
-            self.x0 + (i as f64 + 0.5) * self.dx_az,
-            self.y_near + (j as f64 + 0.5) * self.dy_gr,
-            0.0,
-        )
+        let x = self.x0 + (i as f64 + 0.5) * self.dx_az;
+        let s = self.y_near + (j as f64 + 0.5) * self.dy_gr;
+        if self.re_m > 0.0 {
+            let th = s / self.re_m;
+            Vec3d::new(x, self.re_m * th.sin(), self.re_m * th.cos() - self.re_m)
+        } else {
+            Vec3d::new(x, s, 0.0)
+        }
     }
 }
 

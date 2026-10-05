@@ -26,6 +26,8 @@ pub mod range;
 pub mod rda;
 #[path = "07_tdbp.rs"]
 pub mod tdbp;
+#[path = "13_tdbp_geo.rs"]
+pub mod tdbp_geo;
 #[path = "01_types.rs"]
 pub mod types;
 

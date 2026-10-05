@@ -1,16 +1,13 @@
 //! `sar_focus`-CLI: `.dat` → fokussiertes Bild + Quicklook.
 
 use copernicus_radar::collect_headers::collect_packet_headers;
-use copernicus_radar::decode_packet::decode_fdbaq;
-use copernicus_radar::decode_type_ab::decode_type_a_or_b;
-use copernicus_radar::decode_type_c::{decode_baq3, decode_baq4, decode_baq5};
 use copernicus_radar::header::PacketHeader;
 use copernicus_radar::mmap::MappedFile;
-use copernicus_radar::utils::{BitReader, HEADER_LEN};
 use sar_focus::chirp::ChirpParams;
 use sar_focus::ephem;
 use sar_focus::look;
 use sar_focus::meta;
+use sar_focus::range::RangeCompressor;
 use sar_focus::rda;
 use sar_focus::types::Complex32;
 use std::collections::HashMap;
@@ -20,10 +17,15 @@ fn usage(program: &str) -> String {
         "usage:\n\
          \t{program} meta <input.dat>\tHeader-/Orbit-Diagnose\n\
          \t{program} focus <input.dat> <prefix> [--cpu] [--az0 N] [--az1 M]\n\
-         \t        [--chunk C] [--overlap O] [--compare]\tFokussieren + Quicklook\n\
+         \t        [--chunk C] [--overlap O] [--compare] [--no-rcmc]\n\
+         \t        Fokussieren + Quicklook\n\
          \t{program} ships <bild.cf> <naz> <n0> [az0 az1]\tSchiffs-PSF (opt. Tiefensuche)\n\
          \t{program} ql <bild.cf> <naz> <n0> <out.png> [az0 az1 r0 r1]\n\
          \t        \tQuicklook aus .cf (RFI-sichere Spreizung, opt. Ausschnitt)\n\
+         \t{program} tdbp <input.dat> <prefix> --az0 P0 --az1 P1\n\
+         \t        --waz0 A0 --waz1 A1 --wrg0 R0 --wrg1 R1 [--cpu]\n\
+         \t        [--compare <rda.cf> <naz> <n0> <az0>]\tTDBP-Fenster + Vergleich\n\
+         \t        (wrg in RDA-Output-Pixeln)\n\
          \t{program} --help\t\tDiese Hilfe"
     )
 }
@@ -81,6 +83,12 @@ fn cmd_meta(path: &str) -> Result<(), String> {
             r[r.len() - 1] / 1e3,
             r.len()
         );
+        println!(
+            "data_delay: {} (als F_REF-Takte: {:.3} µs = {:.1} Samples)",
+            m.data_delay,
+            f64::from(m.data_delay) / sar_focus::types::F_REF_HZ * 1e6,
+            f64::from(m.data_delay) / sar_focus::types::F_REF_HZ * m.fs_hz
+        );
     }
     let blocks = ephem::collect_blocks(&stream);
     println!("Ephemeridenblöcke: {}", blocks.len());
@@ -110,6 +118,7 @@ fn main() {
         ["focus", rest @ ..] => cmd_focus(rest),
         ["ships", cf, naz, n0, rest @ ..] => cmd_ships(cf, naz, n0, rest),
         ["ql", cf, naz, n0, png, rest @ ..] => cmd_ql(cf, naz, n0, png, rest),
+        ["tdbp", rest @ ..] => cmd_tdbp(rest),
         ["--help" | "-h"] | [] => {
             println!("{}", usage(&program));
             Ok(())
@@ -132,6 +141,7 @@ struct FocusCfg {
     chunk: usize,
     overlap: usize,
     compare: bool,
+    no_rcmc: bool,
 }
 
 fn parse_focus(args: &[&str]) -> Result<FocusCfg, String> {
@@ -147,12 +157,14 @@ fn parse_focus(args: &[&str]) -> Result<FocusCfg, String> {
         chunk: 8192,
         overlap: 2048,
         compare: false,
+        no_rcmc: false,
     };
     let mut i = 2;
     while i < args.len() {
         match args[i] {
             "--cpu" => c.cpu = true,
             "--compare" => c.compare = true,
+            "--no-rcmc" => c.no_rcmc = true,
             "--az0" => {
                 i += 1;
                 c.az0 = args
@@ -191,30 +203,6 @@ fn parse_focus(args: &[&str]) -> Result<FocusCfg, String> {
     Ok(c)
 }
 
-/// Dekodiert ein Echo (BAQ-Modus wie `copernicus-radar`-Main).
-fn decode_echo(
-    data: &[u8],
-    offset: usize,
-    baq_mode: u32,
-    quads: usize,
-) -> Result<Vec<Complex32>, String> {
-    let mut reader = BitReader::new(data, offset + HEADER_LEN);
-    let packet = match baq_mode {
-        0 => decode_type_a_or_b(&mut reader, quads),
-        3 => decode_baq3(&mut reader, quads),
-        4 => decode_baq4(&mut reader, quads),
-        5 => decode_baq5(&mut reader, quads),
-        12..=14 => decode_fdbaq(&mut reader, quads),
-        m => return Err(format!("BAQ-Modus {m} nicht unterstützt")),
-    }
-    .map_err(|e| e.to_string())?;
-    Ok(packet
-        .to_complex()
-        .iter()
-        .map(|c| Complex32::new(c.re, c.im))
-        .collect())
-}
-
 /// Schreibt Komplexbild als `.cf` (roh, LE-f32-Paare, zeilenmajor).
 fn write_cf(path: &std::path::Path, img: &[Complex32]) -> Result<(), String> {
     use std::io::Write;
@@ -234,121 +222,38 @@ fn write_cf(path: &std::path::Path, img: &[Complex32]) -> Result<(), String> {
 fn cmd_focus(args: &[&str]) -> Result<(), String> {
     let cfg = parse_focus(args)?;
     let t_start = std::time::Instant::now();
-    let mapped = MappedFile::open(std::path::Path::new(&cfg.input)).map_err(|e| e.to_string())?;
-    let bytes = mapped.bytes();
-    let packets = collect_packet_headers(bytes).map_err(|e| e.to_string())?;
-    // Alle Header parsen + SubCom-Strom sammeln …
-    let mut headers = Vec::with_capacity(packets.len());
-    let mut stream: Vec<(u8, u16)> = Vec::with_capacity(packets.len());
-    for h in packets.headers.iter() {
-        let h = PacketHeader::parse(h).map_err(|e| e.to_string())?;
-        stream.push((h.sub_commutated_index as u8, h.sub_commutated_data as u16));
-        headers.push(h);
-    }
-    // … und ALLE abbildenden Echos wählen (kein 512er-Cap wie Parent-Main).
-    let sel = sar_focus::ingest::select_beam_echoes(&headers);
-    if sel.is_empty() {
-        return Err("keine Echos".to_string());
-    }
-    let beam = headers[sel[0]].elevation();
-    let echoes: Vec<(PacketHeader, usize)> = sel
-        .iter()
-        .map(|&i| (headers[i].clone(), packets.offsets[i]))
-        .collect();
-    let az1 = cfg.az1.min(echoes.len());
-    if cfg.az0 >= az1 {
-        return Err(format!("leerer Azimut-Ausschnitt {}..{az1}", cfg.az0));
-    }
-    let echoes = &echoes[cfg.az0..az1];
-    let naz = echoes.len();
-    println!("Beam {beam}, Echos {naz} ({}..{az1})", cfg.az0);
-    // Orbit: Zustand je Echo-Linie interpolieren.
-    let blocks = ephem::collect_blocks(&stream);
-    if blocks.is_empty() {
-        return Err("keine Ephemeridenblöcke".to_string());
-    }
-    let metas: Vec<meta::EchoMeta> = echoes
-        .iter()
-        .enumerate()
-        .map(|(k, (h, off))| meta::parse_echo(h, k, *off).map_err(|e| e.to_string()))
-        .collect::<Result<_, _>>()?;
-    let line_pos: Vec<sar_focus::types::Vec3d> = metas
-        .iter()
-        .map(|m| ephem::interp_pos(&blocks, m.time_s))
-        .collect();
-    let line_vel: Vec<sar_focus::types::Vec3d> = metas
-        .iter()
-        .map(|m| ephem::interp_vel(&blocks, m.time_s))
-        .collect();
-    // Ausrichten nach ECHOZEIT (Rang·PRI + SWST): data_delay allein driftet
-    // über den Rahmen (16 Samples), die Zeit ist das wahre Raster.
-    let m0 = &metas[0];
-    let etime = |m: &meta::EchoMeta| {
-        f64::from(m.rank) * m.pri_s + m.swst_s + meta::suppressed_data_time_s()
-    };
-    let t_ref = metas.iter().map(etime).fold(f64::INFINITY, f64::min);
-    let bases: Vec<usize> = metas
-        .iter()
-        .map(|m| ((etime(m) - t_ref) * m.fs_hz).round().max(0.0) as usize)
-        .collect();
-    let resid_max = metas
-        .iter()
-        .map(|m| {
-            let x = (etime(m) - t_ref) * m.fs_hz;
-            (x.round() - x).abs()
-        })
-        .fold(0.0f64, f64::max);
-    println!("Raster-Rest (Zeit→Sample): max. {resid_max:.3} Samples");
-    let n0raw = metas
-        .iter()
-        .zip(bases.iter())
-        .map(|(m, &b)| b + 2 * m.nquads as usize)
-        .max()
-        .unwrap_or(0);
-    // Padding auf glatte FFT-Größe (nur Primfaktoren ≤ 7): cuFFT scheitert
-    // an großen Primfaktoren (S6: 20015 = 5·4003 → interner Fehler).
-    let n0 = smooth_fft_len(n0raw);
-    println!("Range: {n0raw} + Pad → {n0}");
-    let mut raw = vec![Complex32::zero(); naz * n0];
-    for (k, ((h, off), &base)) in echoes.iter().zip(bases.iter()).enumerate() {
-        if k % 5000 == 0 {
-            println!("  dekodiere Echo {k}/{naz} …");
-        }
-        let s = decode_echo(bytes, *off, h.baq_mode, h.number_of_quads as usize)?;
-        let take = s.len().min(n0 - base);
-        raw[k * n0 + base..k * n0 + base + take].copy_from_slice(&s[..take]);
-    }
-    println!(
-        "Rohbild: {naz} × {n0} ({:.2} GB)",
-        (raw.len() * 8) as f64 / 1e9
-    );
+    let w =
+        sar_focus::ingest::load_window(&cfg.input, cfg.az0, cfg.az1).map_err(|e| e.to_string())?;
     let t_decode = t_start.elapsed();
-    let slant: Vec<f64> = (0..n0)
-        .map(|j| sar_focus::types::SPEED_OF_LIGHT * (t_ref + j as f64 / m0.fs_hz) / 2.0)
-        .collect();
-    println!(
-        "Slant: {:.1}–{:.1} km, fs {:.4} MHz",
-        slant[0] / 1e3,
-        slant[n0 - 1] / 1e3,
-        m0.fs_hz / 1e6
-    );
-    let chirp = ChirpParams {
-        txpsf_hz: m0.txpsf_hz,
-        txpl_s: m0.txpl_s,
-        txprr_hz_s: m0.txprr_hz_s,
-        fs_hz: m0.fs_hz,
-    };
-    let bw = meta::chirp_bandwidth_hz(m0.txprr_hz_s, m0.txpl_s);
-    let veff = rda::veff_mid_range(&line_pos, &line_vel, &slant);
-    println!(
-        "v_eff Mitte: {:.1} m/s, Bandbreite: {:.2} MHz",
-        veff[n0 / 2],
-        bw / 1e6
-    );
-    // Doppler-Centroid: geometrisch vs. Clutterlock (Daten).
+    // Lokale Aliase (wie bisherige Variablennamen).
+    let naz = w.naz;
+    if naz < 2048 {
+        eprintln!(
+            "WARNUNG: nur {naz} Echos (< 2048) — Apertur-Trunkierung erzeugt \
+             Wrap-Linien; E2E-Verifikation braucht ≥ 2048 Echos."
+        );
+    }
+    let n0 = w.n0;
+    let n0raw = w.n0raw;
+    let raw = w.raw;
+    let slant = w.slant;
+    let chirp = w.chirp;
+    let bw = w.bw_hz;
+    let veff = w.veff;
+    let line_pos = w.line_pos;
+    let line_vel = w.line_vel;
+    let m0 = &w.metas[0];
+    // Doppler-Centroid: geometrisch vs. Clutterlock (Daten). Clutterlock
+    // braucht range-komprimierte Daten (Cumming & Wong) — auf Rohdaten
+    // misst Lag-1 die Chirp-Struktur statt Doppler (Absurditaet −272–100 Hz
+    // statt −20 Hz). Mittlere 512 Echos separat komprimieren (ms-Aufwand).
     let mid = naz / 2;
     let geo = ephem::fdc_range_grid(line_pos[mid], line_vel[mid], &slant);
-    let cl = rda::clutterlock_fdc(&raw, naz, m0.pri_s, 64);
+    let ncl = naz.min(512);
+    let ac0 = (naz - ncl) / 2;
+    let mut cl_data = raw[ac0 * n0..(ac0 + ncl) * n0].to_vec();
+    RangeCompressor::new(&chirp, n0).compress_rows(&mut cl_data);
+    let cl = rda::clutterlock_fdc(&cl_data, ncl, m0.pri_s, 64);
     let (gmin, gmax) = minmax(&geo);
     let (cmin, cmax) = minmax(&cl);
     println!("f_DC geometrisch: {gmin:.1}–{gmax:.1} Hz");
@@ -369,7 +274,7 @@ fn cmd_focus(args: &[&str]) -> Result<(), String> {
             slant_m: &slant,
             veff_range: &veff,
             fdc_range: &cl,
-            apply_rcmc: true,
+            apply_rcmc: !cfg.no_rcmc,
         };
         println!("CPU-Fokus …");
         rda::RdaProcessor::new(&p).focus(&mut img);
@@ -406,41 +311,10 @@ fn cmd_focus(args: &[&str]) -> Result<(), String> {
         "geschrieben: {cf_path} ({:.2} GB)",
         (img.len() * 8) as f64 / 1e9
     );
-    let power: Vec<f32> = img.iter().map(|c| c.norm_sqr()).collect();
-    let (mean, std) = look::mean_std(&power);
-    println!(
-        "Leistung: Mittel {mean:.3e}, Std {std:.3e}, Kontrast {:.2}",
-        std / mean.max(1e-30)
-    );
-    let lrg = (n0 / 2048).max(1);
-    let laz = (naz / 2048).max(1);
-    let (ml, oaz, org) = look::multilook(&power, naz, n0, laz, lrg);
-    let db = look::power_db(
-        &ml.iter()
-            .map(|&p| Complex32::new(p.sqrt(), 0.0))
-            .collect::<Vec<_>>(),
-    );
-    let png_path = format!("{}.png", cfg.prefix);
-    let (lo, hi) = look::stretch_lo_hi(&db, 0.02, 0.995);
-    look::render_png_gray(&db, org, oaz, std::path::Path::new(&png_path), lo, hi)?;
-    println!("geschrieben: {png_path} ({org}×{oaz}, {lo:.1}–{hi:.1} dB)");
-    println!("{}", look::render_ascii(&db, org, oaz, 100));
+    let power = write_quicklook(&img, naz, n0, &cfg.prefix)?;
     // Schiffs-PSF: Top-Peaks + FWHM-Schnitte gegen Theorie.
     report_ships(&power, naz, n0, bw, m0.fs_hz, m0.pri_s, &veff, ntx);
     Ok(())
-}
-
-/// Kleinste FFT-Größe ≥ `n` mit Primfaktoren ≤ 7 (cuFFT-sicher).
-fn smooth_fft_len(n: usize) -> usize {
-    fn smooth(mut m: usize) -> bool {
-        for p in [2, 3, 5, 7] {
-            while m.is_multiple_of(p) {
-                m /= p;
-            }
-        }
-        m == 1
-    }
-    (n..).find(|&m| smooth(m)).unwrap_or(n)
 }
 
 /// Peak-RSS in GB (VmHWM aus /proc, Linux).
@@ -508,7 +382,7 @@ fn focus_gpu_chunked(
             slant_m: slant,
             veff_range: veff,
             fdc_range: fdc,
-            apply_rcmc: true,
+            apply_rcmc: !cfg.no_rcmc,
         };
         sar_focus::gpu::RdaGpuProcessor::new(&p)
             .map_err(|e| e.to_string())?
@@ -673,6 +547,36 @@ fn report_ships(
     }
 }
 
+/// Quicklook-Artefakte (PNG + ASCII + Leistungs-Kennzahlen, druckt selbst).
+/// Gibt das Leistungsbild zurück (für Folgeberichte).
+fn write_quicklook(
+    img: &[Complex32],
+    naz: usize,
+    n0: usize,
+    prefix: &str,
+) -> Result<Vec<f32>, String> {
+    let power: Vec<f32> = img.iter().map(|c| c.norm_sqr()).collect();
+    let (mean, std) = look::mean_std(&power);
+    println!(
+        "Leistung: Mittel {mean:.3e}, Std {std:.3e}, Kontrast {:.2}",
+        std / mean.max(1e-30)
+    );
+    let lrg = (n0 / 2048).max(1);
+    let laz = (naz / 2048).max(1);
+    let (ml, oaz, org) = look::multilook(&power, naz, n0, laz, lrg);
+    let db = look::power_db(
+        &ml.iter()
+            .map(|&p| Complex32::new(p.sqrt(), 0.0))
+            .collect::<Vec<_>>(),
+    );
+    let png_path = format!("{prefix}.png");
+    let (lo, hi) = look::stretch_lo_hi(&db, 0.02, 0.995);
+    look::render_png_gray(&db, org, oaz, std::path::Path::new(&png_path), lo, hi)?;
+    println!("geschrieben: {png_path} ({org}×{oaz}, {lo:.1}–{hi:.1} dB)");
+    println!("{}", look::render_ascii(&db, org, oaz, 100));
+    Ok(power)
+}
+
 /// Liest `.cf` als Leistungsbild.
 fn read_cf_power(cf: &str, naz: usize, n0: usize) -> Result<Vec<f32>, String> {
     let bytes = std::fs::read(cf).map_err(|e| e.to_string())?;
@@ -686,6 +590,21 @@ fn read_cf_power(cf: &str, naz: usize, n0: usize) -> Result<Vec<f32>, String> {
         *p = re * re + im * im;
     }
     Ok(power)
+}
+
+/// Liest `.cf` als Komplexbild.
+fn read_cf_complex(cf: &str, naz: usize, n0: usize) -> Result<Vec<Complex32>, String> {
+    let bytes = std::fs::read(cf).map_err(|e| e.to_string())?;
+    if bytes.len() != naz * n0 * 8 {
+        return Err(format!("Größe {} passt nicht zu {naz}×{n0}", bytes.len()));
+    }
+    let mut img = Vec::with_capacity(naz * n0);
+    for i in 0..naz * n0 {
+        let re = f32::from_le_bytes(bytes[8 * i..8 * i + 4].try_into().unwrap());
+        let im = f32::from_le_bytes(bytes[8 * i + 4..8 * i + 8].try_into().unwrap());
+        img.push(Complex32::new(re, im));
+    }
+    Ok(img)
 }
 
 /// Quicklook aus `.cf` (RFI-sichere Spreizung, optionaler Ausschnitt).
@@ -852,4 +771,224 @@ fn deep_ocean_search(power: &[f32], naz: usize, n0: usize, az0: usize, az1: usiz
     if shown == 0 {
         println!("  keine Schiffskandidaten (punktförmig, K>10dB, dunkel)");
     }
+}
+
+struct TdbpCfg {
+    input: String,
+    prefix: String,
+    az0: usize,
+    az1: usize,
+    waz0: usize,
+    waz1: usize,
+    wrg0: usize,
+    wrg1: usize,
+    cpu: bool,
+    compare: Option<(String, usize, usize, usize)>,
+}
+
+fn parse_tdbp(args: &[&str]) -> Result<TdbpCfg, String> {
+    if args.len() < 2 {
+        return Err("tdbp braucht <input.dat> <prefix>".to_string());
+    }
+    let mut c = TdbpCfg {
+        input: args[0].to_string(),
+        prefix: args[1].to_string(),
+        az0: 0,
+        az1: usize::MAX,
+        waz0: 0,
+        waz1: usize::MAX,
+        wrg0: 0,
+        wrg1: usize::MAX,
+        cpu: false,
+        compare: None,
+    };
+    let num = |args: &[&str], i: &mut usize, flag: &str| -> Result<usize, String> {
+        *i += 1;
+        args.get(*i)
+            .and_then(|v| v.parse().ok())
+            .ok_or_else(|| format!("{flag} braucht Zahl"))
+    };
+    let mut i = 2;
+    while i < args.len() {
+        match args[i] {
+            "--cpu" => c.cpu = true,
+            "--az0" => c.az0 = num(args, &mut i, "--az0")?,
+            "--az1" => c.az1 = num(args, &mut i, "--az1")?,
+            "--waz0" => c.waz0 = num(args, &mut i, "--waz0")?,
+            "--waz1" => c.waz1 = num(args, &mut i, "--waz1")?,
+            "--wrg0" => c.wrg0 = num(args, &mut i, "--wrg0")?,
+            "--wrg1" => c.wrg1 = num(args, &mut i, "--wrg1")?,
+            "--compare" => {
+                if i + 4 >= args.len() {
+                    return Err("--compare braucht <rda.cf> <naz> <n0> <az0>".to_string());
+                }
+                let p = |s: &str| {
+                    s.parse()
+                        .map_err(|_| "--compare: naz/n0/az0 Zahlen?".to_string())
+                };
+                c.compare = Some((
+                    args[i + 1].to_string(),
+                    p(args[i + 2])?,
+                    p(args[i + 3])?,
+                    p(args[i + 4])?,
+                ));
+                i += 4;
+            }
+            f => return Err(format!("unbekannte Flagge {f}")),
+        }
+        i += 1;
+    }
+    if c.waz1 == usize::MAX {
+        c.waz1 = c.az1;
+    }
+    if c.waz0 >= c.waz1 || c.wrg0 >= c.wrg1 {
+        return Err("leeres TDBP-Fenster (waz/wrg prüfen)".to_string());
+    }
+    Ok(c)
+}
+
+/// TDBP auf Echtdaten: Pulse laden → Geometrie-Brücke → Rückprojektion.
+fn cmd_tdbp(args: &[&str]) -> Result<(), String> {
+    let cfg = parse_tdbp(args)?;
+    let t_start = std::time::Instant::now();
+    let w =
+        sar_focus::ingest::load_window(&cfg.input, cfg.az0, cfg.az1).map_err(|e| e.to_string())?;
+    let t_decode = t_start.elapsed();
+    let naz = w.naz;
+    let n0 = w.n0;
+    let chirp = w.chirp;
+    // wrg in RDA-Output-Pixeln; die Brücke addiert den Wrap-Rand ntx
+    // selbst (slant[r+ntx]) — hier NICHT vorab addieren (war doppelt:
+    // +2·ntx → Bogen 10,6 km falsch → TDBP-Versatz!).
+    let ntx = sar_focus::chirp::num_tx_samples(&chirp);
+    let geo = sar_focus::tdbp_geo::geo_for_window(&w, cfg.waz0, cfg.waz1, cfg.wrg0, cfg.wrg1)
+        .map_err(|e| e.to_string())?;
+    println!(
+        "TDBP: {} Pulse ({}..{}), Grid {}×{} (az {}..{}, rg {}..{})",
+        naz,
+        cfg.az0,
+        cfg.az0 + naz,
+        geo.grid.naz,
+        geo.grid.nrange,
+        cfg.waz0,
+        cfg.waz1,
+        cfg.wrg0,
+        cfg.wrg1
+    );
+    // Range-komprimieren + rückversetzen (TDBP-Eingang).
+    let mut rc = w.raw;
+    RangeCompressor::new(&chirp, n0).compress_rows(&mut rc);
+    let shift = rda::correlation_shift_samples(ntx, n0);
+    for p in 0..naz {
+        rc[p * n0..(p + 1) * n0].rotate_right(shift);
+    }
+    let t_pre = t_start.elapsed();
+    let t_focus = std::time::Instant::now();
+    let img = if cfg.cpu {
+        let threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        println!("TDBP-CPU ({threads} Stränge) …");
+        let inp = sar_focus::tdbp::TdbpInput {
+            data: &rc,
+            npulse: naz,
+            nsample: n0,
+            plat: &geo.plat,
+            t0_s: geo.t0_s,
+            dt_s: geo.dt_s,
+            lambda: sar_focus::types::TX_WAVELENGTH_M,
+        };
+        sar_focus::tdbp::tdbp_cpu_parallel(&geo.grid, &inp, naz, threads)
+    } else {
+        println!("TDBP-GPU …");
+        sar_focus::gpu::TdbpGpuProcessor::new(
+            geo.grid,
+            naz,
+            n0,
+            geo.t0_s,
+            geo.dt_s,
+            sar_focus::types::TX_WAVELENGTH_M,
+        )
+        .map_err(|e| e.to_string())?
+        .focus(&rc, &geo.plat, naz)
+        .map_err(|e| e.to_string())?
+    };
+    let dt = t_focus.elapsed();
+    let pp = naz as f64 * (geo.grid.naz * geo.grid.nrange) as f64;
+    println!(
+        "TDBP-Fokus: {:.1} s ({:.2e} Puls·Pixel, {:.1} M/s)",
+        dt.as_secs_f64(),
+        pp,
+        pp / dt.as_secs_f64() / 1e6
+    );
+    println!(
+        "Zeit: Dekodierung {:.1} s, Geometrie {:.1} s (gesamt {:.1} s)",
+        t_decode.as_secs_f64(),
+        (t_pre - t_decode).as_secs_f64(),
+        t_start.elapsed().as_secs_f64()
+    );
+    println!("Host-Speicher (Peak): {:.2} GB", peak_rss_gb());
+    let (peak_idx, peak_pw) = sar_focus::tdbp::peak_power(&img);
+    println!(
+        "Peak: {} (az {}, rg {}), P={:.3e}",
+        peak_idx,
+        cfg.waz0 + peak_idx / geo.grid.nrange,
+        cfg.wrg0 + peak_idx % geo.grid.nrange,
+        peak_pw
+    );
+    let cf_path = format!("{}.cf", cfg.prefix);
+    write_cf(std::path::Path::new(&cf_path), &img)?;
+    println!(
+        "geschrieben: {cf_path} ({:.2} GB)",
+        (img.len() * 8) as f64 / 1e9
+    );
+    write_quicklook(&img, geo.grid.naz, geo.grid.nrange, &cfg.prefix)?;
+    // Vergleich mit RDA-Bild (Lage + Kennzahlen + registrierte Differenz).
+    if let Some((path, rnaz, rn0, raz0)) = cfg.compare {
+        let rda = read_cf_complex(&path, rnaz, rn0)?;
+        if cfg.waz0 < raz0 {
+            return Err("TDBP-Fenster vor RDA-Beginn".to_string());
+        }
+        let (ra0, rr0) = (cfg.waz0 - raz0, cfg.wrg0);
+        if ra0 + geo.grid.naz > rnaz || rr0 + geo.grid.nrange > rn0 {
+            return Err("RDA-Bild deckt TDBP-Fenster nicht ab".to_string());
+        }
+        let mut rcrop = Vec::with_capacity(geo.grid.naz * geo.grid.nrange);
+        for a in 0..geo.grid.naz {
+            let s = (ra0 + a) * rn0 + rr0;
+            rcrop.extend_from_slice(&rda[s..s + geo.grid.nrange]);
+        }
+        let (rpeak, rpw) = sar_focus::tdbp::peak_power(&rcrop);
+        let gn = geo.grid.nrange as isize;
+        let daz = rpeak as isize / gn - peak_idx as isize / gn;
+        let drg = rpeak as isize % gn - peak_idx as isize % gn;
+        println!(
+            "RDA-Peak: (az {}, rg {}), P={:.3e}; Versatz RDA−TDBP: Δaz {daz:+}, Δrg {drg:+}",
+            cfg.waz0 + rpeak / geo.grid.nrange,
+            cfg.wrg0 + rpeak % geo.grid.nrange,
+            rpw,
+        );
+        // Registrierte Differenz: TDBP(a,r) ↔ RDA(a+daz,r+drg), Überlappung.
+        // Norm: SpitzenAMPLITUDE (nicht Leistung — sonst 1e5 zu klein!).
+        let (oaz0, oaz1) = (0.max(-daz), geo.grid.naz as isize - daz.max(0));
+        let (org0, org1) = (0.max(-drg), geo.grid.nrange as isize - drg.max(0));
+        let peak = peak_pw.sqrt().max(1e-30);
+        let (mut acc, mut n) = (0.0f64, 0u64);
+        let mut mx = 0.0f32;
+        for a in oaz0..oaz1 {
+            for r in org0..org1 {
+                let t = img[a as usize * geo.grid.nrange + r as usize];
+                let q = rcrop[(a + daz) as usize * geo.grid.nrange + (r + drg) as usize];
+                let d = (t.re - q.re).hypot(t.im - q.im) / peak;
+                acc += d as f64;
+                n += 1;
+                mx = mx.max(d);
+            }
+        }
+        println!(
+            "TDBP↔RDA registriert: max. rel. Abw. {mx:.3e}, Mittel {:.3e} (Überlapp {n} px)",
+            acc / n.max(1) as f64
+        );
+    }
+    Ok(())
 }

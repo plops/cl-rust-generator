@@ -3,6 +3,9 @@
 //! Rohdatenmodell: verzögerter Sende-Chirp je Puls plus Trägerphase der
 //! hyperbolischen Entfernungsänderung `R(η) = √(R₀² + (vη)²)`.
 
+//! Test-Helfer: nicht jedes Target nutzt alle Items.
+#![allow(dead_code)]
+
 use sar_focus::chirp::ChirpParams;
 use sar_focus::types::{Complex32, SPEED_OF_LIGHT, TX_FREQ_HZ};
 
