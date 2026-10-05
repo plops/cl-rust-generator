@@ -14,6 +14,8 @@ pub mod ephem;
 pub mod gpu;
 #[path = "09_kernel.rs"]
 pub mod kernel;
+#[path = "11_look.rs"]
+pub mod look;
 #[path = "02_meta.rs"]
 pub mod meta;
 #[path = "05_range.rs"]

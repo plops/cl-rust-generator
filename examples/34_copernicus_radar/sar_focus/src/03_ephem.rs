@@ -10,6 +10,9 @@
 
 use crate::types::{TX_WAVELENGTH_M, Vec3d, WGS84_A_M, WGS84_B_M};
 
+/// Erdrotationsrate in rad/s (WGS84).
+pub const EARTH_OMEGA_RAD_S: f64 = 7.292_115_9e-5;
+
 /// Ein Ephemeridenpunkt: POD-Zeitstempel + ECEF-Zustandsvektor.
 #[derive(Clone, Copy, Debug)]
 pub struct EphemPoint {
@@ -140,10 +143,32 @@ pub fn effective_velocity(space_vel: f64, pos: Vec3d, slant_range: f64) -> f64 {
     (space_vel * ground_vel).sqrt()
 }
 
+/// Inertiale Geschwindigkeit aus ECEF-Zustand: `v_i = v_e + ω×r`.
+///
+/// Die SubCom-Geschwindigkeiten sind erdfest (Echtdaten: `|v| ≈ 7589 m/s`,
+/// erst `|v + ω×r| ≈ 7501,6 m/s` erfüllt vis-viva). `effective_velocity`
+/// braucht die inertiale Bahngeschwindigkeit — roh wäre `v_eff` 1,1 %
+/// daneben (≈ 9 rad Defokus).
+pub fn inertial_vel(pos: Vec3d, ecef_vel: Vec3d) -> Vec3d {
+    let wxr = Vec3d::new(-EARTH_OMEGA_RAD_S * pos.y, EARTH_OMEGA_RAD_S * pos.x, 0.0);
+    ecef_vel + wxr
+}
+
 /// Geometrischer Doppler-Centroid in Hz: `f_DC = 2·(v·u)/λ`
 /// mit Einheits-Blickvektor `u` (Plattform → Ziel).
-pub fn doppler_centroid_hz(vel: Vec3d, look_unit: Vec3d) -> f64 {
-    2.0 * vel.dot(look_unit) / TX_WAVELENGTH_M
+///
+/// `vel` ist die **ECEF**-Geschwindigkeit: Das Ziel ist erdfest, also
+/// `f_DC = 2·v_e·u/λ` direkt (Erdrotation steckt in `v_e`).
+pub fn doppler_centroid_hz(ecef_vel: Vec3d, look_unit: Vec3d) -> f64 {
+    2.0 * ecef_vel.dot(look_unit) / TX_WAVELENGTH_M
+}
+
+/// Geometrisches `f_DC`-Raster je Range-Bin (Chunk-Mitte, Null-Schiel-Blick).
+pub fn fdc_range_grid(pos: Vec3d, ecef_vel: Vec3d, slant_m: &[f64]) -> Vec<f64> {
+    slant_m
+        .iter()
+        .map(|&r| doppler_centroid_hz(ecef_vel, look_unit_zero_squint(pos, ecef_vel, r)))
+        .collect()
 }
 
 /// Blickvektor (Einheit) zum Szenenreferenzpunkt: rechts-schauend (S1),

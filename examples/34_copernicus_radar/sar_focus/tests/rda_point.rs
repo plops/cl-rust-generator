@@ -8,7 +8,12 @@ use common::{FS, J0, NAZ, NR, PRI, V, chirp, fwhm, peak, simulate_raw};
 use sar_focus::meta::slant_range_vec;
 use sar_focus::rda::{RdaParams, RdaProcessor};
 
-fn processor(slant: &[f64], veff_range: &[f64], apply_rcmc: bool) -> RdaProcessor {
+fn processor(
+    slant: &[f64],
+    veff_range: &[f64],
+    fdc_range: &[f64],
+    apply_rcmc: bool,
+) -> RdaProcessor {
     RdaProcessor::new(&RdaParams {
         chirp: chirp(),
         naz: NAZ,
@@ -16,7 +21,7 @@ fn processor(slant: &[f64], veff_range: &[f64], apply_rcmc: bool) -> RdaProcesso
         pri_s: PRI,
         slant_m: slant,
         veff_range,
-        f_dc_hz: 0.0,
+        fdc_range,
         apply_rcmc,
     })
 }
@@ -34,7 +39,8 @@ fn punktziel_fokussiert_exakt() {
     );
     assert!((check[1] - check[0] - (slant[1] - slant[0])).abs() < 1e-9);
     let veff = vec![V; NR];
-    processor(&slant, &veff, true).focus(&mut data);
+    let fdc = vec![0.0; NR];
+    processor(&slant, &veff, &fdc, true).focus(&mut data);
     let (pa, pr, pv) = peak(&data, NR);
     // Peak exakt am Ziel-Pixel (512, J0).
     assert_eq!((pa, pr), (512, J0), "Peak bei ({pa}, {pr})");
@@ -67,10 +73,11 @@ fn rcmc_verbessert_fokus() {
     // Migration am Aperturrand ≈ 0,8 Samples: mit RCMC schärfer als ohne.
     let (data, slant, _) = simulate_raw();
     let veff = vec![V; NR];
+    let fdc = vec![0.0; NR];
     let mut mit = data.clone();
-    processor(&slant, &veff, true).focus(&mut mit);
+    processor(&slant, &veff, &fdc, true).focus(&mut mit);
     let mut ohne = data;
-    processor(&slant, &veff, false).focus(&mut ohne);
+    processor(&slant, &veff, &fdc, false).focus(&mut ohne);
     let (pa1, pr1, pv1) = peak(&mit, NR);
     let (pa0, pr0, pv0) = peak(&ohne, NR);
     assert_eq!((pa1, pr1), (512, J0));
