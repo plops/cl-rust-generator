@@ -41,6 +41,7 @@ fn setup() -> (Vec<sar_focus::types::Complex32>, TdbpGrid, Vec<Vec3d>, f64) {
         dx_az: dx,
         y_near: yc + (2016.0 - J0 as f64) * dy - 0.5 * dy,
         dy_gr: dy,
+        re_m: 0.0,
     };
     (data, grid, plat, t0)
 }

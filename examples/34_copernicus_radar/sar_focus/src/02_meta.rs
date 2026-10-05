@@ -61,22 +61,24 @@ pub fn range_sample_freq(rgdec: u32) -> Result<f64, Error> {
     Ok(f64::from(l) / f64::from(m) * 4.0 * F_REF_HZ)
 }
 
-/// TX-Rampenrate in Hz/s: `±mag·F_REF²/2²¹`.
+/// TX-Rampenrate in Hz/s: `±mag·F_REF²/2²¹` (Polaritaet 1 = positiv,
+/// sentinel1decoder `_txprr`; nur so komprimiert die Replika S6-Echos).
 pub fn txprr_hz_s(h: &PacketHeader) -> f64 {
     let sign = if h.tx_ramp_rate_polarity == 0 {
-        1.0
-    } else {
         -1.0
+    } else {
+        1.0
     };
     sign * f64::from(h.tx_ramp_rate_magnitude) * F_REF_HZ * F_REF_HZ / 2_097_152.0
 }
 
-/// TX-Startfrequenz in Hz: `TXPRR/4F_REF ± mag·F_REF/2¹⁴`.
+/// TX-Startfrequenz in Hz: `TXPRR/4F_REF ± mag·F_REF/2¹⁴`
+/// (Polaritaet 1 = positiv, sentinel1decoder `_txpsf`).
 pub fn txpsf_hz(h: &PacketHeader) -> f64 {
     let sign = if h.tx_pulse_start_frequency_polarity == 0 {
-        1.0
-    } else {
         -1.0
+    } else {
+        1.0
     };
     txprr_hz_s(h) / (4.0 * F_REF_HZ)
         + sign * f64::from(h.tx_pulse_start_frequency_magnitude) * F_REF_HZ / 16384.0
@@ -138,7 +140,7 @@ mod tests {
         p[12..16].copy_from_slice(&[0x35, 0x2E, 0xF8, 0x53]);
         p[37] = 12;
         p[40] = 9;
-        // TXPRR: Polarität 1 (negativ), Betrag so, dass ≈ −0,826 MHz/µs.
+        // TXPRR: Polarität 1 (positiv), Betrag so, dass ≈ +0,826 MHz/µs.
         // 0,826e12·2²¹/F_REF² ≈ 1229,6 → 1230.
         p[42] = 0x84;
         p[43] = 0xCE; // 0x04CE = 1230
@@ -189,9 +191,9 @@ mod tests {
         // TXPL = 1918/F_REF ≈ 51,10 µs.
         assert!((m.txpl_s - 1918.0 / 37_534_722.24).abs() < 1e-18);
         assert!((m.txpl_s * 1e6 - 51.10).abs() < 0.01);
-        // TXPRR ≈ −0,826 MHz/µs = −8,26·10¹¹ Hz/s.
+        // TXPRR ≈ +0,826 MHz/µs = +8,26·10¹¹ Hz/s (Up-Chirp).
         assert!(
-            (m.txprr_hz_s + 8.264e11).abs() < 2e9,
+            (m.txprr_hz_s - 8.264e11).abs() < 2e9,
             "txprr = {}",
             m.txprr_hz_s
         );

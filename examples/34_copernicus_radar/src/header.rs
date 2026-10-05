@@ -356,10 +356,12 @@ impl PacketHeader {
 
     /// Signed TX ramp-rate magnitude: `(-1)^polarity * magnitude`.
     pub fn tx_ramp_rate_signed(&self) -> f64 {
+        // Polaritaet 1 = positiv (sentinel1decoder `_txprr`:
+        // `sign = (-1)**(1 - (vals >> 15))`, per Echtdaten-Test belegt).
         let sign = if self.tx_ramp_rate_polarity == 0 {
-            1.0
-        } else {
             -1.0
+        } else {
+            1.0
         };
         sign * f64::from(self.tx_ramp_rate_magnitude)
     }
@@ -371,10 +373,11 @@ impl PacketHeader {
 
     /// TX pulse start frequency in MHz.
     pub fn tx_pulse_start_frequency(&self) -> f64 {
+        // Polaritaet 1 = positiv (sentinel1decoder `_txpsf`, analog `_txprr`).
         let sign = if self.tx_pulse_start_frequency_polarity == 0 {
-            1.0
-        } else {
             -1.0
+        } else {
+            1.0
         };
         self.tx_ramp_rate() / (FREF * 4.0)
             + (FREF / 16384.0) * sign * f64::from(self.tx_pulse_start_frequency_magnitude)
@@ -482,11 +485,12 @@ mod tests {
     #[test]
     fn derived_tx_quantities() {
         let h = PacketHeader::parse(&sample_header()).unwrap();
-        assert_eq!(h.tx_ramp_rate_signed(), -258.0);
-        let expected_rate = (FREF * FREF / 2_097_152.0) * -258.0;
+        assert_eq!(h.tx_ramp_rate_signed(), 258.0);
+        let expected_rate = (FREF * FREF / 2_097_152.0) * 258.0;
         assert!((h.tx_ramp_rate() - expected_rate).abs() < 1e-12);
         assert!((h.tx_pulse_length_us() - 100.0 / FREF).abs() < 1e-12);
-        let expected_psf = expected_rate / (FREF * 4.0) + (FREF / 16384.0) * 3.0;
+        // TXPSF-Polaritaet 0 = negativ (Betrag 3).
+        let expected_psf = expected_rate / (FREF * 4.0) + (FREF / 16384.0) * -3.0;
         assert!((h.tx_pulse_start_frequency() - expected_psf).abs() < 1e-12);
     }
 

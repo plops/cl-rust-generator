@@ -12,6 +12,8 @@ pub mod cufft;
 pub mod ephem;
 #[path = "10_gpu.rs"]
 pub mod gpu;
+#[path = "12_ingest.rs"]
+pub mod ingest;
 #[path = "09_kernel.rs"]
 pub mod kernel;
 #[path = "11_look.rs"]
@@ -24,6 +26,8 @@ pub mod range;
 pub mod rda;
 #[path = "07_tdbp.rs"]
 pub mod tdbp;
+#[path = "13_tdbp_geo.rs"]
+pub mod tdbp_geo;
 #[path = "01_types.rs"]
 pub mod types;
 
