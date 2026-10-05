@@ -1,7 +1,7 @@
 //! Regression tests against a real Sentinel-1 RAW `.dat` file.
 //!
 //! The dataset lives next to this crate (it is too large to vendor):
-//! `../34_copernicus/data/vv/s1c-s6-raw-s-vv-*.dat`.
+//! `data/vv/s1c-s6-raw-s-vv-*.dat`.
 //! Override with `S1_DAT`. Tests skip silently when the file is absent so a
 //! checkout without the dataset stays green.
 
@@ -21,7 +21,7 @@ fn dat_path() -> Option<PathBuf> {
         return p.exists().then_some(p);
     }
     let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../34_copernicus/data/vv")
+        .join("data/vv")
         .join("s1c-s6-raw-s-vv-20260929t214300-20260929t214327-009667-0133f4.dat");
     p.exists().then_some(p)
 }

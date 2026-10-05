@@ -13,4 +13,4 @@ target/
 *.vert
 data/*.db
 # huge datasets stay out of the repo (e.g. Sentinel-1 RAW products, ~GBs)
-examples/34_copernicus/data/
+examples/34_copernicus_radar/data/
