@@ -93,3 +93,47 @@ Messwert im Walkthrough.
 │                                                                               │
 │  BILLING        Subscription · Muse Code Everyday Usage                       │
 └───────────────────────────────────────────────────────────────────────────────┘
+
+
+try to fix doc and benchmark
+
+◆ Worked for 34m 17s · 5:19 AM
+
+┌───────────────────────────────────────────────────────┐
+│  Session usage                                        │
+│                                                       │
+│    Input      101,408,100                             │
+│    Cached      99,321,726                             │
+│    Output         423,577                             │
+│    Total      101,831,677                             │
+│                                                       │
+│    Turns               482                            │
+│    Subagents          none                            │
+│                                                       │
+│  Subscription · Muse Code Everyday Usage              │
+│    Current        12% used · Resets at 9:44 AM        │
+│    Weekly         5% used · Resets Oct 12 at 12:00 AM │
+└───────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────────────────────────────┐
+│  MUSE CODE 1.4.2 / brook-asterism                                   COMPLETED │
+│                                                                               │
+│  MODEL          muse-spark-1.3-contributor · max                              │
+│                 meta · native-basic                                           │
+│                                                                               │
+│  WORKSPACE      /workspace/src/cl-rust-generator/examples/34_copernicus_radar │
+│                 trusted · not found                                           │
+│  ACCESS         Unrestricted                                                  │
+│                 sandbox disabled (--yolo)                                     │
+│                 Meta account                                                  │
+│  ACCOUNT        Wol Pumba (wolpumba@gmail.com)                                │
+│                                                                               │
+│  USAGE          101,831,677 tokens · 482 turns · 0 subagents                  │
+│  CONTEXT        90% left · 103K used / 1008K · normal                         │
+│                                                                               │
+│  SESSION        01a10912-b7e9-7473-818f-451872c1e9f7                          │
+│  ACTIVITY       no tasks                                                      │
+│                 0 terminals · inbox clear                                     │
+│                                                                               │
+│  BILLING        Subscription · Muse Code Everyday Usage                       │
+└───────────────────────────────────────────────────────────────────────────────┘
