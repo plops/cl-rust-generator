@@ -1,4 +1,5 @@
 /target/
+/.oxide-artifacts/
 **/*.bc
 .DS_Store
 **/*.cubin
