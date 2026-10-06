@@ -144,6 +144,8 @@ pub struct Cli {
     pub stiffness: Option<f32>,
     /// Override Zeitschritt dt in s (Default 0.0008).
     pub dt: Option<f32>,
+    /// GUI nach N Frames beenden (Smoke-Test, Default: unbegrenzt).
+    pub frames: Option<u64>,
 }
 
 impl Default for Cli {
@@ -157,6 +159,7 @@ impl Default for Cli {
             cpu: false,
             stiffness: None,
             dt: None,
+            frames: None,
         }
     }
 }
@@ -230,6 +233,15 @@ impl Cli {
                             .map_err(|_| "dt muss eine Zahl sein".to_string())?,
                     );
                 }
+                Long("frames") => {
+                    cli.frames = Some(
+                        parser
+                            .value()
+                            .map_err(|e| e.to_string())?
+                            .parse()
+                            .map_err(|_| "frames muss eine Zahl sein".to_string())?,
+                    );
+                }
                 Short('h') | Long("help") => {
                     return Err(Self::help());
                 }
@@ -256,6 +268,7 @@ impl Cli {
          \t--cpu            CPU-Backend statt GPU\n\
          \t--stiffness K    Gas-Steifigkeit (Default 2000)\n\
          \t--dt DT          Zeitschritt in s (Default 0.0008)\n\
+         \t--frames N       GUI nach N Frames beenden (Smoke-Test)\n\
          \t-h, --help       diese Hilfe\n"
             .to_string()
     }
