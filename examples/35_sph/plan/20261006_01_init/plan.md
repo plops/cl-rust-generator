@@ -300,3 +300,109 @@ Because the RTX A4000 has 48 dedicated 2nd-generation RT Cores built directly in
 
 
 
+
+---
+---
+
+# Teil B – Implementierungsplan (Session 2026-10-06, Stand: verifizierte Umgebung)
+
+Dieser Teil befähigt einen unabhängigen Agenten, den Kontext selbstständig
+aufzubauen und die Implementierung fortzuführen. Teil A (oben) bleibt das
+mathematische/architektonische Blueprint-Dokument.
+
+## B.1 Verifizierter Ist-Zustand der Umgebung
+
+- Container: Ubuntu 26.04, CUDA-Toolkit 13.4 (`/usr/local/cuda`), Treiber
+  610.57.04, GPU `NVIDIA RTX A4000` (Ampere, sm_86, 16 GB).
+- `cargo-oxide 0.2.1` war vorinstalliert (`/root/.cargo/bin/cargo-oxide`).
+- Installiert in dieser Session: Toolchain `nightly-2026-08-28` mit
+  `rust-src,rustc-dev,rust-analyzer,clippy,rustfmt,llvm-tools` sowie
+  `clang-21 llvm-21-dev libclang-21-dev libx11-dev libxi-dev libgl1-mesa-dev
+  mesa-common-dev libasound2-dev pkg-config`.
+- `cargo oxide doctor` meldet "Environment looks good".
+- Ende-zu-Ende-Probe (`/tmp/oxide_probe`, vecadd): `cargo oxide run` → PASSED.
+- X11: Socket `/tmp/.X11-unix/X0` verbindbar; GUI-Start mit `DISPLAY=:0`.
+- Git-Identität für Commits: `wol pumba <wolpumba@gmail.com>`.
+
+## B.2 Verbindliche Architektur-Entscheidungen (durch Tests belegt)
+
+1. **Single-Source-cuda-oxide statt Workspace-Split:** Host- und Device-Code
+   liegen in EINEM Crate (`#[cuda_module]` + `#[kernel]`). Der
+   Host/Kernel-Workspace-Split aus Teil A entfällt (cuda-oxide-Prinzip).
+2. **`cuda-core` MUSS aus Git kommen:** `cuda-core = { git =
+   "https://github.com/NVlabs/cuda-oxide.git" }`. Die crates.io-Version 0.4.0
+   ist eine zweite Crate-Instanz und bricht die Typ-Unifikation mit
+   `cuda-host`/`cuda-device` (E0277/E0308). Gleicher Fix wie in
+   `examples/32_cuda-rust/my_first_kernel`.
+3. **GPU-Datenlayout SoA statt AoS:** Device-Buffer `pos, vel, acc
+   ([f32;2])`, `dens, pres (f32)`, `hash, order, cell_start (u32)`,
+   `counts/cursor (DeviceAtomicU32)`. Begründung: `DisjointSlice` verbietet
+   Aliasing innerhalb eines Kernels; SoA erlaubt saubere Lese-/Schreibtrennung
+   pro Kernel-Launch. Hostseitiges `Particle`-Struct (AoS, `repr(C)`, Pod)
+   existiert für Init, CPU-Backend und Renderer weiter.
+4. **Voll-GPU Uniform Grid mit Atomics:** `k_hash` (atomares Zählen),
+   `k_scan` (single-thread exklusiver Präfix-Sum über ≤ 4096 Zellen),
+   `k_reorder` (atomarer Scatter). Kein CPU-Sortier-Fallback im Normalpfad.
+5. **Test-Trennung:** `cargo test` (plain, ohne Oxide-Backend) deckt nur
+   CPU-Code ab (SPH-Math, Grid-CPU, CPU-Backend, Config). Das
+   `#[cuda_module]` ist per `#[cfg(not(test))]` ausgeklammert, weil das
+   Device-Bundle beim plain-Link fehlt. GPU-Validierung läuft über
+   `cargo oxide run -- --headless --steps 500` (NaN/Inf-Check, Wand-Test).
+6. **Blockgröße 256** (nicht 512): mehr Register pro Thread für die
+   Nachbarschleifen; Vorgabe "bis 512" bleibt erfüllt.
+7. **Renderer:** `macroquad` + `glam::Vec2` in der App-Schicht (Umrechnung
+   beim Zeichnen). CLI via `lexopt`, Pod-Transfers via `bytemuck`.
+
+## B.3 Dateiübersicht (Zielzustand, alle ≤ ~300 Zeilen)
+
+| Datei | Inhalt |
+|---|---|
+| `Cargo.toml` | Single-Crate, Edition 2024, `[workspace]`-Isolation, Oxide-Git-Deps + macroquad/glam/bytemuck/lexopt |
+| `rust-toolchain.toml` | `nightly-2026-08-28` + Komponenten (Fixpunkt, nicht ändern) |
+| `.gitignore` | `target/`, `*.ptx`, `*.ll`, `.oxide-artifacts/` |
+| `deps.md` | Alle Crates/Repos in `<org>/<projekt>`-Notation |
+| `src/lib.rs` | Nur `#[path]`-Moduldeklarationen + Re-Exports |
+| `src/main.rs` | Nur CLI-Verdrahtung: headless vs. GUI-App |
+| `src/01_types.rs` (`types`) | `Particle`, `SphParams`, `GridMeta`, bytemuck-Pod |
+| `src/02_params.rs` (`params`) | `SimConfig`-Defaults + lexopt-CLI |
+| `src/03_sph_math.rs` (`sph_math`) | Gerätekompatible reine Fns: Poly6, Spiky, Viskosität + Unit-Tests |
+| `src/04_spatial_grid.rs` (`spatial_grid`) | Hash-Fn (host+device), CPU-Counting-Sort + Tests |
+| `src/05_gpu_kernels.rs` (`gpu_kernels`) | `#[cuda_module]`: hash/scan/reorder/density/force/integrate |
+| `src/06_backend.rs` (`backend`) | `GpuBackend` (Kontext, Buffer, Launch-Sequenz) + `CpuBackend`-Fallback, `Backend`-Trait |
+| `src/07_renderer.rs` (`renderer`) | macroquad-Zeichnen: Partikel, Hindernis, HUD |
+| `src/08_app.rs` (`app`) | Event-Loop: Dam Break, Maus (Wirbel/Strahl), Tasten R/Space/G/C, Pause |
+| `src/09_headless.rs` (`headless`) | Headless-Runner: Steps, NaN/Wand-Validierung, ms/FPS/Particles-s |
+| `tests/sph_math.rs` | Analytische Kernel-Werte |
+| `tests/spatial_grid.rs` | Hash-/Nachbarschafts-Tests |
+| `tests/cpu_stability.rs` | 500 CPU-Steps: kein Tunneln/Explodieren |
+| `benches/throughput.rs` | Durchsatz-Messung (CPU-Basis; GPU via Headless-CLI) |
+
+Modul-Deklarationsschema (nummerierte Dateien, semantische Namen):
+`#[path = "01_types.rs"] pub mod types;`
+
+## B.4 Physik-Defaults (verbindlich)
+
+- N = 16_384 (CLI: 2_048–262_144), ρ₀ = 1000, h = 0.04, k = 2000, μ = 0.1,
+  g = (0, −9.81), dt = 0.0008, 2–4 Sub-Steps/Frame.
+- Domäne: 1.6 m × 1.0 m Rechteck, Wand-Reflexionsdämpfung 0.5, runder
+  Maus-Obstacle, Dam-Break-Init.
+- Druck: P = k(ρ − ρ₀), negativer Druck auf 0 geklemmt (Stabilität).
+- Integration: Symplectic Euler; Gravitation als schaltbare Beschleunigung.
+
+## B.5 Build-/Test-Kommandos (Kurzreferenz)
+
+- `cargo oxide run` – GUI-App (braucht `DISPLAY=:0`).
+- `cargo oxide run -- --headless --steps 500` – GPU-Headless-Validierung.
+- `cargo oxide run -- --headless --steps 2000 --bench` – GPU-Benchmark.
+- `cargo test` – CPU-Unit/Integrationstests (plain, ohne GPU).
+- `cargo fmt --check` – Format-Gate.
+- `cargo clippy --all-targets -- -D warnings` – Lint-Gate (linkt nicht).
+
+## B.6 Commit-Richtlinie (Conventional Commits, Fließtext)
+
+Jeder Commit: `<typ>: <aussagekräftiger Satz im Fließtext>`, Typen `feat:`,
+`fix:`, `perf:`, `test:`, `refactor:`, `docs:`. Beispiele:
+`feat: implementiere SPH-Dichte- und Kraft-Kernel für die GPU`,
+`fix: nutze cuda-core aus Git gegen E0308-Typkonflikte`,
+`test: prüfe Poly6- und Spiky-Kernel gegen analytische Werte`.
+Genau ein logischer Schritt pro Commit, nur verifizierte (grüne) Stände.
