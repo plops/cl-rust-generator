@@ -1,0 +1,17 @@
+[package]
+name = "sph"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+# cuda-oxide Single-Source GPU: alle drei Crates aus demselben Git-Checkout,
+# sonst bricht die Typ-Unifikation (E0277/E0308, siehe deps.md).
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git" }
+cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git" }
+cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git" }
+macroquad = "0.4"
+glam = "0.27"
+bytemuck = { version = "1", features = ["derive"] }
+lexopt = "0.3"
