@@ -175,10 +175,14 @@ pub fn k_density(
 
 | N | GPU ms/Schritt | GPU Partikel/s | CPU Partikel/s | Speedup |
 |---|---|---|---|---|
-| 2 048 | 0,17 | 12,2 Mio | 2,7 Mio | 4,6× |
-| 16 384 | 0,74 | 22,0 Mio | 0,47 Mio | 47× |
+| 2 048 | 0,17 | 12,2 Mio | 6,3 Mio | 1,9× |
+| 16 384 | 0,74 | 22,0 Mio | 5,8 Mio | 3,8× |
 | 65 536 | 6,15 | 10,7 Mio | — | — |
 | 262 144 | 128,0 | 2,0 Mio | — | — |
+
+CPU-Zahlen nach Rayon-Parallelisierung (32 Kerne, SoA-Layout): 2,4× bei
+N = 2 048, 12,4× bei N = 16 384 gegenüber single-threaded; GPU/CPU-Parität
+bleibt bitidentisch (ρ̄ = 930,7 in beiden Varianten).
 
 Der Einbruch bei großem N ist Physik, kein Bug (siehe 2.6).
 

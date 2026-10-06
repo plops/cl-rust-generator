@@ -24,6 +24,10 @@
 
 - `bottledlactose/lexopt` (`lexopt`, minimalistischer CLI-Parser)
 
+## CPU-Parallelisierung
+
+- `rayon-rs/rayon` (`rayon`, datenparallele CPU-Schleifen im `CpuBackend`)
+
 ## Build-/Toolchain-Voraussetzungen (keine Cargo-Deps)
 
 - `rust-lang/rustup` (Toolchain `nightly-2026-08-28` + `rust-src`, `rustc-dev`,

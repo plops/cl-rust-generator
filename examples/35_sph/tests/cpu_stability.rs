@@ -44,4 +44,5 @@ fn cpu_reset_ist_reproduzierbar() {
     b.sync_host();
     assert_eq!(a.positions(), b.positions());
     assert_eq!(a.velocities(), b.velocities());
+    assert_eq!(a.densities(), b.densities());
 }
