@@ -347,7 +347,7 @@ mathematische/architektonische Blueprint-Dokument.
    CPU-Code ab (SPH-Math, Grid-CPU, CPU-Backend, Config). Das
    `#[cuda_module]` ist per `#[cfg(not(test))]` ausgeklammert, weil das
    Device-Bundle beim plain-Link fehlt. GPU-Validierung läuft über
-   `cargo oxide run -- --headless --steps 500` (NaN/Inf-Check, Wand-Test).
+   `cargo oxide run --features gpu -- --headless --steps 500` (NaN/Inf-Check, Wand-Test).
 6. **Blockgröße 256** (nicht 512): mehr Register pro Thread für die
    Nachbarschleifen; Vorgabe "bis 512" bleibt erfüllt.
 7. **Renderer:** `macroquad` + `glam::Vec2` in der App-Schicht (Umrechnung
@@ -391,12 +391,13 @@ Modul-Deklarationsschema (nummerierte Dateien, semantische Namen):
 
 ## B.5 Build-/Test-Kommandos (Kurzreferenz)
 
-- `cargo oxide run` – GUI-App (braucht `DISPLAY=:0`).
-- `cargo oxide run -- --headless --steps 500` – GPU-Headless-Validierung.
-- `cargo oxide run -- --headless --steps 2000 --bench` – GPU-Benchmark.
-- `cargo test` – CPU-Unit/Integrationstests (plain, ohne GPU).
+- `cargo oxide run --features gpu` – GUI-App (braucht `DISPLAY=:0`, ggf. `LIBGL_ALWAYS_SOFTWARE=1`).
+- `cargo oxide run --features gpu -- --headless --steps 500` – GPU-Headless-Validierung.
+- `cargo oxide run --features gpu -- --headless --steps 2000 --bench` – GPU-Benchmark.
+- `cargo test` – CPU-Unit/Integrationstests (plain, ohne GPU; Bin via `required-features` übersprungen).
 - `cargo fmt --check` – Format-Gate.
-- `cargo clippy --all-targets -- -D warnings` – Lint-Gate (linkt nicht).
+- `cargo clippy --all-targets -- -D warnings` – Lint-Gate (linkt nicht),
+- `cargo clippy --all-targets --features gpu -- -D warnings` – Lint-Gate inkl. GPU-Code.
 
 ## B.6 Commit-Richtlinie (Conventional Commits, Fließtext)
 

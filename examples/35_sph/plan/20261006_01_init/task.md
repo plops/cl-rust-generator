@@ -41,25 +41,25 @@ Conventional Commit (siehe `plan.md`, Abschnitt B.6).
 
 ## Phase 4 – Renderer + Interaktion (macroquad)
 
-- [ ] 4.1 `07_renderer.rs`: Partikel (Farbmodi Dichte/Geschwindigkeit),
+- [x] 4.1 `07_renderer.rs`: Partikel (Farbmodi Dichte/Geschwindigkeit),
       Obstacle, HUD-Text
-- [ ] 4.2 `08_app.rs`: Dam-Break-Init, Sub-Steps, Linksklick-Wirbel,
+- [x] 4.2 `08_app.rs`: Dam-Break-Init, Sub-Steps, Linksklick-Wirbel,
       Rechtsklick-Strahl, Tasten R/Space/G/C, Pause/Step
-- [ ] 4.3 GUI-Smoke-Test mit `DISPLAY=:0` (Start + Frames belegen)
+- [x] 4.3 GUI-Smoke-Test mit `DISPLAY=:0` (Start + Frames belegen)
 
 ## Phase 5 – Tests, Benchmarks, Gates
 
-- [ ] 5.1 `tests/sph_math.rs`: Kernel gegen analytische Werte
-- [ ] 5.2 `tests/spatial_grid.rs`: Hash/Nachbarschaft
-- [ ] 5.3 `tests/cpu_stability.rs`: 500 CPU-Steps, kein Tunneln
-- [ ] 5.4 Benchmark: CPU-Basis + GPU-Durchsatz auf RTX A4000
+- [x] 5.1 `tests/sph_math.rs`: Kernel gegen analytische Werte
+- [x] 5.2 `tests/spatial_grid.rs`: Hash/Nachbarschaft
+- [x] 5.3 `tests/cpu_stability.rs`: 500 CPU-Steps, kein Tunneln
+- [x] 5.4 Benchmark: CPU-Basis + GPU-Durchsatz auf RTX A4000
       (`--headless --steps 2000 --bench`)
-- [ ] 5.5 Gates grün: `cargo fmt --check`,
+- [x] 5.5 Gates grün: `cargo fmt --check`,
       `cargo clippy --all-targets -- -D warnings`, `cargo test`
 
 ## Phase 6 – Abschluss
 
-- [ ] 6.1 `walkthrough.md` (deutsch, Mermaid, Code-Beispiele, Learnings,
+- [x] 6.1 `walkthrough.md` (deutsch, Mermaid, Code-Beispiele, Learnings,
       Dockerfile-Pakete) im Plan-Verzeichnis
-- [ ] 6.2 `plan_effort.md` (Tokens, Turns, Subagents) im Plan-Verzeichnis
-- [ ] 6.3 Finale Commit-Hygiene: `git log` prüfen, nur grüne Stände
+- [x] 6.2 `plan_effort.md` (Tokens, Turns, Subagents) im Plan-Verzeichnis
+- [x] 6.3 Finale Commit-Hygiene: `git log` prüfen, nur grüne Stände
