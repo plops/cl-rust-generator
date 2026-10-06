@@ -10,13 +10,18 @@ use cuda_device::atomic::{AtomicOrdering, DeviceAtomicU32};
 use cuda_device::{DisjointSlice, kernel, launch_bounds, launch_contract, thread};
 use cuda_host::cuda_module;
 
-use crate::sph_math::{poly6_coef, pressure, spiky_coef, visc_coef};
 use crate::spatial_grid::hash_cell;
+use crate::sph_math::{poly6_coef, pressure, spiky_coef, visc_coef};
 use crate::types::{InteractParams, SphParams};
 
 /// Enthält alle Device-Kernel; `cuda_host` generiert daraus `LoadedModule`
 /// mit typisierten Launch-Funktionen (`module.k_hash(...)`).
+///
+/// Die Rohzeiger-Parameter sind exklusiv und größen-geprüft (Host garantiert
+/// die Buffer, Kernel prüfen Indexschranken); `unsafe fn` ist für `#[kernel]`
+/// nicht vorgesehen, daher ist der Deref-Lint hier erlaubt.
 #[cuda_module]
+#[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 pub mod device {
     use super::*;
 
@@ -262,8 +267,8 @@ pub mod device {
         if inter.mouse_mode == 2 && iu >= inter.jet_start && iu < inter.jet_start + inter.jet_count
         {
             let k = (i as u32 - inter.jet_start) as f32;
-            let ax = k * 0.6180339887;
-            let ay = k * 0.3819660113;
+            let ax = k * 0.618_034;
+            let ay = k * 0.381_966;
             let fx = (ax - ax.floor() - 0.5) * 0.016;
             let fy = (ay - ay.floor() - 0.5) * 0.016;
             let Some(p_slot) = pos.get_mut(thread::index_1d()) else {

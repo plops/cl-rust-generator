@@ -78,19 +78,13 @@ impl CpuGrid {
     pub fn for_each_in_cell(&self, cell: usize, mut f: impl FnMut(usize)) {
         let begin = self.cell_start[cell] as usize;
         let end = self.cell_start[cell + 1] as usize;
-        for k in begin..end {
-            f(self.order[k] as usize);
+        for &o in &self.order[begin..end] {
+            f(o as usize);
         }
     }
 
     /// Ruft `f` für jeden Partikel in der 3×3-Nachbarschaft von (cx, cy) auf.
-    pub fn for_each_neighbor(
-        &self,
-        cx: u32,
-        cy: u32,
-        grid: &GridMeta,
-        mut f: impl FnMut(usize),
-    ) {
+    pub fn for_each_neighbor(&self, cx: u32, cy: u32, grid: &GridMeta, mut f: impl FnMut(usize)) {
         let x0 = cx.saturating_sub(1);
         let y0 = cy.saturating_sub(1);
         let x1 = (cx + 1).min(grid.w - 1);
@@ -148,7 +142,10 @@ mod tests {
         let mut pos = Vec::new();
         for iy in 0..5 {
             for ix in 0..5 {
-                pos.push([0.8 + (ix as f32 - 2.0) * 0.02, 0.5 + (iy as f32 - 2.0) * 0.02]);
+                pos.push([
+                    0.8 + (ix as f32 - 2.0) * 0.02,
+                    0.5 + (iy as f32 - 2.0) * 0.02,
+                ]);
             }
         }
         let mut grid = CpuGrid::new(g.num_cells(), pos.len());

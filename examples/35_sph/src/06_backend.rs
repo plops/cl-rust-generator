@@ -120,25 +120,27 @@ impl Backend for CpuBackend {
         }
         // Integration (Symplectic Euler, Wände, Hindernis, Maus, Strahl).
         let inter = self.inter;
-        for i in 0..n {
+        for (i, part) in self.particles.iter_mut().enumerate() {
             let iu = i as u32;
-            if inter.mouse_mode == 2 && iu >= inter.jet_start && iu < inter.jet_start + inter.jet_count
+            if inter.mouse_mode == 2
+                && iu >= inter.jet_start
+                && iu < inter.jet_start + inter.jet_count
             {
                 let k = (iu - inter.jet_start) as f32;
-                let ax = k * 0.6180339887;
-                let ay = k * 0.3819660113;
-                self.particles[i].pos = [
-                    inter.mouse[0] + (ax - ax.floor() - 0.5) * 0.016,
-                    inter.mouse[1] + (ay - ay.floor() - 0.5) * 0.016,
+                let jx = k * 0.618_034;
+                let jy = k * 0.381_966;
+                part.pos = [
+                    inter.mouse[0] + (jx - jx.floor() - 0.5) * 0.016,
+                    inter.mouse[1] + (jy - jy.floor() - 0.5) * 0.016,
                 ];
-                self.particles[i].vel = inter.jet_vel;
+                part.vel = inter.jet_vel;
                 continue;
             }
-            let mut p = self.particles[i].pos;
-            let mut v = self.particles[i].vel;
-            let inv_rho = 1.0 / self.particles[i].density.max(1e-6);
-            let mut ax = self.particles[i].force[0] * inv_rho;
-            let mut ay = self.particles[i].force[1] * inv_rho - params.gravity * inter.gravity_on;
+            let mut p = part.pos;
+            let mut v = part.vel;
+            let inv_rho = 1.0 / part.density.max(1e-6);
+            let mut ax = part.force[0] * inv_rho;
+            let mut ay = part.force[1] * inv_rho - params.gravity * inter.gravity_on;
             if inter.mouse_mode == 1 {
                 let dx = p[0] - inter.mouse[0];
                 let dy = p[1] - inter.mouse[1];
@@ -193,8 +195,8 @@ impl Backend for CpuBackend {
                     v[1] -= (1.0 + damp) * vn * ny;
                 }
             }
-            self.particles[i].pos = p;
-            self.particles[i].vel = v;
+            part.pos = p;
+            part.vel = v;
         }
     }
 
@@ -233,11 +235,12 @@ impl Backend for CpuBackend {
     }
 }
 
-/// GPU-Backend: SoA-Device-Buffer + Launch-Sequenz.
-/// Hinweis: Unter plain `cargo test` wird `device::load` nie aufgerufen und
-/// vom Linker gestrippt (verifiziert); GPU-Läufe brauchen `cargo oxide run`.
+/// GPU-Backend: SoA-Device-Buffer + Launch-Sequenz (nur mit `gpu`-Feature,
+/// da der Geräte-Anker plain nicht linkt).
+#[cfg(feature = "gpu")]
 pub use gpu::GpuBackend;
 
+#[cfg(feature = "gpu")]
 mod gpu {
     use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig1D};
 
@@ -283,8 +286,7 @@ mod gpu {
             let stream = ctx.default_stream();
             // SAFETY: Dieses Paket besitzt das eingebettete Device-Bundle
             // des obigen `device`-Moduls.
-            let module =
-                unsafe { device::load(&ctx) }.map_err(|e| format!("Modul-Load: {e:?}"))?;
+            let module = unsafe { device::load(&ctx) }.map_err(|e| format!("Modul-Load: {e:?}"))?;
             let dev = |len: usize| {
                 DeviceBuffer::<u32>::zeroed(&stream, len).map_err(|e| format!("{e:?}"))
             };

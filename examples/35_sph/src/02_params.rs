@@ -275,16 +275,14 @@ impl Cli {
 
     /// Überträgt CLI-Werte in eine `SimConfig` (mit Klemmung).
     pub fn sim_config(&self) -> SimConfig {
-        let mut cfg = SimConfig::default();
-        cfg.particles = self.particles;
+        let mut cfg = SimConfig {
+            particles: self.particles,
+            substeps: self.substeps,
+            stiffness: self.stiffness.unwrap_or(2000.0),
+            dt: self.dt.unwrap_or(0.0008),
+            ..SimConfig::default()
+        };
         cfg.clamp_particles();
-        cfg.substeps = self.substeps;
-        if let Some(k) = self.stiffness {
-            cfg.stiffness = k;
-        }
-        if let Some(dt) = self.dt {
-            cfg.dt = dt;
-        }
         cfg
     }
 }
@@ -309,8 +307,10 @@ mod tests {
     #[test]
     fn dam_break_liefert_exakt_n_partikel_im_block() {
         for n in [2_048, 16_384] {
-            let mut cfg = SimConfig::default();
-            cfg.particles = n;
+            let cfg = SimConfig {
+                particles: n,
+                ..SimConfig::default()
+            };
             let parts = cfg.dam_break();
             assert_eq!(parts.len(), n);
             for p in &parts {

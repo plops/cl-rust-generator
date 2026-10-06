@@ -11,31 +11,29 @@ use crate::backend::{Backend, CpuBackend};
 use crate::params::{Cli, SimConfig};
 use crate::types::InteractParams;
 
-#[cfg(not(test))]
+#[cfg(feature = "gpu")]
 use crate::backend::GpuBackend;
 
 /// Wählt das Backend (GPU außer bei `--cpu`), exit(1) ohne GPU.
-fn make_backend(cfg: &SimConfig, cli: &Cli) -> Box<dyn Backend> {
-    if cli.cpu {
-        return Box::new(CpuBackend::new(cfg));
-    }
-    #[cfg(not(test))]
-    match GpuBackend::new(cfg) {
-        Ok(gpu) => return Box::new(gpu),
-        Err(e) => {
-            eprintln!("GPU-Backend fehlgeschlagen: {e}");
-            std::process::exit(1);
+fn make_backend(
+    cfg: &SimConfig,
+    #[cfg_attr(not(feature = "gpu"), allow(unused_variables))] cli: &Cli,
+) -> Box<dyn Backend> {
+    #[cfg(feature = "gpu")]
+    if !cli.cpu {
+        match GpuBackend::new(cfg) {
+            Ok(gpu) => return Box::new(gpu),
+            Err(e) => {
+                eprintln!("GPU-Backend fehlgeschlagen: {e}");
+                std::process::exit(1);
+            }
         }
     }
-    #[cfg(test)]
     Box::new(CpuBackend::new(cfg))
 }
 
 /// Validiert einen Schnappschuss; leere Rückgabe = bestanden.
-pub fn validate(
-    backend: &dyn Backend,
-    cfg: &SimConfig,
-) -> Vec<String> {
+pub fn validate(backend: &dyn Backend, cfg: &SimConfig) -> Vec<String> {
     let mut problems = Vec::new();
     let pos = backend.positions();
     let vel = backend.velocities();
@@ -55,7 +53,10 @@ pub fn validate(
         }
         let eps = 1e-4;
         if p[0].is_finite()
-            && (p[0] < -eps || p[0] > cfg.domain_w + eps || p[1] < -eps || p[1] > cfg.domain_h + eps)
+            && (p[0] < -eps
+                || p[0] > cfg.domain_w + eps
+                || p[1] < -eps
+                || p[1] > cfg.domain_h + eps)
         {
             tunneled += 1;
         }

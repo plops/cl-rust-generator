@@ -183,10 +183,17 @@ pub fn draw_frame(
         format!(
             "Schritte: {} | {} | Gravitation: {} (G)",
             hud.steps,
-            if hud.paused { "PAUSE (Space)" } else { "läuft" },
+            if hud.paused {
+                "PAUSE (Space)"
+            } else {
+                "läuft"
+            },
             if hud.gravity_on { "an" } else { "aus" }
         ),
-        format!("Farbe: {} (C) | Reset: R | Schritt: S", view.color_mode.name()),
+        format!(
+            "Farbe: {} (C) | Reset: R | Schritt: S",
+            view.color_mode.name()
+        ),
         "Links: Wirbel | Rechts: Strahl | Hindernis folgt Maus | Esc: Ende".to_string(),
     ] {
         draw_text(&line, 12.0, y, 20.0, hud_color);

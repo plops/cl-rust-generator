@@ -12,7 +12,7 @@ use crate::backend::{Backend, CpuBackend};
 use crate::params::Cli;
 use crate::renderer::{ColorMode, HudState, ViewState, draw_frame, screen_to_world};
 
-#[cfg(not(test))]
+#[cfg(feature = "gpu")]
 use crate::backend::GpuBackend;
 
 /// Fensterkonfiguration (Titel + 1280×800).
@@ -34,9 +34,12 @@ pub fn run(cli: Cli) {
 }
 
 /// Wählt GPU (außer `--cpu`), fällt bei GPU-Fehler auf CPU zurück.
-fn make_backend(cfg: &crate::params::SimConfig, cli: &Cli) -> (Box<dyn Backend>, &'static str) {
+fn make_backend(
+    cfg: &crate::params::SimConfig,
+    #[cfg_attr(not(feature = "gpu"), allow(unused_variables))] cli: &Cli,
+) -> (Box<dyn Backend>, &'static str) {
+    #[cfg(feature = "gpu")]
     if !cli.cpu {
-        #[cfg(not(test))]
         match GpuBackend::new(cfg) {
             Ok(gpu) => return (Box::new(gpu), "GPU"),
             Err(e) => eprintln!("GPU-Backend fehlgeschlagen ({e}), falle auf CPU zurück."),
@@ -92,7 +95,14 @@ async fn async_main(cli: Cli) {
         }
         // Maus → Welt; Hindernis folgt dem Cursor (in Domäne geklemmt).
         let (mx, my) = mouse_position();
-        let mw = screen_to_world(mx, my, screen_width(), screen_height(), cfg.domain_w, cfg.domain_h);
+        let mw = screen_to_world(
+            mx,
+            my,
+            screen_width(),
+            screen_height(),
+            cfg.domain_w,
+            cfg.domain_h,
+        );
         let mouse = Vec2::new(mw[0], mw[1]);
         // Hindernis folgt dem Cursor, solange er in der Domäne liegt.
         if mouse.cmpge(Vec2::ZERO).all() && mouse.cmplt(Vec2::new(cfg.domain_w, cfg.domain_h)).all()
@@ -151,8 +161,11 @@ async fn async_main(cli: Cli) {
         );
         next_frame().await;
         frames += 1;
-        if frames % 60 == 0 {
-            println!("frame={frames} fps={} steps={steps} backend={backend_name}", get_fps());
+        if frames.is_multiple_of(60) {
+            println!(
+                "frame={frames} fps={} steps={steps} backend={backend_name}",
+                get_fps()
+            );
         }
         if cli.frames.is_some_and(|max| frames >= max) {
             println!("Smoke-Test: {frames} Frames gerendert, beende.");

@@ -15,6 +15,7 @@ pub mod sph_math;
 #[path = "04_spatial_grid.rs"]
 pub mod spatial_grid;
 
+#[cfg(feature = "gpu")]
 #[path = "05_gpu_kernels.rs"]
 pub mod gpu_kernels;
 

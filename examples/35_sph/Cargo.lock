@@ -183,7 +183,7 @@ dependencies = [
 [[package]]
 name = "cuda-artifact-finalizer"
 version = "0.2.1"
-source = "git+https://github.com/NVlabs/cuda-oxide.git#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
+source = "git+https://github.com/NVlabs/cuda-oxide.git?rev=a0cc6cc0bc18722ec5cdfbea136c118a7c051977#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
 dependencies = [
  "libnvvm-sys",
  "nvjitlink-sys",
@@ -195,7 +195,7 @@ dependencies = [
 [[package]]
 name = "cuda-bindings"
 version = "0.4.0"
-source = "git+https://github.com/NVlabs/cuda-oxide.git#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
+source = "git+https://github.com/NVlabs/cuda-oxide.git?rev=a0cc6cc0bc18722ec5cdfbea136c118a7c051977#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
 dependencies = [
  "bindgen",
  "libloading",
@@ -208,7 +208,7 @@ dependencies = [
 [[package]]
 name = "cuda-core"
 version = "0.4.0"
-source = "git+https://github.com/NVlabs/cuda-oxide.git#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
+source = "git+https://github.com/NVlabs/cuda-oxide.git?rev=a0cc6cc0bc18722ec5cdfbea136c118a7c051977#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
 dependencies = [
  "anyhow",
  "cuda-bindings",
@@ -220,7 +220,7 @@ dependencies = [
 [[package]]
 name = "cuda-core-derive"
 version = "0.4.0"
-source = "git+https://github.com/NVlabs/cuda-oxide.git#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
+source = "git+https://github.com/NVlabs/cuda-oxide.git?rev=a0cc6cc0bc18722ec5cdfbea136c118a7c051977#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -230,7 +230,7 @@ dependencies = [
 [[package]]
 name = "cuda-device"
 version = "0.2.1"
-source = "git+https://github.com/NVlabs/cuda-oxide.git#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
+source = "git+https://github.com/NVlabs/cuda-oxide.git?rev=a0cc6cc0bc18722ec5cdfbea136c118a7c051977#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
 dependencies = [
  "cuda-macros",
 ]
@@ -238,7 +238,7 @@ dependencies = [
 [[package]]
 name = "cuda-host"
 version = "0.2.1"
-source = "git+https://github.com/NVlabs/cuda-oxide.git#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
+source = "git+https://github.com/NVlabs/cuda-oxide.git?rev=a0cc6cc0bc18722ec5cdfbea136c118a7c051977#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
 dependencies = [
  "cuda-artifact-finalizer",
  "cuda-core",
@@ -254,7 +254,7 @@ dependencies = [
 [[package]]
 name = "cuda-macros"
 version = "0.2.1"
-source = "git+https://github.com/NVlabs/cuda-oxide.git#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
+source = "git+https://github.com/NVlabs/cuda-oxide.git?rev=a0cc6cc0bc18722ec5cdfbea136c118a7c051977#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -265,7 +265,7 @@ dependencies = [
 [[package]]
 name = "cuda-target-spec"
 version = "0.1.0"
-source = "git+https://github.com/NVlabs/cuda-oxide.git#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
+source = "git+https://github.com/NVlabs/cuda-oxide.git?rev=a0cc6cc0bc18722ec5cdfbea136c118a7c051977#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
 
 [[package]]
 name = "digest"
@@ -469,7 +469,7 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 [[package]]
 name = "libnvvm-sys"
 version = "0.2.1"
-source = "git+https://github.com/NVlabs/cuda-oxide.git#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
+source = "git+https://github.com/NVlabs/cuda-oxide.git?rev=a0cc6cc0bc18722ec5cdfbea136c118a7c051977#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
 dependencies = [
  "cuda-target-spec",
  "libloading",
@@ -589,7 +589,7 @@ dependencies = [
 [[package]]
 name = "nvjitlink-sys"
 version = "0.2.1"
-source = "git+https://github.com/NVlabs/cuda-oxide.git#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
+source = "git+https://github.com/NVlabs/cuda-oxide.git?rev=a0cc6cc0bc18722ec5cdfbea136c118a7c051977#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
 dependencies = [
  "libloading",
  "thiserror",
@@ -666,7 +666,7 @@ dependencies = [
 [[package]]
 name = "ptx-parse"
 version = "0.1.0"
-source = "git+https://github.com/NVlabs/cuda-oxide.git#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
+source = "git+https://github.com/NVlabs/cuda-oxide.git?rev=a0cc6cc0bc18722ec5cdfbea136c118a7c051977#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
 
 [[package]]
 name = "quad-rand"
@@ -715,7 +715,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "reserved-oxide-symbols"
 version = "0.2.1"
-source = "git+https://github.com/NVlabs/cuda-oxide.git#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
+source = "git+https://github.com/NVlabs/cuda-oxide.git?rev=a0cc6cc0bc18722ec5cdfbea136c118a7c051977#a0cc6cc0bc18722ec5cdfbea136c118a7c051977"
 
 [[package]]
 name = "rustc-hash"
