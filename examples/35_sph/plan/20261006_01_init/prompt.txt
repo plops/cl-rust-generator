@@ -1,0 +1,126 @@
+**Rolle & Umgebung:**
+
+Du läufst in einem Docker-Image mit Ubuntu auf einem Linux-Host.
+Gestartet mit `cl-cl-generator/example/05_dockerfile_meta/source01/examples/03_ai_env $ ./setup02_run.sh --gpu --host-kmsg --usb --source-isolation --docker-sock --x11`
+
+Du arbeitest
+als User `ubuntu` und hast Zugriff auf eine NVIDIA RTX A4000 GPU (Ampere GA104,
+16 GB VRAM, Compute Capability 8.6). Du kannst mittels des gemounteten Unix-Domain-Sockets
+in `/tmp/.X11-unix` als User `ubuntu` auf den X-Server des Hosts zugreifen (z. B. über
+`DISPLAY=:0`).
+Host-Projektpfad: `/home/kiel/stage/...`
+Docker-Projektpfad: `/workspace/src/cl-rust-generator/examples/35_sph`
+Du arbeitest im Auftrag von wol pumba (wolpumba@gmail.com).
+
+Falls dir System-Pakete fehlen (z. B. X11-Libraries, Clang, CUDA-Tools), installiere sie
+selbstständig im Container.
+
+Das Ziel ist es, eine echtzeitfähige, GPU-beschleunigte 2D Smoothed-Particle-Hydrodynamics
+(SPH) Fluidsimulation mit interaktiver X11-Visualisierung zu implementieren. Die GPU-Physikkerne
+sollen mit NVIDIA/cuda-rust (`cuda-oxide`) in nativem Rust geschrieben und kompiliert werden.
+
+## Konzept & Architektur
+
+1. **GPU-Physik-Kern (`NVIDIA/cuda-rust` / `cuda-oxide`):**
+   - Implementierung der SPH-Kernschritte als Rust-GPU-Kernel (`#[kernel]`):
+     - Schritt 1: Dichte- und Druckberechnung (Müller Poly6 Kernel + Tait/Idealgas-EOS).
+     - Schritt 2: Druckgradient- und Viskositätskräfte (Spiky Gradient + Müller Viscosity Laplacian).
+     - Schritt 3: Zeitintegration (Symplectic Euler) und Randkollisionsbehandlung.
+   - Zur Vermeidung des $O(N^2)$-Flaschenhalses wird ein GPU Uniform Grid Spatial Hashing
+     implementiert (Zellgröße = Glättungslänge $h$).
+   - Ausnutzen der Ampere-Architektur der RTX A4000: Block-Größen bis 512 Threads, coalesced
+     Memory Accesses, minimale Warp-Divergenz.
+
+2. **Bibliotheksauswahl (schlank, keine redundanten Eigenentwicklungen):**
+   - GPU-Kompilierung/Laufzeit: `NVIDIA/cuda-rust` (`cuda-device`, `cuda-core`, `cuda-macros`).
+   - GUI, Windowing & Rendering: `macroquad` (schlankes, selbstständiges X11/OpenGL-Rendering
+     ohne schwere Winit/Vulkan-Abhängigkeiten, unterstützt Partikeldarstellung und Maus/Tastatur-Events).
+   - Vektormathematik: `glam` (`Vec2`, SIMD-optimiert, `no_std`-fähig).
+   - Zero-Copy / FFI-Safety: `bytemuck` (`Pod`, `Zeroable`) für strukturierte GPU-Host-Transfers.
+   - CLI: `argh` oder `lexopt` für minimalen Overhead bei Parametern.
+
+3. **Feature-Sets & Defaults:**
+   - **Set 1: Kernphysik (SPH Solver):**
+     - Partikelanzahl Standard: 16_384 (skalierbar via CLI von 2_048 bis 262_144).
+     - Ruhedichte: $\rho_0 = 1000.0\ \text{kg/m}^3$
+     - Glättungsradius: $h = 0.04\ \text{m}$
+     - Gas-Steifigkeit: $k = 2000.0\ \text{J}$
+     - Viskosität: $\mu = 0.1\ \text{Pa}\cdot\text{s}$
+     - Schwerkraft: $\mathbf{g} = [0.0, -9.81]\ \text{m/s}^2$
+     - Zeitschritt $\Delta t = 0.0008\ \text{s}$ (mit 2-4 Sub-Steps pro Render-Frame).
+   - **Set 2: Begrenzung & Kollision:**
+     - Rechteckige Bounding Box mit Reflektionsdämpfung ($0.5$).
+     - Interaktiver runder Störkörper (Obstacle), beweglich mit der Maus.
+   - **Set 3: Interaktivität:**
+     - Initialzustand: "Dam Break" (Partikelblock stürzt zusammen).
+     - Linksklick: Kraftfeld / Wirbel an Mausposition.
+     - Rechtsklick: Partikelstrahl injizieren.
+     - Tasten: `R` (Reset), `Space` (Pause/Step), `G` (Toggle Gravitation), `C` (Farbschema).
+   - **Set 4: Benchmarking & Headless-Modus:**
+     - CLI `--headless --steps <N>`: Ausführung ohne X11-Display für CI/Automatisierung.
+     - Validierung auf numerische Stabilität (keine `NaN`/`Inf`, Dichtekonvergenz).
+     - Ausgabe von Berechnungszeit (ms), FPS und Durchsatz (Particles/sec).
+
+## Code- und Struktur-Anforderungen
+
+- **Rust-Version:** Aktuelles Rust (2024 Edition).
+- Schreibe pures Rust. Nicht den lispartigen transpiler input fuer cl-rust-generator
+- **Workspace/Projekt-Ordner:** `/workspace/src/cl-rust-generator/examples/35_sph`.
+- **Dateiaufteilung (verbindlich):**
+  Lange Quelltextdateien sind strikt zu vermeiden. Sobald eine Datei mehr als eine
+  klar abgrenzbare Zuständigkeit hat oder ca. 300 Zeilen überschreitet, ist sie in
+  semantisch getrennte Dateien mit aufsteigender zweistelliger Nummerierung aufzuteilen:
+  z. B. `01_types.rs`, `02_params.rs`, `03_spatial_grid.rs`, `04_sph_kernels.rs`,
+  `05_integration.rs`, `06_renderer.rs`, `07_app.rs`.
+  `main.rs` und `lib.rs` enthalten nur Moduldeklarationen und Top-Level-Verdrahtung.
+- **Abhängigkeiten:**
+  Führe alle genutzten Crates und GitHub-Repositories in `deps.md` in der Notation
+  `<organization>/<project>` auf (z. B. `NVIDIA/cuda-rust`, `not-fl3/macroquad`, `bitflags/bytemuck`, `bitshifter/glam-rs`).
+  Nutze DeepWiki MCP für `NVIDIA/cuda-rust`, um Dokumentation
+  und Implementierungsdetails zu erfragen.
+- **Code-Qualitäts-Gates:**
+  `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`.
+
+## Tests & Validierung
+
+1. Unit-Tests für SPH-Kernelfunktionen (Poly6, Spiky Gradient, Viscosity Laplacian) gegen
+   analytische Werte.
+2. Integrationstests für das Spatial-Hashing und die Nachbarschaftssuche.
+3. GPU-Headless-Testlauf (`cargo test -- --nocapture` bzw. Headless-CLI-Run), der 500 Schritte
+   durchrechnet und sicherstellt, dass keine Partikel durch die Wände tunneln oder explodieren.
+4. Benchmark-Messung für Partikeldurchsatz auf der RTX A4000.
+
+## Implementierungsplan (`plan.md`) & Aufgabenliste (`task.md`)
+
+- Schreibe vorab einen detaillierten Implementierungsplan in `plan.md`. Dieser muss einen
+  unabhängigen Agenten befähigen, den Kontext selbstständig aufzubauen.
+- Enthalte eine Liste aller relevanten Dateien mit Kurzbeschreibung.
+- Definiere eine Richtlinie für Git-Commits: Jeder Commit muss als **Conventional Commit**
+  (`feat:`, `fix:`, `perf:`, `test:`, `refactor:`, `docs:`) mit aussagekräftigem Fließtext formuliert sein.
+- Schreibe `task.md`, in dem die Implementierungs- und Testschritte sequentiell gegliedert sind
+  (Modellierung $\to$ GPU-Kernels $\to$ Spatial Hash $\to$ Renderer $\to$ Interaktion $\to$ Benchmarks).
+
+## Abschluss-Dokumentation (`walkthrough.md`)
+
+Nach Abschluss aller Implementierungen, erfolgreichen Tests und Commits ist ein Abschlussbericht
+`walkthrough.md` im selben Plan-Verzeichnis zu verfassen.
+Strikte Regeln für dieses Dokument:
+- **Sprache & Stil:** Zwingend auf Deutsch verfasst, didaktisch hervorragend aufgebaut und flüssig lesbar.
+- **Erklärungen:** Fachbegriffe (z. B. SPH, Smoothing Kernel, Spatial Hashing, Tait-Gleichung, PTX) kurz und klar erklären.
+- **Visualisierung:** Reichlich Code-Beispiele und aussagekräftige **Mermaid-Diagramme** (Architektur, Datenfluss, GPU-Grid-Lookup).
+- **Inhaltliche Struktur:**
+  1. Was exakt implementiert wurde.
+  2. Welche Architektur-Entscheidungen aufgrund von Tests oder GPU-Besonderheiten spontan geändert wurden.
+  3. Learnings und mögliche zukünftige Optimierungen (z. B. 3D, Multi-Stream, RT-Core Raytracing).
+  4. Liste der neuen Programme/Pakete, die dauerhaft in das Dockerfile aufgenommen werden sollten.
+
+## Aufwand (`plan_effort.md`)
+
+Halte den Token-Verbrauch und die Session-Statistiken in `plan_effort.md` fest
+(Input/Output/Cached/Total Tokens, Turns, Subagents), um die Aufwände transparent zu dokumentieren.
+
+
+Referenzen
+
+../32_cuda-rust/plan/misc/cuda-rust.md
+/workspace/src/cl-rust-generator/examples/35_sph/../30_wgpu/plan/misc/glam.md
