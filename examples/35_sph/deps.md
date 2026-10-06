@@ -4,8 +4,10 @@
 
 - `NVlabs/cuda-oxide` (enthält `NVIDIA/cuda-rust`-Historie; Monorepo mit
   `cuda-device`, `cuda-host`, `cuda-macros`, `cuda-core`, `cargo-oxide`)
-  - Git-Dependency für `cuda-device`, `cuda-host`, `cuda-core`
-    (alle drei aus demselben Checkout, sonst E0277/E0308).
+  - Optionale Git-Dependencies für `cuda-device`, `cuda-host`, `cuda-core`
+    (alle drei aus derselben gepinnten Revision, sonst E0277/E0308),
+    aktiviert nur per `gpu`-Feature (`dep:`-Syntax). Ohne das Feature baut
+    das Projekt auf CPU-only-Systemen ohne CUDA-Toolkit.
   - Doku via DeepWiki MCP (`NVIDIA/cuda-rust`) erfragt: Kernel-Autorenschaft,
     Atomics, Shared Memory, skalare Argumente, Float-Math, Thread-Intrinsics.
 

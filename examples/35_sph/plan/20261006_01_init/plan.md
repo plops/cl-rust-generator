@@ -394,7 +394,9 @@ Modul-Deklarationsschema (nummerierte Dateien, semantische Namen):
 - `cargo oxide run --features gpu` – GUI-App (braucht `DISPLAY=:0`, ggf. `LIBGL_ALWAYS_SOFTWARE=1`).
 - `cargo oxide run --features gpu -- --headless --steps 500` – GPU-Headless-Validierung.
 - `cargo oxide run --features gpu -- --headless --steps 2000 --bench` – GPU-Benchmark.
-- `cargo test` – CPU-Unit/Integrationstests (plain, ohne GPU; Bin via `required-features` übersprungen).
+- `cargo build` / `cargo run -- --headless --cpu` – CPU-only-Betrieb ohne
+  GPU und ohne CUDA-Toolkit (cuda-Crates sind optionale Dependencies).
+- `cargo test` – CPU-Unit/Integrationstests (plain, ohne GPU; Bin linkt mit).
 - `cargo fmt --check` – Format-Gate.
 - `cargo clippy --all-targets -- -D warnings` – Lint-Gate (linkt nicht),
 - `cargo clippy --all-targets --features gpu -- -D warnings` – Lint-Gate inkl. GPU-Code.

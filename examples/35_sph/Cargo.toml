@@ -5,13 +5,13 @@ edition = "2024"
 
 [workspace]
 
-# Das Binär braucht den Geräte-Anker und wird ohne `gpu`-Feature
-# übersprungen (required-features); main.rs hat keine Unit-Tests.
+# main.rs hat keine Unit-Tests. Ohne `gpu`-Feature linkt das Binär plain
+# (reines CPU-Programm, kein Geräte-Anker erreichbar); mit `gpu`-Feature
+# braucht es das Oxide-Backend (`cargo oxide run --features gpu`).
 [[bin]]
 name = "sph"
 path = "src/main.rs"
 test = false
-required-features = ["gpu"]
 
 [[bench]]
 name = "throughput"
@@ -20,15 +20,18 @@ harness = false
 [dependencies]
 # cuda-oxide Single-Source GPU: alle drei Crates aus derselben gepinnten
 # Revision, sonst bricht die Typ-Unifikation (E0277/E0308, siehe deps.md).
-cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "a0cc6cc0bc18722ec5cdfbea136c118a7c051977" }
-cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "a0cc6cc0bc18722ec5cdfbea136c118a7c051977" }
-cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "a0cc6cc0bc18722ec5cdfbea136c118a7c051977" }
+# Optional, damit CPU-only-Systeme ohne CUDA-Toolkit bauen können
+# (cuda-bindings braucht cuda.h + libclang schon zum Kompilieren).
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "a0cc6cc0bc18722ec5cdfbea136c118a7c051977", optional = true }
+cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "a0cc6cc0bc18722ec5cdfbea136c118a7c051977", optional = true }
+cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "a0cc6cc0bc18722ec5cdfbea136c118a7c051977", optional = true }
 macroquad = "0.4"
 glam = "0.27"
 bytemuck = { version = "1", features = ["derive"] }
 lexopt = "0.3"
 
 [features]
-# Deaktiviert per Default, damit plain `cargo test`/`cargo clippy` ohne
-# Device-Bundle linken. GPU-Läufe brauchen `--features gpu` (oxide).
-gpu = []
+# Deaktiviert per Default: plain `cargo build/test/clippy` braucht dann
+# weder GPU noch CUDA-Toolkit (reiner CPU-Betrieb). GPU-Läufe brauchen
+# `cargo oxide run --features gpu`.
+gpu = ["dep:cuda-device", "dep:cuda-host", "dep:cuda-core"]

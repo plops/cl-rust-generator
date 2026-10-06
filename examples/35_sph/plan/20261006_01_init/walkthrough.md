@@ -232,6 +232,14 @@ GPU-Referenzen sind `cfg`-gated. Plain `cargo test`/`cargo clippy` prüfen
 CPU-Code; `cargo clippy --all-targets --features gpu` (linkt nicht) prüft
 den Rest; Oxide-Läufe brauchen `--features gpu`.
 
+**Nachtrag (CPU-only-Folgeauftrag):** Die cuda-Crates sind nun zusätzlich
+*optionale* Dependencies (`gpu = ["dep:cuda-device", …]`), `required-features`
+am Binär entfiel. Damit baut und läuft das Projekt auf Systemen ohne GPU
+und ohne CUDA-Toolkit (`cargo build`, `cargo run -- --headless --cpu`);
+zuvor scheiterte schon das Kompilieren an `cuda-bindings` (bindgen gegen
+`cuda.h`). Nachweis: `cargo tree` ohne Feature enthält 0 cuda-Knoten, der
+Verbose-Build ruft keine cuda-Build-Skripte auf.
+
 ### 2.6 Skalierungs-Ehrlichkeit: Nachbarzahl wächst mit N
 
 Bei festem h = 0,04 m und wachsendem N sinkt der Partikelabstand s, also
