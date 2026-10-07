@@ -137,7 +137,10 @@ pub fn draw_frame(
 ) {
     clear_background(Color::from_rgba(8, 10, 18, 255));
     let (vw, vh) = (screen_width(), screen_height());
-    let scale = (vw / view.domain_w).min(view.domain_h);
+    // Letterbox-Skalierung einmal pro Frame statt pro Partikel (Divisionen!).
+    let scale = (vw / view.domain_w).min(vh / view.domain_h);
+    let ox = (vw - view.domain_w * scale) * 0.5;
+    let oy = (vh - view.domain_h * scale) * 0.5;
     // Domänenrahmen.
     let (x0, y1) = world_to_screen([0.0, 0.0], vw, vh, view.domain_w, view.domain_h);
     let (x1, y0) = world_to_screen(
@@ -148,21 +151,33 @@ pub fn draw_frame(
         view.domain_h,
     );
     draw_rectangle_lines(x0, y0, x1 - x0, y1 - y0, 2.0, GRAY);
-    // Partikel als gebatchte Rechtecke.
+    // Partikel als gebatchte Rechtecke; Farbmodus außerhalb der Schleife,
+    // Welt→Bild-Transform inline (identische Reihenfolge wie world_to_screen).
     let size = (0.006 * scale).clamp(2.0, 6.0);
     let half = size * 0.5;
     let pos = backend.positions();
-    let vel = backend.velocities();
-    let dens = backend.densities();
-    for i in 0..pos.len() {
-        let (sx, sy) = world_to_screen(pos[i], vw, vh, view.domain_w, view.domain_h);
-        let color = match view.color_mode {
-            ColorMode::Velocity => {
-                velocity_color((vel[i][0] * vel[i][0] + vel[i][1] * vel[i][1]).sqrt())
+    match view.color_mode {
+        ColorMode::Velocity => {
+            let vel = backend.velocities();
+            for i in 0..pos.len() {
+                let p = pos[i];
+                let sx = ox + p[0] * scale;
+                let sy = vh - (oy + p[1] * scale);
+                let v = vel[i];
+                let color = velocity_color((v[0] * v[0] + v[1] * v[1]).sqrt());
+                draw_rectangle(sx - half, sy - half, size, size, color);
             }
-            ColorMode::Density => density_color(dens[i], view.rest_density),
-        };
-        draw_rectangle(sx - half, sy - half, size, size, color);
+        }
+        ColorMode::Density => {
+            let dens = backend.densities();
+            for i in 0..pos.len() {
+                let p = pos[i];
+                let sx = ox + p[0] * scale;
+                let sy = vh - (oy + p[1] * scale);
+                let color = density_color(dens[i], view.rest_density);
+                draw_rectangle(sx - half, sy - half, size, size, color);
+            }
+        }
     }
     // Hindernis + Wirbelradius.
     let (ox, oy) = world_to_screen(obstacle, vw, vh, view.domain_w, view.domain_h);

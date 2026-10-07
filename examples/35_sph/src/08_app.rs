@@ -66,6 +66,8 @@ async fn async_main(cli: Cli) {
     // FPS-Messung: erste 5 Frames (Warmup) ausschließen.
     let mut t_start = std::time::Instant::now();
     let mut phys_total = std::time::Duration::ZERO;
+    let mut draw_total = std::time::Duration::ZERO;
+    let mut present_total = std::time::Duration::ZERO;
     let view = ViewState {
         domain_w: cfg.domain_w,
         domain_h: cfg.domain_h,
@@ -148,6 +150,8 @@ async fn async_main(cli: Cli) {
         if frames >= 5 {
             phys_total += t_phys.elapsed();
         }
+        // Zeichnen (CPU-Schleife) vs. Present (GL + X11) getrennt messen.
+        let t_draw = std::time::Instant::now();
         // Zeichnen.
         let hud = HudState {
             fps: get_fps(),
@@ -166,7 +170,14 @@ async fn async_main(cli: Cli) {
             mouse.to_array(),
             inter.mouse_mode,
         );
+        if frames >= 5 {
+            draw_total += t_draw.elapsed();
+        }
+        let t_present = std::time::Instant::now();
         next_frame().await;
+        if frames >= 5 {
+            present_total += t_present.elapsed();
+        }
         frames += 1;
         if frames == 5 {
             t_start = std::time::Instant::now();
@@ -182,8 +193,10 @@ async fn async_main(cli: Cli) {
             let wall_s = t_start.elapsed().as_secs_f64();
             let frame_ms = wall_s * 1000.0 / m;
             let phys_ms = phys_total.as_secs_f64() * 1000.0 / m;
+            let draw_ms = draw_total.as_secs_f64() * 1000.0 / m;
+            let present_ms = present_total.as_secs_f64() * 1000.0 / m;
             println!(
-                "Smoke-Test: {frames} Frames gerendert, beende. Ø {frame_ms:.2} ms/Frame ({:.1} FPS), Physik Ø {phys_ms:.2} ms/Frame.",
+                "Smoke-Test: {frames} Frames gerendert, beende. Ø {frame_ms:.2} ms/Frame ({:.1} FPS), Physik Ø {phys_ms:.2} ms, Draw Ø {draw_ms:.2} ms, Present Ø {present_ms:.2} ms.",
                 m / wall_s,
             );
             break;
