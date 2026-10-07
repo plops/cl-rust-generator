@@ -14,7 +14,19 @@ use crate::types::{InteractParams, Particle, SphParams};
 /// Ein Physik-Zeitschritt + Host-Zugriff, backend-unabhängig.
 pub trait Backend {
     /// Führt genau einen Zeitschritt dt aus (N Partikel).
+    ///
+    /// Auf der GPU ist das rein asynchron (kein Host-Sync); erst
+    /// `sync_host` bzw. [`Backend::run_steps`] synchronisieren.
     fn step(&mut self);
+    /// Führt `steps` Zeitschritte aus und meldet die reine GPU-Kernelzeit
+    /// in Millisekunden, wenn das Backend sie per CUDA-Events misst
+    /// (sonst `None`, z. B. CPU-Backend mit Wallclock).
+    fn run_steps(&mut self, steps: usize) -> Option<f32> {
+        for _ in 0..steps {
+            self.step();
+        }
+        None
+    }
     /// Holt Geräte- in Host-Spiegel (CPU: kopiert aus SoA-Vektoren).
     fn sync_host(&mut self);
     /// Positionen nach `sync_host` (Weltkoordinaten, m).
@@ -442,10 +454,24 @@ mod gpu {
                     &mut self.vel,
                 )
                 .expect("k_integrate");
-            self.stream.synchronize().expect("Stream-Sync");
+            // Absichtlich kein synchronize: Der Stream ist FIFO-geordnet,
+            // erst sync_host (Download) oder explizite Messpunkte warten.
+        }
+
+        fn run_steps(&mut self, steps: usize) -> Option<f32> {
+            let flags = Some(cuda_core::sys::CUevent_flags_enum_CU_EVENT_DEFAULT);
+            let start = self.stream.record_event(flags).expect("Event-Start");
+            for _ in 0..steps {
+                self.step();
+            }
+            let stop = self.stream.record_event(flags).expect("Event-Stopp");
+            let ms = start.elapsed_ms(&stop).expect("Event-Zeit");
+            Some(ms)
         }
 
         fn sync_host(&mut self) {
+            // Einziger Sync-Punkt im Normalpfad: jedes copy_to_host wartet
+            // auf alle zuvor eingereihten Kernel (ein Sync pro Copy).
             self.pos
                 .copy_to_host(&self.stream, &mut self.host_pos)
                 .expect("pos-Download");

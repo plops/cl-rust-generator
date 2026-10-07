@@ -94,9 +94,8 @@ pub fn run(cli: Cli) {
     backend.set_interact(InteractParams::neutral(cfg.domain_w, cfg.domain_h));
 
     let t0 = Instant::now();
-    for _ in 0..cli.steps {
-        backend.step();
-    }
+    // GPU: reine Kernelzeit via CUDA-Events (ohne Host/Treiber-Latenz).
+    let gpu_kernel_ms = backend.run_steps(cli.steps);
     // Ein Sync fürs Timing; Downloads zählen nicht zur Physikzeit.
     backend.sync_host();
     let phys = t0.elapsed();
@@ -125,19 +124,27 @@ pub fn run(cli: Cli) {
     let ms_step = phys.as_secs_f64() * 1000.0 / steps;
     let steps_s = steps / secs;
     let parts_s = n * steps / secs;
+    let miups = parts_s / 1e6;
+    let kernel_step = gpu_kernel_ms.map(|ms| f64::from(ms) / steps);
     if cli.bench {
-        println!("backend,particles,steps,total_ms,ms_per_step,steps_per_s,particles_per_s");
         println!(
-            "{backend_name},{},{},{:.2},{ms_step:.4},{steps_s:.1},{parts_s:.0}",
+            "backend,particles,steps,total_ms,ms_per_step,steps_per_s,particles_per_s,miups,kernel_ms_per_step"
+        );
+        println!(
+            "{backend_name},{},{},{:.2},{ms_step:.4},{steps_s:.1},{parts_s:.0},{miups:.2},{}",
             cfg.particles,
             cli.steps,
             phys.as_secs_f64() * 1000.0,
+            kernel_step.map_or_else(String::new, |k| format!("{k:.4}")),
         );
     } else {
         println!(
-            "Physik: {steps} Schritte in {:.2} ms ({ms_step:.4} ms/Schritt, {steps_s:.1} Schritte/s, {parts_s:.0} Partikel/s)",
+            "Physik: {steps} Schritte in {:.2} ms ({ms_step:.4} ms/Schritt, {steps_s:.1} Schritte/s, {parts_s:.0} Partikel/s, {miups:.2} MIUPS)",
             phys.as_secs_f64() * 1000.0,
         );
+        if let Some(k) = kernel_step {
+            println!("GPU-Kernel (CUDA-Events, ohne Host-Latenz): {k:.4} ms/Schritt");
+        }
     }
     if problems.is_empty() {
         println!("Validierung: PASS (kein NaN/Inf, kein Tunneln, Dichte ok)");
