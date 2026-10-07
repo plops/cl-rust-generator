@@ -7,7 +7,7 @@
 //! 256, alle Schleifen `while` (primitiv, warp-freundlich).
 
 use cuda_device::atomic::{AtomicOrdering, DeviceAtomicU32};
-use cuda_device::{DisjointSlice, kernel, launch_bounds, launch_contract, thread};
+use cuda_device::{DisjointSlice, SharedArray, kernel, launch_bounds, launch_contract, thread};
 use cuda_host::cuda_module;
 
 use crate::spatial_grid::hash_cell;
@@ -45,31 +45,78 @@ pub mod sort_device {
         atomic.fetch_add(1, AtomicOrdering::Relaxed);
     }
 
-    /// Schritt 1b: exklusiver Präfix-Sum über Zellzählungen (nur Thread 0).
+    /// Schritt 1b: paralleler exklusiver Präfix-Sum über Zellzählungen.
     ///
-    /// Schreibt `cell_start` (ncell+1) und verwandelt `counts` in-place in
-    /// den Scatter-Cursor für `k_reorder`.
+    /// Kooperativer Ein-Block-Chunk-Scan mit allen 256 Threads: Jeder Thread
+    /// summiert sein Zell-Chunk in Shared Memory, Thread 0 bildet den Präfix
+    /// über die Chunk-Summen, danach schreibt jeder Thread den exklusiven
+    /// Scan seines Chunks nach `cell_start` und initialisiert den
+    /// `counts`-Scatter-Cursor für `k_reorder`. Skaliert auf beliebiges
+    /// `ncell` (auch feine Grids und 3D).
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
     pub fn k_scan(counts: *mut u32, ncell: u32, cell_start: *mut u32) {
-        if thread::index_1d().get() != 0 {
-            return;
+        static mut CHUNK: SharedArray<u32, 256> = SharedArray::UNINIT;
+        static mut TOTAL: SharedArray<u32, 1> = SharedArray::UNINIT;
+        // Raw-Pointer statt Indexing: kein `static_mut_refs`-Lint.
+        let chunk_ptr = unsafe { SharedArray::as_raw_mut_ptr(&raw mut CHUNK) };
+        let total_ptr = unsafe { SharedArray::as_raw_mut_ptr(&raw mut TOTAL) };
+        let tid = thread::threadIdx_x() as usize;
+        let n = ncell as usize;
+        let span = n.div_ceil(256);
+        let begin = tid * span;
+        let mut end = begin + span;
+        if end > n {
+            end = n;
         }
+        // Phase 1: lokale Chunk-Summe (atomare Loads wie bisher).
         let mut sum = 0u32;
-        let mut c = 0u32;
-        while c < ncell {
-            unsafe {
-                let slot = DeviceAtomicU32::from_ptr(counts.add(c as usize));
-                let cnt = slot.load(AtomicOrdering::Relaxed);
-                cell_start.add(c as usize).write(sum);
-                slot.store(sum, AtomicOrdering::Relaxed);
-                sum += cnt;
-            }
+        let mut c = begin;
+        while c < end {
+            let slot = unsafe { DeviceAtomicU32::from_ptr(counts.add(c)) };
+            sum += slot.load(AtomicOrdering::Relaxed);
             c += 1;
         }
         unsafe {
-            cell_start.add(ncell as usize).write(sum);
+            chunk_ptr.add(tid).write(sum);
+        }
+        thread::sync_threads();
+        // Phase 2: exklusiver Präfix über die 256 Chunk-Summen (Thread 0).
+        if tid == 0 {
+            let mut run = 0u32;
+            let mut t = 0usize;
+            while t < 256 {
+                let v = unsafe { chunk_ptr.add(t).read() };
+                unsafe {
+                    chunk_ptr.add(t).write(run);
+                }
+                run += v;
+                t += 1;
+            }
+            unsafe {
+                total_ptr.write(run);
+            }
+        }
+        thread::sync_threads();
+        // Phase 3: exklusiver Scan im eigenen Chunk + Cursor-Init.
+        let mut run = unsafe { chunk_ptr.add(tid).read() };
+        let mut c = begin;
+        while c < end {
+            let slot = unsafe { DeviceAtomicU32::from_ptr(counts.add(c)) };
+            let cnt = slot.load(AtomicOrdering::Relaxed);
+            unsafe {
+                cell_start.add(c).write(run);
+            }
+            slot.store(run, AtomicOrdering::Relaxed);
+            run += cnt;
+            c += 1;
+        }
+        if tid == 0 {
+            let total = unsafe { total_ptr.read() };
+            unsafe {
+                cell_start.add(n).write(total);
+            }
         }
     }
 
