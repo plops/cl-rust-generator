@@ -1,100 +1,24 @@
-//! GPU-Physikkerne als cuda-oxide-Single-Source (`#[kernel]` → PTX).
+//! GPU-Physikkerne auf sortierten Puffern (cuda-oxide-Single-Source).
 //!
-//! Sechs Kernel pro Zeitschritt: `k_hash` (Zell-Hash + atomares Zählen),
-//! `k_scan` (exklusiver Präfix-Sum + Cursor-Init, ein Thread), `k_reorder`
-//! (atomarer Scatter in Morton-ähnliche Zellordnung), `k_density`,
-//! `k_force`, `k_integrate`. Alle Nachbarschleifen nutzen `while` (primitiv,
-//! warp-freundlich), alle Launches Blockgröße 256.
+//! `k_density`, `k_force`, `k_integrate` arbeiten direkt auf den
+//! zellkontinuierlich sortierten Puffern aus `k_permute`: Thread `i`
+//! bearbeitet das sortierte Partikel `i`, Nachbarn kommen aus
+//! zusammenhängenden Zellintervallen ohne `order`-Indirektion
+//! (koaleszierende Zugriffe, keine Warp-Divergenz). Alle Launches
+//! Blockgröße 256, alle Schleifen `while` (primitiv, warp-freundlich).
 
-use cuda_device::atomic::{AtomicOrdering, DeviceAtomicU32};
 use cuda_device::{DisjointSlice, kernel, launch_bounds, launch_contract, thread};
 use cuda_host::cuda_module;
 
-use crate::spatial_grid::hash_cell;
 use crate::sph_math::{poly6_coef, pressure, spiky_coef, visc_coef};
 use crate::types::{InteractParams, SphParams};
 
-/// Enthält alle Device-Kernel; `cuda_host` generiert daraus `LoadedModule`
-/// mit typisierten Launch-Funktionen (`module.k_hash(...)`).
-///
-/// Die Rohzeiger-Parameter sind exklusiv und größen-geprüft (Host garantiert
-/// die Buffer, Kernel prüfen Indexschranken); `unsafe fn` ist für `#[kernel]`
-/// nicht vorgesehen, daher ist der Deref-Lint hier erlaubt.
+/// Enthält alle Physik-Device-Kernel; `cuda_host` generiert daraus
+/// `LoadedModule` mit typisierten Launch-Funktionen.
 #[cuda_module]
-#[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
-pub mod device {
+#[allow(clippy::too_many_arguments)]
+pub mod physics_device {
     use super::*;
-
-    /// Schritt 1a: Zell-Hash pro Partikel + atomare Zellzählung.
-    #[kernel]
-    #[launch_bounds(256)]
-    #[launch_contract(domain = 1, block = (256, 1, 1))]
-    pub fn k_hash(
-        pos: &[[f32; 2]],
-        params: SphParams,
-        counts: *mut u32,
-        mut hash: DisjointSlice<u32>,
-    ) {
-        let idx = thread::index_1d();
-        let i = idx.get();
-        if i >= params.num_particles as usize {
-            return;
-        }
-        let p = pos[i];
-        let h = hash_cell(p[0], p[1], 1.0 / params.h, params.grid_w, params.grid_h);
-        let Some(slot) = hash.get_mut(idx) else {
-            return;
-        };
-        *slot = h;
-        let atomic = unsafe { DeviceAtomicU32::from_ptr(counts.add(h as usize)) };
-        atomic.fetch_add(1, AtomicOrdering::Relaxed);
-    }
-
-    /// Schritt 1b: exklusiver Präfix-Sum über Zellzählungen (nur Thread 0).
-    ///
-    /// Schreibt `cell_start` (ncell+1) und verwandelt `counts` in-place in
-    /// den Scatter-Cursor für `k_reorder`.
-    #[kernel]
-    #[launch_bounds(256)]
-    #[launch_contract(domain = 1, block = (256, 1, 1))]
-    pub fn k_scan(counts: *mut u32, ncell: u32, cell_start: *mut u32) {
-        if thread::index_1d().get() != 0 {
-            return;
-        }
-        let mut sum = 0u32;
-        let mut c = 0u32;
-        while c < ncell {
-            unsafe {
-                let slot = DeviceAtomicU32::from_ptr(counts.add(c as usize));
-                let cnt = slot.load(AtomicOrdering::Relaxed);
-                cell_start.add(c as usize).write(sum);
-                slot.store(sum, AtomicOrdering::Relaxed);
-                sum += cnt;
-            }
-            c += 1;
-        }
-        unsafe {
-            cell_start.add(ncell as usize).write(sum);
-        }
-    }
-
-    /// Schritt 1c: scattert Partikelindizes zellweise nach `order`.
-    #[kernel]
-    #[launch_bounds(256)]
-    #[launch_contract(domain = 1, block = (256, 1, 1))]
-    pub fn k_reorder(hash: &[u32], n: u32, cursor: *mut u32, order: *mut u32) {
-        let i = thread::index_1d().get();
-        if i >= n as usize {
-            return;
-        }
-        let h = hash[i];
-        let slot = unsafe { DeviceAtomicU32::from_ptr(cursor.add(h as usize)) }
-            .fetch_add(1, AtomicOrdering::Relaxed);
-        // Eindeutig: jedes fetch_add liefert einen eigenen Slot.
-        unsafe {
-            order.add(slot as usize).write(i as u32);
-        }
-    }
 
     /// Schritt 2: Dichte (Poly6 über 3×3 Zellen) + Druck (EOS).
     ///
@@ -105,7 +29,6 @@ pub mod device {
     #[launch_contract(domain = 1, block = (256, 1, 1))]
     pub fn k_density(
         pos: &[[f32; 2]],
-        order: &[u32],
         cell_start: &[u32],
         params: SphParams,
         mut dens: DisjointSlice<f32>,
@@ -136,9 +59,9 @@ pub mod device {
                     let mut k = cell_start[c] as usize;
                     let end = cell_start[c + 1] as usize;
                     while k < end {
-                        let j = order[k] as usize;
-                        let qx = pi[0] - pos[j][0];
-                        let qy = pi[1] - pos[j][1];
+                        let pj = pos[k];
+                        let qx = pi[0] - pj[0];
+                        let qy = pi[1] - pj[1];
                         let r2 = qx * qx + qy * qy;
                         if r2 < h2 {
                             let d = h2 - r2;
@@ -174,7 +97,6 @@ pub mod device {
         vel: &[[f32; 2]],
         dens: &[f32],
         pres: &[f32],
-        order: &[u32],
         cell_start: &[u32],
         params: SphParams,
         mut acc: DisjointSlice<[f32; 2]>,
@@ -209,17 +131,18 @@ pub mod device {
                     let mut k = cell_start[c] as usize;
                     let end = cell_start[c + 1] as usize;
                     while k < end {
-                        let j = order[k] as usize;
-                        if j != i {
-                            let qx = pi[0] - pos[j][0];
-                            let qy = pi[1] - pos[j][1];
+                        // Sortierte Indizes: k und i liegen in derselben Ordnung.
+                        if k != i {
+                            let pj = pos[k];
+                            let qx = pi[0] - pj[0];
+                            let qy = pi[1] - pj[1];
                             let r2 = qx * qx + qy * qy;
                             if r2 < h2 && r2 > 0.0 {
                                 let r = r2.sqrt();
-                                let rhoj = dens[j];
+                                let rhoj = dens[k];
                                 // Druck: −ρᵢ·m·(Pᵢ/ρᵢ² + Pⱼ/ρⱼ²)·∇W
                                 // (ρᵢ kürzt sich erst bei a = F/ρᵢ).
-                                let pterm = ppi / (rhoi * rhoi) + pres[j] / (rhoj * rhoj);
+                                let pterm = ppi / (rhoi * rhoi) + pres[k] / (rhoj * rhoj);
                                 let t = h - r;
                                 let s = -spiky * t * t / r;
                                 let f = -rhoi * params.mass * pterm * s;
@@ -227,7 +150,7 @@ pub mod device {
                                 fy += f * qy;
                                 // Viskosität: μ·m·(vⱼ−vᵢ)/ρⱼ·∇²W.
                                 let w = visc * (h - r) / rhoj;
-                                let vj = vel[j];
+                                let vj = vel[k];
                                 fx += w * (vj[0] - vi[0]);
                                 fy += w * (vj[1] - vi[1]);
                             }
@@ -247,6 +170,9 @@ pub mod device {
     }
 
     /// Schritt 4: Symplectic Euler + Wände + Hindernis + Maus + Strahl.
+    ///
+    /// Läuft in-place auf den sortierten Puffern; der Host tauscht danach
+    /// die Ping-Pong-Handles (kein Copy).
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
@@ -261,7 +187,7 @@ pub mod device {
         if i >= params.num_particles as usize {
             return;
         }
-        // Strahl: recycelte Indizes deterministisch um die Maus streuen.
+        // Strahl: recycelte Slots deterministisch um die Maus streuen.
         // (i < N ≤ 262144 passt immer in u32.)
         let iu = i as u32;
         if inter.mouse_mode == 2 && iu >= inter.jet_start && iu < inter.jet_start + inter.jet_count

@@ -16,11 +16,19 @@ pub mod sph_math;
 pub mod spatial_grid;
 
 #[cfg(feature = "gpu")]
+#[path = "05a_sort_kernels.rs"]
+pub mod sort_kernels;
+
+#[cfg(feature = "gpu")]
 #[path = "05_gpu_kernels.rs"]
 pub mod gpu_kernels;
 
 #[path = "06_backend.rs"]
 pub mod backend;
+
+#[cfg(feature = "gpu")]
+#[path = "06a_gpu_backend.rs"]
+pub mod gpu_backend;
 
 #[path = "07_renderer.rs"]
 pub mod renderer;
