@@ -63,6 +63,9 @@ async fn async_main(cli: Cli) {
     let mut jet_cursor = 0u32;
     let mut steps = 0u64;
     let mut frames = 0u64;
+    // FPS-Messung: erste 5 Frames (Warmup) ausschließen.
+    let mut t_start = std::time::Instant::now();
+    let mut phys_total = std::time::Duration::ZERO;
     let view = ViewState {
         domain_w: cfg.domain_w,
         domain_h: cfg.domain_h,
@@ -132,7 +135,8 @@ async fn async_main(cli: Cli) {
             jet_cursor = (jet_cursor + 96) % cfg.particles as u32;
         }
         backend.set_interact(inter);
-        // Physik.
+        // Physik (inkl. Download für den Renderer).
+        let t_phys = std::time::Instant::now();
         if !paused || step_once {
             for _ in 0..cfg.substeps {
                 backend.step();
@@ -141,6 +145,9 @@ async fn async_main(cli: Cli) {
             step_once = false;
         }
         backend.sync_host();
+        if frames >= 5 {
+            phys_total += t_phys.elapsed();
+        }
         // Zeichnen.
         let hud = HudState {
             fps: get_fps(),
@@ -161,6 +168,9 @@ async fn async_main(cli: Cli) {
         );
         next_frame().await;
         frames += 1;
+        if frames == 5 {
+            t_start = std::time::Instant::now();
+        }
         if frames.is_multiple_of(60) {
             println!(
                 "frame={frames} fps={} steps={steps} backend={backend_name}",
@@ -168,7 +178,14 @@ async fn async_main(cli: Cli) {
             );
         }
         if cli.frames.is_some_and(|max| frames >= max) {
-            println!("Smoke-Test: {frames} Frames gerendert, beende.");
+            let m = (frames - 5).max(1) as f64;
+            let wall_s = t_start.elapsed().as_secs_f64();
+            let frame_ms = wall_s * 1000.0 / m;
+            let phys_ms = phys_total.as_secs_f64() * 1000.0 / m;
+            println!(
+                "Smoke-Test: {frames} Frames gerendert, beende. Ø {frame_ms:.2} ms/Frame ({:.1} FPS), Physik Ø {phys_ms:.2} ms/Frame.",
+                m / wall_s,
+            );
             break;
         }
     }

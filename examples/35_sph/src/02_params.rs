@@ -140,6 +140,8 @@ pub struct Cli {
     pub bench: bool,
     /// CPU-Backend erzwingen (Debug/Fallback).
     pub cpu: bool,
+    /// Override Glättungslänge h in m (Default 0.04, = Zellgröße).
+    pub h: Option<f32>,
     /// Override Gas-Steifigkeit k (Default 2000).
     pub stiffness: Option<f32>,
     /// Override Zeitschritt dt in s (Default 0.0008).
@@ -157,6 +159,7 @@ impl Default for Cli {
             substeps: 3,
             bench: false,
             cpu: false,
+            h: None,
             stiffness: None,
             dt: None,
             frames: None,
@@ -215,6 +218,15 @@ impl Cli {
                         .parse()
                         .map_err(|_| "substeps muss eine Zahl sein".to_string())?;
                 }
+                Long("h") => {
+                    cli.h = Some(
+                        parser
+                            .value()
+                            .map_err(|e| e.to_string())?
+                            .parse()
+                            .map_err(|_| "h muss eine Zahl sein".to_string())?,
+                    );
+                }
                 Long("stiffness") => {
                     cli.stiffness = Some(
                         parser
@@ -254,6 +266,9 @@ impl Cli {
         if cli.substeps == 0 {
             return Err("substeps muss >= 1 sein".to_string());
         }
+        if cli.h.is_some_and(|h| h <= 0.0 || !h.is_finite()) {
+            return Err("h muss > 0 sein".to_string());
+        }
         Ok(cli)
     }
 
@@ -266,6 +281,7 @@ impl Cli {
          \t--substeps N     Physikschritte pro Frame, nur GUI (Default 3)\n\
          \t--bench          Durchsatz-Tabelle (nur headless)\n\
          \t--cpu            CPU-Backend statt GPU\n\
+         \t--h H            Glättungslänge/Zellgröße in m (Default 0.04)\n\
          \t--stiffness K    Gas-Steifigkeit (Default 2000)\n\
          \t--dt DT          Zeitschritt in s (Default 0.0008)\n\
          \t--frames N       GUI nach N Frames beenden (Smoke-Test)\n\
@@ -278,6 +294,7 @@ impl Cli {
         let mut cfg = SimConfig {
             particles: self.particles,
             substeps: self.substeps,
+            h: self.h.unwrap_or(0.04),
             stiffness: self.stiffness.unwrap_or(2000.0),
             dt: self.dt.unwrap_or(0.0008),
             ..SimConfig::default()
@@ -329,6 +346,17 @@ mod tests {
         assert_eq!((cli.steps, cli.particles), (500, 4096));
         let cfg = cli.sim_config();
         assert_eq!(cfg.particles, 4096);
+    }
+
+    #[test]
+    fn cli_parst_h_override() {
+        let cli = Cli::parse_from(["--h", "0.02"]).expect("parse");
+        assert_eq!(cli.sim_config().h, 0.02);
+        assert!(Cli::parse_from(["--h", "0.0"]).is_err());
+        assert!(Cli::parse_from(["--h", "-0.01"]).is_err());
+        assert!(Cli::parse_from(["--h", "viel"]).is_err());
+        // Ohne Flag bleibt der alte Default.
+        assert_eq!(Cli::default().sim_config().h, 0.04);
     }
 
     #[test]
