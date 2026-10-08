@@ -18,7 +18,7 @@ pub struct Particle {
     pub force: [f32; 2],
     /// Dichte in kg/m³.
     pub density: f32,
-    /// Druck in Pa (nie negativ, siehe `sph_math::pressure`).
+    /// Druck in Pa (leicht negativ bis −Tension-Cap, siehe `sph_math::pressure`).
     pub pressure: f32,
 }
 
@@ -53,7 +53,7 @@ pub struct SphParams {
     pub dt: f32,
     /// Gravitationsbetrag in m/s² (Richtung −y, 0 = abgeschaltet).
     pub gravity: f32,
-    /// Reflexionsdämpfung an Wänden/Hindernis (0.5 = halbe Rückprall-Reku).
+    /// Reflexionsdämpfung an Wänden/Hindernis (0.2 = weiches Zusammenlaufen).
     pub wall_damping: f32,
     /// Partikelanzahl N (Kernel-Abbruchschranke).
     pub num_particles: u32,

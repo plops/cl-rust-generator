@@ -53,12 +53,25 @@ pub fn visc_laplacian(r: f32, h: f32) -> f32 {
     visc_coef(h) * (h - r)
 }
 
-/// Zustandsgleichung P = k(ρ − ρ₀), negativer Druck auf 0 geklemmt.
+/// Erlaubter Unterdruck als Bruchteil von k·ρ₀ (Kohäsions-Limit).
 ///
-/// Die Klemmung opfert leichte Kohäsion für numerische Stabilität
-/// (verhindert Klumpen-Instabilität bei Unterdichte).
+/// 0,1 begrenzt die Zugspannung auf 10 % des Vollvakuum-Drucks: genug, um
+/// Rand-Katapult und Zerstäuben zu dämpfen (Anziehung über den symmetrischen
+/// Druckterm), zu klein für Klumpen-Instabilität im Volumen.
+pub const TENSION_RATIO: f32 = 0.1;
+
+/// Zustandsgleichung P = k(ρ − ρ₀), Unterdruck auf −cap begrenzt.
+///
+/// Anders als die reine 0-Klemmung erlaubt das schwache Kohäsion: Partikel
+/// in Unterdichte (freie Oberfläche, Gischt) ziehen sich sanft an, statt
+/// als drucklose Fragmente auseinanderzufliegen. NaN-Dichte gibt 0
+/// (keine Phantom-Anziehung); die Funktion bleibt gerätekompatibel.
 pub fn pressure(density: f32, rest_density: f32, stiffness: f32) -> f32 {
-    (stiffness * (density - rest_density)).max(0.0)
+    if density.is_nan() {
+        return 0.0;
+    }
+    let cap = TENSION_RATIO * stiffness * rest_density;
+    (stiffness * (density - rest_density)).max(-cap)
 }
 
 /// Euklidischer Abstand zweier 2D-Punkte (auch für Device-Code).
@@ -106,9 +119,15 @@ mod tests {
     }
 
     #[test]
-    fn druck_klemmt_unterdichte_auf_null() {
+    fn druck_erlaubt_begrenzten_unterdruck() {
         assert_eq!(pressure(1200.0, 1000.0, 2000.0), 400_000.0);
         assert_eq!(pressure(1000.0, 1000.0, 2000.0), 0.0);
-        assert_eq!(pressure(500.0, 1000.0, 2000.0), 0.0);
+        // Halbe Ruhedichte: roh −1 MPa, geklemmt auf −cap = −200 kPa.
+        assert_eq!(pressure(500.0, 1000.0, 2000.0), -200_000.0);
+        // Tiefes Vakuum sättigt am Cap, nie darunter.
+        assert_eq!(pressure(0.0, 1000.0, 2000.0), -200_000.0);
+        assert_eq!(pressure(-500.0, 1000.0, 2000.0), -200_000.0);
+        // NaN bleibt drucklos (keine Phantom-Kohäsion).
+        assert_eq!(pressure(f32::NAN, 1000.0, 2000.0), 0.0);
     }
 }

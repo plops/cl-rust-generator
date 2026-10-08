@@ -38,11 +38,11 @@ impl Default for SimConfig {
             stiffness: 2000.0,
             viscosity: 0.1,
             gravity: 9.81,
-            dt: 0.0008,
-            substeps: 3,
+            dt: 0.0004,
+            substeps: 6,
             domain_w: 1.6,
             domain_h: 1.0,
-            wall_damping: 0.5,
+            wall_damping: 0.2,
         }
     }
 }
@@ -134,7 +134,7 @@ pub struct Cli {
     pub steps: usize,
     /// Partikelanzahl (Default 16_384).
     pub particles: usize,
-    /// Sub-Steps pro Frame (nur GUI, Default 3).
+    /// Sub-Steps pro Frame (nur GUI, Default 6).
     pub substeps: u32,
     /// Durchsatz-Tabelle statt Kurzbericht (nur headless).
     pub bench: bool,
@@ -144,7 +144,7 @@ pub struct Cli {
     pub h: Option<f32>,
     /// Override Gas-Steifigkeit k (Default 2000).
     pub stiffness: Option<f32>,
-    /// Override Zeitschritt dt in s (Default 0.0008).
+    /// Override Zeitschritt dt in s (Default 0.0004).
     pub dt: Option<f32>,
     /// GUI nach N Frames beenden (Smoke-Test, Default: unbegrenzt).
     pub frames: Option<u64>,
@@ -156,7 +156,7 @@ impl Default for Cli {
             headless: false,
             steps: 500,
             particles: 16_384,
-            substeps: 3,
+            substeps: 6,
             bench: false,
             cpu: false,
             h: None,
@@ -278,12 +278,12 @@ impl Cli {
          \t--headless       ohne Fenster rechnen (Validierung/Benchmark)\n\
          \t--steps N        Physikschritte headless (Default 500)\n\
          \t--particles N    Partikelanzahl 2048–262144 (Default 16384)\n\
-         \t--substeps N     Physikschritte pro Frame, nur GUI (Default 3)\n\
+         \t--substeps N     Physikschritte pro Frame, nur GUI (Default 6)\n\
          \t--bench          Durchsatz-Tabelle (nur headless)\n\
          \t--cpu            CPU-Backend statt GPU\n\
          \t--h H            Glättungslänge/Zellgröße in m (Default 0.04)\n\
          \t--stiffness K    Gas-Steifigkeit (Default 2000)\n\
-         \t--dt DT          Zeitschritt in s (Default 0.0008)\n\
+         \t--dt DT          Zeitschritt in s (Default 0.0004)\n\
          \t--frames N       GUI nach N Frames beenden (Smoke-Test)\n\
          \t-h, --help       diese Hilfe\n"
             .to_string()
@@ -296,7 +296,7 @@ impl Cli {
             substeps: self.substeps,
             h: self.h.unwrap_or(0.04),
             stiffness: self.stiffness.unwrap_or(2000.0),
-            dt: self.dt.unwrap_or(0.0008),
+            dt: self.dt.unwrap_or(0.0004),
             ..SimConfig::default()
         };
         cfg.clamp_particles();
@@ -317,8 +317,9 @@ mod tests {
         assert_eq!(cfg.stiffness, 2000.0);
         assert_eq!(cfg.viscosity, 0.1);
         assert_eq!(cfg.gravity, 9.81);
-        assert_eq!(cfg.dt, 0.0008);
-        assert_eq!(cfg.wall_damping, 0.5);
+        assert_eq!(cfg.dt, 0.0004);
+        assert_eq!(cfg.substeps, 6);
+        assert_eq!(cfg.wall_damping, 0.2);
     }
 
     #[test]

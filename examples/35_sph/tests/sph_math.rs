@@ -56,13 +56,15 @@ fn viskositaet_ist_linear_fallend() {
 
 #[test]
 fn druck_waechst_linear_mit_ueberdichte() {
+    use sph::sph_math::TENSION_RATIO;
     approx(pressure(1500.0, 1000.0, 2000.0), 1_000_000.0);
-    // Monoton in der Dichte, nie negativ.
-    let mut prev = 0.0;
+    // Monoton in der Dichte, Unterdruck auf −cap begrenzt.
+    let cap = TENSION_RATIO * 2000.0 * 1000.0;
+    let mut prev = -cap;
     let mut rho = 0.0;
     while rho <= 3000.0 {
         let p = pressure(rho, 1000.0, 2000.0);
-        assert!(p >= prev && p >= 0.0);
+        assert!(p >= prev && p >= -cap, "rho={rho}: {p}");
         prev = p;
         rho += 100.0;
     }
