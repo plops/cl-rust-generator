@@ -1,16 +1,15 @@
 //! GPU-Physikkerne auf sortierten Puffern (cuda-oxide-Single-Source).
 //!
-//! `k_density`, `k_force`, `k_integrate` arbeiten direkt auf den
-//! zellkontinuierlich sortierten Puffern aus `k_permute`: Thread `i`
-//! bearbeitet das sortierte Partikel `i`, Nachbarn kommen aus
-//! zusammenhängenden Zellintervallen ohne `order`-Indirektion
-//! (koaleszierende Zugriffe, keine Warp-Divergenz). Alle Launches
-//! Blockgröße 256, alle Schleifen `while` (primitiv, warp-freundlich).
+//! `k_density`, `k_force`, `k_integrate` auf zellkontinuierlichen Puffern:
+//! Thread `i` → Partikel `i`, Nachbarn aus Zellintervallen (koalesziert,
+//! keine Warp-Divergenz). Blockgröße 256, `while`-Schleifen.
 
 use cuda_device::{DisjointSlice, kernel, launch_bounds, launch_contract, thread};
 use cuda_host::cuda_module;
 
-use crate::sph_math::{poly6_coef, pressure, spiky_coef, visc_coef};
+use crate::sph_math::{
+    XSPH_EPS, cohesion_core, poly6_coef, pressure, ramped_pterm, spiky_coef, visc_coef, xsph_pair,
+};
 use crate::types::{InteractParams, SphParams};
 
 /// Enthält alle Physik-Device-Kernel; `cuda_host` generiert daraus
@@ -20,10 +19,7 @@ use crate::types::{InteractParams, SphParams};
 pub mod physics_device {
     use super::*;
 
-    /// Schritt 2: Dichte (Poly6 über 3×3 Zellen) + Druck (EOS).
-    ///
-    /// Die Selbstwechselwirkung (r = 0) ist enthalten: Das Partikel liegt
-    /// garantiert in seiner Zentralzelle, daher ist ρᵢ immer > 0.
+    /// Schritt 2: Dichte (Poly6 über 3×3 Zellen, inkl. r = 0) + Druck.
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
@@ -86,9 +82,9 @@ pub mod physics_device {
         *pp = p;
     }
 
-    /// Schritt 3: Druck- (Spiky) + Viskositätskräfte als Beschleunigung.
+    /// Schritt 3: Druck- (Spiky) + Viskositätskräfte, XSPH-Korrektur.
     ///
-    /// aᵢ = (Fᵢ^druck + Fᵢ^visk) / ρᵢ; Gravitation folgt in `k_integrate`.
+    /// aᵢ = Fᵢ/ρᵢ; Gravitation und XSPH-Positionsupdate in `k_integrate`.
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
@@ -100,6 +96,7 @@ pub mod physics_device {
         cell_start: &[u32],
         params: SphParams,
         mut acc: DisjointSlice<[f32; 2]>,
+        mut xsph: DisjointSlice<[f32; 2]>,
     ) {
         let i = thread::index_1d().get();
         if i >= params.num_particles as usize {
@@ -113,6 +110,7 @@ pub mod physics_device {
         let h2 = h * h;
         let spiky = spiky_coef(h);
         let visc = visc_coef(h) * params.viscosity * params.mass;
+        let core = cohesion_core(params.mass, params.rest_density);
         let inv = 1.0 / h;
         let gw = params.grid_w as i32;
         let gh = params.grid_h as i32;
@@ -120,6 +118,8 @@ pub mod physics_device {
         let cy = ((pi[1] * inv).floor() as i32).clamp(0, gh - 1);
         let mut fx = 0.0f32;
         let mut fy = 0.0f32;
+        let mut xx = 0.0f32;
+        let mut xy = 0.0f32;
         let mut dy = -1i32;
         while dy <= 1 {
             let mut dx = -1i32;
@@ -143,6 +143,8 @@ pub mod physics_device {
                                 // Druck: −ρᵢ·m·(Pᵢ/ρᵢ² + Pⱼ/ρⱼ²)·∇W
                                 // (ρᵢ kürzt sich erst bei a = F/ρᵢ).
                                 let pterm = ppi / (rhoi * rhoi) + pres[k] / (rhoj * rhoj);
+                                // Anziehung per Rampe (0 am Abstand → stabil).
+                                let pterm = ramped_pterm(pterm, r2, h2, core * core);
                                 let t = h - r;
                                 let s = -spiky * t * t / r;
                                 let f = -rhoi * params.mass * pterm * s;
@@ -153,6 +155,10 @@ pub mod physics_device {
                                 let vj = vel[k];
                                 fx += w * (vj[0] - vi[0]);
                                 fy += w * (vj[1] - vi[1]);
+                                // XSPH-Korrektur (gleiche Schleife, keine Extrakosten).
+                                let xc = xsph_pair(params.mass, 0.5 * (rhoi + rhoj), vi, vj, r, h);
+                                xx += xc[0];
+                                xy += xc[1];
                             }
                         }
                         k += 1;
@@ -167,17 +173,21 @@ pub mod physics_device {
             return;
         };
         *a = [fx * inv_rho, fy * inv_rho];
+        let Some(x) = xsph.get_mut(thread::index_1d()) else {
+            return;
+        };
+        *x = [xx, xy];
     }
 
     /// Schritt 4: Symplectic Euler + Wände + Hindernis + Maus + Strahl.
     ///
-    /// Läuft in-place auf den sortierten Puffern; der Host tauscht danach
-    /// die Ping-Pong-Handles (kein Copy).
+    /// In-place auf sortierten Puffern; Host tauscht Ping-Pong-Handles.
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
     pub fn k_integrate(
         acc: &[[f32; 2]],
+        xsph: &[[f32; 2]],
         params: SphParams,
         inter: InteractParams,
         mut pos: DisjointSlice<[f32; 2]>,
@@ -187,8 +197,7 @@ pub mod physics_device {
         if i >= params.num_particles as usize {
             return;
         }
-        // Strahl: recycelte Slots deterministisch um die Maus streuen.
-        // (i < N ≤ 262144 passt immer in u32.)
+        // Strahl: Slots um die Maus streuen (i < N ≤ 262144 passt in u32).
         let iu = i as u32;
         if inter.mouse_mode == 2 && iu >= inter.jet_start && iu < inter.jet_start + inter.jet_count
         {
@@ -218,7 +227,7 @@ pub mod physics_device {
         let a = acc[i];
         let mut ax = a[0];
         let mut ay = a[1] - params.gravity * inter.gravity_on;
-        // Wirbel: tangentiale Beschleunigung um die Maus (Radius 0.2 m).
+        // Wirbel um die Maus (Radius 0.2 m).
         if inter.mouse_mode == 1 {
             let dx = p[0] - inter.mouse[0];
             let dy = p[1] - inter.mouse[1];
@@ -233,18 +242,18 @@ pub mod physics_device {
         }
         v[0] += ax * params.dt;
         v[1] += ay * params.dt;
-        // Geschwindigkeitsbegrenzung gegen Explosionen.
-        let vmax = 12.0;
+        let vmax = 12.0; // Cap gegen Explosionen.
         let s2 = v[0] * v[0] + v[1] * v[1];
         if s2 > vmax * vmax {
             let s = vmax / s2.sqrt();
             v[0] *= s;
             v[1] *= s;
         }
-        p[0] += v[0] * params.dt;
-        p[1] += v[1] * params.dt;
-        // Rechteckwände mit Dämpfung.
-        let damp = params.wall_damping;
+        // XSPH: Position folgt geglätteter Geschwindigkeit.
+        let xc = xsph[i];
+        p[0] += (v[0] + XSPH_EPS * xc[0]) * params.dt;
+        p[1] += (v[1] + XSPH_EPS * xc[1]) * params.dt;
+        let damp = params.wall_damping; // Wände + Hindernis.
         if p[0] < 0.0 {
             p[0] = 0.0;
             v[0] = -v[0] * damp;
@@ -261,7 +270,7 @@ pub mod physics_device {
             p[1] = params.domain_h;
             v[1] = -v[1] * damp;
         }
-        // Kreishindernis: herausschieben + radiale Reflexion.
+        // Hindernis: herausschieben + radiale Reflexion.
         let ox = p[0] - inter.obstacle[0];
         let oy = p[1] - inter.obstacle[1];
         let orad = inter.obstacle_r;

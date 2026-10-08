@@ -8,7 +8,10 @@ use rayon::prelude::*;
 
 use crate::params::SimConfig;
 use crate::spatial_grid::{CpuGrid, cell_coords};
-use crate::sph_math::{poly6, pressure, spiky_grad_factor, visc_laplacian};
+use crate::sph_math::{
+    XSPH_EPS, cohesion_core, poly6, pressure, ramped_pterm, spiky_grad_factor, visc_laplacian,
+    xsph_pair,
+};
 use crate::types::{InteractParams, Particle, SphParams};
 
 /// Ein Physik-Zeitschritt + Host-Zugriff, backend-unabhängig.
@@ -53,6 +56,7 @@ pub struct CpuBackend {
     pos: Vec<[f32; 2]>,
     vel: Vec<[f32; 2]>,
     force: Vec<[f32; 2]>,
+    xsph: Vec<[f32; 2]>,
     dens: Vec<f32>,
     pres: Vec<f32>,
     grid: CpuGrid,
@@ -72,6 +76,7 @@ impl CpuBackend {
             pos: vec![[0.0, 0.0]; n],
             vel: vec![[0.0, 0.0]; n],
             force: vec![[0.0, 0.0]; n],
+            xsph: vec![[0.0, 0.0]; n],
             dens: vec![0.0; n],
             pres: vec![0.0; n],
             grid,
@@ -111,43 +116,57 @@ impl Backend for CpuBackend {
                 *rho = acc;
                 *pres = pressure(acc, params.rest_density, params.stiffness);
             });
-        // Druck- + Viskositätskräfte.
+        // Druck- + Viskositätskräfte + XSPH-Korrektur (eine Schleife).
+        let core = cohesion_core(params.mass, params.rest_density);
+        let h2 = params.h * params.h;
         let (pos, vel, dens, pres, grid) =
             (&self.pos, &self.vel, &self.dens, &self.pres, &self.grid);
-        self.force.par_iter_mut().enumerate().for_each(|(i, f)| {
-            let pi = pos[i];
-            let vi = vel[i];
-            let rhoi = dens[i];
-            let ppi = pres[i];
-            let (cx, cy) = cell_coords(pi[0], pi[1], &grid_meta);
-            let mut fx = 0.0f32;
-            let mut fy = 0.0f32;
-            grid.for_each_neighbor(cx, cy, &grid_meta, |j| {
-                if j == i {
-                    return;
-                }
-                let pj = pos[j];
-                let qx = pi[0] - pj[0];
-                let qy = pi[1] - pj[1];
-                let r2 = qx * qx + qy * qy;
-                if r2 < params.h * params.h && r2 > 0.0 {
-                    let r = r2.sqrt();
-                    let rhoj = dens[j];
-                    let pterm = ppi / (rhoi * rhoi) + pres[j] / (rhoj * rhoj);
-                    // ρᵢ-Faktor wie im Spec-Pseudocode (kürzt sich bei a=F/ρᵢ).
-                    let f = -rhoi * params.mass * pterm * spiky_grad_factor(r, params.h);
-                    fx += f * qx;
-                    fy += f * qy;
-                    let w = params.viscosity * params.mass * visc_laplacian(r, params.h) / rhoj;
-                    let vj = vel[j];
-                    fx += w * (vj[0] - vi[0]);
-                    fy += w * (vj[1] - vi[1]);
-                }
+        self.force
+            .par_iter_mut()
+            .zip(self.xsph.par_iter_mut())
+            .enumerate()
+            .for_each(|(i, (f, x))| {
+                let pi = pos[i];
+                let vi = vel[i];
+                let rhoi = dens[i];
+                let ppi = pres[i];
+                let (cx, cy) = cell_coords(pi[0], pi[1], &grid_meta);
+                let mut fx = 0.0f32;
+                let mut fy = 0.0f32;
+                let mut xx = 0.0f32;
+                let mut xy = 0.0f32;
+                grid.for_each_neighbor(cx, cy, &grid_meta, |j| {
+                    if j == i {
+                        return;
+                    }
+                    let pj = pos[j];
+                    let qx = pi[0] - pj[0];
+                    let qy = pi[1] - pj[1];
+                    let r2 = qx * qx + qy * qy;
+                    if r2 < params.h * params.h && r2 > 0.0 {
+                        let r = r2.sqrt();
+                        let rhoj = dens[j];
+                        let pterm = ppi / (rhoi * rhoi) + pres[j] / (rhoj * rhoj);
+                        // Anziehung per Rampe (0 am Abstand → stabil).
+                        let pterm = ramped_pterm(pterm, r2, h2, core * core);
+                        // ρᵢ-Faktor wie im Spec-Pseudocode (kürzt sich bei a=F/ρᵢ).
+                        let f = -rhoi * params.mass * pterm * spiky_grad_factor(r, params.h);
+                        fx += f * qx;
+                        fy += f * qy;
+                        let vj = vel[j];
+                        let w = params.viscosity * params.mass * visc_laplacian(r, params.h) / rhoj;
+                        fx += w * (vj[0] - vi[0]);
+                        fy += w * (vj[1] - vi[1]);
+                        let xc = xsph_pair(params.mass, 0.5 * (rhoi + rhoj), vi, vj, r, params.h);
+                        xx += xc[0];
+                        xy += xc[1];
+                    }
+                });
+                *f = [fx, fy];
+                *x = [xx, xy];
             });
-            *f = [fx, fy];
-        });
         // Integration (Symplectic Euler, Wände, Hindernis, Maus, Strahl).
-        let (force, dens) = (&self.force, &self.dens);
+        let (force, dens, xsph) = (&self.force, &self.dens, &self.xsph);
         let inter = self.inter;
         self.pos
             .par_iter_mut()
@@ -195,8 +214,10 @@ impl Backend for CpuBackend {
                     v[0] *= s;
                     v[1] *= s;
                 }
-                p[0] += v[0] * params.dt;
-                p[1] += v[1] * params.dt;
+                // XSPH: Position folgt geglätteter Geschwindigkeit.
+                let xc = xsph[i];
+                p[0] += (v[0] + XSPH_EPS * xc[0]) * params.dt;
+                p[1] += (v[1] + XSPH_EPS * xc[1]) * params.dt;
                 let damp = params.wall_damping;
                 if p[0] < 0.0 {
                     p[0] = 0.0;

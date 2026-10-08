@@ -15,9 +15,9 @@ pub const TRAIL_FADE_ALPHA: u8 = 110;
 pub const FOAM_DENSITY_RATIO: f32 = 0.7;
 /// Gischt-Schwelle: Aufwärtsgeschwindigkeit über 2,5 m/s wirkt als Spray.
 pub const FOAM_RISE_VEL: f32 = 2.5;
-/// Partikelradius als Bruchteil des Anfangsabstands (1,5-fache Überlappung
-/// lässt dichte Regionen optisch zur Fläche verschmelzen).
-pub const PARTICLE_R_FACTOR: f32 = 0.75;
+/// Partikelradius als Bruchteil des Anfangsabstands (2,5-fache Überlappung
+/// lässt dichte Regionen optisch zur Fläche verschmelzen, Screenshot-verifiziert).
+pub const PARTICLE_R_FACTOR: f32 = 1.25;
 /// Deckkraft des Wasserkörpers (Überlappung akkumuliert zur Fläche).
 pub const WATER_ALPHA: u8 = 220;
 

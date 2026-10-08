@@ -215,3 +215,37 @@ zuvor per Repo-Policy ausstehend gelassen):
    (Renderer + Stilmodul + App-Verdrahtung).
 3. `docs: Plan, Walkthrough und Aufwand für besseres Wasser`
    (dieser Ordner, inkl. Tokenstatistik in `plan_effort.md`).
+
+## 10. Nachtrag: VSync, Kochen, Zug-Rampe + XSPH (Fix-Session)
+
+Anlass: Neuer Container (`--ipc=host`, xtrlock gestoppt) machte die GUI
+erstmals wirklich verifizierbar (direktes NVIDIA-GLX, Screenshots via
+`mss`). Zwei Befunde, ein Fix-Commit.
+
+**VSync (1 FPS systemweit):** Auch `glxgears` lief mit 1 FPS — der
+X-Server liefert keine VBlanks, und miniquad erzwingt
+`swap_interval(1)` (Env greift nicht). Fix: `swap_interval: Some(0)` in
+`08_app.rs` → **409 FPS** (2,45 ms = Physik 1,85 + Draw 0,41 + Present
+0,19). Treiberseitig per `__GL_SYNC_TO_VBLANK=1` reversibel.
+
+**Kochen (Wasser weiß statt tiefblau):** Screenshots zeigten überall
+weiße Körnung; Histogramm bei 20k Schritten: 62 % der Partikel bei
+3–12 m/s, 398 am 12er-Cap — obwohl ρ̄=988. Ursache: Unterdruck-Anziehung
+mit **negativer Steifigkeit am Ruhezustand** (tensile Instabilität, nicht
+nur Nah-Kollaps). Tot getestet: kleinerer Cap (0,05/0,02), dt=0,0002,
+μ=0,5, harter Anziehungs-Kern.
+
+**Fix (2 Mechanismen):** `tension_ramp` skaliert Anziehung mit
+`1−(W(r)/W(s))⁴` (0 am Abstand → positive Steifigkeit, 1 fern;
+`ramped_pterm` in beiden Kraft-Loops) plus XSPH (ε=0,5, Monaghan,
+Positions-Update folgt geglätteter Geschwindigkeit, eigener Puffer).
+Danach: ~15 % über 3 m/s, 2 am Cap, ρ̄=997, ρmin=898; Screenshot:
+tiefblauer Körper, Gischt nur an Oberfläche/Spray. Sprite-Faktor
+0,75→1,25 (Screenshot-verifizierte Verschmelzung).
+
+**Validierung:** 35/35 Tests (3 neu, alle mit Rot-Nachweis: Rampe,
+XSPH-Mitziehen, Kollaps-Stopp), beide Clippys, Headless-PASS
+(ρ̄=998,4). Kosten: ~+9 % ms/Schritt (XSPH-Puffer + Poly6 pro Paar),
+Dateien ≤300 Zeilen. Lehre: 500-Schritte-Statistik versteckte das
+Kochen — vmax=12 war das übersehene Signal; Langläufe gehören zum
+Qualitäts-Gate.

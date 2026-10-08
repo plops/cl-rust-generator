@@ -23,6 +23,14 @@ fn window_conf() -> macroquad::conf::Conf {
             window_title: "SPH Fluid – cuda-oxide".to_string(),
             window_width: 1280,
             window_height: 800,
+            // VSync aus: Auf Servern ohne VBlank (z. B. Headless-X11)
+            // blockiert swap_interval(1) ~1 s pro Frame (470→1 FPS);
+            // unbegrenzt misst ehrlich. Per __GL_SYNC_TO_VBLANK=1
+            // jederzeit treiberseitig wieder einschaltbar.
+            platform: macroquad::miniquad::conf::Platform {
+                swap_interval: Some(0),
+                ..Default::default()
+            },
             ..Default::default()
         },
         ..Default::default()

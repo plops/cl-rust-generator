@@ -26,6 +26,7 @@ pub struct GpuBackend {
     vel: DeviceBuffer<[f32; 2]>,
     vel_alt: DeviceBuffer<[f32; 2]>,
     acc: DeviceBuffer<[f32; 2]>,
+    xsph: DeviceBuffer<[f32; 2]>,
     dens: DeviceBuffer<f32>,
     pres: DeviceBuffer<f32>,
     hash: DeviceBuffer<u32>,
@@ -66,6 +67,7 @@ impl GpuBackend {
         let vel = DeviceBuffer::zeroed(&stream, n).map_err(|e| format!("{e:?}"))?;
         let vel_alt = DeviceBuffer::zeroed(&stream, n).map_err(|e| format!("{e:?}"))?;
         let acc = DeviceBuffer::zeroed(&stream, n).map_err(|e| format!("{e:?}"))?;
+        let xsph = DeviceBuffer::zeroed(&stream, n).map_err(|e| format!("{e:?}"))?;
         let dens = DeviceBuffer::zeroed(&stream, n).map_err(|e| format!("{e:?}"))?;
         let pres = DeviceBuffer::zeroed(&stream, n).map_err(|e| format!("{e:?}"))?;
         let hash = dev(n)?;
@@ -81,6 +83,7 @@ impl GpuBackend {
             vel,
             vel_alt,
             acc,
+            xsph,
             dens,
             pres,
             hash,
@@ -194,6 +197,7 @@ impl Backend for GpuBackend {
                 &self.cell_start,
                 params,
                 &mut self.acc,
+                &mut self.xsph,
             )
             .expect("k_force");
         self.physics
@@ -201,6 +205,7 @@ impl Backend for GpuBackend {
                 &self.stream,
                 &p_int,
                 &self.acc,
+                &self.xsph,
                 params,
                 inter,
                 &mut self.pos_alt,

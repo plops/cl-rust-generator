@@ -27,3 +27,10 @@
 - [x] 3.2 GUI-Smoke `--frames 120` auf DISPLAY=:0 (Timing, Trails-Toggle)
 - [x] 3.3 `walkthrough.md` (DE, Tabelle, Mermaid, Folgearbeit) + `plan_effort.md` + `deps.md`-Check
 - [x] 3.4 Finale Gates; Commits bleiben per Policy ausstehend (im Bericht vermerkt)
+
+## Phase 4 – Fix-Session (VSync, Kochen)
+
+- [x] 4.1 VSync-Ursache (glxgears-Beweis) + `swap_interval(0)` + Screenshot-Setup
+- [x] 4.2 Koch-Diagnose (Histogramm) + tote Pfade (Cap, dt, μ, harter Kern)
+- [x] 4.3 Zug-Rampe + XSPH (ε=0,5) + Sprite-Faktor 1,25, Screenshot-verifiziert
+- [x] 4.4 Tests (3 neu, Rot-Nachweise), Gates, Walkthrough-Nachtrag, Fix-Commit
