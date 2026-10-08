@@ -33,6 +33,9 @@ pub mod gpu_backend;
 #[path = "07_renderer.rs"]
 pub mod renderer;
 
+#[path = "07a_water_style.rs"]
+pub mod water_style;
+
 #[path = "08_app.rs"]
 pub mod app;
 

@@ -11,6 +11,7 @@ use macroquad::prelude::*;
 use crate::backend::{Backend, CpuBackend};
 use crate::params::Cli;
 use crate::renderer::{ColorMode, HudState, ViewState, draw_frame, screen_to_world};
+use crate::water_style::{PARTICLE_R_FACTOR, soft_sprite_image};
 
 #[cfg(feature = "gpu")]
 use crate::backend::GpuBackend;
@@ -73,8 +74,13 @@ async fn async_main(cli: Cli) {
         domain_h: cfg.domain_h,
         color_mode,
         rest_density: cfg.rest_density,
+        particle_r: PARTICLE_R_FACTOR * cfg.initial_spacing(),
+        trails: true,
     };
     let mut view = view;
+    // Soft-Sprite einmal erzeugen (weißer Radialverlauf, linear gefiltert).
+    let sprite = Texture2D::from_image(&soft_sprite_image());
+    sprite.set_filter(FilterMode::Linear);
 
     loop {
         // Tasten (kantengetriggert).
@@ -97,6 +103,9 @@ async fn async_main(cli: Cli) {
         if is_key_pressed(KeyCode::C) {
             color_mode.toggle();
             view.color_mode = color_mode;
+        }
+        if is_key_pressed(KeyCode::T) {
+            view.trails = !view.trails;
         }
         // Maus → Welt; Hindernis folgt dem Cursor (in Domäne geklemmt).
         let (mx, my) = mouse_position();
@@ -165,6 +174,7 @@ async fn async_main(cli: Cli) {
             backend.as_ref(),
             &view,
             &hud,
+            &sprite,
             obstacle.to_array(),
             obstacle_r,
             mouse.to_array(),

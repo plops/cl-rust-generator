@@ -1,18 +1,24 @@
 //! macroquad-Renderer: Partikel, Hindernis, HUD.
 //!
-//! Reine Umrechnungs-/Farbfunktionen sind unit-getestet; `draw_frame`
-//! zeichnet einen Backend-Schnappschuss (Welt: Meter, y nach oben).
+//! Reine Umrechnungsfunktionen sind unit-getestet (Farben + Sprite in
+//! `07a_water_style.rs`); `draw_frame` zeichnet einen Backend-Schnappschuss
+//! (Welt: Meter, y nach oben) als weiche Sprites mit Gischt + Trails.
 
+use macroquad::models::Vertex;
 use macroquad::prelude::*;
+use macroquad::window::get_internal_gl;
 
 use crate::backend::Backend;
+use crate::water_style::{
+    TRAIL_FADE_ALPHA, WATER_BG, foam_color, is_foam, water_color, water_density_color,
+};
 
 /// Partikel-Farbmodus (Taste C schaltet um).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColorMode {
-    /// Blau→Rot nach Geschwindigkeitsbetrag.
+    /// Tiefblau→Türkis→Weiß nach Geschwindigkeitsbetrag.
     Velocity,
-    /// Grün→Gelb→Rot nach Dichte relativ zu ρ₀.
+    /// Tiefblau→Türkis→Weiß nach Dichte relativ zu ρ₀.
     Density,
 }
 
@@ -46,6 +52,10 @@ pub struct ViewState {
     pub color_mode: ColorMode,
     /// Ruhedichte ρ₀ für den Dichte-Farbmodus.
     pub rest_density: f32,
+    /// Partikelradius in m (aus Anfangsabstand, siehe Stilkonstante).
+    pub particle_r: f32,
+    /// Trails an (Fade) statt hartem Clear (Taste T).
+    pub trails: bool,
 }
 
 /// HUD-Zustand (Text links oben).
@@ -93,55 +103,63 @@ pub fn screen_to_world(
     [(sx - ox) / scale, (view_h - sy - oy) / scale]
 }
 
-/// Lineare Farbmischung (t = 0 → a, t = 1 → b).
-fn mix(a: Color, b: Color, t: f32) -> Color {
-    Color::new(
-        a.r + (b.r - a.r) * t,
-        a.g + (b.g - a.g) * t,
-        a.b + (b.b - a.b) * t,
-        1.0,
-    )
-}
-
-/// Blau→Cyan→Gelb→Rot über 0–6 m/s.
-pub fn velocity_color(speed: f32) -> Color {
-    let t = (speed / 6.0).clamp(0.0, 1.0);
-    if t < 0.33 {
-        mix(BLUE, SKYBLUE, t / 0.33)
-    } else if t < 0.66 {
-        mix(SKYBLUE, YELLOW, (t - 0.33) / 0.33)
-    } else {
-        mix(YELLOW, RED, (t - 0.66) / 0.34)
-    }
-}
-
-/// Grün (0.3ρ₀) → Gelb (ρ₀) → Rot (1.1ρ₀+).
-pub fn density_color(rho: f32, rho0: f32) -> Color {
-    let t = ((rho / rho0 - 0.3) / 0.8).clamp(0.0, 1.0);
-    if t < 0.875 {
-        mix(GREEN, YELLOW, t / 0.875)
-    } else {
-        mix(YELLOW, RED, (t - 0.875) / 0.125)
-    }
+/// Eingefärbtes Sprite-Quad in den laufenden Batch schieben.
+///
+/// Der Aufrufer setzt Textur + Draw-Mode einmalig (State-Hoisting wie bei
+/// der Letterbox-Skalierung); pro Partikel bleibt nur der Geometrie-Push.
+/// `draw_texture_ex` wäre ~80 ms (Trigonometrie + Lookups pro Aufruf).
+fn push_sprite_quad(
+    gl: &mut macroquad::window::InternalGlContext,
+    x: f32,
+    y: f32,
+    size: f32,
+    color: Color,
+) {
+    #[rustfmt::skip]
+    let vertices = [
+        Vertex::new(x,        y,        0., 0.0, 0.0, color),
+        Vertex::new(x + size, y,        0., 1.0, 0.0, color),
+        Vertex::new(x + size, y + size, 0., 1.0, 1.0, color),
+        Vertex::new(x,        y + size, 0., 0.0, 1.0, color),
+    ];
+    let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
+    gl.quad_gl.geometry(&vertices, &indices);
 }
 
 /// Zeichnet Partikel, Hindernis, Mausindikator und HUD.
+///
+/// `sprite` ist das einmal erzeugte Soft-Sprite (weißer Radialverlauf);
+/// Partikel werden als eingefärbte, skalierte Quads gebatcht.
+#[allow(clippy::too_many_arguments)] // Frame-Kontext: 8 explizite Handles statt God-Struct.
 pub fn draw_frame(
     backend: &dyn Backend,
     view: &ViewState,
     hud: &HudState,
+    sprite: &Texture2D,
     obstacle: [f32; 2],
     obstacle_r: f32,
     mouse_world: [f32; 2],
     mouse_mode: u32,
 ) {
-    clear_background(Color::from_rgba(8, 10, 18, 255));
     let (vw, vh) = (screen_width(), screen_height());
+    let (br, bg, bb) = WATER_BG;
+    if view.trails {
+        // Kein hartes Clear: halbtransparentes Übermalen lässt Schweife stehen.
+        draw_rectangle(
+            0.0,
+            0.0,
+            vw,
+            vh,
+            Color::from_rgba(br, bg, bb, TRAIL_FADE_ALPHA),
+        );
+    } else {
+        clear_background(Color::from_rgba(br, bg, bb, 255));
+    }
     // Letterbox-Skalierung einmal pro Frame statt pro Partikel (Divisionen!).
     let scale = (vw / view.domain_w).min(vh / view.domain_h);
     let ox = (vw - view.domain_w * scale) * 0.5;
     let oy = (vh - view.domain_h * scale) * 0.5;
-    // Domänenrahmen.
+    // Becken: massiver Außenrahmen + feine Innenkante.
     let (x0, y1) = world_to_screen([0.0, 0.0], vw, vh, view.domain_w, view.domain_h);
     let (x1, y0) = world_to_screen(
         [view.domain_w, view.domain_h],
@@ -150,39 +168,81 @@ pub fn draw_frame(
         view.domain_w,
         view.domain_h,
     );
-    draw_rectangle_lines(x0, y0, x1 - x0, y1 - y0, 2.0, GRAY);
-    // Partikel als gebatchte Rechtecke; Farbmodus außerhalb der Schleife,
+    draw_rectangle_lines(
+        x0 - 5.0,
+        y0 - 5.0,
+        x1 - x0 + 10.0,
+        y1 - y0 + 10.0,
+        5.0,
+        Color::from_rgba(28, 36, 52, 255),
+    );
+    draw_rectangle_lines(
+        x0,
+        y0,
+        x1 - x0,
+        y1 - y0,
+        1.5,
+        Color::new(0.35, 0.55, 0.85, 0.9),
+    );
+    // Partikel als weiche Sprites (Überlappung → Fläche); Gischt kleiner+weiß.
     // Welt→Bild-Transform inline (identische Reihenfolge wie world_to_screen).
-    let size = (0.006 * scale).clamp(2.0, 6.0);
-    let half = size * 0.5;
+    let size = (2.0 * view.particle_r * scale).clamp(3.0, 16.0);
+    let foam_size = (size * 0.55).max(2.0);
     let pos = backend.positions();
+    let vel = backend.velocities();
+    let dens = backend.densities();
+    // Textur-State einmalig setzen, dann 16k reine Geometrie-Pushes.
+    // SAFETY: Handle lebt nur bis Schleifenende, Main-Thread, keine
+    // Reentrancy (Schleifenkörper ruft keine Draw-Funktionen auf).
+    let mut gl = unsafe { get_internal_gl() };
+    gl.quad_gl.texture(Some(sprite));
+    gl.quad_gl.draw_mode(DrawMode::Triangles);
     match view.color_mode {
         ColorMode::Velocity => {
-            let vel = backend.velocities();
             for i in 0..pos.len() {
                 let p = pos[i];
                 let sx = ox + p[0] * scale;
                 let sy = vh - (oy + p[1] * scale);
                 let v = vel[i];
-                let color = velocity_color((v[0] * v[0] + v[1] * v[1]).sqrt());
-                draw_rectangle(sx - half, sy - half, size, size, color);
+                if is_foam(dens[i], view.rest_density, v[1]) {
+                    let h = foam_size * 0.5;
+                    push_sprite_quad(&mut gl, sx - h, sy - h, foam_size, foam_color());
+                } else {
+                    let color = water_color((v[0] * v[0] + v[1] * v[1]).sqrt());
+                    let h = size * 0.5;
+                    push_sprite_quad(&mut gl, sx - h, sy - h, size, color);
+                }
             }
         }
         ColorMode::Density => {
-            let dens = backend.densities();
             for i in 0..pos.len() {
                 let p = pos[i];
                 let sx = ox + p[0] * scale;
                 let sy = vh - (oy + p[1] * scale);
-                let color = density_color(dens[i], view.rest_density);
-                draw_rectangle(sx - half, sy - half, size, size, color);
+                if is_foam(dens[i], view.rest_density, vel[i][1]) {
+                    let h = foam_size * 0.5;
+                    push_sprite_quad(&mut gl, sx - h, sy - h, foam_size, foam_color());
+                } else {
+                    let color = water_density_color(dens[i], view.rest_density);
+                    let h = size * 0.5;
+                    push_sprite_quad(&mut gl, sx - h, sy - h, size, color);
+                }
             }
         }
     }
-    // Hindernis + Wirbelradius.
+    // `gl` ist hier tot (NLL) — Hindernis/HUD nutzen wieder High-Level-Calls.
+    // Hindernis: Schatten + Körper + Glanzpunkt.
     let (ox, oy) = world_to_screen(obstacle, vw, vh, view.domain_w, view.domain_h);
-    draw_circle(ox, oy, obstacle_r * scale, Color::new(1.0, 0.3, 0.3, 0.25));
-    draw_circle_lines(ox, oy, obstacle_r * scale, 2.0, RED);
+    let orad = obstacle_r * scale;
+    draw_circle(ox + 4.0, oy + 4.0, orad, Color::from_rgba(0, 0, 0, 80));
+    draw_circle(ox, oy, orad, Color::new(1.0, 0.3, 0.3, 0.25));
+    draw_circle_lines(ox, oy, orad, 2.0, RED);
+    draw_circle(
+        ox - 0.35 * orad,
+        oy - 0.35 * orad,
+        0.18 * orad,
+        Color::new(1.0, 1.0, 1.0, 0.55),
+    );
     if mouse_mode == 1 {
         let (mx, my) = world_to_screen(mouse_world, vw, vh, view.domain_w, view.domain_h);
         draw_circle_lines(mx, my, 0.2 * scale, 2.0, SKYBLUE);
@@ -206,8 +266,9 @@ pub fn draw_frame(
             if hud.gravity_on { "an" } else { "aus" }
         ),
         format!(
-            "Farbe: {} (C) | Reset: R | Schritt: S",
-            view.color_mode.name()
+            "Farbe: {} (C) | Schweif: {} (T) | Reset: R | Schritt: S",
+            view.color_mode.name(),
+            if view.trails { "an" } else { "aus" }
         ),
         "Links: Wirbel | Rechts: Strahl | Hindernis folgt Maus | Esc: Ende".to_string(),
     ] {
@@ -232,18 +293,5 @@ mod tests {
         // Ecken landen im sichtbaren Rahmen.
         let (sx, sy) = world_to_screen([0.0, 0.0], vw, vh, dw, dh);
         assert!(sx >= 0.0 && sx <= vw && sy >= 0.0 && sy <= vh);
-    }
-
-    #[test]
-    fn farbrampen_sind_gueltig() {
-        for v in [0.0, 1.5, 3.0, 6.0, 20.0] {
-            let c = velocity_color(v);
-            assert!([c.r, c.g, c.b, c.a].iter().all(|x| (0.0..=1.0).contains(x)));
-        }
-        assert_eq!(velocity_color(0.0), BLUE);
-        for r in [0.0, 300.0, 1000.0, 1100.0, 5000.0] {
-            let c = density_color(r, 1000.0);
-            assert!([c.r, c.g, c.b, c.a].iter().all(|x| (0.0..=1.0).contains(x)));
-        }
     }
 }
