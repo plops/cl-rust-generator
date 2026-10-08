@@ -1,0 +1,147 @@
+Hier ist ein detaillierter Prompt, der exakt auf deinen bestehenden Stil, deine Container-Umgebung und die Erkenntnisse aus dem Code-Review zugeschnitten ist:
+
+***
+
+**Rolle & Umgebung:**
+
+Du läufst in einem Docker-Image mit Ubuntu auf einem Linux-Host.  
+Gestartet mit:  
+`cl-cl-generator/example/05_dockerfile_meta/source01/examples/03_ai_env $ ./setup02_run.sh --gpu --host-kmsg --usb --source-isolation --docker-sock --x11`
+
+Du arbeitest als User `ubuntu` und hast Zugriff auf eine **NVIDIA RTX A4000 GPU (Ampere GA104, 16 GB VRAM, Compute Capability 8.6)**. Du kannst mittels des gemounteten Unix-Domain-Sockets in `/tmp/.X11-unix` als User `ubuntu` auf den X-Server des Hosts zugreifen (z. B. über `DISPLAY=:0`).  
+Host-Projektpfad: `/home/kiel/stage/...`  
+Docker-Projektpfad: `/workspace/src/cl-rust-generator/examples/35_sph`  
+Du arbeitest im Auftrag von wol pumba (`wolpumba@gmail.com`).
+
+Falls dir System-Pakete fehlen (z. B. X11-Libraries, Clang, CUDA-Tools, Profiler), installiere sie selbstständig im Container.
+
+---
+
+Schau dir review.md an und mache die zustandsgleichung robuster
+
+Schau dir auch beauty.md an und optimiere die visualisierung.
+
+---
+
+## Code- und Struktur-Anforderungen
+
+- **Rust-Version:** Aktuelles Nightly Rust (2024 Edition, vgl. `rust-toolchain.toml`).
+- **Workspace/Projekt-Ordner:** `/workspace/src/cl-rust-generator/examples/35_sph`.
+- **Dateiaufteilung (verbindlich):**
+  - Halte die strikte modulare Strukturierung ein (`01_types.rs` bis `09_headless.rs`).
+  - Keine Datei darf ca. 300 Zeilen überschreiten oder mehr als eine klare Zuständigkeit haben. Sollte für die Permutation/Sortierung zusätzlicher Code nötig sein, gliedere ihn sauber aus (z. B. `05a_sort_kernels.rs` oder klare Trennung in `05_gpu_kernels.rs`).
+  - `main.rs` und `lib.rs` dienen nur der Verdrahtung.
+- **Abhängigkeiten:** Aktualisiere bei Änderungen `deps.md`.
+- **Code-Qualitäts-Gates (müssen alle fehlerfrei durchlaufen):**
+  1. `cargo fmt --check`
+  2. `cargo clippy --all-targets -- -D warnings` (CPU-only)
+  3. `cargo clippy --all-targets --features gpu -- -D warnings` (GPU-Code)
+  4. `cargo test` (CPU-Tests & Mathe-Suiten)
+
+---
+
+## Tests & Validierung
+
+1. **Paritäts- und Unit-Tests:** Alle bestehenden 25 Tests in `tests/` müssen weiterhin grün sein.
+2. **GPU-Headless-Lauf:** `cargo run --features gpu -- --headless --steps 500` muss mit Status `PASS` durchlaufen.
+3. **Performance-Sweep:** Ermittle die Vorher-Nachher-Werte für:
+   - $N \in \{2\,048, 16\,384, 65\,536, 262\,144\}$
+   - Metriken: GPU ms/Schritt, MIUPS, Speedup gegenüber dem bisherigen Stand.
+4. **GUI-Smoke-Test:** `cargo run --features gpu -- --frames 120` auf `DISPLAY=:0` (prüfe flüssiges Rendern und fehlerfreie Interaktion).
+
+---
+
+## Dokumentation & Arbeitsablauf
+
+1. **Planung (`plan.md` & `task.md`):**
+   - Lege vor Beginn der Implementierung einen neuen Plan-Ordner an (z. B. `plan/<datum>_02_perf_opt/`).
+   - Erstelle `plan.md` mit detaillierter technischer Analyse der Flaschenhälse, Soll-Architektur (inkl. Puffer-Layout) und Risiko-Abwägung.
+   - Erstelle `task.md` mit einer sequenziellen Checkliste aller Umsetzungs- und Testschritte.
+2. **Git-Commits:**
+   - Jeder Commit zwingend als **Conventional Commit** (`perf:`, `feat:`, `refactor:`, `test:`, `fix:`) mit aussagekräftiger Beschreibung im Fließtext.
+3. **Abschlussbericht (`walkthrough.md`):**
+   - Verfasse einen ausführlichen, didaktisch hochwertigen Abschlussbericht auf Deutsch im neuen Plan-Ordner.
+   - **Vergleichende Benchmark-Tabelle** (Vorher vs. Nachher für alle Partikelzahlen inkl. MIUPS).
+   - **Mermaid-Diagramme** für das neue Speicherlayout (Sortierung/Permutation der Buffers) und den optimierten Kernel-Ablauf ohne Substep-Sync.
+   - Erklärung der wichtigsten Code-Änderungen und der Ursachen für die gemessenen Geschwindigkeitszuwächse.
+4. **Aufwandstracking (`plan_effort.md`):**
+   - Dokumentiere die Session-Statistiken (Tokens, Turns, Tool Calls).
+
+---
+
+## Referenzen im Workspace
+
+- Bisheriger Walkthrough: `plan/20261006_01_init/walkthrough.md`
+- Cuda-Rust Dokumentation: `../32_cuda-rust/plan/misc/cuda-rust.md`
+- Vektormathematik: `../30_wgpu/plan/misc/glam.md`
+
+
+Für die Umsetzung der Optimierungen deines SPH-Solvers lohnt es sich, DeepWiki MCP vor allem für Repositories einzusetzen, die **entweder bleeding-edge (kaum in Standard-LLM-Trainingsdaten vorhanden)** sind oder als **mathematisch-architektonische Gold-Standards für GPU-Partikelsimulationen** dienen.
+
+Hier sind die lohnendsten Repositories, gegliedert nach Nutzen und Relevanz:
+
+---
+
+### 1. Höchste Priorität: Das CUDA-in-Rust-Ökosystem (Nischen-Wissen)
+
+Hier halluzinieren LLMs am häufigsten, weil `cuda-oxide` / `cuda-rust` eine sehr junge, spezifische Makro- und Typ-DSL nutzt.
+
+#### `NVlabs/cuda-oxide` (bzw. `NVIDIA/cuda-rust`)
+* **Warum es sich lohnt:** Die API-Signaturen für Kernel-Attribute, Speicher-Wrappers und Host-Module sind strikt typisiert und ändern sich zwischen Nightly-Releases schnell.
+* **Was der Agent konkret abfragen sollte:**
+  * **Shared Memory Syntax:** Gibt es in `cuda-device` ein Attribut wie `#[shared]`, oder wie deklariert man Shared-Memory-Puffer für Block-Kooperation (z. B. für `k_scan` oder Tiling in `k_density`)?
+  * **Barrieren / Synchronization:** Wie lautet die genaue rust-native Funktion für `__syncthreads()` (z. B. `cuda_device::sync::syncthreads()` oder `thread::sync()`)?
+  * **CUDA Events (`cuda-core` / `cuda-host`):** Wie werden `CudaEvent`, `stream.record_event()` und Zeitdifferenz-Berechnungen typisiert instanziiert, um CPU-freie Timings für MIUPS zu messen?
+  * **Warp-Intrinsics:** Bietet `cuda-device` bereits Warp-Shuffle-Funktionen (`shfl_sync` etc.), um Scans ultra-schnell ohne Shared Memory auszuführen?
+
+---
+
+### 2. Algorithmen- & Architektur-Vorlagen (GPU-SPH & Scan)
+
+Diese Repositories liefern die Blaupause für die Umstellung von "Indirection Gathering" auf "Reordered Buffers" und für parallele Scans.
+
+#### `NVIDIA/cuda-samples` (insbesondere das Sample `Particles`)
+* **Warum es sich lohnt:** Das `Particles`-Sample von Simon Green ist **die** Ur-Referenz für Grid-basiertes Spatial Hashing auf NVIDIA GPUs.
+* **Was der Agent abfragen sollte:**
+  * Den genauen Aufbau des Permutations-Kernels (`reorderDataAndFindCellStart`).
+  * Wie `cellStart` und `cellEnd` gebildet werden, wenn Zellen leer sind.
+  * Wie die Nachbarschleife auf `sortedPos` zugreift, um vollständiges Memory-Coalescing und Cache-Hits zu erzwingen.
+
+#### `NVIDIA/cccl` (CUDA Core Compute Libraries: CUB & Thrust)
+* **Warum es sich lohnt:** CUB (`cub::BlockScan`) ist der Gold-Standard für block-parallele Präfixsummen (Prefix Sum) auf NVIDIA-Hardware.
+* **Was der Agent abfragen sollte:**
+  * Algorithmus für **Work-Efficient Parallel Prefix Sum** (Blelloch-Scan) im Shared Memory, um den single-threaded Flaschenhals in `k_scan` sauber in Rust nachzubilden.
+  * Vermeidung von Shared-Memory-Bank-Conflicts bei Potenzen von zwei (Padding-Tricks).
+
+#### `InteractiveComputerGraphics/SPlisHSPlasH` (oder `dual-sphysics/DualSPHysics`)
+* **Warum es sich lohnt:** Dies sind die führenden wissenschaftlichen Open-Source-Frameworks für SPH.
+* **Was der Agent abfragen sollte:**
+  * Optimierte Kernel-Normalisierungen und Vermeidung von Singularitäten bei $r \to 0$.
+  * Best Practices für künstliche Viskosität und Dichtekorrekturen (z. B. XSPH oder Shepard-Filter).
+  * Branchless-Techniken für Nachbarschaftssuchen (Maskierung statt `if dist < h`).
+
+---
+
+### 3. Rendering- & Visualisierungs-Optimierung
+
+Falls der Flaschenhals beim CPU-Rasterisieren (über 16.000 `draw_rectangle`-Aufrufe auf dem Host) beseitigt werden soll:
+
+#### `not-fl3/macroquad` (bzw. `not-fl3/miniquad`)
+* **Warum es sich lohnt:** Um von CPU-Schleifen auf instanziiertes GPU-Zeichnen umzustellen.
+* **Was der Agent abfragen sollte:**
+  * Batching-Mechanismen: Wie übergibt man Macroquad am performantesten flache Positions- und Farb-Arrays (z. B. über Custom Meshes oder Point-Primitives), ohne jedes Partikel einzeln per Drawcall/Funktionsaufruf durch die CPU zu jagen?
+  * Instanced Rendering / Custom Material Pipelines in Miniquad/Macroquad.
+
+---
+
+### Zusammenfassung: Empfohlener Prompt-Befehl für deinen Agenten
+
+Du kannst deinem Agenten die folgende konkrete Arbeitsanweisung mitgeben:
+
+> *"Nutze DeepWiki MCP gezielt für folgende Repositories:*
+> 1. *`NVlabs/cuda-oxide` / `NVIDIA/cuda-rust`: Suche nach Shared-Memory-Deklaration (`#[shared]` / `extern shared`), `syncthreads`, Warp-Shuffles und `CudaEvent`-Timings.*
+> 2. *`NVIDIA/cuda-samples` (Pfad: `Samples/5_Domain_Specific/Particles`): Analysiere das Datenlayout für `reorderDataAndFindCellStart` zur Beseitigung der Warp-Divergenz.*
+> 3. *`NVIDIA/cccl` (CUB BlockScan): Prüfe die Shared-Memory-Implementierung für parallele In-Block-Prefix-Sums zur Ablösung des 1-Thread-Scans in `k_scan`."*
+
+
+Lies dir auch ../misc/nvidia.md durch
