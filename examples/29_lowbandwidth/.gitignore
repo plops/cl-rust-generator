@@ -2,3 +2,4 @@
 # Git only sees the link itself, so ignore the link paths, not their contents.
 source7_mvp/models
 source8_transpiled/models
+source9_gpu/models
