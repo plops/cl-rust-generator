@@ -8,6 +8,7 @@ wurde, was unterwegs umentschieden werden musste und was man daraus mitnimmt.
 
 Fachbegriffe werden beim ersten Auftreten kurz erklärt. Alle Messwerte stammen
 von echten Läufen auf diesem Rechner (RTX A4000, 16 GB, CUDA 13.4, cuDNN 9).
+Plan und Tasks dazu: [`plan.md`](plan.md), [`task.md`](task.md) im selben Ordner.
 
 ## 1. Was exakt implementiert wurde
 
@@ -87,7 +88,8 @@ Warum Hybrid und nicht alles auf die GPU? Das hat die Messung entschieden
 (siehe Abschnitt 2). Der Aufteilung liegt ein simples Prinzip zugrunde:
 
 - **Detektor (DBNet)** — *compute-gebunden*: ein großer Durchlauf über das
-  ganze Bild. Rechenlast hoch, ein PCIe-Transfer. GPU gewinnt haushoch.
+  ganze Bild. Rechenlast hoch, ein Transfer über *PCIe* (die Verbindung
+  zwischen CPU und Grafikkarte). GPU gewinnt haushoch.
 - **Erkenner (CTC)** — *formwechsel-gebunden*: ~40 Durchläufe (je Textzeile),
   jeder mit anderer Bildbreite. CUDA zahlt pro Formwechsel ~28 ms statt ~1 ms
   (Speicher-/Kernel-Setup, s. Abschnitt 2). CPU ist formwechsel-robust und
@@ -168,6 +170,24 @@ loggt sie bei `-v`. So sieht man ohne Profiler, wo die Zeit bleibt:
   Textmenge (> 20 Zeichen), Boxen-im-Bild und deterministische Wiederholung;
   `padding`-Sweep und Smoke laufen auf 720p-Xvfb.
 
+### 1.6 Verifikation im Überblick
+
+Alles auf diesem Rechner beobachtet, nichts übernommen:
+
+- `cargo test --workspace`: 12 Suiten grün (u. a. 28 Server-Unit-Tests).
+- `models`-Test: `EP=CUDA+CPU`, 40 Zeilen / 2050 Zeichen, Detektor warm 15 ms,
+  Erkenner 385 ms; zweiter Durchlauf bitgleich.
+- `padding`-Sweep: Marker `PADDING-SWEEP-720` über den Produktpfad gefunden,
+  REC_PAD=4 und MASK_PAD=6 halten (MVP-Konstanten gelten auch bei 720p).
+- `smoke_xvfb.sh`: OK — Probe meldet Text + Kachel, Mausklick kommt in `xev`
+  an, Server loggt Eingaben und RandR-Ursprung `+0+0`.
+- `nvidia-smi` während eines Laufs: `lbw-server` mit 440 MiB GPU-Speicher.
+- `cargo fmt --check` und `cargo clippy` (eigener Code) sauber.
+- Commits (Conventional Commits, aufsteigend): `2494335` docs Plan/Tasks,
+  `314cfed` feat Implementierung, `8b60c19` docs Walkthrough, `fdd04de` docs
+  Aufwand, `4d0008f` fix Formwechsel-Befund, `81b4fed` docs Batching-Befund,
+  `f0e3956` docs Verkettungs-Befund.
+
 ## 2. Architektur-Entscheidungen, die Tests erzwungen haben
 
 ### 2.1 Voll-CUDA → Hybrid (die große Umentscheidung)
@@ -175,10 +195,10 @@ loggt sie bei `-v`. So sieht man ohne Profiler, wo die Zeit bleibt:
 Der Plan sagte: alles auf die GPU. Die Messung sagte: falsch. Auf dem
 720p-Testbild (40 Textzeilen, 2050 Zeichen):
 
-| EP | detektor kalt | detektor warm | Erkenner (40 Zeilen) |
+| EP | Detektor kalt | Detektor warm | Erkenner warm (40 Zeilen) |
 |---|---|---|---|
 | CUDA (beide) | 437 ms | **14,5 ms** | 994 ms (~25 ms/Zeile) |
-| CPU (beide) | 118 ms | 83 ms | 416–492 ms (~11 ms/Zeile) |
+| CPU (beide) | 118 ms | 83 ms | ≈420 ms (~11 ms/Zeile) |
 | **Hybrid (det→CUDA, rec→CPU)** | 431 ms | **15 ms** | **385 ms** |
 
 „Kalt“ ist der erste Durchlauf (CUDA-Kontext + *cuDNN-Autotune*: ONNX Runtime
@@ -241,9 +261,21 @@ diente als Tripwire:
   blieb rot → verworfen.
 - **Exaktes Batching auf CPU** (Gruppen gleicher Breite, kein Zusatz-Padding):
   **0/42 Zeilen weichen ab** — aber nur 1,03× schneller (371 vs. 385 ms), weil
-  fast jede Zeile eine eigene Breite hat (~35 Runs statt 40) und der
-  CPU-Run-Overhead winzig ist. ~80 Zeilen Code für 3 % → ebenfalls verworfen
-  (revertiert; Stand: Hybrid mit Einzel-Läufen wie zuvor).
+  fast jede Zeile eine eigene Breite hat (fast so viele Runs wie Zeilen) und
+  der CPU-Run-Overhead winzig ist. Rund 80 Zeilen Code für 3 % → ebenfalls
+  verworfen (revertiert; Stand: Hybrid mit Einzel-Läufen wie zuvor).
+
+```mermaid
+flowchart TD
+    B[Erkenner beschleunigen?] --> P{Padding auf\nEinheitsform?}
+    P -->|Ja: 26 ms| A[Attention kippt:\nV→Y, Schwellen-Flip]
+    A --> X1[verworfen]
+    P -->|Nein: exakte Gruppen| C{Wo laufen?}
+    C -->|CUDA: viele Formen| S[Formwechsel-Churn\n~28 ms/Run]
+    S --> X2[verworfen]
+    C -->|CPU: kein Churn| E[0/42 Abw., aber nur 1,03×]
+    E --> X3[verworfen]
+```
 
 Trilemma für dieses Modell: exakte Tensoren brauchen viele Formen (CUDA
 unbezahlbar), wenige Formen brauchen Padding (Attention kippt), CPU hat kaum
@@ -317,7 +349,8 @@ Runs sind auf CPU billig, auf CUDA zählt nur die Formgleichheit.)
 - **Text nur bei Änderung erkennen**: Detektor jede N Frames statt jedes Frame
   (Text ändert sich selten) — braucht Box-Tracking für Scrollen.
 - **CUDA-Graphen** (`with_cuda_graph`): könnten den Detektor-Overhead weiter
-  senken; bei variablen Eingabegrößen (Erkenner) nutzlos.
+  senken (fixe Form 1280×736, ideal für Graphen); für den Erkenner mit seinen
+  variablen Breiten nutzlos.
 - **TensorRT-EP**: Das geladene Binary enthält ihn bereits, aber `libnvinfer`
   ist nicht installiert. Potenziell schnellerer Detektor nach Engine-Build
   (Minuten beim Start).
