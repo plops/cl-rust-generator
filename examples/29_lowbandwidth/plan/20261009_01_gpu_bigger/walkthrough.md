@@ -88,14 +88,13 @@ Warum Hybrid und nicht alles auf die GPU? Das hat die Messung entschieden
 
 - **Detektor (DBNet)** — *compute-gebunden*: ein großer Durchlauf über das
   ganze Bild. Rechenlast hoch, ein PCIe-Transfer. GPU gewinnt haushoch.
-- **Erkenner (CTC)** — *latenz-gebunden*: ~40 winzige Durchläufe (je Textzeile),
-  jeder mit eigenem PCIe-Roundtrip (Bild rauf, Ergebnis runter zur CPU).
-  Die Transfers kosten mehr als das Rechnen. CPU gewinnt.
+- **Erkenner (CTC)** — *formwechsel-gebunden*: ~40 Durchläufe (je Textzeile),
+  jeder mit anderer Bildbreite. CUDA zahlt pro Formwechsel ~28 ms statt ~1 ms
+  (Speicher-/Kernel-Setup, s. Abschnitt 2). CPU ist formwechsel-robust und
+  gewinnt.
 
-*PCIe* ist der Bus zwischen CPU und Grafikkarte; jeder `session.run()` auf CUDA
-schiebt Eingabe hin und Ausgabe zurück. *DBNet* findet Text**boxen**,
-*CTC* (*Connectionist Temporal Classification*) liest danach den **Inhalt**
-jeder Box.
+*DBNet* findet Text**boxen**, *CTC* (*Connectionist Temporal Classification*)
+liest danach den **Inhalt** jeder Box.
 
 ```mermaid
 flowchart TD
@@ -187,11 +186,22 @@ probiert beim ersten Mal per *Exhaustive-Search* alle Faltungs-Algorithmen
 durch — langsam einmalig, schnell für immer). „Warm“ ist jeder weitere.
 
 Lesart: Der Detektor ist auf CUDA **6× schneller** als auf CPU (15 vs. 83 ms).
-Der Erkenner ist auf CUDA **2× langsamer** (994 vs. ~420 ms), weil 40 PCIe-
-Roundtrips für Briefmarken-Bilder die GPU nie auslasten. Voll-CUDA wäre in
+Der Erkenner ist auf CUDA **2× langsamer** (994 vs. ~420 ms). Voll-CUDA wäre in
 Summe (~1000 ms) sogar langsamer als Voll-CPU (~500 ms) gewesen — der Hybrid
 (~400 ms) schlägt beide. Konsequenz im Code: `Recognizer::new` nimmt gar keinen
 Provider mehr (immer CPU, dokumentiert), `Detector::new` bekommt ihn.
+
+**Korrektur (Nachtrag):** Die erste Fassung dieses Dokuments gab dem PCIe-
+Transfer die Schuld („40 PCIe-Roundtrips“). Das war falsch. Eine Nachmessung
+mit fester Zeilenbreite zeigt CUDA mit 1,3 ms pro Lauf *inklusive* Transfers
+4× schneller als CPU (7,3 ms). Die wahre Ursache: **Jede Zeile hat eine andere
+Breite, und CUDA zahlt pro Formwechsel ~28 ms statt ~1 ms** — Speicherplanung
+und Kernel-Setup werden bei jedem formverschiedenen Lauf neu gemacht (der Cache
+greift offenbar nur bei identischer Wiederholungsform: 40 Läufe gruppiert nach
+Breite dauern 256 ms, verschachtelt 1125 ms). Weder `Heuristic`-Suche (1013 ms)
+noch PCIe sind der Treiber; CPU ist schlicht formwechsel-robust. Diese
+Erkenntnis macht Batching (ein Lauf, eine Form) zum logischen nächsten Schritt
+(siehe unten).
 
 ```mermaid
 flowchart LR
@@ -219,10 +229,12 @@ wusste. Jetzt nutzt er `PROTO_VERSION` wie der Server-Test schon immer.
 
 ### Learnings
 
-- **GPU heißt nicht automatisch schneller.** Faustregel aus diesem Projekt:
-  Große, wenige Durchläufe → GPU; viele winzige Durchläufe → CPU (der
-  PCIe-Roundtrip kostet ~0,5 ms, egal wie klein das Bild ist). Immer messen,
-  nie annehmen — der `models`-Test druckt deshalb kalt/warm-Zeiten.
+- **GPU heißt nicht automatisch schneller — und die erste Erklärung ist oft
+  falsch.** Erst hieß es „PCIe-Latenz“, die Nachmessung zeigte: Transfers sind
+  schnell (1,3 ms inkl. allem), der Killer ist der **Formwechsel pro Lauf**
+  (~28 ms). Faustregel jetzt: wenige gleiche Formen → GPU; viele wechselnde
+  Formen → CPU oder Batching. Immer messen, nie annehmen — der `models`-Test
+  druckt deshalb kalt/warm-Zeiten. (Sonde: `/tmp/recprobe`, nicht im Git.)
 - **Der erste CUDA-Durchlauf lügt.** 437 ms kalt vs. 15 ms warm beim Detektor —
   wer nur einmal misst, verwirft die GPU zu Unrecht. `ConvAlgorithmSearch`
   steht auf *Exhaustive* (langsamster Kaltstart, schnellster Dauerbetrieb):
@@ -240,10 +252,15 @@ wusste. Jetzt nutzt er `PROTO_VERSION` wie der Server-Test schon immer.
 
 ### Mögliche Erweiterungen
 
-- **Batched Recognition**: Alle Zeilen-Crops in *einem* Durchlauf erkennen
-  (Batch-Dimension) statt 40× einzeln — würde den Erkenner GPU-tauglich
-  machen. Voraussetzung: prüfen, ob das ONNX-Modell Batch > 1 erlaubt, und
-  CTC-Korrektheit mit Padding verifizieren.
+- **Batched Recognition** (jetzt vermessen, empfohlen): Alle Zeilen-Crops in
+  *einem* Durchlauf erkennen statt 40× einzeln. Die Batch-Dimension ist
+  dynamisch (`[-1, 3, 48, -1]`), Batch 40 läuft auf CUDA in **26 ms** statt
+  1125 ms sequentiell (43×!) bzw. 228 ms CPU-sequentiell (9×). Implementierung:
+  Zeilen pro Frame sammeln, Breiten auf Buckets padden (z. B. 320/640/960 —
+  nur 3 Formen, Autotune also 3× einmalig), ein Run, pro Batch-Row
+  CTC-dekodieren, Ergebnis gegen sequentiell validieren (Padding erzeugt nur
+  Blank-Timesteps, die CTC wegfaltet — trotzdem testen). Geschätzter Gewinn:
+  Erkenner 385 ms → 40–120 ms, Pipeline 400 ms → 60–140 ms.
 - **CUDA-Graphen** (`with_cuda_graph`): könnten den Detektor-Overhead weiter
   senken; bei variablen Eingabegrößen (Erkenner) nutzlos.
 - **TensorRT-EP**: Das geladene Binary enthält ihn bereits, aber `libnvinfer`

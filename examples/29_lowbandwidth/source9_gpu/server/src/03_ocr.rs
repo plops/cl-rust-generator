@@ -38,8 +38,8 @@ const MAX_W: usize = 960;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Provider {
     /// Hybrid (gemessen optimal): Detektor auf CUDA (GPU 0, compute-gebunden,
-    /// ~6× schneller als CPU), Erkenner auf CPU (latenz-gebunden: viele kleine
-    /// Einzel-Inferenzen, CPU ~2× schneller als CUDA). Scheitert CUDA, läuft
+    /// ~6× schneller als CPU), Erkenner auf CPU (Formwechsel pro Zeile macht
+    /// CUDA ~4× langsamer als CPU — s. Walkthrough). Scheitert CUDA, läuft
     /// alles auf CPU (Warnung auf stderr).
     #[default]
     Auto,
@@ -252,8 +252,10 @@ pub struct Recognizer {
 
 impl Recognizer {
     /// `dict_path`: `inference.yml` mit `PostProcess.character_dict`.
-    /// Immer CPU: die vielen kleinen Zeilen-Inferenzen sind latenz-gebunden
-    /// (PCIe-Roundtrip pro Zeile) — CPU misst ~2× schneller als CUDA.
+    /// Immer CPU: Jede Zeile hat eine andere Breite, und CUDA zahlt pro
+    /// Formwechsel ~28 ms statt ~1 ms (Speicher-/Kernel-Setup ohne wirksamen
+    /// Cache über Shapes hinweg) — CPU ist formwechsel-robust und misst
+    /// ~4× schneller. Batching (ein Run, eine Form) würde das ändern.
     pub fn new(path: &str, dict_path: &str, threads: usize) -> Result<Self, String> {
         let yaml = std::fs::read_to_string(dict_path).map_err(|e| format!("{dict_path}: {e}"))?;
         let dict = load_dict(&yaml)?;

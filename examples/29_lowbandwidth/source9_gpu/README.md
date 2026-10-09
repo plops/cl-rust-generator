@@ -8,7 +8,7 @@ Maus/Tastatur zurück (`enigo`). Protokoll v2 (inkompatibel zu v1/640²).
 
 KI-Ausführung (Hybrid, gemessen optimal): Der Detektor (DBNet, compute-gebunden)
 läuft per ONNX-CUDA-EP auf der NVIDIA-GPU, der Erkenner (viele kleine
-Zeilen-Inferenzen, latenz-gebunden) auf CPU. Das 720p-Bild wird für die
+Zeilen-Inferenzen, eine Breite pro Zeile) auf CPU. Das 720p-Bild wird für die
 Detektion auf 1280×736 gepaddet (Kanten-Replikation, keine Kachel-Stückelung),
 Boxen werden auf 720 zurückgeschnitten.
 
@@ -38,7 +38,7 @@ cargo test --release -p lbw-server --test padding -- --ignored --nocapture  # Sw
 ```
 
 Messwerte (RTX A4000, 720p-Testbild, 40 Zeilen): Detektor warm 15 ms (CPU:
-83 ms), Erkenner 385 ms auf CPU (CUDA: 994 ms — PCIe-Latenz). Details im
+83 ms), Erkenner 385 ms auf CPU (CUDA: 994 ms — Formwechsel pro Zeile). Details im
 Walkthrough.
 
 ## Was gegenüber source6 fehlt (bewusst)
