@@ -225,6 +225,30 @@ Der Client-Loopback-Test assertierte `version: 1` hartkodiert und schlug nach
 dem Versionssprung fehl — kein Produktfehler, sondern ein Test, der zu viel
 wusste. Jetzt nutzt er `PROTO_VERSION` wie der Server-Test schon immer.
 
+### 2.4 Batching versucht und verworfen (Negativ-Befund)
+
+Auf die Frage „Erkenner batchen?“ wurde beides implementiert und vermessen —
+und beides wieder verworfen. Ein Äquivalenztest (Batch vs. einzeln, 42 Zeilen)
+diente als Tripwire:
+
+- **Bucket-Batching auf CUDA** (3 Breiten-Buckets, 1 Run pro Bucket): schnell
+  (Batch 40 in 26 ms statt 1125 ms einzeln), aber **ändert die Erkennung**.
+  Die Transformer-Attention mischt die Pad-Timesteps ein: Kurze Zeilen kippen
+  (`"V"`→`"Y"`, `"个"`→`"←"`, `" 1"`→`"ā"`), Konfidenzen wackeln überall
+  (0,99→0,98), und eine Zeile rutscht dadurch sogar über die
+  `MIN_TEXT_CONF`-Schwelle (0,15→0,51) — das ändert die gesendeten `TextItems`.
+  Ohne Ground-Truth-Korpus ist so eine Änderung nicht validierbar → Tripwire
+  blieb rot → verworfen.
+- **Exaktes Batching auf CPU** (Gruppen gleicher Breite, kein Zusatz-Padding):
+  **0/42 Zeilen weichen ab** — aber nur 1,03× schneller (371 vs. 385 ms), weil
+  fast jede Zeile eine eigene Breite hat (~35 Runs statt 40) und der
+  CPU-Run-Overhead winzig ist. ~80 Zeilen Code für 3 % → ebenfalls verworfen
+  (revertiert; Stand: Hybrid mit Einzel-Läufen wie zuvor).
+
+Trilemma für dieses Modell: exakte Tensoren brauchen viele Formen (CUDA
+unbezahlbar), wenige Formen brauchen Padding (Attention kippt), CPU hat kaum
+Overhead (Batching spart nichts). Echte Hebel lägen woanders (siehe unten).
+
 ## 3. Learnings und mögliche Erweiterungen
 
 ### Learnings
@@ -233,8 +257,12 @@ wusste. Jetzt nutzt er `PROTO_VERSION` wie der Server-Test schon immer.
   falsch.** Erst hieß es „PCIe-Latenz“, die Nachmessung zeigte: Transfers sind
   schnell (1,3 ms inkl. allem), der Killer ist der **Formwechsel pro Lauf**
   (~28 ms). Faustregel jetzt: wenige gleiche Formen → GPU; viele wechselnde
-  Formen → CPU oder Batching. Immer messen, nie annehmen — der `models`-Test
-  druckt deshalb kalt/warm-Zeiten. (Sonde: `/tmp/recprobe`, nicht im Git.)
+  Formen → CPU (nicht Batching — siehe §2.4). Immer messen, nie annehmen —
+  der `models`-Test druckt deshalb kalt/warm-Zeiten. (Sonde: `/tmp/recprobe`,
+  nicht im Git.)
+- **Timing-Tests seriell laufen lassen.** Zwei `#[ignore]`-Tests parallel
+  verfälschen sich gegenseitig massiv (Detektor-Kaltstart 459 statt 56 ms):
+  `cargo test … -- --ignored --test-threads=1` für vergleichbare Zahlen.
 - **Der erste CUDA-Durchlauf lügt.** 437 ms kalt vs. 15 ms warm beim Detektor —
   wer nur einmal misst, verwirft die GPU zu Unrecht. `ConvAlgorithmSearch`
   steht auf *Exhaustive* (langsamster Kaltstart, schnellster Dauerbetrieb):
@@ -252,15 +280,19 @@ wusste. Jetzt nutzt er `PROTO_VERSION` wie der Server-Test schon immer.
 
 ### Mögliche Erweiterungen
 
-- **Batched Recognition** (jetzt vermessen, empfohlen): Alle Zeilen-Crops in
-  *einem* Durchlauf erkennen statt 40× einzeln. Die Batch-Dimension ist
-  dynamisch (`[-1, 3, 48, -1]`), Batch 40 läuft auf CUDA in **26 ms** statt
-  1125 ms sequentiell (43×!) bzw. 228 ms CPU-sequentiell (9×). Implementierung:
-  Zeilen pro Frame sammeln, Breiten auf Buckets padden (z. B. 320/640/960 —
-  nur 3 Formen, Autotune also 3× einmalig), ein Run, pro Batch-Row
-  CTC-dekodieren, Ergebnis gegen sequentiell validieren (Padding erzeugt nur
-  Blank-Timesteps, die CTC wegfaltet — trotzdem testen). Geschätzter Gewinn:
-  Erkenner 385 ms → 40–120 ms, Pipeline 400 ms → 60–140 ms.
+- **Batched Recognition: evaluiert und verworfen** (siehe §2.4). Die
+  Batch-Dimension ist zwar dynamisch und Batch 40 läuft auf CUDA in 26 ms —
+  aber Bucket-Padding ändert die Erkennung (Attention), exaktes Batching auf
+  CPU bringt nur 1,03×. Nicht wieder aufgreifen ohne neues Modell.
+- **Stillstand-Skip**: `Ocr::text` läuft alle 100 ms, auch wenn sich kein Pixel
+  geändert hat (400 ms für nichts). Frame mit letztem vergleichen, bei
+  Gleichheit `last_texts` wiederverwenden — ~5 Zeilen, bit-identisches
+  Ergebnis, größter Hebel für ruhige Bildschirme.
+- **Erkennungs-Cache**: Unveränderte Boxen über Frames hinweg nicht neu
+  erkennen (Box + Pixel-Hash als Schlüssel; `source6` hatte so einen Cache,
+  MVP strich ihn). Größter Hebel für dichte, statische Bildschirme.
+- **Text nur bei Änderung erkennen**: Detektor jede N Frames statt jedes Frame
+  (Text ändert sich selten) — braucht Box-Tracking für Scrollen.
 - **CUDA-Graphen** (`with_cuda_graph`): könnten den Detektor-Overhead weiter
   senken; bei variablen Eingabegrößen (Erkenner) nutzlos.
 - **TensorRT-EP**: Das geladene Binary enthält ihn bereits, aber `libnvinfer`
