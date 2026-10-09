@@ -249,6 +249,26 @@ Trilemma für dieses Modell: exakte Tensoren brauchen viele Formen (CUDA
 unbezahlbar), wenige Formen brauchen Padding (Attention kippt), CPU hat kaum
 Overhead (Batching spart nichts). Echte Hebel lägen woanders (siehe unten).
 
+### 2.5 Verketten statt Padding? — Nein, dreifach nein (Sonde)
+
+Naheliegend: Zeilen ohne Padding aneinanderhängen (Streifen mit Trennstegen,
+ein Run pro Streifen). Eine Wegwerf-Sonde (42 echte Zeilen, exakte
+Resize-Mathematik, Substring-Orakel) lehnt das aus drei unabhängigen Gründen ab:
+
+1. **Übersprechen frisst Zeichen.** Im einzigen geteilten Streifen (8 kurze
+   Zeilen) gehen 4/8 verloren: `"V"`→`"Y"`, `"X"`→`"x"` (Case-Flip), `"个"`
+   und `"1"` verschwinden ganz. Echte Nachbar-Texte stören die Attention noch
+   stärker als graues Padding (gleiche Kipprichtung `V`→`Y` wie dort).
+2. **Packen spart fast keine Runs.** 42 Zeilen → 35 Streifen: UI-Zeilen sind
+   zu breit, um sich 960 px zu teilen. Ersparnis auf CPU: ~7 Runs × ~2 ms.
+3. **Formenproblem bleibt.** Streifenbreiten streuen genauso wie Zeilenbreiten
+   (CUDA-Churn), Einheitsbreite bräuchte wieder Padding — plus ungelöster
+   Split-Logik (Zeichen→Time-Step-Alignment, CTC-Merge an Nähten: End-`e` +
+   Anfangs-`e` würden zu einem `e` verschmelzen).
+
+(Sonde danach gelöscht; Befund: Verketten optimiert die falsche Variable —
+Runs sind auf CPU billig, auf CUDA zählt nur die Formgleichheit.)
+
 ## 3. Learnings und mögliche Erweiterungen
 
 ### Learnings
@@ -284,6 +304,9 @@ Overhead (Batching spart nichts). Echte Hebel lägen woanders (siehe unten).
   Batch-Dimension ist zwar dynamisch und Batch 40 läuft auf CUDA in 26 ms —
   aber Bucket-Padding ändert die Erkennung (Attention), exaktes Batching auf
   CPU bringt nur 1,03×. Nicht wieder aufgreifen ohne neues Modell.
+- **Zeilen-Verkettung: evaluiert und verworfen** (siehe §2.5). Übersprechen
+  (4/8 Zeichen im geteilten Streifen verloren), kein Run-Gewinn (42→35),
+  Formenproblem ungelöst plus Split-Komplexität.
 - **Stillstand-Skip**: `Ocr::text` läuft alle 100 ms, auch wenn sich kein Pixel
   geändert hat (400 ms für nichts). Frame mit letztem vergleichen, bei
   Gleichheit `last_texts` wiederverwenden — ~5 Zeilen, bit-identisches
