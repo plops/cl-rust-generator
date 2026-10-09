@@ -1,0 +1,271 @@
+# Walkthrough: GPU-Server mit 1280×720 (`source9_gpu`)
+
+Ziel war: Die KI des Low-Bandwidth-Remote-Desktops soll auf der NVIDIA RTX A4000
+rechnen statt auf der CPU, und der Server soll einen 1280×720-Bildschirm lesen
+und kodieren. Ergebnis ist `source9_gpu` — eine Weiterentwicklung von
+`source7_mvp` (640×640, reine CPU). Dieses Dokument erklärt, was genau gebaut
+wurde, was unterwegs umentschieden werden musste und was man daraus mitnimmt.
+
+Fachbegriffe werden beim ersten Auftreten kurz erklärt. Alle Messwerte stammen
+von echten Läufen auf diesem Rechner (RTX A4000, 16 GB, CUDA 13.4, cuDNN 9).
+
+## 1. Was exakt implementiert wurde
+
+### 1.1 Protokoll v2: 1280×720 statt 640×640
+
+Das MVP kannte genau eine Bildgröße: `SIZE = 640`. Jetzt gibt es Breite und Höhe
+getrennt, und die Protokollversion wurde erhöht, damit sich alte und neue
+Clients/Server nicht versehentlich mischen (der Server lehnt fremde Versionen
+beim `Hello` ab):
+
+```rust
+// common/src/01_types.rs
+/// v2: 1280×720 statt 640×640 (inkompatibel zu v1).
+pub const PROTO_VERSION: u16 = 2;
+/// Feste Bildbreite (GPU: immer 1280×720).
+pub const WIDTH: u32 = 1280;
+/// Feste Bildhöhe (GPU: immer 1280×720).
+pub const HEIGHT: u32 = 720;
+```
+
+Angepasst wurden: Server-Capture (`ScrapSource::open(x, y, WIDTH, HEIGHT)`),
+Client-Fenster und Szene (`04_scene.rs`: Canvas jetzt `W * H` statt `N * N`,
+`blit` prüft beide Achsen), alle Tests sowie das Smoke-Skript (Xvfb mit
+`1280x720x24`). Das AV1-Kodierprinzip blieb: **eine** Bounding-Box pro Frame
+als AV1-Still-Picture — ein *Still-Picture* ist ein einzelnes, unabhängig
+dekodierbares Intra-Bild, also quasi „AVIF ohne Container“.
+
+### 1.2 Hybrid-KI: Detektor auf der GPU, Erkenner auf der CPU
+
+**Execution Provider (EP)** heißt bei ONNX Runtime die austauschbare
+Rechen-Schicht: derselbe Modell-Graph kann auf CPU, CUDA oder TensorRT laufen.
+Die Crate `ort` lädt dafür passende Binaries; mit dem Cargo-Feature `cuda`
+kommt ein build mit CUDA-Unterstützung:
+
+```toml
+# server/Cargo.toml
+ort = { version = "2.0.0-rc.13", default-features = false,
+        features = ["download-binaries", "copy-dylibs", "tls-native", "std", "cuda"] }
+```
+
+Der Clou: `ort-sys` erkennt das installierte CUDA 13 und lädt ONNX Runtime 1.28
+mit CUDA-13-EP (`x86_64-unknown-linux-gnu+cuda13,tensorrt,nvrtx`) — exakt
+passend zu CUDA 13.4 + cuDNN 9 auf diesem Rechner. **Kein einziges apt-Paket
+war dafür nötig**, und es kam **keine neue Rust-Abhängigkeit** dazu.
+
+Die Session-Erzeugung versucht CUDA explizit — `error_on_failure` verhindert,
+dass ein kaputtes CUDA still auf CPU zurückfällt (dann wüsste niemand, dass die
+GPU untätig ist). Der Fallback passiert stattdessen sichtbar, mit Grund:
+
+```rust
+// server/src/03_ocr.rs
+fn session(path: &str, threads: usize, want_cuda: bool)
+    -> Result<(Session, &'static str), String>
+{
+    let build = |cuda: bool| -> Result<Session, String> {
+        // ... Builder wie bisher (Level 3, Threads) ...
+        if cuda {
+            b = b.with_execution_providers([ort::ep::CUDA::default()
+                .with_device_id(0)
+                .build()
+                .error_on_failure()])
+                .map_err(|x| format!("{path}: {x}"))?;
+        }
+        b.commit_from_file(path).map_err(e)
+    };
+    if want_cuda {
+        match build(true) {
+            Ok(s) => return Ok((s, "CUDA")),
+            Err(e) => eprintln!("[ort] {path}: CUDA fehlgeschlagen ({e}) — CPU-Fallback"),
+        }
+    }
+    build(false).map(|s| (s, "CPU"))
+}
+```
+
+Warum Hybrid und nicht alles auf die GPU? Das hat die Messung entschieden
+(siehe Abschnitt 2). Der Aufteilung liegt ein simples Prinzip zugrunde:
+
+- **Detektor (DBNet)** — *compute-gebunden*: ein großer Durchlauf über das
+  ganze Bild. Rechenlast hoch, ein PCIe-Transfer. GPU gewinnt haushoch.
+- **Erkenner (CTC)** — *latenz-gebunden*: ~40 winzige Durchläufe (je Textzeile),
+  jeder mit eigenem PCIe-Roundtrip (Bild rauf, Ergebnis runter zur CPU).
+  Die Transfers kosten mehr als das Rechnen. CPU gewinnt.
+
+*PCIe* ist der Bus zwischen CPU und Grafikkarte; jeder `session.run()` auf CUDA
+schiebt Eingabe hin und Ausgabe zurück. *DBNet* findet Text**boxen**,
+*CTC* (*Connectionist Temporal Classification*) liest danach den **Inhalt**
+jeder Box.
+
+```mermaid
+flowchart TD
+    A[Frame 1280×720] --> B[pad_to_32 → 1280×736]
+    B --> C{Detektor DBNet}
+    C -->|CUDA, GPU 0| D[Boxen]
+    D --> E[clip_to → 720p]
+    E --> F{Erkenner CTC je Zeile}
+    F -->|CPU| G[Text + Konfidenz]
+    G --> H[Farben samplen, Maske, AV1-Box]
+```
+
+Der aktive Provider steht beim Start im Log und ist per `Ocr::ep()` abfragbar
+(`"CUDA+CPU"` oder `"CPU"`). `--cpu` erzwingt reinen CPU-Betrieb:
+
+```
+[ort] execution provider: CUDA+CPU (det: CUDA, rec: CPU)
+[server] lauscht auf 127.0.0.1:7878 (1280x720@0,0, q=180)
+```
+
+### 1.3 Padding statt Tiling für das KI-Modell
+
+DBNet ist *voll-convolutional*: Es akzeptiert jede Eingabegröße, solange Breite
+und Höhe Vielfache von 32 sind. 1280 ist es (40×32), 720 nicht (22,5×32).
+Statt das Bild zu kacheln (*Tiling*: viele Teilbilder + Zusammenfügen der
+Boxen mit Überlappungs-Logik), wird unten mit **Kanten-Replikation** auf
+1280×736 aufgefüllt — die letzte Zeile wird wiederholt, sodass keine künstliche
+Bildkante entsteht, die der Detektor als Text missverstehen könnte:
+
+```rust
+// server/src/03_ocr.rs
+pub fn pad_to_32(img: &RgbImage) -> (RgbImage, u32, u32) {
+    let (w, h) = (img.width(), img.height());
+    let (pw, ph) = (w.div_ceil(32) * 32, h.div_ceil(32) * 32);
+    let mut out = RgbImage::new(pw, ph);
+    for y in 0..ph {
+        let sy = y.min(h - 1);
+        for x in 0..pw {
+            out.put_pixel(x, y, *img.get_pixel(x.min(w - 1), sy));
+        }
+    }
+    (out, w, h)
+}
+
+/// Schneidet `r` auf `w`×`h` zu; `None` bei Boxen ganz außerhalb
+/// (z. B. in der Padding-Zone unterhalb von 720).
+pub fn clip_to(r: Rect, w: u32, h: u32) -> Option<Rect> { /* ... */ }
+```
+
+Erkennung, Farbsampling und Maske laufen danach auf dem **Original** — die
+Koordinaten oberhalb von 720 sind in beiden Bildern identisch.
+
+### 1.4 Timing-Log als GPU-Nachweis
+
+Jeder `Ocr::text()`-Durchlauf misst Detektor- und Erkenner-Zeit; die Session
+loggt sie bei `-v`. So sieht man ohne Profiler, wo die Zeit bleibt:
+
+```
+[frame 1] 1 Texte (det 490.2 ms, rec 9.0 ms), 1 Kacheln, 1324 B
+[frame 2] 1 Texte (det 14.2 ms, rec 7.9 ms), 0 Kacheln, 0 B
+```
+
+(Frame 1 zahlt den CUDA-Kaltstart, danach ist der Detektor bei ~14 ms.)
+
+### 1.5 Modelle per Symlink, Tests, Client
+
+- `source9_gpu/models` → Symlink auf `../source7_mvp/models` (echte Dateien,
+  nicht im Git; Pfad in `.gitignore` ergänzt). `--models` bleibt als Option.
+- Client: Fenster, Szene und Maus-Clamping auf 1280×720; Rest unverändert.
+- Tests: Unit-Tests für `pad_to_32`/`clip_to`; `models`-Test assertiert EP,
+  Textmenge (> 20 Zeichen), Boxen-im-Bild und deterministische Wiederholung;
+  `padding`-Sweep und Smoke laufen auf 720p-Xvfb.
+
+## 2. Architektur-Entscheidungen, die Tests erzwungen haben
+
+### 2.1 Voll-CUDA → Hybrid (die große Umentscheidung)
+
+Der Plan sagte: alles auf die GPU. Die Messung sagte: falsch. Auf dem
+720p-Testbild (40 Textzeilen, 2050 Zeichen):
+
+| EP | detektor kalt | detektor warm | Erkenner (40 Zeilen) |
+|---|---|---|---|
+| CUDA (beide) | 437 ms | **14,5 ms** | 994 ms (~25 ms/Zeile) |
+| CPU (beide) | 118 ms | 83 ms | 416–492 ms (~11 ms/Zeile) |
+| **Hybrid (det→CUDA, rec→CPU)** | 431 ms | **15 ms** | **385 ms** |
+
+„Kalt“ ist der erste Durchlauf (CUDA-Kontext + *cuDNN-Autotune*: ONNX Runtime
+probiert beim ersten Mal per *Exhaustive-Search* alle Faltungs-Algorithmen
+durch — langsam einmalig, schnell für immer). „Warm“ ist jeder weitere.
+
+Lesart: Der Detektor ist auf CUDA **6× schneller** als auf CPU (15 vs. 83 ms).
+Der Erkenner ist auf CUDA **2× langsamer** (994 vs. ~420 ms), weil 40 PCIe-
+Roundtrips für Briefmarken-Bilder die GPU nie auslasten. Voll-CUDA wäre in
+Summe (~1000 ms) sogar langsamer als Voll-CPU (~500 ms) gewesen — der Hybrid
+(~400 ms) schlägt beide. Konsequenz im Code: `Recognizer::new` nimmt gar keinen
+Provider mehr (immer CPU, dokumentiert), `Detector::new` bekommt ihn.
+
+```mermaid
+flowchart LR
+    M[Messung] --> D{Detektor warm?}
+    D -->|15 ms CUDA vs 83 ms CPU| DC[Detektor → CUDA]
+    M --> R{Erkenner 40 Zeilen?}
+    R -->|994 ms CUDA vs 385 ms CPU| RC[Erkenner → CPU]
+    DC & RC --> H[Hybrid: ~400 ms]
+```
+
+### 2.2 Padding statt Tiling (bestätigt, nicht geändert)
+
+Der Plan vermutete bereits: kein Tiling nötig. Der `models`-Test beweist es:
+Alle 40 Zeilen werden auf dem gepaddeten Vollbild gefunden, alle Boxen liegen
+nach dem Clip im 720p-Bild. Tiling hätte Stitching-Logik (doppelte Boxen an
+Kachelgrenzen verschmelzen, *NMS*) für null Nutzen bedeutet.
+
+### 2.3 Kleinigkeit: Loopback-Test pinnt Protokollversion
+
+Der Client-Loopback-Test assertierte `version: 1` hartkodiert und schlug nach
+dem Versionssprung fehl — kein Produktfehler, sondern ein Test, der zu viel
+wusste. Jetzt nutzt er `PROTO_VERSION` wie der Server-Test schon immer.
+
+## 3. Learnings und mögliche Erweiterungen
+
+### Learnings
+
+- **GPU heißt nicht automatisch schneller.** Faustregel aus diesem Projekt:
+  Große, wenige Durchläufe → GPU; viele winzige Durchläufe → CPU (der
+  PCIe-Roundtrip kostet ~0,5 ms, egal wie klein das Bild ist). Immer messen,
+  nie annehmen — der `models`-Test druckt deshalb kalt/warm-Zeiten.
+- **Der erste CUDA-Durchlauf lügt.** 437 ms kalt vs. 15 ms warm beim Detektor —
+  wer nur einmal misst, verwirft die GPU zu Unrecht. `ConvAlgorithmSearch`
+  steht auf *Exhaustive* (langsamster Kaltstart, schnellster Dauerbetrieb):
+  richtig für einen Server, der stundenlang läuft.
+- **`error_on_failure` ist Pflicht.** Ohne das Flag fällt `ort` bei kaputtem
+  CUDA lautlos auf CPU zurück — man glaubt, auf der GPU zu sein, und ist es
+  nicht. Mit Flag scheitert die Session explizit, und der eigene Fallback
+  loggt den Grund.
+- **crates.io blockt den Default-curl-User-Agent** (HTTP 403), `cargo`
+  funktioniert trotzdem. Bei Netz-Rätseln zuerst den User-Agent prüfen.
+- **`pkill -f` trifft die eigene Shell**, wenn das Muster im eigenen Kommando
+  vorkommt (z. B. ein Pfad mit `lbw-server`). Für exakte Namen: `pkill -x`.
+- **`ort` erkennt CUDA 13 selbst** (per `nvcc`/Env) und lädt das passende
+  Binary — kein `ORT_CUDA_VERSION` nötig, kein apt, keine neue Rust-Dep.
+
+### Mögliche Erweiterungen
+
+- **Batched Recognition**: Alle Zeilen-Crops in *einem* Durchlauf erkennen
+  (Batch-Dimension) statt 40× einzeln — würde den Erkenner GPU-tauglich
+  machen. Voraussetzung: prüfen, ob das ONNX-Modell Batch > 1 erlaubt, und
+  CTC-Korrektheit mit Padding verifizieren.
+- **CUDA-Graphen** (`with_cuda_graph`): könnten den Detektor-Overhead weiter
+  senken; bei variablen Eingabegrößen (Erkenner) nutzlos.
+- **TensorRT-EP**: Das geladene Binary enthält ihn bereits, aber `libnvinfer`
+  ist nicht installiert. Potenziell schnellerer Detektor nach Engine-Build
+  (Minuten beim Start).
+- **FP16 / INT8**: Kleinere Modelle, schnellere Inferenz — braucht Validierung
+  der Erkennungsqualität (CER-Messung).
+- **VRAM-Limit-Flag** (`with_memory_limit`, Default unbegrenzt): relevant erst
+  bei geteilter GPU.
+- **Multi-GPU** (`--device-id`): aktuell fest GPU 0 — richtig für genau eine
+  A4000, erweiterbar bei Bedarf.
+
+## 4. Programme/Pakete für das Dockerfile
+
+Dauerhaft ins Image (GPU-Laufzeit + Build + Tests):
+
+| Paket | Wofür | Phase |
+|---|---|---|
+| CUDA 13 + cuDNN 9 (bereits im GPU-Image) | ONNX-CUDA-EP zur Laufzeit | Laufzeit |
+| `libxcb1-dev`, `libxcb-shm0-dev`, `libxcb-randr0-dev` | Link-Symlinks für `scrap` | Build |
+| `xvfb`, `xterm` | Smoke-Test + Padding-Sweep | Test |
+| `x11-utils` (`xdpyinfo`, `xrandr`) | Display-Diagnose | Debug |
+
+Ausdrücklich **nicht** nötig: `nasm` (rav1e ohne `asm`), `nvcc`/CUDA-Toolkit
+zum Bauen (nur Laufzeit-Libs), TensorRT-Libs (ungenutzt), neue Rust-Crates.
