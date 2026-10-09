@@ -374,3 +374,51 @@ Dauerhaft ins Image (GPU-Laufzeit + Build + Tests):
 
 Ausdrücklich **nicht** nötig: `nasm` (rav1e ohne `asm`), `nvcc`/CUDA-Toolkit
 zum Bauen (nur Laufzeit-Libs), TensorRT-Libs (ungenutzt), neue Rust-Crates.
+
+## 5. Betrieb: Server aus dem Container auf Host-`:0`
+
+Der Server läuft auch aus dem Container heraus direkt gegen den echten
+Host-Desktop (`:0`, 1280×720 — passt exakt zum Capture-Ausschnitt), ohne
+etwas auf dem Host zu ändern. Zwei Stolpersteine:
+
+**X-Auth schlägt fehl, obwohl ein Cookie da ist.** Der Container teilt
+`/tmp/.X11-unix` mit dem Host (der `X0`-Socket liegt darin), und
+`/root/.Xauthority` ist als Read-only-Mount sichtbar. Aber: X11-Clients
+suchen den Cookie-Eintrag unter dem eigenen Rechnernamen
+(`$(hostname)/unix:0`), und die drei Einträge darin (`(none)`, `gentoo`,
+`localhost`) passen nicht zum Container-Hostnamen — `xdpyinfo` meldet
+`Authorization required, but no authorization protocol specified`. Durch
+Ausprobieren: Nur der `localhost`-Cookie
+(`b56239a3a3e85008964efd97b11e6e7b`) authentifiziert gegen Host-`:0`
+(X.Org 21.1.24). Fix: beschreibbare Kopie mit passendem
+Hostnamen-Eintrag anlegen (die gemountete Datei ist nicht schreibbar)
+— **kein `xhost +` auf dem Host nötig**, also kein Sicherheitsloch:
+
+```sh
+# einmalig pro Container-Leben (der Hostname ändert sich bei Neustart)
+COOKIE=b56239a3a3e85008964efd97b11e6e7b
+xauth -f /tmp/.Xauthority-host add "$(hostname)/unix:0" MIT-MAGIC-COOKIE-1 "$COOKIE"       # root
+xauth -f /home/ubuntu/.Xauthority add "$(hostname)/unix:0" MIT-MAGIC-COOKIE-1 "$COOKIE"    # ubuntu
+chown ubuntu:ubuntu /home/ubuntu/.Xauthority
+
+# Server starten (aus source9_gpu/)
+DISPLAY=:0 XAUTHORITY=/tmp/.Xauthority-host ./target/release/lbw-server
+su -s /bin/bash ubuntu -c 'cd .../source9_gpu && DISPLAY=:0 XAUTHORITY=/home/ubuntu/.Xauthority ./target/release/lbw-server'
+```
+
+**`su`-Syntax.** `su ubuntu xterm` scheitert mit
+`/usr/bin/xterm: cannot execute binary file` — `su` ohne `-c` führt kein
+Programm aus, sondern füttert es an die Shell. Es heißt
+`su -s /bin/bash ubuntu -c '…'`.
+
+**Verifikation auf Host-`:0`** (Port 17881, danach gestoppt): `xterm`
+erschien im Host-Display (`xlsclients` listet es); der Server meldete
+`[ort] CUDA+CPU`, `lauscht auf … (1280x720@0,0)`, `[input] bereit`,
+RandR-Ursprung `+0+0`. Eine eingabefreie Probe (Variante von
+`client/examples/probe.rs` **ohne** Maus-/Tastatur-Events — die normale
+Probe klickt bei 100,100 und tippt `hi`+Enter, gefährlich auf einem
+echten Desktop; Sonde: `/tmp/probe_noinput`, nicht im Git):
+`probe: OK (41 Texte, 1 Kacheln, 8385 B)` mit echten Host-Inhalten
+(Firefox-Tabs, Fenstermenü). Detektor warm ~14,5 ms, keine
+Session-Fehler. Befund: **MIT-SHM-Capture (`scrap`) funktioniert über
+die Container-Grenze** — kein `--ipc=host`, kein Fallback nötig.
