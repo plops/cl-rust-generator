@@ -41,8 +41,19 @@ DISPLAY="$DISP" ./target/release/lbw-server \
 SERVER_PID=$!
 sleep 2
 
-cargo run --release -p lbw-client --example probe -- "127.0.0.1:$PORT" 2>&1 | tail -n 12
+cargo run --release -p lbw-client --example probe -- "127.0.0.1:$PORT" 2>&1 | tee /tmp/smoke_probe1.log | tail -n 12
+# Reconnect-Regression: Der zweite Client muss ebenfalls Vollbild bekommen
+# (Session keilte früher bei statischem Bild — Reconnect blieb schwarz).
+cargo run --release -p lbw-client --example probe -- "127.0.0.1:$PORT" 2>&1 | tee /tmp/smoke_probe2.log | tail -n 6
 
+if ! grep -q "probe: OK" /tmp/smoke_probe1.log; then
+  echo "smoke: FEHLER — erste Probe ohne Vollbild" >&2
+  exit 1
+fi
+if ! grep -q "probe: OK" /tmp/smoke_probe2.log; then
+  echo "smoke: FEHLER — zweite Probe ohne Vollbild (Reconnect-Regression)" >&2
+  exit 1
+fi
 if grep -q "Session-Fehler" /tmp/smoke_server.log; then
   echo "smoke: FEHLER — Server meldet Session-Fehler:" >&2
   grep "Session-Fehler" /tmp/smoke_server.log >&2

@@ -10,6 +10,7 @@ use lbw_log::Recorder;
 use lbw_server::capture::ScrapSource;
 use lbw_server::config::Config;
 use lbw_server::detect::Provider;
+use lbw_server::input::Injector;
 use lbw_server::ocr::Ocr;
 use lbw_server::session::serve_client;
 
@@ -68,7 +69,14 @@ fn run(cfg: Config) -> Result<(), String> {
                     .unwrap_or_else(|_| "?".into());
                 eprintln!("[server] Client verbunden");
                 rec.gap_up(&peer);
-                match serve_client(s, &cfg, &mut src, &mut ocr, None, &rec) {
+                let inj = match Injector::open((cfg.x, cfg.y)) {
+                    Ok(i) => Some(i),
+                    Err(e) => {
+                        eprintln!("[input] {e} — laufe ohne Eingabe");
+                        None
+                    }
+                };
+                match serve_client(s, &cfg, &mut src, &mut ocr, None, &rec, inj) {
                     Ok(()) => rec.gap_down("ok"),
                     Err(e) => {
                         eprintln!("[server] Session-Fehler: {e}");

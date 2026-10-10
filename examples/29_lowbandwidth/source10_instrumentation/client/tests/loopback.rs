@@ -189,6 +189,60 @@ fn wait_all_with_end(path: &str, timeout: Duration) -> Vec<LogRecord> {
     }
 }
 
+/// Reconnect-Resync: Nach dem Abriss muss die zweite Verbindung wieder
+/// ein (dekodierbares) Vollbild liefern — sonst bleibt der Client schwarz.
+#[test]
+fn tile_arrives_after_reconnect_with_pixels() {
+    let rgb = [40u8, 80, 160].repeat(64 * 64);
+    let tile = lbw_server::av1::encode_rgb(&rgb, 64, 64, 180).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let addr = format!("127.0.0.1:{port}");
+    let stub1 = stub(listener, tile, 0);
+
+    let net = Net::connect(&addr);
+    let mut tiles = 0;
+    recv_until(&net, Instant::now() + Duration::from_secs(10), &mut |e| {
+        if matches!(e, Event::Tile { .. }) {
+            tiles += 1;
+            return true;
+        }
+        false
+    });
+    assert_eq!(tiles, 1, "erste Verbindung muss eine Kachel liefern");
+    stub1.join().unwrap();
+    recv_until(&net, Instant::now() + Duration::from_secs(5), &mut |e| {
+        matches!(e, Event::Disconnected(_))
+    });
+
+    // Zweite Verbindung: wieder Connected UND Kachel mit Pixeln.
+    let listener2 = TcpListener::bind(&addr).unwrap();
+    let rgb2 = [200u8, 100, 50].repeat(64 * 64);
+    let tile2 = lbw_server::av1::encode_rgb(&rgb2, 64, 64, 180).unwrap();
+    let stub2 = stub(listener2, tile2, 0);
+    let mut connected = false;
+    let mut pixels_ok = false;
+    recv_until(&net, Instant::now() + Duration::from_secs(10), &mut |e| {
+        match e {
+            Event::Connected => connected = true,
+            Event::Tile { w, h, rgba, .. } => {
+                assert_eq!((w, h), (64, 64));
+                assert!(rgba.chunks(4).all(|p| p[3] == 255));
+                for (got, want) in rgba[0..3].iter().zip([200, 100, 50]) {
+                    assert!(got.abs_diff(want) <= 3, "{rgba:?}");
+                }
+                pixels_ok = true;
+            }
+            _ => {}
+        }
+        connected && pixels_ok
+    });
+    assert!(connected, "Reconnect muss Connected liefern");
+    assert!(pixels_ok, "Reconnect muss eine Kachel mit Pixeln liefern");
+    stub2.join().unwrap();
+    drop(net);
+}
+
 #[test]
 fn recording_captures_both_directions_and_decode() {
     let path = format!(

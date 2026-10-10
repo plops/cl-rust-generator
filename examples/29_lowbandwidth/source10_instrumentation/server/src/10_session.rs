@@ -9,6 +9,7 @@
 use std::net::TcpStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::channel;
 use std::time::{Duration, Instant};
 
 use image::RgbImage;
@@ -20,7 +21,7 @@ use lbw_log::{FrameMs, MsgKind, Recorder, TileStat, fnv1a64};
 use crate::av1::encode_rgb;
 use crate::capture::FrameSource;
 use crate::config::Config;
-use crate::input::Injector;
+use crate::input::Inject;
 use crate::ocr::Ocr;
 use crate::textids::{assign_ids, diff_texts};
 use crate::tiles::{MASK_PAD, crop_rgb, dirty_bbox, fill_rect, pad_rect};
@@ -75,14 +76,16 @@ fn send_text(wr: &mut TcpStream, rec: &Recorder, m: &ServerMsg, text_bytes: &mut
 
 /// Bedient genau einen Client bis zum Abriss. `max_frames` begrenzt die
 /// Schleife (Tests); `None` läuft für immer. Verbindungsabbrüche sind
-/// `Ok(())`, nur lokale Fehler (Capture, OCR) sind `Err`.
-pub fn serve_client<S: FrameSource, R: Recognize>(
+/// `Ok(())`, nur lokale Fehler (Capture, OCR) sind `Err`. `inj` injiziert
+/// Eingaben (`None`: kein Display — Reader läuft als Drain).
+pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
     stream: TcpStream,
     cfg: &Config,
     src: &mut S,
     ocr: &mut R,
     max_frames: Option<u64>,
     rec: &Recorder,
+    inj: Option<I>,
 ) -> Result<(), String> {
     stream
         .set_read_timeout(Some(HELLO_TIMEOUT))
@@ -108,22 +111,41 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
     rec.msg_server(&ServerMsg::Hello, n);
 
     // Eingaben laufen in eigenem Thread, damit Tippen nie auf AV1 wartet.
+    // Der Reader läuft IMMER (ohne Injektor als Drain): Sein Ende ist das
+    // einzige Abriss-Signal — bei statischem Bild schreibt die Hauptschleife
+    // nie, sähe den toten Client also nie (Accept verkeilt, Reconnect
+    // schwarz; s. Test `session_ends_when_client_disconnects_idle`).
+    // Die Injektion läuft dahinter entkoppelt (eigener Thread, unbegrenzter
+    // Kanal): Ein hängendes `handle` (enigo/X11, 1× live beobachtet) darf
+    // weder Reader noch Session je keilen. Der Worker ist bewusst detached
+    // (kein Join — genau der würde wieder keilen); Normalfall-Ende per
+    // Kanal-`Disconnect`, im Hängefall leckt ein Thread pro Session.
     rd.set_read_timeout(Some(Duration::from_millis(200)))
         .map_err(|e| e.to_string())?;
     let stop = Arc::new(AtomicBool::new(false));
-    let input = match Injector::open((cfg.x, cfg.y)) {
-        Ok(inj) => Some(spawn_input(
-            rd,
-            fr,
-            inj,
-            stop.clone(),
-            cfg.verbose,
-            rec.clone(),
-        )),
-        Err(e) => {
-            eprintln!("[input] {e} — laufe ohne Eingabe");
-            None
+    let input = match inj {
+        Some(inj) => {
+            let (tx, rx) = channel::<ClientMsg>();
+            let r = rec.clone();
+            std::thread::spawn(move || {
+                let mut inj = inj;
+                for m in rx {
+                    let t = Instant::now();
+                    let ok = match inj.handle(&m) {
+                        Ok(()) => true,
+                        Err(e) => {
+                            eprintln!("[input] {e}");
+                            false
+                        }
+                    };
+                    r.inject(MsgKind::of_client(&m), ms(t), ok);
+                }
+            });
+            spawn_reader(rd, fr, stop.clone(), cfg.verbose, rec.clone(), move |m| {
+                let _ = tx.send(m);
+            })
         }
+        None => spawn_reader(rd, fr, stop.clone(), cfg.verbose, rec.clone(), |_| {}),
     };
 
     let mut prev: Option<RgbImage> = None;
@@ -131,6 +153,10 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
     let mut next_text_id: u64 = 1;
     let mut frames: u64 = 0;
     let result = loop {
+        if input.is_finished() {
+            // Reader-Thread weg (EOF/Protokollfehler): Client ist tot.
+            break Ok(());
+        }
         if max_frames.is_some_and(|n| frames >= n) {
             break Ok(());
         }
@@ -277,9 +303,7 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
     };
 
     stop.store(true, Ordering::Relaxed);
-    if let Some(h) = input {
-        let _ = h.join();
-    }
+    let _ = input.join();
     result
 }
 
@@ -315,28 +339,19 @@ pub fn input_loop(
     }
 }
 
-fn spawn_input(
+/// Startet den Eingabe-Reader (Injektion oder Drain — s. `serve_client`).
+fn spawn_reader(
     rd: TcpStream,
     fr: FrameReader,
-    mut inj: Injector,
     stop: Arc<AtomicBool>,
     verbose: bool,
     rec: Recorder,
+    on_msg: impl FnMut(ClientMsg) + Send + 'static,
 ) -> std::thread::JoinHandle<()> {
     if verbose {
         eprintln!("[input] bereit");
     }
     std::thread::spawn(move || {
-        input_loop(rd, fr, &stop, verbose, &rec, |m| {
-            let t = Instant::now();
-            let ok = match inj.handle(&m) {
-                Ok(()) => true,
-                Err(e) => {
-                    eprintln!("[input] {e}");
-                    false
-                }
-            };
-            rec.inject(MsgKind::of_client(&m), ms(t), ok);
-        });
+        input_loop(rd, fr, &stop, verbose, &rec, on_msg);
     })
 }

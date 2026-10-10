@@ -16,6 +16,12 @@ pub struct Injector {
     oy: i32,
 }
 
+/// Führt Client-Eingaben aus (enigo in Produktion, Attrappe in Tests).
+pub trait Inject {
+    /// Führt eine Client-Nachricht aus (Hello wird ignoriert).
+    fn handle(&mut self, m: &ClientMsg) -> Result<(), String>;
+}
+
 impl Injector {
     /// `offset`: linke obere Ecke des Capture-Ausschnitts im primären
     /// Monitor; dessen RandR-Ursprung kommt dazu (Mehrmonitor-Layouts).
@@ -28,9 +34,10 @@ impl Injector {
             oy: my + offset.1 as i32,
         })
     }
+}
 
-    /// Führt eine Client-Nachricht aus (Hello wird ignoriert).
-    pub fn handle(&mut self, m: &ClientMsg) -> Result<(), String> {
+impl Inject for Injector {
+    fn handle(&mut self, m: &ClientMsg) -> Result<(), String> {
         match m {
             ClientMsg::Hello { .. } => Ok(()),
             ClientMsg::MouseMove { x, y } => {

@@ -1,82 +1,20 @@
 //! Loopback: echte Session (`SharedSource` + Stub-OCR) über echtes TCP.
 //! Läuft ohne X11 und ohne Modelle.
 
+mod common;
+use common::*;
+
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
-use clap::Parser;
-use image::RgbImage;
 use lbw_common::framing::{FrameReader, decode_msg, write_msg};
-use lbw_common::{ClientMsg, PROTO_VERSION, Rect, ServerMsg, TextItem};
+use lbw_common::{ClientMsg, PROTO_VERSION, ServerMsg};
 use lbw_log::io::{Reader, Recorder};
 use lbw_log::{Dir, LogRecord, MsgKind};
 use lbw_server::capture::{SharedSource, solid};
-use lbw_server::config::Config;
-use lbw_server::session::{Recognize, input_loop, serve_client};
-
-/// Stub-OCR mit von außen wechselbarem Ergebnis (Delta-Tests).
-#[derive(Clone)]
-struct StubOcr(std::sync::Arc<std::sync::Mutex<Vec<TextItem>>>);
-
-impl StubOcr {
-    fn fixed(v: Vec<TextItem>) -> Self {
-        Self(std::sync::Arc::new(std::sync::Mutex::new(v)))
-    }
-
-    fn set(&self, v: Vec<TextItem>) {
-        *self.0.lock().unwrap() = v;
-    }
-}
-
-impl Recognize for StubOcr {
-    fn text(&mut self, _img: &RgbImage) -> Result<Vec<TextItem>, String> {
-        Ok(self.0.lock().unwrap().clone())
-    }
-}
-
-fn test_cfg() -> Config {
-    // Ohne Display: Injector::open scheitert, die Session läuft ohne Eingabe.
-    Config::try_parse_from(["lbw-server"]).unwrap()
-}
-
-fn item() -> TextItem {
-    TextItem {
-        id: 0, // vergibt die Session (Stub liefert wie OCR id: 0)
-        rect: Rect::new(8, 8, 32, 16),
-        fg: [0; 3],
-        bg: [255; 3],
-        text: "hi".into(),
-    }
-}
-
-fn item_at(x: u16, y: u16, text: &str) -> TextItem {
-    TextItem {
-        id: 0,
-        rect: Rect::new(x, y, 32, 16),
-        fg: [0; 3],
-        bg: [255; 3],
-        text: text.into(),
-    }
-}
-
-/// Liest bis zur Deadline; `want` zählt relevante Nachrichten.
-fn read_until(
-    fr: &mut FrameReader,
-    s: &mut TcpStream,
-    until: Instant,
-    want: &mut dyn FnMut(&ServerMsg) -> bool,
-) {
-    s.set_read_timeout(Some(Duration::from_millis(200)))
-        .unwrap();
-    while Instant::now() < until {
-        if let Some(m) = fr.read_msg::<ServerMsg>(s).unwrap()
-            && want(&m)
-        {
-            return;
-        }
-    }
-}
+use lbw_server::input::Injector;
+use lbw_server::session::{input_loop, serve_client};
 
 #[test]
 fn full_frame_then_single_dirty_tile() {
@@ -96,6 +34,7 @@ fn full_frame_then_single_dirty_tile() {
             &mut ocr,
             Some(30),
             &Recorder::none(),
+            None::<Injector>,
         )
     });
 
@@ -183,6 +122,7 @@ fn wrong_version_is_rejected() {
             &mut ocr,
             Some(1),
             &Recorder::none(),
+            None::<Injector>,
         )
     });
 
@@ -268,7 +208,15 @@ fn recording_captures_messages_and_frames() {
         let (stream, _) = listener.accept().unwrap();
         let mut src = SharedSource::new(solid(128, 128, [40; 3]));
         let mut ocr = StubOcr::fixed(vec![item()]);
-        let r = serve_client(stream, &test_cfg(), &mut src, &mut ocr, Some(3), &rec);
+        let r = serve_client(
+            stream,
+            &test_cfg(),
+            &mut src,
+            &mut ocr,
+            Some(3),
+            &rec,
+            None::<Injector>,
+        );
         drop(rec); // `End` vor dem Lesen schreiben.
         r
     });
@@ -380,6 +328,7 @@ fn text_delta_sends_only_changes() {
             &mut ocr,
             Some(40),
             &Recorder::none(),
+            None::<Injector>,
         )
     });
 
@@ -470,6 +419,7 @@ fn removed_text_sends_remove_text() {
             &mut ocr,
             Some(40),
             &Recorder::none(),
+            None::<Injector>,
         )
     });
 
