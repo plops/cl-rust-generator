@@ -1,0 +1,16 @@
+[workspace]
+resolver = "3"
+members = ["common", "log", "server", "client"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Wol Pumba <wolpumba@gmail.com>"]
+license = "MIT"
+
+[profile.release]
+opt-level = 3
+
+# Debug-Builds: Abhängigkeiten optimieren (Encoder/Decoder sonst ~20x langsamer).
+[profile.dev.package."*"]
+opt-level = 3

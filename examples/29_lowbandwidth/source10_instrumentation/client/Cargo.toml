@@ -1,0 +1,20 @@
+[package]
+name = "lbw-client"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+lbw-common = { path = "../common" }
+lbw-log = { path = "../log" }
+macroquad = "0.4.16"
+rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8"] }
+
+[dev-dependencies]
+lbw-server = { path = "../server" }
+
+[[bin]]
+name = "lbw-replay"
+path = "src/bin/lbw-replay.rs"
