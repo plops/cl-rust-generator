@@ -1,0 +1,106 @@
+Der vorliegende Code ist **architektonisch bemerkenswert fokussiert und durchdacht**. Das Konzept (DBNet auf CUDA, SVTR auf CPU, OCR-Maskierung, einzelne dynamische AV1-Bounding-Box und v3-Text-Deltas) löst das Kernproblem schmalbandiger Verbindungen mit erstaunlich wenig "Balast".
+
+Im Folgenden findest du eine detaillierte Prüfung auf **Code-Minimalismus** sowie auf die **Eignung des Log-Formats und der Statistik für einen 6-kB/s-Kanal**.
+
+---
+
+### Teil 1: Ist der Code so minimal wie möglich?
+
+#### Was bereits extrem schlank gelöst ist:
+1. **Kein Kachelraster-Overhead (`06_tiles.rs`):** Statt eines Quadtrees oder Kachel-Managers wird einfach *eine einzige* umschließende Bounding Box berechnet. AV1 übernimmt das Überspringen statischer Bildbereiche intern. Das spart hunderte Zeilen Kachelverwaltung.
+2. **Text-Delta (`09_textids.rs`):** Statt komplexer Zeilen-Tracking-Algorithmen genügt eine euklidische Distanzprüfung (`hypot <= 24.0`) mit Längenvergleich. Das ist absolut pragmatisch und wirkungsvoll.
+3. **Framing & Serialisierung (`02_framing.rs`):** 4-Byte-LE-Länge + `bincode`. Kein Protobuf, kein Schema-Compiler, minimaler Laufzeit-Overhead.
+4. **Verzicht auf `serde_json`:** Eigener Hand-Serializer in `06_export.rs`.
+5. **Kein Async-Overhead auf dem Server:** Synchrone Threads mit Sockets und Lese-Timeouts.
+
+#### Wo noch unnötiger Code/Ballast liegt (Einsparpotenziale):
+
+1. **Legacy-Kompatibilität in `common/src/02_framing.rs`:**
+   * `TextItemV2`, `ServerMsgV2`, `decode_server_v2` und die Weiche in `decode_server_logged` gehören **nicht** in `lbw-common`.
+   * *Problem:* `lbw-common` definiert das aktuelle Protokoll (v3). Log-Altlasten für Version 1 verunreinigen das Core-Crate. 
+   * *Minimalismus:* Wenn es sich um ein Forschungsprojekt/internes Tool handelt, alte Logs verwerfen oder den V2-Decoder komplett in `lbw-log` isolieren.
+2. **Doppelte Zeitstempel in `Stamp` (`01_record.rs`):**
+   * Jeder Record speichert `wall_us: u64` *und* `mono_us: u64` (16 Byte pro Record nur für Zeit).
+   * *Minimaler:* Ein einzelner Basis-`wall_us` im `Session`-Header und in den Records ausschließlich relative `mono_us` (oder `mono_ms`). Das spart Byte im Log und Berechnungslogik.
+3. **Doppelte Hash-Implementierung:**
+   * In `lbw-log::fnv1a64` existiert FNV-1a/64. In `server/src/05_ocr.rs` (`hash_rect`) wird FNV-1a manuell nachimplementiert. Hier sollte `lbw-log` oder ein Helfer in `common` wiederverwendet werden.
+4. **Frame-Pacing-Jitter (`10_session.rs`):**
+   * Am Ende des Server-Loops steht `std::thread::sleep(FRAME_GAP);` mit festen 100 ms.
+   * Wenn OCR + AV1 65 ms dauern, beträgt der Frameabstand 165 ms (~6 fps statt 10 fps).
+   * *Minimaler Fix:* `std::thread::sleep(FRAME_GAP.saturating_sub(t.elapsed()));` – das stabilisiert den Durchsatz ohne zusätzlichen Scheduler.
+
+---
+
+### Teil 2: Reichen Log-Format & Statistik für einen 6-kB/s-Kanal und Latenzmessungen aus?
+
+Ein 6-kB/s-Kanal (~48 kbit/s) ist extrem empfindlich: Bereits ein einziges AV1-Paket von 3 kB blockiert die Leitung für **500 ms**. Hier entscheidet sich die Nutzbarkeit über Bufferbloat und Queueing-Delays.
+
+Das Format und die Auswertungen in `03_stats.rs` bis `05_deep.rs` sind für diesen Zweck bereits **sehr weit fortgeschritten**, weisen jedoch **drei methodische Schwachstellen** auf:
+
+#### 1. Die `input_visible_ms`-Falle (Maus-Spam verfälscht Latenz)
+In `03_stats.rs`:
+```rust
+if is_input(r) {
+    pending_vis = Some(stamp.mono_us);
+    pending_frm = Some(stamp.mono_us);
+} else if is_visible(r) && let Some(t0) = pending_vis.take() {
+    vis_samples.push((stamp.mono_us.saturating_sub(t0)) as f64 / 1000.0);
+}
+```
+* **Das Problem:** `is_input` matcht auch `MouseMove`. Wenn der Benutzer die Maus bewegt, sendet der Client 50–100 `MouseMove`-Nachrichten pro Sekunde. Jede Bewegung überschreibt `pending_vis`. 
+* Wenn nun ein Server-Frame eintrifft, misst `input_visible_ms` nur die Zeitspanne vom **allerletzten** Maus-Event bis zum Frame (oft wenige Millisekunden) – die tatsächliche Verzögerung der ersten Eingabe durch die Queue wird komplett maskiert!
+* **Fehlende Kausalität:** Wenn ein Tastendruck erfolgt und kurz darauf ein zufälliger Hintergrund-Frame (z. B. blinkender Cursor oder Uhr) eintrifft, wird fälschlicherweise dieser Frame als Antwort auf die Taste gewertet.
+* **Empfehlung:**
+  * Latenz getrennt für `Text`/`Key` vs. `MouseMove` erfassen.
+  * Eine FIFO-Queue für `pending_key_inputs` nutzen (First-In, First-Out statt `take()` auf der letzten Eingabe).
+
+#### 2. Getrennte Betrachtung: Text-Latenz vs. AV1-Bild-Latenz
+Auf einem 6-kB/s-Kanal gibt es zwei fundamentale Nutzungserlebnisse:
+1. **Tippgefühl:** Ein `AddText`-Delta hat ~40–80 Byte und benötigt auf 6 kB/s nur **10 ms** Übertragungszeit.
+2. **Bildaufbau:** Eine AV1-Kachel hat 1.500–5.000 Byte und benötigt **250–850 ms**.
+
+In `is_visible` werden `Tile`, `ClearText`, `AddText` und `RemoveText` in einen Topf geworfen. Dadurch kann `logstat` nicht beantworten: *„Erscheint der getippte Buchstabe sofort, während das Bild hinterherhinkt?“*
+* **Empfehlung:** Differenzieren zwischen `Input → Text-Echo` (Key bis `AddText`) und `Input → Pixel-Echo` (Input bis `Tile`).
+
+#### 3. Der OS-Socket-Buffer verschleiert `send_ms`
+In `FrameMs` misst der Server:
+```rust
+let t = Instant::now();
+let n = write_msg(&mut wr, &msg);
+send_ms += ms(t);
+```
+* Auf Linux hat der TCP-Sendepuffer typischerweise 128 kB bis mehrere MB.
+* `write_msg` kopiert 4 kB in den Kernel-Puffer und kehrt nach **0,05 ms** zurück.
+* `FrameMs.send` misst daher **nicht** die Leitungsübertragung, sondern nur den lokalen `memcpy` in den Kernel! Der Server "denkt", er war in 0,1 ms fertig, während das Paket noch 600 ms im Puffer festhängt.
+* **ABER:** Dein Ansatz in `05_deep.rs` mit `delivery_delays` (Segment-Matching Server-Sendewall vs. Client-Receivewall minus minimaler NTP-Offset) ist **hervorragend**, weil er genau diesen Bufferbloat aufdeckt! Das ist ein echter Lichtblick im Code.
+
+#### 4. Clock-Drift bei langen Aufzeichnungen
+In `clock_offset` wird ein einzelnes globales Minimum über die gesamte Session gesucht:
+```rust
+let min = diffs.into_iter().reduce(f64::min);
+```
+Bei einer Session von 30–60 Minuten laufen unkalibrierte Computer-Uhren typischerweise um 10 bis 50 ms auseinander (Quarz-Drift). Ein einzelnes globales Minimum führt dazu, dass die berechnete `delivery_delay` am Ende der Session künstlich steigt oder negativ wird.
+* **Empfehlung:** Entweder Sessions auf max. 10–15 Minuten begrenzen oder den Offset in 5-Minuten-Fenstern rollierend berechnen.
+
+#### 5. Erkennung von 6-kB/s-Überlastung
+In `03_stats.rs` prüfst du:
+```rust
+let over_budget_secs = timeline.iter().filter(|s| s.srv > BUDGET_BPS).count();
+```
+Das ist eine gute Metrik, erfasst aber Bursts nicht exakt: Wenn Sekunde 1 = 12 kB hat und Sekunde 2 = 0 kB, ist der Kanal für 2 Sekunden verstopft (1 Sekunde Überhang).
+* **Empfehlung:** Eine simulierte "Leaky Bucket" oder "Token Bucket"-Queue im Logstat mitlaufen lassen (Abfluss 6.000 B/s). Die maximale Füllung dieser virtuellen Queue zeigt exakt die reale Latenzzeit durch Warteschlangen an.
+
+---
+
+### Zusammenfassung & Fazit
+
+| Aspekt | Bewertung | Bemerkung |
+| :--- | :--- | :--- |
+| **Code-Minimalismus** | **Sehr gut (A-)** | Die Kern-Engine ist radikal schlank. Etwas Ballast in `common` durch V2-Log-Kompatibilität und duale Timestamps. |
+| **Format-Tauglichkeit für 6 kB/s** | **Ausgezeichnet (A)** | Die Erfassung von Gaps, Wire-Bytes, Dedup-Verschwendung und Pipeline-Phasen deckt alle Engpässe ab. |
+| **Latenz-Charakterisierung** | **Gut (B+)** | Genial gelöst über `delivery_delays` und NTP-Min-Filter. Schwachstelle ist die Aggregation in `input_visible_ms` (Maus-Verfälschung und Zusammenlegung von Text & Bild). |
+
+**Empfohlene Mini-Refactorings:**
+1. In `is_input` **Mausbewegungen ausschließen** (oder separat auswerten): Nur `Key` und `Text` gegen sichtbare Änderungen matchen.
+2. `is_visible` aufteilen in `is_visible_text` und `is_visible_tile`, um die Entkopplung von Schrift und Grafik bei 6 kB/s zu beweisen.
+3. Die V2-Structs aus `02_framing.rs` entfernen.

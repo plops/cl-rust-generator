@@ -107,7 +107,7 @@ fn summary_reports_expected_lines_and_json() {
     let j = String::from_utf8(out.stdout).unwrap();
     assert!(j.contains("\"msgs\":1"), "{j}");
     assert!(j.contains("\"tiles\":1"), "{j}");
-    assert!(j.contains("\"clock_offset_ms\":null"), "{j}");
+    assert!(j.contains("\"clock_offsets\":[]"), "{j}");
     assert!(j.contains("\"p99\":"), "{j}");
 
     let out = Command::new(bin).arg("--deep").arg(&p).output().unwrap();

@@ -12,7 +12,9 @@ derselbe Remote-Desktop (Protokoll v2, 1280×720, GPU-Hybrid-OCR), aber mit
 Fachbegriffe werden beim ersten Auftreten kurz erklärt. Alle Messwerte
 stammen von echten Läufen auf diesem Rechner (RTX A4000, Xvfb-Smoke mit
 echten PP-OCRv6-Modellen). Plan und Tasks dazu: [`plan.md`](plan.md),
-[`task.md`](task.md) im selben Ordner.
+[`task.md`](task.md) im selben Ordner. Kapitel 1–4 beschreiben den
+Erststand (Protokoll v2, 65 Tests); Kapitel 5–6 die Folgearbeiten aus
+echten Sessions und externem Review (Protokoll v3, 90 Tests).
 
 ## 1. Was exakt implementiert wurde
 
@@ -320,7 +322,152 @@ Dauerhaft ins Image (zusätzlich zu source9: CUDA 13 + cuDNN 9,
 | `xvfb`, `xterm` | Smoke-Tests (alt + Recording) | Test |
 | `x11-utils` (`xev`, `xdpyinfo`) | Klick-Nachweis, Display-Diagnose | Test/Debug |
 | `ffmpeg` (optional) | PPM-Replay-Frames → MP4 montieren | Analyse |
+| `libxkbcommon0`, `libxkbcommon-x11-0` | X11-Tastatur im Client-Fenster (winit) | Laufzeit |
 
 Ausdrücklich **nicht** nötig: neue Rust-Crates (null), `nasm`
 (rav1e ohne `asm` wie bisher), `cargo-edit` (Versionsprüfung geht per
-`cargo search`), neue Systemlibs zur Laufzeit (Recording ist reines `std`).
+`cargo search`). Neu zur Laufzeit nur `libxkbcommon0` (+ `-x11`,
+winit/X11-Tastatur im Client-Fenster) — s. Tabelle oben.
+
+## 5. Echte Sessions: vom Befund zu Protokoll v3
+
+§2 hielt den Protokoll-v3-Verzicht als Learning fest — zwei 40-Minuten-Logs
+(Server `20261010`, 11 MB; Client `20261010_0921`, 9,4 MB) haben ihn mit
+Messwerten widerlegt. Die Logs selbst liegen nicht in Git (`.gitignore`,
+lokale Analyse), die Auswertung schon: `lbw-logstat --deep`.
+
+### 5.1 Was die Sessions zeigten
+
+- **95 % doppelte Text-Bytes:** Jeder Textwechsel sendete die komplette
+  Szenen-Beschriftung neu (`ClearText` + alle `AddText`).
+- **Erkennung als FPS-Bremse:** `rec` ~300 ms Dauerlast pro Frame.
+- **85 stale Inputs** über Reconnects hinweg (Tippen ins Leere).
+- **255-kB-Collapse-Kacheln:** einzelne AV1-Ausreißer blockieren den Kanal.
+
+Empfehlungen 1–3 (Delta, Cache, Flush) wurden umgesetzt, 4
+(Sender-Throttling/Resume) bleibt ein Design-Follow-up.
+
+### 5.2 Protokoll v3: stabile Text-IDs + Delta
+
+`TextItem.id`, `RemoveText`, `LOG_VERSION` 2, `PROTO_VERSION` 3. Der Server
+(`09_textids.rs`) vergibt stabile IDs per Positions-Matching (24 px
+Distanz, 16 px Größe) und sendet Deltas: erster Frame `sync_all` mit
+`ClearText`, danach nur `RemoveText` + geänderte `AddText`. Der Client hält
+eine id-basierte Szene und verarbeitet `RemoveText`-Events. Alte
+v1-Logs bleiben lesbar (versionsstrikte Decoder statt Raten — Bincode
+könnte sonst mehrdeutig parsen). Wirkung im 11-Min-Log `20261010_1330`:
+genau **1× `ClearText`**, Text nur noch 255 KB von 1,3 MB downstream.
+
+### 5.3 OCR-Erkennungs-Cache
+
+`05_ocr.rs`: `TextCache` mit FNV-Schlüssel über Box-Maße + Pixel, inklusive
+negativer („Müll“-)Urteile, Cap 1024 mit Alles-verwerfen-Politik. Warm-Rec
+500 → 0,6 ms (Modelltest); in Session: `rec` p50 **0,3 ms** (vorher
+~300 ms Dauerlast). Neue Engstelle danach: Detektion mit 16 ms je Frame.
+
+### 5.4 Stale-Input-Flush
+
+Der Client leert beim Connect seinen Eingabe-Kanal (`03_net.rs`) — was
+während der Lücke getippt wurde, wird nicht mehr nachträglich injiziert.
+`--deep` zählt solche Eingaben (`gap_inputs`).
+
+### 5.5 Tiefenanalyse als `lbw-logstat --deep`
+
+`05_deep.rs` (+ `08_delivery.rs`, s. §6.4): Verbindungs-Splits,
+Gap-Zeitleiste, Top-Sekunden, Idle-Phasen, Kachelgrößen + 3×4-Raster,
+rec-ms je Textzahl, Adds/Clear, Dedup-Totals, Top-Texte,
+Zustell-Verzögerung. Dafür wurde `03_stats.rs` in Stats/Summary/Deep/Export
+und `03_ocr.rs` in Detect/Recognize/Ocr gesplittet (600-Zeilen-Regel).
+
+### 5.6 Render-Fix: Text-Baseline
+
+Befund: Der Client rendert Text um eine Aszent-Höhe zu hoch. Ursache:
+macroquads `draw_text`-Y ist die **Baseline**, nicht die Oberkante.
+Fix per `measure_text`-Offset (`draw_text_item`/`baseline_y` in
+`05_app.rs`), validiert per Pixel-Probe unter Xvfb (`render_probe`-Example
++ `scripts/render_check.sh`): **PASS** (Ink-Zeilen 200–230 in Box 200–240;
+Gegenprobe mit altem Code rot).
+
+## 6. Externes Review: Methodik-Fixes
+
+Datei [`review`](review) im selben Ordner: Prüfung auf Code-Minimalismus
+und 6-kB/s-Tauglichkeit von Format + Statistik (Noten A- bis A, Latenz B+).
+Alle 9 Befunde wurden am Code verifiziert und bis auf einen umgesetzt.
+
+### 6.1 Frame-Pacing + geteilter FNV-Hasher
+
+- Der Server-Loop schlief starr 100 ms **nach** OCR+AV1 (~6 statt 10 fps).
+  Jetzt `sleep(FRAME_GAP − elapsed)` — ein Einzeiler mit ~40 % Framerate.
+- `hash_rect` (OCR-Cache) duplizierte FNV-1a: jetzt ein inkrementeller
+  `Fnv1a64`-Hasher in `lbw-log`, byte-identische Werte (Test).
+- `FrameMs.send` dokumentiert, dass es nur den Kernel-memcpy misst —
+  echte Leitungszeit misst allein `delivery_delays` (s. §6.5).
+
+### 6.2 Latenz: FIFO + Text/Tile-Split
+
+Zwei echte Methodik-Fehler in `input_visible_ms`:
+
+1. **Maus-Spam:** 4133 `MouseMove` überschrieben ständig die wartende
+   Eingabe — gemessen wurde ab dem letzten Move (p50 42 ms), nicht ab der
+   Taste. Jetzt zählen nur diskrete Eingaben (Key/Text/Button).
+2. **Ein Topf:** Text-Echo (~10 ms Leitung) und Kachel-Echo (250–850 ms)
+   waren vermischt. Jetzt getrennt: `Input→Text` vs. `Input→Kachel`.
+
+```mermaid
+flowchart LR
+    K[Taste t1] --> Q[FIFO je Echo-Art]
+    M[Maus-Spam] -. ignoriert .-> Q
+    Q --> T[AddText t2: Text-Echo]
+    Q --> K2[Tile t3: Kachel-Echo]
+```
+
+Jede Eingabe wird je Echo-Art genau einmal per FIFO gematcht
+(kein Überschreiben mehr). Wirkung im 1330er-Log: n=175 statt 566,
+Text-Echo p50 **149 ms**, Kachel-Echo p50 **632 ms** — die Entkopplung von
+Schrift und Grafik ist jetzt beweisbar.
+
+### 6.3 Leaky Bucket statt Budget-Sekunden
+
+„81 s über Budget“ sagt nicht, wie lange ein Burst nachwirkt. Jetzt läuft
+eine virtuelle Queue mit 6-kB/s-Abfluss über die Timeline (`queue_peak_b`,
+Text + JSON). 1330er-Log: max 105 KB ≈ **17,6 s** Kanalzeit — schärfer als
+jede Sekunden-Summe. Lücken lassen die Queue leerlaufen (Test).
+
+### 6.4 V2-Decoder → `07_legacy.rs`, Delivery → `08_delivery.rs`
+
+`TextItemV2`/`ServerMsgV2`/`decode_server_logged` lebten in `lbw-common`,
+gehörten aber nur der Auswertung — jetzt in `lbw-log` (`07_legacy.rs`),
+`common` ist v3-rein. `lbw-replay` hing ohnehin schon an `lbw-log`.
+Weil `05_deep.rs` dadurch über 600 Zeilen wuchs, zog die
+Zustell-Analyse (Segmente, Delivery, Tenths, Datei-Pick) nach
+`08_delivery.rs` um (492/150 Zeilen).
+
+### 6.5 Rollierender Uhr-Offset
+
+Ein globales Minimum über 40 Minuten ignoriert Quarz-Drift (10–50 ms).
+Jetzt `ClockWin`-Fenster à 5 Minuten (Min-Filter je Fenster),
+`delivery_delays` korrigiert jede Probe mit dem Fenster ihrer Empfangszeit,
+JSON exportiert `"clock_offsets":[...]`. Das Smoke-Paar zeigt weiterhin
+43,6 ms (ein Fenster) — kurze Sessions ändern sich nicht.
+
+### 6.6 Validierung + offener Befund
+
+- `cargo test --workspace`: **90 passed, 0 failed** (7 neue Tests:
+  FNV-inkrementell, Maus-Falle, FIFO/Split, Queue, Drift-Fenster,
+  Fenster-Delivery, Legacy-Striktheit).
+- `fmt`/`clippy` sauber, alle Dateien < 600 Zeilen, alle 3 Smokes grün,
+  v1-Replay 0 Fehler, keine neuen Deps.
+- **Offener Befund (v1-Paar):** 5 Fenster 7409→6261 s, Delivery −220 s.
+  Per Altbinär im Worktree bewiesen: alter Stand maß −1360 s — das
+  Input-Matching dieses Paars war schon immer verschoben (kein
+  Regressionsfehler, Fensterung hat es verbessert). Ursache vermutlich
+  Mehr-Sessions-Dateien oder entfallene Inputs in der Zip-Reihenfolge;
+  saubere Lösung braucht sitzungsbewusstes Matching (Follow-up).
+
+### Geparkt (bewusst nicht umgesetzt)
+
+- **Doppelte Timestamps** (16 B/Record ≈ 18 % Loggröße): nur lokale Platte,
+  kein Wire-Format — erst beim nächsten `LOG_VERSION`-Bruch anfassen.
+- **Empfehlung 4** (Sender-Throttling/Resume), **ID-Churn** (26,8 %,
+  inhaltsbasiertes Matching als nächster Schritt), **Detection-Skip**
+  (16 ms/Frame Fixkosten).

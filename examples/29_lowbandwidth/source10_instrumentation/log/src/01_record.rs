@@ -95,7 +95,8 @@ pub struct FrameMs {
     pub mask_diff: f32,
     /// AV1-Encode der Box (0 bei Stille).
     pub encode: f32,
-    /// Alle `write_msg` des Frames zusammen.
+    /// Alle `write_msg` des Frames zusammen (nur lokaler Kernel-memcpy —
+    /// keine Leitungszeit; echte Zustellung misst `deep::delivery_delays`).
     pub send: f32,
 }
 
@@ -175,20 +176,61 @@ pub enum LogRecord {
     },
 }
 
+/// Inkrementeller FNV-1a/64-Hasher (eine Implementierung für Dedup-Hash
+/// und OCR-Cache-Schlüssel — kein Zwischenpuffer nötig).
+#[derive(Clone, Debug)]
+pub struct Fnv1a64 {
+    h: u64,
+}
+
+impl Fnv1a64 {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x100_0000_01b3;
+
+    #[must_use]
+    pub fn new() -> Self {
+        Self { h: Self::OFFSET }
+    }
+
+    pub fn update(&mut self, b: &[u8]) {
+        for &x in b {
+            self.h ^= u64::from(x);
+            self.h = self.h.wrapping_mul(Self::PRIME);
+        }
+    }
+
+    #[must_use]
+    pub fn finish(&self) -> u64 {
+        self.h
+    }
+}
+
+impl Default for Fnv1a64 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// FNV-1a/64 über `b` (Dedup-Hash; stabil über Prozesse hinweg).
 #[must_use]
 pub fn fnv1a64(b: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for &x in b {
-        h ^= u64::from(x);
-        h = h.wrapping_mul(0x100_0000_01b3);
-    }
-    h
+    let mut h = Fnv1a64::new();
+    h.update(b);
+    h.finish()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fnv_incremental_matches_oneshot() {
+        let mut h = Fnv1a64::new();
+        h.update(b"Hallo");
+        h.update(b" Welt");
+        assert_eq!(h.finish(), fnv1a64(b"Hallo Welt"));
+        assert_eq!(Fnv1a64::new().finish(), fnv1a64(b""));
+    }
 
     #[test]
     fn fnv_matches_offset_basis_and_is_stable() {

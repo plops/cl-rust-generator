@@ -6,8 +6,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use crate::legacy::decode_server_logged;
 use lbw_common::ServerMsg;
-use lbw_common::framing::decode_server_logged;
 
 use crate::record::{Dir, LogRecord, MsgKind};
 use crate::stats::{FileLog, FileSummary, Lat, app_of, summarize_file};
@@ -59,10 +59,23 @@ pub struct Summary {
     pub inject: Lat,
     pub inject_failed: usize,
     pub motion: Motion,
-    /// Geschätzter Wall-Offset Server−Client in ms (Min-Filter, NTP-Prinzip).
-    pub clock_offset_ms: Option<f64>,
-    pub clock_offset_samples: usize,
+    /// Wall-Offset Server−Client je 5-Minuten-Fenster (Min-Filter,
+    /// NTP-Prinzip) — rollierend gegen Quarz-Drift langer Sessions.
+    pub clock_offsets: Vec<ClockWin>,
 }
+
+/// Uhr-Offset-Fenster: Min-Filter über gematchte Eingaben eines 5-Min-Abschnitts.
+#[derive(Clone, Copy, Debug)]
+pub struct ClockWin {
+    /// Fensterbeginn als Client-Wall in µs (absolut, für Segment-Lookup).
+    pub start_wall_us: u64,
+    /// Offset Server−Client in ms (schnellstes Paket ≈ reine Uhrdifferenz).
+    pub ms: f64,
+    pub samples: usize,
+}
+
+/// Offset-Fensterbreite (5 Minuten — darunter bleibt Quarz-Drift < 5 ms).
+pub const OFFSET_WIN_US: u64 = 300_000_000;
 
 /// Wählt den Referenzstrom für die Dedup-Analyse: SrvToCli-Nachrichten aus
 /// Server-Dateien (das tatsächlich Gesendete); ohne Server-Datei alle.
@@ -202,7 +215,7 @@ pub fn summarize(files: &[FileLog]) -> Summary {
             _ => {}
         }
     }
-    let (clock_offset_ms, clock_offset_samples) = clock_offset(files);
+    let clock_offsets = clock_offset(files);
     Summary {
         files: file_sums,
         dedup_text: dedup(&stream, MsgKind::AddText),
@@ -213,8 +226,7 @@ pub fn summarize(files: &[FileLog]) -> Summary {
         inject: Lat::of(inj),
         inject_failed: inj_fail,
         motion,
-        clock_offset_ms,
-        clock_offset_samples,
+        clock_offsets,
     }
 }
 
@@ -250,10 +262,11 @@ fn motion_of(records: &[&LogRecord]) -> Motion {
     motion
 }
 
-/// Wall-Offset Server−Client: gleiche Eingaben (Art+Hash, Auftretens-Reihenfolge)
-/// auf beiden Seiten matchen, Minimum der Differenzen (schnellstes Paket ≈
-/// reine Uhrdifferenz). `None` ohne passendes Datei-Paar.
-fn clock_offset(files: &[FileLog]) -> (Option<f64>, usize) {
+/// Wall-Offset Server−Client je 5-Minuten-Fenster: gleiche Eingaben
+/// (Art+Hash, Auftretens-Reihenfolge) auf beiden Seiten matchen, Minimum der
+/// Differenzen je Fenster (schnellstes Paket ≈ reine Uhrdifferenz). Leer ohne
+/// passendes Datei-Paar.
+fn clock_offset(files: &[FileLog]) -> Vec<ClockWin> {
     let mut cli: BTreeMap<(u8, u64), Vec<u64>> = BTreeMap::new();
     let mut srv: BTreeMap<(u8, u64), Vec<u64>> = BTreeMap::new();
     for f in files {
@@ -286,17 +299,31 @@ fn clock_offset(files: &[FileLog]) -> (Option<f64>, usize) {
             side.entry(k).or_default().push(w);
         }
     }
-    let mut diffs = Vec::new();
+    let mut diffs: Vec<(u64, f64)> = Vec::new();
     for (k, c) in &cli {
         if let Some(s) = srv.get(k) {
             for (a, b) in c.iter().zip(s.iter()) {
-                diffs.push((*b as f64 - *a as f64) / 1000.0);
+                diffs.push((*a, (*b as f64 - *a as f64) / 1000.0));
             }
         }
     }
-    let n = diffs.len();
-    let min = diffs.into_iter().reduce(f64::min);
-    (min, n)
+    if diffs.is_empty() {
+        return Vec::new();
+    }
+    let base = diffs.iter().map(|(w, _)| *w).min().unwrap_or(0);
+    let mut wins: BTreeMap<u64, (f64, usize)> = BTreeMap::new();
+    for (w, d) in diffs {
+        let e = wins.entry((w - base) / OFFSET_WIN_US).or_insert((d, 0));
+        e.0 = e.0.min(d);
+        e.1 += 1;
+    }
+    wins.into_iter()
+        .map(|(i, (ms, samples))| ClockWin {
+            start_wall_us: base + i * OFFSET_WIN_US,
+            ms,
+            samples,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -389,9 +416,46 @@ mod tests {
             ),
         ];
         let s = summarize(&files);
-        // Differenzen 50 ms und 200 ms → Min 50 ms, 2 Samples.
-        assert_eq!(s.clock_offset_samples, 2);
-        assert_eq!(s.clock_offset_ms, Some(50.0));
+        // Differenzen 50 ms und 200 ms → ein Fenster, Min 50 ms, 2 Samples.
+        assert_eq!(s.clock_offsets.len(), 1);
+        assert_eq!(s.clock_offsets[0].samples, 2);
+        assert_eq!(s.clock_offsets[0].ms, 50.0);
+    }
+
+    #[test]
+    fn clock_offset_splits_drift_into_windows() {
+        let input = |w, m, h| LogRecord::Msg {
+            stamp: stamp(w, m),
+            dir: Dir::CliToSrv,
+            kind: MsgKind::Text,
+            wire_bytes: 20,
+            hash: h,
+            body: vec![],
+        };
+        // Zwei Paare, 400 s auseinander: je eigenes 5-Min-Fenster.
+        let files = vec![
+            file(
+                "c",
+                vec![
+                    session("lbw-client"),
+                    input(1_000_000, 1, 7),
+                    input(401_000_000, 2, 8),
+                ],
+            ),
+            file(
+                "s",
+                vec![
+                    session("lbw-server"),
+                    input(1_050_000, 1, 7),
+                    input(401_090_000, 2, 8),
+                ],
+            ),
+        ];
+        let s = summarize(&files);
+        assert_eq!(s.clock_offsets.len(), 2);
+        assert_eq!(s.clock_offsets[0].ms, 50.0);
+        assert_eq!(s.clock_offsets[1].ms, 90.0);
+        assert_eq!(s.clock_offsets[1].samples, 1);
     }
 
     #[test]

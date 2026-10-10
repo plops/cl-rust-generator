@@ -1,16 +1,16 @@
 //! `05_deep` — Tiefenanalyse für `lbw-logstat --deep`.
 //!
 //! Reine Funktionen über Records: Verbindungs-Zeitleiste, Dedup-Totals,
-//! Text-Churn, Idle-Phasen, Kachel-Verteilung, Erkennungs-Zeiten je Textzahl,
-//! Zustell-Verzögerung (Server→Client, Positions-Matching) und Maus-Statistik.
+//! Text-Churn, Idle-Phasen, Kachel-Verteilung, Erkennungs-Zeiten je Textzahl
+//! und Maus-Statistik. Zustell-Verzögerung (Kreuz-Analyse): `08_delivery`.
 
 use std::collections::BTreeMap;
 
+use crate::legacy::decode_server_logged;
 use lbw_common::ServerMsg;
-use lbw_common::framing::decode_server_logged;
 
 use crate::record::{Dir, GapEvent, LogRecord, MsgKind};
-use crate::stats::{FileLog, Lat, SecStat, app_of, stamp_of};
+use crate::stats::{Lat, SecStat, stamp_of};
 
 /// Eine Verbindung (Up … Down) mit Zählern je Richtung.
 #[derive(Clone, Debug)]
@@ -303,60 +303,6 @@ pub fn rec_by_texts(records: &[LogRecord]) -> BTreeMap<usize, Lat> {
     buckets.into_iter().map(|(b, v)| (b, Lat::of(v))).collect()
 }
 
-/// Server→Client-Walls, aufgeteilt an Downs (ein Segment je Verbindung).
-/// Leere Segmente (Refused-Retries ohne Nachrichten) fallen weg.
-pub fn srv_segments(records: &[LogRecord]) -> Vec<Vec<u64>> {
-    let mut segs = vec![Vec::new()];
-    for r in records {
-        match r {
-            LogRecord::Msg {
-                stamp,
-                dir: Dir::SrvToCli,
-                ..
-            } => segs.last_mut().unwrap().push(stamp.wall_us),
-            LogRecord::Gap {
-                event: GapEvent::Down { .. },
-                ..
-            } => segs.push(Vec::new()),
-            _ => {}
-        }
-    }
-    segs.retain(|s| !s.is_empty());
-    segs
-}
-
-/// Zustell-Verzögerung in Sekunden: k-te empfangene = k-te gesendete
-/// (TCP-Reihenfolge, Verluste nur am Verbindungsende). `offset_s` ist der
-/// Wall-Offset Server−Client in Sekunden (vgl. `Summary::clock_offset_ms`).
-pub fn delivery_delays(srv_segs: &[Vec<u64>], cli_segs: &[Vec<u64>], offset_s: f64) -> Vec<f64> {
-    srv_segs
-        .iter()
-        .zip(cli_segs.iter())
-        .flat_map(|(s, c)| {
-            s.iter()
-                .zip(c.iter())
-                .map(|(sw, cw)| (*cw as f64 - *sw as f64) / 1e6 + offset_s)
-        })
-        .collect()
-}
-
-/// Median je Zehntel (Verlauf der Verzögerung über die Session).
-/// Bei < 10 Samples wiederholen sich Ränge (nie leer, nie Panik).
-pub fn tenths(v: &[f64]) -> Vec<f64> {
-    if v.is_empty() {
-        return Vec::new();
-    }
-    let mut out = Vec::with_capacity(10);
-    for q in 0..10 {
-        let a = q * v.len() / 10;
-        let b = ((q + 1) * v.len() / 10).max(a + 1).min(v.len());
-        let mut s = v[a..b].to_vec();
-        s.sort_by(|a, b| a.total_cmp(b));
-        out.push(s[s.len() / 2]);
-    }
-    out
-}
-
 /// Eingaben, die bei getrennter Verbindung ins Leere (in den Kanal) gingen —
 /// werden beim Reconnect stale geflusht.
 pub fn gap_inputs(records: &[LogRecord]) -> usize {
@@ -400,13 +346,6 @@ pub fn mouse_stats(records: &[LogRecord]) -> (usize, usize) {
         }
     }
     (per_min.len(), per_min.values().max().copied().unwrap_or(0))
-}
-
-/// Wählt Server- und Client-Datei (per App-Namen) für Kreuz-Analysen.
-pub fn pick_srv_cli(files: &[FileLog]) -> (Option<&FileLog>, Option<&FileLog>) {
-    let srv = files.iter().find(|f| app_of(&f.records).contains("server"));
-    let cli = files.iter().find(|f| app_of(&f.records).contains("client"));
-    (srv, cli)
 }
 
 #[cfg(test)]
@@ -534,48 +473,6 @@ mod tests {
         assert_eq!(buckets.len(), 2);
         assert_eq!(buckets[&0].avg, 30.0);
         assert_eq!(buckets[&20].n, 2);
-    }
-
-    #[test]
-    fn delivery_pairs_by_position_per_segment() {
-        // Server 10 s vor (Offset), eine Nachricht verloren am Schluss.
-        let srv = vec![vec![100_000_000, 101_000_000, 102_000_000]];
-        let cli = vec![vec![90_100_000, 91_100_000]];
-        let d = delivery_delays(&srv, &cli, 10.0);
-        assert_eq!(d.len(), 2);
-        assert!((d[0] - 0.1).abs() < 1e-9);
-        assert_eq!(
-            tenths(&[1.0, 2.0]),
-            vec![1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0]
-        );
-        assert_eq!(tenths(&[]), Vec::<f64>::new());
-    }
-
-    #[test]
-    fn pick_finds_server_and_client() {
-        let sess = |app: &str| LogRecord::Session {
-            app: app.into(),
-            version: 2,
-            args: vec![],
-        };
-        let files = vec![
-            FileLog {
-                name: "c".into(),
-                records: vec![sess("lbw-client")],
-                version: 2,
-            },
-            FileLog {
-                name: "s".into(),
-                records: vec![sess("lbw-server")],
-                version: 1,
-            },
-        ];
-        let (srv, cli) = pick_srv_cli(&files);
-        let srv = srv.unwrap();
-        assert_eq!((srv.name.as_str(), srv.version), ("s", 1));
-        assert_eq!(cli.unwrap().name, "c");
-        let (no_srv, no_cli) = pick_srv_cli(&[]);
-        assert!(no_srv.is_none() && no_cli.is_none());
     }
 
     #[test]

@@ -9,6 +9,7 @@
 
 use clap::Parser;
 use lbw_log::deep;
+use lbw_log::delivery;
 use lbw_log::export::to_json;
 use lbw_log::io::load_lenient;
 use lbw_log::record::MsgKind;
@@ -85,6 +86,12 @@ fn render(s: &Summary) -> String {
             o.push_str(&format!("  … ({} weitere)\n", f.timeline.len() - 10));
         }
         o.push_str(&format!(
+            "Warteschlange ({} B/s): max {} B (≈ {:.0} ms)\n",
+            BUDGET_BPS,
+            f.queue_peak_b,
+            f.queue_peak_b as f64 / BUDGET_BPS as f64 * 1000.0
+        ));
+        o.push_str(&format!(
             "Gaps: {} (Down gesamt {:.0} ms)\n",
             f.gaps.len(),
             f.down_total_ms
@@ -107,6 +114,14 @@ fn render(s: &Summary) -> String {
         o.push_str(&format!(
             "Input→sichtbar (Client-Uhr): {}\n",
             lat(&f.input_visible_ms)
+        ));
+        o.push_str(&format!(
+            "Input→Text (Client-Uhr): {}\n",
+            lat(&f.input_text_ms)
+        ));
+        o.push_str(&format!(
+            "Input→Kachel (Client-Uhr): {}\n",
+            lat(&f.input_tile_ms)
         ));
         o.push_str(&format!(
             "Input→Frame (Server-Uhr): {}\n",
@@ -157,12 +172,22 @@ fn render(s: &Summary) -> String {
         "Motion: {} Paare, {} gleiche Box, |dx|={:.1} |dy|={:.1} px\n",
         s.motion.pairs, s.motion.same_rect, s.motion.avg_abs_dx, s.motion.avg_abs_dy
     ));
-    match s.clock_offset_ms {
-        Some(d) => o.push_str(&format!(
-            "Uhr-Offset Server−Client: {d:.1} ms ({} Samples, Min-Filter)\n",
-            s.clock_offset_samples
+    match s.clock_offsets.as_slice() {
+        [] => o.push_str("Uhr-Offset: — (kein Client/Server-Paar mit gleichen Inputs)\n"),
+        [w] => o.push_str(&format!(
+            "Uhr-Offset Server−Client: {:.1} ms ({} Samples, Min-Filter)\n",
+            w.ms, w.samples
         )),
-        None => o.push_str("Uhr-Offset: — (kein Client/Server-Paar mit gleichen Inputs)\n"),
+        wins => {
+            let n: usize = wins.iter().map(|w| w.samples).sum();
+            o.push_str(&format!(
+                "Uhr-Offset Server−Client: {:.1}→{:.1} ms ({} Fenster à 5 min, {} Samples, Min-Filter)\n",
+                wins.first().map(|w| w.ms).unwrap_or(0.0),
+                wins.last().map(|w| w.ms).unwrap_or(0.0),
+                wins.len(),
+                n
+            ));
+        }
     }
     o
 }
@@ -260,17 +285,17 @@ fn render_deep(files: &[FileLog], s: &Summary) -> String {
         o.push_str(&format!("    {n:5}x {sample:?}\n"));
     }
     // Zustell-Verzögerung über Server/Client-Paar.
-    match (deep::pick_srv_cli(files), s.clock_offset_ms) {
-        ((Some(srv), Some(cli)), Some(off_ms)) => {
-            let d = deep::delivery_delays(
-                &deep::srv_segments(&srv.records),
-                &deep::srv_segments(&cli.records),
-                off_ms / 1000.0,
+    match delivery::pick_srv_cli(files) {
+        (Some(srv), Some(cli)) if !s.clock_offsets.is_empty() => {
+            let d = delivery::delivery_delays(
+                &delivery::srv_segments(&srv.records),
+                &delivery::srv_segments(&cli.records),
+                &s.clock_offsets,
             );
             if d.is_empty() {
                 o.push_str("  Zustell-Verzögerung: — (keine Paare)\n");
             } else {
-                let tenths = deep::tenths(&d);
+                let tenths = delivery::tenths(&d);
                 let ts: Vec<String> = tenths.iter().map(|v| format!("{v:.1}")).collect();
                 let mut tail = d[d.len().saturating_sub(500)..].to_vec();
                 tail.sort_by(|a, b| a.total_cmp(b));

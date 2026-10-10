@@ -48,7 +48,7 @@ STAT_OUT="$(./target/release/lbw-logstat "$SRV_LOG" "$CLI_LOG" 2>&1)"
 echo "$STAT_OUT" | tail -n 30
 echo "$STAT_OUT" | grep -q "Frames: " || { echo "smoke_record: FEHLER — keine Frames im Server-Log" >&2; exit 1; }
 echo "$STAT_OUT" | grep -q "Decode (Client)" || { echo "smoke_record: FEHLER — keine Decode-Records" >&2; exit 1; }
-./target/release/lbw-logstat --json "$SRV_LOG" "$CLI_LOG" | grep -q '"clock_offset_ms"' || { echo "smoke_record: FEHLER — JSON ohne clock_offset" >&2; exit 1; }
+./target/release/lbw-logstat --json "$SRV_LOG" "$CLI_LOG" | grep -q '"clock_offsets"' || { echo "smoke_record: FEHLER — JSON ohne clock_offset" >&2; exit 1; }
 
 REPLAY_OUT="$(./target/release/lbw-replay "$SRV_LOG" 2>&1)"
 echo "$REPLAY_OUT" | tail -n 3

@@ -135,12 +135,12 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
             break Ok(());
         }
         frames += 1;
-        let t = Instant::now();
+        let frame_start = Instant::now();
         let img = match src.grab() {
             Ok(i) => i,
             Err(e) => break Err(e),
         };
-        let cap_ms = ms(t);
+        let cap_ms = ms(frame_start);
         let texts = match ocr.text(&img) {
             Ok(t) => t,
             Err(e) => break Err(e),
@@ -271,7 +271,9 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
             );
         }
         prev = Some(masked);
-        std::thread::sleep(FRAME_GAP);
+        // Feste Taktung: nur die Restzeit schlafen, sonst kostet jede
+        // Pipeline-Phase (OCR+AV1) zusätzlich volle 100 ms (~6 statt 10 fps).
+        std::thread::sleep(FRAME_GAP.saturating_sub(frame_start.elapsed()));
     };
 
     stop.store(true, Ordering::Relaxed);

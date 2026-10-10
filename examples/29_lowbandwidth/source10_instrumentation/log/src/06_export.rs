@@ -55,7 +55,7 @@ pub fn to_json(s: &Summary) -> String {
             o.push(',');
         }
         o.push_str(&format!(
-            "{{\"name\":{},\"app\":{},\"records\":{},\"wall_secs\":{:.3},\"mono_secs\":{:.3},\"has_end\":{},\"msgs\":{},\"bytes_srv\":{},\"bytes_cli\":{},\"over_budget_secs\":{},\"down_total_ms\":{:.1},\"input_visible_ms\":{},\"input_frame_ms\":{},\"kinds\":[",
+            "{{\"name\":{},\"app\":{},\"records\":{},\"wall_secs\":{:.3},\"mono_secs\":{:.3},\"has_end\":{},\"msgs\":{},\"bytes_srv\":{},\"bytes_cli\":{},\"over_budget_secs\":{},\"queue_peak_b\":{},\"down_total_ms\":{:.1},\"input_visible_ms\":{},\"input_text_ms\":{},\"input_tile_ms\":{},\"input_frame_ms\":{},\"kinds\":[",
             esc(&f.name),
             esc(&f.app),
             f.records,
@@ -66,8 +66,11 @@ pub fn to_json(s: &Summary) -> String {
             f.bytes_srv,
             f.bytes_cli,
             f.over_budget_secs,
+            f.queue_peak_b,
             f.down_total_ms,
             lat_json(&f.input_visible_ms),
+            lat_json(&f.input_text_ms),
+            lat_json(&f.input_tile_ms),
             lat_json(&f.input_frame_ms),
         ));
         for (j, k) in f.kinds.iter().enumerate() {
@@ -162,13 +165,24 @@ pub fn to_json(s: &Summary) -> String {
         ",\"motion\":{{\"pairs\":{},\"same_rect\":{},\"avg_abs_dx\":{:.1},\"avg_abs_dy\":{:.1}}}",
         s.motion.pairs, s.motion.same_rect, s.motion.avg_abs_dx, s.motion.avg_abs_dy
     ));
-    o.push_str(&format!(
-        ",\"clock_offset_ms\":{},\"clock_offset_samples\":{}}}",
-        s.clock_offset_ms
-            .map(|d| format!("{d:.1}"))
-            .unwrap_or("null".into()),
-        s.clock_offset_samples
-    ));
+    o.push_str(",\"clock_offsets\":[");
+    let base = s
+        .clock_offsets
+        .first()
+        .map(|w| w.start_wall_us)
+        .unwrap_or(0);
+    for (i, w) in s.clock_offsets.iter().enumerate() {
+        if i > 0 {
+            o.push(',');
+        }
+        o.push_str(&format!(
+            "{{\"start_s\":{:.0},\"ms\":{:.1},\"n\":{}}}",
+            (w.start_wall_us.saturating_sub(base)) as f64 / 1_000_000.0,
+            w.ms,
+            w.samples
+        ));
+    }
+    o.push_str("]}");
     o
 }
 
@@ -195,7 +209,7 @@ mod tests {
         }]);
         let j = to_json(&s);
         assert!(j.starts_with("{\"files\":[") && j.ends_with("}"), "{j}");
-        assert!(j.contains("\"clock_offset_ms\":null"));
+        assert!(j.contains("\"clock_offsets\":[]"));
         assert!(j.contains("\"p90\":0.000"));
     }
 }

@@ -11,10 +11,10 @@ use clap::Parser;
 use lbw_client::av1::Decoder;
 use lbw_client::net::Event;
 use lbw_client::scene::Scene;
-use lbw_common::framing::decode_server_logged;
 use lbw_common::{HEIGHT, ServerMsg, WIDTH};
 use lbw_log::fnv1a64;
 use lbw_log::io::load_lenient;
+use lbw_log::legacy::decode_server_logged;
 use lbw_log::record::{Dir, LogRecord};
 use lbw_log::stats::log_version;
 

@@ -8,6 +8,7 @@
 use image::RgbImage;
 
 use lbw_common::{Rect, TextItem};
+use lbw_log::Fnv1a64;
 
 use crate::detect::{Detector, Provider, clip_to, pad_to_32, px};
 use crate::recognize::Recognizer;
@@ -27,17 +28,12 @@ const CACHE_CAP: usize = 1024;
 /// FNV-1a über Box-Maße + Pixel (Cache-Schlüssel; gleiche Pixel = gleiches
 /// Ergebnis — inklusive „Müll"-Urteilen, die sonst jeden Frame neu kämen).
 fn hash_rect(img: &RgbImage, r: Rect) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    let mut mix = |b: u8| {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x100_0000_01b3);
-    };
-    for b in r.w.to_le_bytes().iter().chain(r.h.to_le_bytes().iter()) {
-        mix(*b);
-    }
+    let mut h = Fnv1a64::new();
+    h.update(&r.w.to_le_bytes());
+    h.update(&r.h.to_le_bytes());
     let (iw, ih) = (img.width() as usize, img.height() as usize);
     if iw == 0 || ih == 0 {
-        return h;
+        return h.finish();
     }
     let x0 = (r.x as usize).min(iw - 1);
     let y0 = (r.y as usize).min(ih - 1);
@@ -45,12 +41,10 @@ fn hash_rect(img: &RgbImage, r: Rect) -> u64 {
     let y1 = (y0 + r.h as usize).min(ih);
     for y in y0..y1 {
         for x in x0..x1 {
-            for b in px(img, x, y) {
-                mix(b);
-            }
+            h.update(&px(img, x, y));
         }
     }
-    h
+    h.finish()
 }
 
 /// Erkannte Zeile im Cache (Inhalt + Konfidenz + Farben).

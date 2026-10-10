@@ -19,7 +19,14 @@ pub mod deep;
 #[path = "06_export.rs"]
 pub mod export;
 
+#[path = "07_legacy.rs"]
+pub mod legacy;
+
+#[path = "08_delivery.rs"]
+pub mod delivery;
+
 pub use io::Recorder;
 pub use record::{
-    Dir, FrameMs, GapEvent, LOG_MAGIC, LOG_VERSION, LogRecord, MsgKind, Stamp, TileStat, fnv1a64,
+    Dir, Fnv1a64, FrameMs, GapEvent, LOG_MAGIC, LOG_VERSION, LogRecord, MsgKind, Stamp, TileStat,
+    fnv1a64,
 };
