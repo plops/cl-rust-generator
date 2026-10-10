@@ -22,6 +22,7 @@ use crate::capture::FrameSource;
 use crate::config::Config;
 use crate::input::Injector;
 use crate::ocr::Ocr;
+use crate::textids::{assign_ids, diff_texts};
 use crate::tiles::{MASK_PAD, crop_rgb, dirty_bbox, fill_rect, pad_rect};
 
 /// Was die Session zum Erkennen braucht (Tests nutzen Attrappen).
@@ -30,6 +31,10 @@ pub trait Recognize {
     /// Letzte Inferenz-Zeiten (Detektion, Erkennung) in ms; Default 0.
     fn last_ms(&self) -> (f64, f64) {
         (0.0, 0.0)
+    }
+    /// Cache-Statistik (Treffer, Zugriffe); Default 0 (nur echtes `Ocr`).
+    fn cache_stats(&self) -> (u64, u64) {
+        (0, 0)
     }
 }
 
@@ -41,6 +46,10 @@ impl Recognize for Ocr {
     fn last_ms(&self) -> (f64, f64) {
         self.last_ms
     }
+
+    fn cache_stats(&self) -> (u64, u64) {
+        self.cache_stats()
+    }
 }
 
 /// Abstand zweier Frames (10 fps genügen für 720p).
@@ -50,6 +59,18 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn ms(t: Instant) -> f32 {
     t.elapsed().as_secs_f32() * 1000.0
+}
+
+/// Sendet eine Text-Nachricht mit Recording; `false` bei Abriss.
+fn send_text(wr: &mut TcpStream, rec: &Recorder, m: &ServerMsg, text_bytes: &mut usize) -> bool {
+    match write_msg(wr, m) {
+        Ok(n) => {
+            *text_bytes += n;
+            rec.msg_server(m, n);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 /// Bedient genau einen Client bis zum Abriss. `max_frames` begrenzt die
@@ -107,6 +128,7 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
 
     let mut prev: Option<RgbImage> = None;
     let mut last_texts: Vec<TextItem> = Vec::new();
+    let mut next_text_id: u64 = 1;
     let mut frames: u64 = 0;
     let result = loop {
         if max_frames.is_some_and(|n| frames >= n) {
@@ -124,45 +146,64 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
             Err(e) => break Err(e),
         };
         let (det_ms, ocr_rec_ms) = ocr.last_ms();
-        // Text nur bei Änderung senden (sonst Dauerlast bei Standbild).
+        // Text als Delta (v3): 1. Frame sync_all, danach nur remove/change.
         let mut bytes = 0;
         let mut text_bytes = 0;
         let mut send_ms = 0.0;
-        let text_changed = texts != last_texts;
+        let cur = assign_ids(&last_texts, texts, &mut next_text_id);
+        let (removed, changed) = diff_texts(&last_texts, &cur);
+        let sync_all = frames == 1 && !cur.is_empty();
+        let text_changed = sync_all || !removed.is_empty() || !changed.is_empty();
         if text_changed {
             let t = Instant::now();
-            let mut failed = false;
-            match write_msg(&mut wr, &ServerMsg::ClearText) {
-                Ok(n) => {
-                    text_bytes += n;
-                    rec.msg_server(&ServerMsg::ClearText, n);
-                }
-                Err(_) => failed = true,
+            let mut ok = true;
+            if sync_all {
+                ok = send_text(&mut wr, rec, &ServerMsg::ClearText, &mut text_bytes);
             }
-            if !failed {
-                for tm in &texts {
-                    let m = ServerMsg::AddText(tm.clone());
-                    match write_msg(&mut wr, &m) {
-                        Ok(n) => {
-                            text_bytes += n;
-                            rec.msg_server(&m, n);
-                        }
-                        Err(_) => {
-                            failed = true;
+            if ok {
+                if sync_all {
+                    for tm in &cur {
+                        ok = send_text(
+                            &mut wr,
+                            rec,
+                            &ServerMsg::AddText(tm.clone()),
+                            &mut text_bytes,
+                        );
+                        if !ok {
                             break;
+                        }
+                    }
+                } else {
+                    for id in &removed {
+                        ok = send_text(&mut wr, rec, &ServerMsg::RemoveText(*id), &mut text_bytes);
+                        if !ok {
+                            break;
+                        }
+                    }
+                    if ok {
+                        for tm in &changed {
+                            ok = send_text(
+                                &mut wr,
+                                rec,
+                                &ServerMsg::AddText(tm.clone()),
+                                &mut text_bytes,
+                            );
+                            if !ok {
+                                break;
+                            }
                         }
                     }
                 }
             }
             send_ms += ms(t);
-            if failed {
+            if !ok {
                 break Ok(());
             }
-            last_texts = texts.clone();
+            last_texts = cur.clone();
         }
         let t = Instant::now();
         let mut masked = img.clone();
-        for tm in &texts {
+        for tm in &cur {
             let m = pad_rect(tm.rect, MASK_PAD, masked.width(), masked.height());
             fill_rect(&mut masked, m, tm.bg);
         }
@@ -208,7 +249,7 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
         }
         rec.frame(
             frames,
-            texts.len(),
+            cur.len(),
             text_changed,
             text_bytes,
             tile_stat,
@@ -223,9 +264,10 @@ pub fn serve_client<S: FrameSource, R: Recognize>(
         );
         if cfg.verbose {
             let (det_ms, rec_ms) = ocr.last_ms();
+            let (chits, clook) = ocr.cache_stats();
             eprintln!(
-                "[frame {frames}] {} Texte (det {det_ms:.1} ms, rec {rec_ms:.1} ms), {tiles} Kacheln, {bytes} B",
-                texts.len()
+                "[frame {frames}] {} Texte (det {det_ms:.1} ms, rec {rec_ms:.1} ms, cache {chits}/{clook}), {tiles} Kacheln, {bytes} B",
+                cur.len()
             );
         }
         prev = Some(masked);
