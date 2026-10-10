@@ -34,6 +34,7 @@ cargo test --release -p lbw-server --test models -- --ignored  # echte Modelle +
 ./scripts/smoke_xvfb.sh                       # E2E ohne Recording
 ./scripts/smoke_record.sh                     # E2E mit Recording + logstat + replay
 ./scripts/render_check.sh                     # Text-Lage per Pixel (Xvfb + GL)
+./wireshark/check.sh                          # C-Dissector bauen + per tshark prüfen
 ```
 
 ## Was gegenüber source9 neu ist
@@ -47,6 +48,8 @@ cargo test --release -p lbw-server --test models -- --ignored  # echte Modelle +
 - `lbw-replay`: Headless-Replay durch echten Decoder + Szene (Canvas-Hash,
   `--ppm`, `--realtime`).
 - `probe`-Example: `--record`-Option für aufgezeichnete Smokes.
+- `wireshark/`: C-Dissector für (t)shark (alle v3-Varianten, Reassembly,
+  `sample.pcap`, `check.sh`) — kein Lua.
 - Protokoll v3: stabile Text-IDs, `RemoveText`, Delta statt Resend (Server
   `09_textids.rs`); Erkennungs-Cache (statische Zeilen ~0 ms); Stale-Flush
   bei Reconnect; `logstat --deep` (Tiefenanalyse); Text-Baseline-Fix
