@@ -44,6 +44,6 @@ Segmentgrenzen). Unbekannte Varianten/Restbytes erscheinen als `lbw.raw`
   alle Varianten + Kachel über zwei Segmente gesplittet. Body-Bytes sind
   per `encode_msg` verifizierte Vektoren — bei Protokolländerung hier
   und im Dissector nachziehen.
-- `sample.pcap` — committedes Beispiel (11 Pakete, ~1 KB).
+- `sample.pcap` — committedes Beispiel (13 Pakete, ~1 KB).
 - `check.sh` — baut und behauptet alle 10 Varianten per tshark
   (Exit 2 ohne Toolchain, analog zu den Modell-Checks der Smokes).

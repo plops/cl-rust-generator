@@ -235,8 +235,8 @@ dissect_msg(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
             s = add_string(&c, t, hf_str);
             if (c.trunc)
                 goto short_frame;
-            proto_tree_add_bytes(t, hf_fg, tvb, fg, 3, NULL);
-            proto_tree_add_bytes(t, hf_bg, tvb, bg, 3, NULL);
+            proto_tree_add_item(t, hf_fg, tvb, fg, 3, ENC_NA);
+            proto_tree_add_item(t, hf_bg, tvb, bg, 3, ENC_NA);
             proto_tree_add_string_format(t, hf_msg, tvb, at, c.off - at,
                 "AddText", "AddText id=%" PRIu64 " \"%s\"", id, s);
             col_add_fstr(pinfo->cinfo, COL_INFO, "S→C AddText id=%" PRIu64 " \"%s\"", id, s);
@@ -254,7 +254,7 @@ dissect_msg(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
             proto_tree_add_uint(t, hf_tilx, tvb, at, c.off - at, (uint32_t)x);
             proto_tree_add_uint(t, hf_tily, tvb, at, c.off - at, (uint32_t)y);
             proto_tree_add_uint(t, hf_tillen, tvb, at, c.off - at, (uint32_t)n);
-            proto_tree_add_bytes(t, hf_tildata, tvb, dat, (int)n, NULL);
+            proto_tree_add_item(t, hf_tildata, tvb, dat, (int)n, ENC_NA);
             proto_tree_add_string_format(t, hf_msg, tvb, at, c.off - at,
                 "Tile", "Tile @%" PRIu64 ",%" PRIu64 " %" PRIu64 "B", x, y, n);
             col_add_fstr(pinfo->cinfo, COL_INFO,
@@ -341,14 +341,14 @@ dissect_msg(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
 
     if (!c.trunc && c.off < c.end) {
         /* Restbytes (neue Felder?) als Rohdaten zeigen statt zu raten. */
-        proto_tree_add_bytes(t, hf_raw, tvb, c.off, c.end - c.off, NULL);
+        proto_tree_add_item(t, hf_raw, tvb, c.off, c.end - c.off, ENC_NA);
     }
     return c.end;
 
 unknown: {
     expert_add_info_format(pinfo, ti, &ei_variant,
         "Unbekannte %s-Variante %" PRIu64, dir, v);
-    proto_tree_add_bytes(t, hf_raw, tvb, 4, c.end - 4, NULL);
+    proto_tree_add_item(t, hf_raw, tvb, 4, c.end - 4, ENC_NA);
     col_add_fstr(pinfo->cinfo, COL_INFO, "%s ?%" PRIu64 " (%dB)", dir, v, c.end - 4);
     return c.end;
 }

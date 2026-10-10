@@ -37,10 +37,16 @@ fi
 
 OUT=$(T -T fields -e lbw.msg 2>/dev/null)
 echo "$OUT"
-EXP="AddText Button ClearText Hello Hello Key MouseMove RemoveText Text Tile"
+# Unbekannte Variante setzt kein lbw.msg (leere Zeile, wie Rumpf-Segment);
+# Hello-mit-Rest zählt als drittes Hello.
+EXP="AddText Button ClearText Hello Hello Hello Key MouseMove RemoveText Text Tile"
 # Leere Zeile = Rumpf-Segment der gesplitteten Kachel (keine Nachricht).
 GOT=$(echo "$OUT" | grep -v '^$' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 [ "$GOT" = "$EXP" ] || { echo "check: FEHLER — Varianten: [$GOT] != [$EXP]" >&2; exit 1; }
+# Vollbaum-Pass (wie Klick in der GUI — fängt Dissector-Bugs, die -T fields
+# wegen tree==NULL nicht sieht): kein Abort, keine CRITICAL/Fehler auf stderr.
+T -V > /dev/null 2>/tmp/lbw_v.log || { echo "check: FEHLER — tshark -V brach ab" >&2; tail -n 5 /tmp/lbw_v.log >&2; exit 1; }
+grep -E "Dissector bug|CRITICAL|ERROR" /tmp/lbw_v.log && { echo "check: FEHLER — Baum-Pass meldet Dissector-Fehler" >&2; exit 1; } || true
 # Stichproben: Version, Mehrbyte-Varint (w=300, 251-Marker), Kachel, UTF-8.
 T -T fields -e lbw.version 2>/dev/null | grep -qx 3 || { echo "check: FEHLER — lbw.version" >&2; exit 1; }
 T -T fields -e lbw.text.w 2>/dev/null | grep -qx 300 || { echo "check: FEHLER — lbw.text.w" >&2; exit 1; }

@@ -20,6 +20,10 @@ V = {
     # Tile x=10 y=20 data=01020304
     "S_TILE": "030a140401020304",
     "S_RM": "0409",
+    # Unbekannte Variante (Robustheit: als lbw.raw, kein Abort)
+    "S_UNKNOWN": "09ff",
+    # Hello mit Restbyte (Robustheit: Rest als lbw.raw)
+    "S_TRAIL": "00aa",
     # Client -> Server
     "C_HELLO": "0003",
     "C_MOVE": "0164c8",
@@ -74,6 +78,8 @@ def main(path: str) -> None:
         (True, tile[:5]),
         (True, tile[5:]),
         (True, frame(V["S_RM"])),
+        (True, frame(V["S_UNKNOWN"])),
+        (True, frame(V["S_TRAIL"])),
         (False, frame(V["C_MOVE"])),
         (False, frame(V["C_BTN"])),
         (False, frame(V["C_TEXT"])),
