@@ -30,6 +30,8 @@ pub enum Event {
     Disconnected(String),
     ClearText,
     AddText(TextItem),
+    /// Text mit `id` entfernen (v3-Delta).
+    RemoveText(u64),
     /// Dekodierte AV1-Box (RGBA8, `w`×`h`).
     Tile {
         x: u16,
@@ -92,6 +94,9 @@ fn run(addr: &str, ev: Sender<Event>, out: Receiver<ClientMsg>, stop: &AtomicBoo
         match TcpStream::connect(addr) {
             Ok(s) => {
                 backoff = Duration::from_millis(500);
+                // Stale Inputs aus der Offline-Phase verwerfen (kamen sonst
+                // Minuten zu spät an — s. Session-Analyse: 85/347 s).
+                while out.try_recv().is_ok() {}
                 let why = session(s, &ev, &out, stop, &mut decoder, rec, addr);
                 if stop.load(Ordering::Relaxed) {
                     break;
@@ -165,6 +170,9 @@ fn session(
                         }
                         ServerMsg::AddText(t) => {
                             let _ = ev.send(Event::AddText(t));
+                        }
+                        ServerMsg::RemoveText(id) => {
+                            let _ = ev.send(Event::RemoveText(id));
                         }
                         ServerMsg::Tile { x, y, data } => {
                             let t = Instant::now();

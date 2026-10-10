@@ -47,29 +47,47 @@ pub async fn run(cfg: Config) {
         clear_background(BLACK);
         draw_texture(&texture, 0.0, 0.0, WHITE);
         for t in &scene.texts {
-            let r = t.rect;
-            draw_rectangle(
-                r.x as f32,
-                r.y as f32,
-                r.w as f32,
-                r.h as f32,
-                Color::from_rgba(t.bg[0], t.bg[1], t.bg[2], 255),
-            );
-            draw_text(
-                &t.text,
-                r.x as f32,
-                r.y as f32,
-                r.h as f32,
-                Color::from_rgba(t.fg[0], t.fg[1], t.fg[2], 255),
-            );
+            draw_text_item(t);
         }
         if show_hud {
-            draw_text(hud(&scene).as_str(), 8.0, 16.0, 16.0, YELLOW);
+            draw_top_text(hud(&scene).as_str(), 8.0, 8.0, 16.0, YELLOW);
         }
 
         send_input(&net, &mut last_mouse, &mut show_hud);
         next_frame().await;
     }
+}
+
+/// Baseline-Y, sodass die Glyphen-Oberkante an `top` sitzt (reine Geometrie).
+/// macroquad-Vertrag (`TextDimensions`-Doku): `draw_text` rendert nach
+/// `Rect(X, Y − offset_y, …)` — Y ist also die Baseline, nicht die Oberkante.
+fn baseline_y(top: f32, offset_y: f32) -> f32 {
+    top + offset_y
+}
+
+/// Zeichnet Text mit Oberkante an (`x`, `top`) statt macroquad-Baseline.
+fn draw_top_text(text: &str, x: f32, top: f32, size: f32, color: Color) {
+    let dims = measure_text(text, None, size as u16, 1.0);
+    draw_text(text, x, baseline_y(top, dims.offset_y), size, color);
+}
+
+/// Zeichnet ein Textelement: Hintergrund-Box + Glyphen in der Box.
+pub fn draw_text_item(t: &lbw_common::TextItem) {
+    let r = t.rect;
+    draw_rectangle(
+        r.x as f32,
+        r.y as f32,
+        r.w as f32,
+        r.h as f32,
+        Color::from_rgba(t.bg[0], t.bg[1], t.bg[2], 255),
+    );
+    draw_top_text(
+        &t.text,
+        r.x as f32,
+        r.y as f32,
+        r.h.max(1) as f32,
+        Color::from_rgba(t.fg[0], t.fg[1], t.fg[2], 255),
+    );
 }
 
 fn hud(s: &Scene) -> String {
@@ -156,5 +174,19 @@ fn send_input(net: &Net, last_mouse: &mut (u16, u16), show_hud: &mut bool) {
     }
     if is_key_pressed(KeyCode::F1) {
         *show_hud = !*show_hud;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::baseline_y;
+
+    #[test]
+    fn baseline_places_ink_top_at_box_top() {
+        // macroquad-Vertrag: Ink-Oberkante = Y − offset_y → Y = top + offset_y.
+        // (Dass macroquad den Vertrag einhält, prüft tests/render.rs per Pixel.)
+        assert_eq!(baseline_y(200.0, 32.5), 232.5);
+        assert_eq!(baseline_y(200.0, 32.5) - 32.5, 200.0);
+        assert_eq!(baseline_y(0.0, 0.0), 0.0);
     }
 }

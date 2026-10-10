@@ -9,7 +9,8 @@ use lbw_log::Recorder;
 
 use lbw_server::capture::ScrapSource;
 use lbw_server::config::Config;
-use lbw_server::ocr::{Ocr, Provider};
+use lbw_server::detect::Provider;
+use lbw_server::ocr::Ocr;
 use lbw_server::session::serve_client;
 
 /// ONNX-Threads (fest: kein `--threads`).

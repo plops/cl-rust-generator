@@ -97,7 +97,7 @@ fn summary_reports_expected_lines_and_json() {
         "{s}"
     );
     assert!(
-        s.contains("gesamt: n=1 avg=63.0 p50=63.0 max=63.0 ms"),
+        s.contains("gesamt: n=1 avg=63.0 p50=63.0 p90=63.0 p99=63.0 max=63.0 ms"),
         "{s}"
     );
     assert!(s.contains("keine Wiederholungen"), "{s}");
@@ -108,6 +108,19 @@ fn summary_reports_expected_lines_and_json() {
     assert!(j.contains("\"msgs\":1"), "{j}");
     assert!(j.contains("\"tiles\":1"), "{j}");
     assert!(j.contains("\"clock_offset_ms\":null"), "{j}");
+    assert!(j.contains("\"p99\":"), "{j}");
+
+    let out = Command::new(bin).arg("--deep").arg(&p).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let d = String::from_utf8(out.stdout).unwrap();
+    assert!(d.contains("== Tiefenanalyse =="), "{d}");
+    assert!(d.contains("conn1 127.0.0.1:9"), "{d}");
+    assert!(d.contains("Dedup-Tile-Total: 1x"), "{d}");
+    assert!(d.contains("Kachelgrößen: n=1"), "{d}");
+    assert!(
+        d.contains("Zustell-Verzögerung: — (braucht Server+Client"),
+        "{d}"
+    );
 
     std::fs::remove_file(&p).unwrap();
 }

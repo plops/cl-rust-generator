@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 
 /// Protokollversion (Client-`Hello`; Server lehnt Abweichungen ab).
 /// v2: 1280×720 statt 640×640 (inkompatibel zu v1).
-pub const PROTO_VERSION: u16 = 2;
+/// v3: stabile Text-IDs + `RemoveText` (Delta statt Komplett-Resend).
+pub const PROTO_VERSION: u16 = 3;
 /// Default-TCP-Port.
 pub const DEFAULT_PORT: u16 = 7878;
 /// Feste Bildbreite (GPU: immer 1280×720).
@@ -51,10 +52,13 @@ impl Rect {
     }
 }
 
-/// Ein erkanntes Textelement (Box, Farben, String). Keine ID: der Server
-/// sendet bei jeder Textänderung `ClearText` + alle `AddText` neu.
+/// Ein erkanntes Textelement (ID, Box, Farben, String). Die `id` vergibt der
+/// Server stabil über Frames hinweg (Positions-Matching, s. `09_textids`);
+/// der Client ersetzt per `AddText` gleichen IDs und löscht per `RemoveText`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TextItem {
+    /// Stabile Zeilen-ID (Zähler ab 1; 0 = noch unvergeben).
+    pub id: u64,
     pub rect: Rect,
     /// Vordergrund (Schrift).
     pub fg: [u8; 3],
@@ -71,8 +75,9 @@ pub type Button = u8;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ServerMsg {
     Hello,
-    /// Alle bisherigen Texte verwerfen.
+    /// Alle bisherigen Texte verwerfen (nur 1. Frame je Verbindung).
     ClearText,
+    /// Text hinzufügen oder gleichen `id` ersetzen.
     AddText(TextItem),
     /// AV1-Box (Still-Picture, rohe OBUs) an Position (`x`, `y`).
     Tile {
@@ -80,6 +85,9 @@ pub enum ServerMsg {
         y: u16,
         data: Vec<u8>,
     },
+    /// Text mit `id` entfernen (Delta; hinten angehängt, damit alte
+    /// Varianten-Indizes für `.lbwlog`-Kompat stabil bleiben).
+    RemoveText(u64),
 }
 
 /// Nachrichten Client → Server. Positionen im Capture-Raum.

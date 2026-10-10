@@ -67,7 +67,15 @@ impl Scene {
                 }
             }
             Event::ClearText => self.texts.clear(),
-            Event::AddText(t) => self.texts.push(t),
+            Event::AddText(t) => {
+                // Gleiche id = ersetzen (v3-Delta), sonst anhängen.
+                if let Some(e) = self.texts.iter_mut().find(|e| e.id == t.id) {
+                    *e = t;
+                } else {
+                    self.texts.push(t);
+                }
+            }
+            Event::RemoveText(id) => self.texts.retain(|e| e.id != id),
             Event::Tile {
                 x,
                 y,
@@ -102,8 +110,9 @@ mod tests {
     use super::*;
     use lbw_common::Rect;
 
-    fn item(text: &str) -> TextItem {
+    fn item(id: u64, text: &str) -> TextItem {
         TextItem {
+            id,
             rect: Rect::new(0, 0, 10, 10),
             fg: [0; 3],
             bg: [255; 3],
@@ -114,13 +123,29 @@ mod tests {
     #[test]
     fn clear_and_add_texts() {
         let mut s = Scene::new();
-        s.apply(Event::AddText(item("a")));
-        s.apply(Event::AddText(item("b")));
+        s.apply(Event::AddText(item(1, "a")));
+        s.apply(Event::AddText(item(2, "b")));
         assert_eq!(s.texts.len(), 2);
         s.apply(Event::ClearText);
         assert!(s.texts.is_empty());
-        s.apply(Event::AddText(item("c")));
+        s.apply(Event::AddText(item(3, "c")));
         assert_eq!(s.texts[0].text, "c");
+    }
+
+    #[test]
+    fn same_id_replaces_and_remove_deletes() {
+        let mut s = Scene::new();
+        s.apply(Event::AddText(item(1, "a")));
+        s.apply(Event::AddText(item(2, "b")));
+        // Gleiche id = ersetzen (getipptes Zeichen), keine Dublette.
+        s.apply(Event::AddText(item(1, "a2")));
+        assert_eq!(s.texts.len(), 2);
+        assert_eq!(s.texts[0].text, "a2");
+        s.apply(Event::RemoveText(2));
+        assert_eq!(s.texts.len(), 1);
+        // Unbekannte id: No-op, kein Absturz.
+        s.apply(Event::RemoveText(99));
+        assert_eq!(s.texts.len(), 1);
     }
 
     #[test]

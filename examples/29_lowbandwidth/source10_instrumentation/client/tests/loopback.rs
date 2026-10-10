@@ -12,6 +12,7 @@ use lbw_log::{Dir, GapEvent, LogRecord, MsgKind};
 
 fn item() -> TextItem {
     TextItem {
+        id: 5,
         rect: Rect::new(8, 8, 32, 16),
         fg: [0; 3],
         bg: [255; 3],
@@ -20,7 +21,8 @@ fn item() -> TextItem {
 }
 
 /// Stub: Hello lesen, Hello + Text + Kachel schicken, dann `expect`
-/// Client-Nachrichten lesen und zurückgeben. Schließen → Client sieht EOF.
+/// Client-Nachrichten lesen und zurückgeben. Danach 300 ms Stille fordern
+/// (fängt stale/geflushte Inputs). Schließen → Client sieht EOF.
 fn stub(
     listener: TcpListener,
     tile: Vec<u8>,
@@ -39,6 +41,8 @@ fn stub(
         write_msg(&mut s, &ServerMsg::Hello).unwrap();
         write_msg(&mut s, &ServerMsg::ClearText).unwrap();
         write_msg(&mut s, &ServerMsg::AddText(item())).unwrap();
+        // Delta-Pfad: Text gleich wieder entfernen (Transport-Test).
+        write_msg(&mut s, &ServerMsg::RemoveText(item().id)).unwrap();
         write_msg(
             &mut s,
             &ServerMsg::Tile {
@@ -55,7 +59,12 @@ fn stub(
                 None => panic!("Timeout beim Warten auf Client-Nachrichten"),
             }
         }
-        got
+        s.set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
+        match fr.read_msg::<ClientMsg>(&mut s).unwrap() {
+            None => got,
+            Some(m) => panic!("unerwartete Nachricht nach expect: {m:?}"),
+        }
     })
 }
 
@@ -93,16 +102,20 @@ fn hello_text_tile_and_reconnect() {
 
     let net = Net::connect(&addr);
 
-    // Erste Verbindung: Hello → Clear → Text → Kachel.
-    let (mut connected, mut clear, mut texts, mut tiles) = (0, 0, 0, 0);
+    // Erste Verbindung: Hello → Clear → Text → Remove → Kachel.
+    let (mut connected, mut clear, mut texts, mut tiles, mut removed) = (0, 0, 0, 0, 0);
     recv_until(&net, Instant::now() + Duration::from_secs(10), &mut |e| {
         match e {
             Event::Connected => connected += 1,
             Event::Disconnected(_) => {}
             Event::ClearText => clear += 1,
             Event::AddText(t) => {
-                assert_eq!(t.text, "hi");
+                assert_eq!((t.id, t.text.as_str()), (5, "hi"));
                 texts += 1;
+            }
+            Event::RemoveText(id) => {
+                assert_eq!(id, 5);
+                removed += 1;
             }
             Event::Tile {
                 x,
@@ -124,9 +137,9 @@ fn hello_text_tile_and_reconnect() {
                 tiles += 1;
             }
         }
-        connected >= 1 && clear >= 1 && texts >= 1 && tiles >= 1
+        connected >= 1 && clear >= 1 && texts >= 1 && tiles >= 1 && removed >= 1
     });
-    assert_eq!((connected, clear, texts, tiles), (1, 1, 1, 1));
+    assert_eq!((connected, clear, texts, tiles, removed), (1, 1, 1, 1, 1));
 
     // Gegenrichtung: Net::send muss vollständig beim Server ankommen.
     for m in &sent {
@@ -262,4 +275,39 @@ fn recording_captures_both_directions_and_decode() {
         }
     }
     std::fs::remove_file(&path).unwrap();
+}
+
+#[test]
+fn stale_inputs_are_dropped_on_reconnect() {
+    let rgb = [40u8, 80, 160].repeat(64 * 64);
+    let tile = lbw_server::av1::encode_rgb(&rgb, 64, 64, 180).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let addr = format!("127.0.0.1:{port}");
+    let stub1 = stub(listener, tile, 0);
+
+    let net = Net::connect(&addr);
+    // Verbinden, dann Abriss abwarten (stub1 schließt nach der Sequenz).
+    recv_until(&net, Instant::now() + Duration::from_secs(10), &mut |e| {
+        matches!(e, Event::Connected)
+    });
+    stub1.join().unwrap();
+    recv_until(&net, Instant::now() + Duration::from_secs(5), &mut |e| {
+        matches!(e, Event::Disconnected(_))
+    });
+    // Offline-Phase: zwei stale Eingaben (müssen beim Reconnect verfallen).
+    net.send(ClientMsg::MouseMove { x: 1, y: 1 });
+    net.send(ClientMsg::MouseMove { x: 2, y: 2 });
+
+    let listener2 = TcpListener::bind(&addr).unwrap();
+    let tile2 = lbw_server::av1::encode_rgb(&rgb, 64, 64, 180).unwrap();
+    let stub2 = stub(listener2, tile2, 1);
+    recv_until(&net, Instant::now() + Duration::from_secs(10), &mut |e| {
+        matches!(e, Event::Connected)
+    });
+    // Frische Eingabe NACH dem Reconnect: die muss ankommen.
+    let fresh = ClientMsg::Text("frisch".into());
+    net.send(fresh.clone());
+    assert_eq!(stub2.join().unwrap(), vec![fresh]);
+    drop(net);
 }

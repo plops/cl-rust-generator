@@ -48,6 +48,7 @@ fn replay_is_deterministic() {
         ServerMsg::Hello,
         ServerMsg::ClearText,
         ServerMsg::AddText(TextItem {
+            id: 9,
             rect: Rect::new(8, 8, 32, 16),
             fg: [0; 3],
             bg: [255; 3],

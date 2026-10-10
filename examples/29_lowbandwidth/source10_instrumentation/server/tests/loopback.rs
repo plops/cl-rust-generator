@@ -15,11 +15,23 @@ use lbw_server::capture::{SharedSource, solid};
 use lbw_server::config::Config;
 use lbw_server::session::{Recognize, input_loop, serve_client};
 
-struct StubOcr(Vec<TextItem>);
+/// Stub-OCR mit von außen wechselbarem Ergebnis (Delta-Tests).
+#[derive(Clone)]
+struct StubOcr(std::sync::Arc<std::sync::Mutex<Vec<TextItem>>>);
+
+impl StubOcr {
+    fn fixed(v: Vec<TextItem>) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(v)))
+    }
+
+    fn set(&self, v: Vec<TextItem>) {
+        *self.0.lock().unwrap() = v;
+    }
+}
 
 impl Recognize for StubOcr {
     fn text(&mut self, _img: &RgbImage) -> Result<Vec<TextItem>, String> {
-        Ok(self.0.clone())
+        Ok(self.0.lock().unwrap().clone())
     }
 }
 
@@ -30,10 +42,21 @@ fn test_cfg() -> Config {
 
 fn item() -> TextItem {
     TextItem {
+        id: 0, // vergibt die Session (Stub liefert wie OCR id: 0)
         rect: Rect::new(8, 8, 32, 16),
         fg: [0; 3],
         bg: [255; 3],
         text: "hi".into(),
+    }
+}
+
+fn item_at(x: u16, y: u16, text: &str) -> TextItem {
+    TextItem {
+        id: 0,
+        rect: Rect::new(x, y, 32, 16),
+        fg: [0; 3],
+        bg: [255; 3],
+        text: text.into(),
     }
 }
 
@@ -65,7 +88,7 @@ fn full_frame_then_single_dirty_tile() {
     let server = std::thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
         let mut src = worker_src;
-        let mut ocr = StubOcr(vec![item()]);
+        let mut ocr = StubOcr::fixed(vec![item()]);
         serve_client(
             stream,
             &test_cfg(),
@@ -152,7 +175,7 @@ fn wrong_version_is_rejected() {
     let server = std::thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
         let mut src = SharedSource::new(solid(128, 128, [0; 3]));
-        let mut ocr = StubOcr(vec![]);
+        let mut ocr = StubOcr::fixed(vec![]);
         serve_client(
             stream,
             &test_cfg(),
@@ -244,7 +267,7 @@ fn recording_captures_messages_and_frames() {
     let server = std::thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
         let mut src = SharedSource::new(solid(128, 128, [40; 3]));
-        let mut ocr = StubOcr(vec![item()]);
+        let mut ocr = StubOcr::fixed(vec![item()]);
         let r = serve_client(stream, &test_cfg(), &mut src, &mut ocr, Some(3), &rec);
         drop(rec); // `End` vor dem Lesen schreiben.
         r
@@ -337,4 +360,157 @@ fn recording_captures_messages_and_frames() {
     assert_eq!((tile.w, tile.h), (128, 128));
     assert!(tile.bytes > 0 && frames[0].4.total() >= 0.0);
     std::fs::remove_file(&path).unwrap();
+}
+
+#[test]
+fn text_delta_sends_only_changes() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let ocr = StubOcr::fixed(vec![item_at(8, 8, "a"), item_at(8, 40, "b")]);
+    let worker_ocr = ocr.clone();
+
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut src = SharedSource::new(solid(128, 128, [40; 3]));
+        let mut ocr = worker_ocr;
+        serve_client(
+            stream,
+            &test_cfg(),
+            &mut src,
+            &mut ocr,
+            Some(40),
+            &Recorder::none(),
+        )
+    });
+
+    let mut s = TcpStream::connect(addr).unwrap();
+    let mut fr = FrameReader::new();
+    write_msg(
+        &mut s,
+        &ClientMsg::Hello {
+            version: PROTO_VERSION,
+        },
+    )
+    .unwrap();
+    // Frame 1: Clear + beide Texte + Kachel; IDs merken.
+    let mut adds = Vec::new();
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| {
+            if let ServerMsg::AddText(t) = m {
+                adds.push(t.clone());
+            }
+            matches!(m, ServerMsg::Tile { .. })
+        },
+    );
+    assert_eq!(adds.len(), 2);
+    assert_ne!(adds[0].id, adds[1].id);
+    // Textwechsel: "a" bleibt (gleiche Box), "b" wird "b2" (getippt, gleiche
+    // Box → gleiche id), dazu neue Zeile "c".
+    ocr.set(vec![
+        item_at(8, 8, "a"),
+        item_at(8, 40, "b2"),
+        item_at(8, 72, "c"),
+    ]);
+    // Delta einsammeln: genau 1× AddText(b2, alte id) + 1× AddText(c, neu),
+    // kein ClearText, kein Resend von "a".
+    let mut delta = Vec::new();
+    let mut clears = 0;
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| {
+            match m {
+                ServerMsg::ClearText => clears += 1,
+                ServerMsg::AddText(_) | ServerMsg::Tile { .. } | ServerMsg::RemoveText(_) => {
+                    delta.push(m.clone())
+                }
+                _ => {}
+            }
+            matches!(m, ServerMsg::Tile { .. })
+        },
+    );
+    drop(s);
+    server.join().unwrap().unwrap();
+    assert_eq!(clears, 0, "Delta darf kein ClearText senden");
+    let added: Vec<_> = delta
+        .iter()
+        .filter_map(|m| match m {
+            ServerMsg::AddText(t) => Some(t.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(added.len(), 2, "{delta:?}");
+    // "b2" trägt die alte id von "b", "c" eine frische.
+    let b_old = adds.iter().find(|t| t.text == "b").unwrap();
+    let b2 = added.iter().find(|t| t.text == "b2").unwrap();
+    assert_eq!(b2.id, b_old.id);
+    assert!(!added.iter().any(|t| t.text == "a"), "{added:?}");
+    assert!(added.iter().any(|t| t.text == "c"), "{added:?}");
+}
+
+#[test]
+fn removed_text_sends_remove_text() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let ocr = StubOcr::fixed(vec![item_at(8, 8, "a"), item_at(8, 40, "weg")]);
+    let worker_ocr = ocr.clone();
+
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut src = SharedSource::new(solid(128, 128, [40; 3]));
+        let mut ocr = worker_ocr;
+        serve_client(
+            stream,
+            &test_cfg(),
+            &mut src,
+            &mut ocr,
+            Some(40),
+            &Recorder::none(),
+        )
+    });
+
+    let mut s = TcpStream::connect(addr).unwrap();
+    let mut fr = FrameReader::new();
+    write_msg(
+        &mut s,
+        &ClientMsg::Hello {
+            version: PROTO_VERSION,
+        },
+    )
+    .unwrap();
+    let mut first_id = 0;
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| {
+            if let ServerMsg::AddText(t) = m
+                && t.text == "weg"
+            {
+                first_id = t.id;
+            }
+            matches!(m, ServerMsg::Tile { .. })
+        },
+    );
+    assert_ne!(first_id, 0);
+    ocr.set(vec![item_at(8, 8, "a")]);
+    let mut removed = Vec::new();
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| {
+            if let ServerMsg::RemoveText(id) = m {
+                removed.push(*id);
+            }
+            matches!(m, ServerMsg::Tile { .. })
+        },
+    );
+    drop(s);
+    server.join().unwrap().unwrap();
+    assert_eq!(removed, vec![first_id]);
 }

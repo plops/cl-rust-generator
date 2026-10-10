@@ -1,11 +1,12 @@
 # source10_instrumentation — Low-Bandwidth-Remote-Desktop mit Recording (1280×720)
 
-Wie [`../source9_gpu`](../source9_gpu) (Protokoll v2, GPU-Hybrid-OCR, eine
-AV1-Box pro Frame), aber: Server und Client können per `--record` jede
-übertragene Nachricht plus Timing-/Performance-Metriken in eine `.lbwlog`-Datei
-schreiben. `lbw-logstat` wertet Aufzeichnungen offline aus (Durchsatz, Gaps,
-Dedup, Latenzen), `lbw-replay` spielt sie headless wieder ab. Das Protokoll
-(`common/`) ist unverändert — Instrumentierung passiert rein an den Rändern.
+Wie [`../source9_gpu`](../source9_gpu) (GPU-Hybrid-OCR, eine AV1-Box pro
+Frame), aber Protokoll **v3** (stabile Text-IDs + Text-Delta statt
+Komplett-Resend — inkompatibel zu v2, alte `.lbwlog`-Dateien bleiben lesbar).
+Server und Client können per `--record` jede übertragene Nachricht plus
+Timing-/Performance-Metriken in eine `.lbwlog`-Datei schreiben. `lbw-logstat`
+wertet Aufzeichnungen offline aus (Durchsatz, Gaps, Dedup, Latenzen, `--deep`),
+`lbw-replay` spielt sie headless wieder ab.
 
 Plan, Tasks, Walkthrough:
 [`../plan/20261010_01_instrumentation/`](../plan/20261010_01_instrumentation/),
@@ -23,6 +24,7 @@ DISPLAY=:0 ./target/release/lbw-server --record /tmp/srv.lbwlog
 
 # Offline-Analyse + Replay
 ./target/release/lbw-logstat /tmp/srv.lbwlog /tmp/cli.lbwlog
+./target/release/lbw-logstat --deep /tmp/srv.lbwlog /tmp/cli.lbwlog
 ./target/release/lbw-logstat --json /tmp/srv.lbwlog > auswertung.json
 ./target/release/lbw-replay /tmp/srv.lbwlog
 
@@ -31,6 +33,7 @@ cargo test --workspace                        # Unit + Loopback (ohne X11/Modell
 cargo test --release -p lbw-server --test models -- --ignored  # echte Modelle + GPU
 ./scripts/smoke_xvfb.sh                       # E2E ohne Recording
 ./scripts/smoke_record.sh                     # E2E mit Recording + logstat + replay
+./scripts/render_check.sh                     # Text-Lage per Pixel (Xvfb + GL)
 ```
 
 ## Was gegenüber source9 neu ist
@@ -44,6 +47,10 @@ cargo test --release -p lbw-server --test models -- --ignored  # echte Modelle +
 - `lbw-replay`: Headless-Replay durch echten Decoder + Szene (Canvas-Hash,
   `--ppm`, `--realtime`).
 - `probe`-Example: `--record`-Option für aufgezeichnete Smokes.
+- Protokoll v3: stabile Text-IDs, `RemoveText`, Delta statt Resend (Server
+  `09_textids.rs`); Erkennungs-Cache (statische Zeilen ~0 ms); Stale-Flush
+  bei Reconnect; `logstat --deep` (Tiefenanalyse); Text-Baseline-Fix
+  (`scripts/render_check.sh`).
 
 ## Hinweise aus source9 (gelten weiter)
 

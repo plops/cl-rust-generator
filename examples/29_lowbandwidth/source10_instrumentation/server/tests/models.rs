@@ -4,7 +4,8 @@
 //! Mit `LBW_CPU=1` läuft er auf CPU (Vergleichsmessung); sonst muss CUDA
 //! aktiv sein.
 
-use lbw_server::ocr::{Ocr, Provider};
+use lbw_server::detect::Provider;
+use lbw_server::ocr::Ocr;
 
 fn models_dir() -> String {
     format!("{}/../models", env!("CARGO_MANIFEST_DIR"))
@@ -37,6 +38,9 @@ fn detects_text_on_real_screenshot() {
     let texts2 = ocr.text(&img).unwrap();
     let (det2, rec2) = ocr.last_ms;
     assert_eq!(texts, texts2, "zweiter Durchlauf weicht ab");
+    // Gleiches Bild → alle Zweit-Zugriffe aus dem Cache (1. Lauf Misses).
+    let (hits, lookups) = ocr.cache_stats();
+    assert!(hits > 0 && hits * 2 == lookups, "{hits}/{lookups}");
     assert!(!texts.is_empty(), "kein Text auf dem Testbild erkannt");
     let chars: usize = texts.iter().map(|t| t.text.chars().count()).sum();
     assert!(chars > 20, "zu wenig Text: {texts:?}");

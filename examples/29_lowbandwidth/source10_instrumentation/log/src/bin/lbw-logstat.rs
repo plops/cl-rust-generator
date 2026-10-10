@@ -2,12 +2,18 @@
 //!
 //! Liest Server- und/oder Client-Logs, druckt Durchsatz, Gaps, Dedup und
 //! Latenzen (Human-Text oder `--json`, Timeline optional als `--csv`).
+//! Mit `--deep` folgen Tiefenanalyse-Abschnitte (Verbindungs-Zeitleiste,
+//! Dedup-Totals, Idle-Phasen, Zustell-Verzögerung).
 //! Zerrissene Dateischlüsse (Absturz) werden als Teilstand mit Warnung
 //! ausgewertet, nicht als harter Fehler.
 
 use clap::Parser;
+use lbw_log::deep;
+use lbw_log::export::to_json;
 use lbw_log::io::load_lenient;
-use lbw_log::stats::{BUDGET_BPS, FileLog, Lat, Summary, summarize, to_json};
+use lbw_log::record::MsgKind;
+use lbw_log::stats::{BUDGET_BPS, FileLog, Lat, log_version};
+use lbw_log::summary::{Summary, dedup_stream, summarize};
 
 #[derive(Parser)]
 #[command(
@@ -24,6 +30,9 @@ struct Args {
     /// Durchsatz-Timeline zusätzlich als CSV in diese Datei schreiben.
     #[arg(long)]
     csv: Option<String>,
+    /// Tiefenanalyse anhängen (nur Human-Text).
+    #[arg(long)]
+    deep: bool,
 }
 
 fn lat(l: &Lat) -> String {
@@ -31,8 +40,8 @@ fn lat(l: &Lat) -> String {
         return "—".into();
     }
     format!(
-        "n={} avg={:.1} p50={:.1} max={:.1} ms",
-        l.n, l.avg, l.p50, l.max
+        "n={} avg={:.1} p50={:.1} p90={:.1} p99={:.1} max={:.1} ms",
+        l.n, l.avg, l.p50, l.p90, l.p99, l.max
     )
 }
 
@@ -158,6 +167,128 @@ fn render(s: &Summary) -> String {
     o
 }
 
+fn render_deep(files: &[FileLog], s: &Summary) -> String {
+    let mut o = String::from("== Tiefenanalyse ==\n");
+    for (fi, f) in files.iter().enumerate() {
+        let fs = &s.files[fi];
+        o.push_str(&format!("-- {} --\n", f.name));
+        for c in deep::conn_split(&f.records) {
+            o.push_str(&format!(
+                "  conn{} {}: SrvToCli {}x {} B, CliToSrv {}x {} B, Ende: {}\n",
+                c.index, c.peer, c.srv_msgs, c.srv_bytes, c.cli_msgs, c.cli_bytes, c.end
+            ));
+        }
+        let gaps = deep::gap_timeline(&f.records);
+        o.push_str(&format!("  {} Gaps, erste:\n", gaps.len()));
+        for g in gaps.iter().take(5) {
+            o.push_str(&format!(
+                "    t={:8.1}s {} {} {} {:?}\n",
+                g.t_rel_s,
+                if g.up { "Up  " } else { "Down" },
+                g.peer,
+                g.reason,
+                g.down_ms
+            ));
+        }
+        let top = deep::top_seconds(&fs.timeline, 5);
+        let base = fs.timeline.first().map(|t| t.sec).unwrap_or(0);
+        o.push_str(&format!("  Top-{} Sekunden:\n", top.len()));
+        for t in &top {
+            o.push_str(&format!(
+                "    s+{}: {} B/s srv, {} B/s cli\n",
+                t.sec.saturating_sub(base),
+                t.srv,
+                t.cli
+            ));
+        }
+        let (longest, over5) = deep::idle_stats(&f.records);
+        o.push_str(&format!(
+            "  längste Srv-Stille: {longest:.1}s, Stillstände>5s: {over5}\n"
+        ));
+        let sizes = deep::tile_sizes(&f.records);
+        o.push_str(&format!(
+            "  Kachelgrößen: n={} avg={:.0} p50={:.0} p90={:.0} max={:.0} B\n",
+            sizes.n, sizes.avg, sizes.p50, sizes.p90, sizes.max
+        ));
+        o.push_str("  Kachelraster (3x4):\n");
+        for row in deep::tile_raster(&f.records) {
+            o.push_str(&format!("    {row:?}\n"));
+        }
+        o.push_str("  rec-ms je Textzahl:\n");
+        for (b, l) in deep::rec_by_texts(&f.records) {
+            o.push_str(&format!(
+                "    {b:3}-{:<3}: n={:4} avg={:6.1}ms\n",
+                b + 9,
+                l.n,
+                l.avg
+            ));
+        }
+        let (clears, adds) = deep::adds_per_clear(&f.records);
+        o.push_str(&format!(
+            "  ClearText: {clears}x, Adds/Clear: n={} avg={:.1} p50={:.0} max={:.0}\n",
+            adds.n, adds.avg, adds.p50, adds.max
+        ));
+        o.push_str(&format!(
+            "  stale Inputs (in Lücke): {}\n",
+            deep::gap_inputs(&f.records)
+        ));
+        let (mins, peak) = deep::mouse_stats(&f.records);
+        o.push_str(&format!("  Maus: {mins} aktive Minuten, Peak {peak}/min\n"));
+    }
+    // Referenzstrom-Totals + Top-Texte (Server-Datei bevorzugt).
+    let stream = dedup_stream(files);
+    for (name, kind) in [("Text", MsgKind::AddText), ("Tile", MsgKind::Tile)] {
+        let t = deep::dedup_totals(&stream, kind);
+        if t.total_n == 0 {
+            continue;
+        }
+        o.push_str(&format!(
+            "  Dedup-{name}-Total: {total}x ({total_b} B), {uniq} unique, verschwendet {w} B ({p:.1}%), hist 1x:{h1} 2-10x:{h10} 11-100x:{h100} >100x:{hbig}\n",
+            total = t.total_n,
+            total_b = t.total_b,
+            uniq = t.uniq_n,
+            w = t.wasted,
+            p = 100.0 * t.wasted as f64 / t.total_b.max(1) as f64,
+            h1 = t.hist_1,
+            h10 = t.hist_2_10,
+            h100 = t.hist_11_100,
+            hbig = t.hist_100p,
+        ));
+    }
+    o.push_str("  Top-Texte:\n");
+    for (n, sample) in deep::top_texts(&stream, 8) {
+        o.push_str(&format!("    {n:5}x {sample:?}\n"));
+    }
+    // Zustell-Verzögerung über Server/Client-Paar.
+    match (deep::pick_srv_cli(files), s.clock_offset_ms) {
+        ((Some(srv), Some(cli)), Some(off_ms)) => {
+            let d = deep::delivery_delays(
+                &deep::srv_segments(&srv.records),
+                &deep::srv_segments(&cli.records),
+                off_ms / 1000.0,
+            );
+            if d.is_empty() {
+                o.push_str("  Zustell-Verzögerung: — (keine Paare)\n");
+            } else {
+                let tenths = deep::tenths(&d);
+                let ts: Vec<String> = tenths.iter().map(|v| format!("{v:.1}")).collect();
+                let mut tail = d[d.len().saturating_sub(500)..].to_vec();
+                tail.sort_by(|a, b| a.total_cmp(b));
+                o.push_str(&format!(
+                    "  Zustell-Verzögerung (n={}, s): Zehntel-Mediane [{}], letzte 500: min={:.1} p50={:.1} max={:.1}\n",
+                    d.len(),
+                    ts.join(" "),
+                    tail[0],
+                    tail[tail.len() / 2],
+                    tail[tail.len() - 1]
+                ));
+            }
+        }
+        _ => o.push_str("  Zustell-Verzögerung: — (braucht Server+Client-Datei mit Offset)\n"),
+    }
+    o
+}
+
 fn main() {
     let args = Args::parse();
     if args.files.is_empty() {
@@ -173,6 +304,7 @@ fn main() {
                 }
                 files.push(FileLog {
                     name: p.clone(),
+                    version: log_version(&records),
                     records,
                 });
             }
@@ -187,6 +319,9 @@ fn main() {
         println!("{}", to_json(&s));
     } else {
         print!("{}", render(&s));
+        if args.deep {
+            print!("{}", render_deep(&files, &s));
+        }
     }
     if let Some(csv) = args.csv {
         let mut o = String::from("file,sec,srv_bps,cli_bps\n");

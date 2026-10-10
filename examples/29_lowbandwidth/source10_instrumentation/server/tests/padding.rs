@@ -16,7 +16,9 @@ use image::RgbImage;
 use lbw_server::av1::encode_rgb;
 use lbw_server::capture::{FrameSource, ScrapSource};
 use lbw_server::config::Config;
-use lbw_server::ocr::{Detector, Ocr, Provider, Recognizer, clip_to, pad_to_32, sample_colors};
+use lbw_server::detect::{Detector, Provider, clip_to, pad_to_32};
+use lbw_server::ocr::{Ocr, sample_colors};
+use lbw_server::recognize::Recognizer;
 use lbw_server::tiles::{MASK_PAD, crop_rgb, fill_rect, pad_rect};
 
 /// Was das xterm anzeigt (ASCII-Anteil wird assertiert, Umlaute nur berichtet).

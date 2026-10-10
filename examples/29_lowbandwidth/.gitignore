@@ -4,3 +4,8 @@ source7_mvp/models
 source8_transpiled/models
 source9_gpu/models
 source10_instrumentation/models
+# Session recordings + collect dumps (large, local analysis only).
+source10_instrumentation/20261010
+source10_instrumentation/20261010_0921
+source10_instrumentation/*.lbwlog
+source10_instrumentation/data.txt

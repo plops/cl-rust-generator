@@ -11,11 +11,12 @@ use clap::Parser;
 use lbw_client::av1::Decoder;
 use lbw_client::net::Event;
 use lbw_client::scene::Scene;
-use lbw_common::framing::decode_msg;
+use lbw_common::framing::decode_server_logged;
 use lbw_common::{HEIGHT, ServerMsg, WIDTH};
 use lbw_log::fnv1a64;
 use lbw_log::io::load_lenient;
 use lbw_log::record::{Dir, LogRecord};
+use lbw_log::stats::log_version;
 
 #[derive(Parser)]
 #[command(
@@ -69,8 +70,10 @@ fn main() {
         }
     };
     let mut scene = Scene::new();
+    let version = log_version(&records);
     let (mut tiles, mut texts, mut decode_err, mut msg_err, mut ppm_n) =
         (0u32, 0u32, 0u32, 0u32, 0u32);
+    let mut next_id = 1u64; // für v1-Logs (AddText ohne id → frische IDs)
     let mut last_mono: Option<u64> = None;
     for r in &records {
         if let LogRecord::Msg {
@@ -87,7 +90,7 @@ fn main() {
             if *dir != Dir::SrvToCli {
                 continue;
             }
-            let msg: ServerMsg = match decode_msg(body) {
+            let msg: ServerMsg = match decode_server_logged(body, version) {
                 Ok(m) => m,
                 Err(e) => {
                     msg_err += 1;
@@ -98,10 +101,15 @@ fn main() {
             match msg {
                 ServerMsg::Hello => scene.apply(Event::Connected),
                 ServerMsg::ClearText => scene.apply(Event::ClearText),
-                ServerMsg::AddText(t) => {
+                ServerMsg::AddText(mut t) => {
                     texts += 1;
+                    if t.id == 0 {
+                        t.id = next_id;
+                        next_id += 1;
+                    }
                     scene.apply(Event::AddText(t));
                 }
+                ServerMsg::RemoveText(id) => scene.apply(Event::RemoveText(id)),
                 ServerMsg::Tile { x, y, data } => match dec.decode(&data) {
                     Ok(rgba) => {
                         tiles += 1;

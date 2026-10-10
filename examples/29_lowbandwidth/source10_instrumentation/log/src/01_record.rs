@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 /// Datei-Magic (8 Byte am Dateianfang).
 pub const LOG_MAGIC: [u8; 8] = *b"LBWLOG10";
 /// Record-Format-Version (steht im `Session`-Record).
-pub const LOG_VERSION: u16 = 1;
+/// 1 = v2-Protokoll-Bodies, ≥ 2 = v3-Bodies (`TextItem.id`, `RemoveText`).
+/// Das Record-Format selbst ist unverändert — nur eingebettete Bodies.
+pub const LOG_VERSION: u16 = 2;
 
 /// Leitungsrichtung einer Nachricht.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -22,6 +24,7 @@ pub enum Dir {
 }
 
 /// Nachrichtenart — kompakte Zusammenfassung für Analyse ohne Dekodierung.
+/// Neue Varianten nur hinten anhängen (alte Indizes = alte Logs lesbar).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MsgKind {
     SrvHello,
@@ -33,6 +36,7 @@ pub enum MsgKind {
     Button,
     Text,
     Key,
+    RemoveText,
 }
 
 impl MsgKind {
@@ -43,6 +47,7 @@ impl MsgKind {
             ServerMsg::ClearText => Self::ClearText,
             ServerMsg::AddText(_) => Self::AddText,
             ServerMsg::Tile { .. } => Self::Tile,
+            ServerMsg::RemoveText(_) => Self::RemoveText,
         }
     }
 
@@ -196,6 +201,7 @@ mod tests {
     fn kinds_cover_all_protocol_variants() {
         use lbw_common::{Rect, TextItem};
         let item = TextItem {
+            id: 1,
             rect: Rect::new(0, 0, 1, 1),
             fg: [0; 3],
             bg: [0; 3],
@@ -217,6 +223,10 @@ mod tests {
                 data: vec![]
             }),
             MsgKind::Tile
+        );
+        assert_eq!(
+            MsgKind::of_server(&ServerMsg::RemoveText(1)),
+            MsgKind::RemoveText
         );
         assert_eq!(
             MsgKind::of_client(&ClientMsg::Hello { version: 2 }),

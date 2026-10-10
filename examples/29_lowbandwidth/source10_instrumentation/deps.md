@@ -51,7 +51,8 @@ Modelle (Laufzeit, nicht im Git — Symlink `models/` → `../source7_mvp/models
 
 Systemvoraussetzungen Build/Laufzeit/Test: wie source9 (`libxcb1-dev`,
 `libxcb-shm0-dev`, `libxcb-randr0-dev`; CUDA 13 + cuDNN 9; `xvfb`, `xterm`,
-`x11-utils` für Smoke/Debug).
+`x11-utils` für Smoke/Debug; `libxkbcommon0` zur Laufzeit für macroquad-Fenster
+— belegt durch `scripts/render_check.sh`).
 
 DeepWiki-Beispiele: `ask_wiki_question(repoName="serde-rs/serde",
 question="...")`, `ask_wiki_question(repoName="bincode-org/bincode",
