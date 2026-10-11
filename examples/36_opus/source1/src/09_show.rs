@@ -4,7 +4,7 @@
 //! `R` = Reset, `ESC` = Ende. Hover ueber dem Wasserfall zeigt
 //! Fadenkreuz plus Frame-Details.
 
-use minifb::{Key, MouseButton, MouseMode, Window, WindowOptions};
+use minifb::{Key, KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
 
 use crate::canvas::{FG, GRID, Image};
 use crate::render::{freq_of_bin, layout, render_range};
@@ -176,12 +176,16 @@ pub fn show_interactive(
     let mut view = View::full(analysis.summary.duration_ms);
     let mut base = render_range(analysis, cols, view.t0, view.t1, lay.plot_w);
     draw_hint(&mut base, &lay);
-    let mut drag_x: Option<f32> = None;
+    let mut prev_mouse: Option<(f32, f32)> = None;
     let mut frames = 0;
     while window.is_open() && !window.is_key_down(Key::Escape) && frames < max_frames
     {
         let mouse = window.get_mouse_pos(MouseMode::Clamp);
-        let mut dirty = handle_keys(&window, &mut view);
+        let pressed = window.get_keys_pressed(KeyRepeat::No);
+        if pressed.contains(&Key::Escape) {
+            break; // Kurzer Tastendruck (kein Halten) beendet auch.
+        }
+        let mut dirty = handle_keys(&window, &mut view, &pressed);
         if let Some((_, dy)) = window.get_scroll_wheel() {
             if dy != 0.0 {
                 let anchor = mouse.map_or_else(
@@ -194,22 +198,18 @@ pub fn show_interactive(
                 dirty = true;
             }
         }
-        let down = window.get_mouse_down(MouseButton::Left);
-        if down {
-            if let Some((mx, _)) = mouse {
-                if let Some(last) = drag_x {
-                    let dx_ms =
-                        f64::from((last - mx) / lay.plot_w as f32) * view.span();
-                    if dx_ms != 0.0 {
-                        view.pan_by(dx_ms);
-                        dirty = true;
-                    }
+        // Drag relativ zur Vorframe-Position (faengt auch Spruenge).
+        if window.get_mouse_down(MouseButton::Left) {
+            if let (Some((mx, _)), Some((px, _))) = (mouse, prev_mouse) {
+                let dx_ms =
+                    f64::from((px - mx) / lay.plot_w as f32) * view.span();
+                if dx_ms != 0.0 {
+                    view.pan_by(dx_ms);
+                    dirty = true;
                 }
-                drag_x = Some(mx);
             }
-        } else {
-            drag_x = None;
         }
+        prev_mouse = mouse;
         if dirty {
             base = render_range(analysis, cols, view.t0, view.t1, lay.plot_w);
             draw_hint(&mut base, &lay);
@@ -227,7 +227,7 @@ pub fn show_interactive(
 }
 
 /// Tasten: `+`/`-` Zoom, Pfeile Pan, `R` Reset. Rueckgabe = geaendert.
-fn handle_keys(window: &Window, view: &mut View) -> bool {
+fn handle_keys(window: &Window, view: &mut View, pressed: &[Key]) -> bool {
     let mid = view.pixel_to_ms(600.0, VIEW_PLOT_W);
     if window.is_key_down(Key::Equal) || window.is_key_down(Key::NumPadPlus) {
         view.zoom_around(mid, 0.95);
@@ -242,7 +242,7 @@ fn handle_keys(window: &Window, view: &mut View) -> bool {
     } else if window.is_key_down(Key::Right) {
         view.pan_by(0.03 * view.span());
         true
-    } else if window.is_key_down(Key::R) {
+    } else if pressed.contains(&Key::R) {
         view.reset();
         true
     } else {

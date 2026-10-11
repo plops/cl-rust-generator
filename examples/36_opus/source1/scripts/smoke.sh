@@ -39,6 +39,13 @@ echo "== show unter xvfb (30 frames) =="
 xvfb-run -a ./$BIN /tmp/smoke_demo.opus --show --frames 30 \
   -o /tmp/smoke_show.png
 
+echo "== interaktion (zoom/pan/hover) =="
+if command -v xdotool >/dev/null && command -v scrot >/dev/null; then
+  ./scripts/interact.sh
+else
+  echo "(kein xdotool/scrot, uebersprungen)"
+fi
+
 echo "== echte datei (falls vorhanden) =="
 if [ -f ../rpQs3m5jtIM.webm ]; then
   ffmpeg -y -v error -i ../rpQs3m5jtIM.webm -t 30 -c:a copy -vn \
