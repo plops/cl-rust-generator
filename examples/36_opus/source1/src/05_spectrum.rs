@@ -15,6 +15,8 @@ pub const FMIN: f32 = 50.0;
 pub const FMAX: f32 = 20_000.0;
 /// Sample-Rate (Opus-intern immer 48 kHz).
 pub const RATE: f32 = 48_000.0;
+/// Hop-Dauer in ms (20.0 bei 960/48 kHz).
+pub const HOP_MS: f64 = HOP as f64 / RATE as f64 * 1000.0;
 /// Dynamik-Untergrenze in dB (alles darunter = Boden).
 pub const DB_FLOOR: f32 = -72.0;
 
