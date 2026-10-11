@@ -1,11 +1,12 @@
 //! Interaktiver X11-Viewer via `minifb` (nur Feature `show`).
 //!
 //! Rad = Zeit-Zoom um Cursor, Links-Drag = Pan, `+`/`-`/Pfeile ebenso,
-//! `R` = Reset, `ESC` = Ende. Hover ueber dem Wasserfall zeigt
-//! Fadenkreuz plus Frame-Details.
+//! `1`-`4` = Ansicht, `R` = Reset, `ESC` = Ende. Hover ueber dem
+//! Wasserfall zeigt Fadenkreuz plus Frame-/CELT-Details.
 
 use minifb::{Key, KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
 
+use crate::bitstream::{Source, Sources};
 use crate::canvas::{FG, GRID, Image};
 use crate::render::{freq_of_bin, layout, render_range};
 use crate::spectrum::{BINS, HOP_MS};
@@ -99,42 +100,59 @@ impl View {
     }
 }
 
-/// Hover-Punkt: Zeit, Bin, Pegel, Frame (fuer Panel-Text).
+/// Hover-Punkt: Zeit, Bin, Wert, Frame, CELT-Info (fuer Panel-Text).
 #[derive(Debug, Clone, Copy)]
 pub struct Hover<'a> {
     /// Zeit in ms.
     pub t_ms: f64,
     /// Log-Bin (0 = tief).
     pub bin: usize,
-    /// Pegel in dB.
-    pub db: f32,
+    /// Wert an der Stelle (dB oder Bits, je Quelle).
+    pub value: f32,
+    /// Aktive Quelle (bestimmt Wert-Label).
+    pub source: Source,
     /// Frame an dieser Zeit (kann fehlen).
     pub frame: Option<&'a FrameMeta>,
+    /// Transient-Flag des Hops (`None` = kein CELT).
+    pub transient: Option<bool>,
+    /// Signal-Bits des Hops (`None` = kein CELT).
+    pub frame_bits: Option<f32>,
 }
 
-/// Zwei Panel-Zeilen aus Hover-Punkt (rein/testbar).
+/// Drei Panel-Zeilen aus Hover-Punkt (rein/testbar).
 #[must_use]
-pub fn hover_lines(h: Hover<'_>) -> (String, String) {
+pub fn hover_lines(h: Hover<'_>) -> (String, String, String) {
+    let val = match h.source {
+        Source::Spectrum | Source::Bitstream => format!("PEGEL={:.0}DB", h.value),
+        Source::Divergence if h.value.is_nan() => "DIV=---".to_string(),
+        Source::Divergence => format!("DIV={:.0}DB", h.value),
+        Source::Density => format!("DICHTE={:.1}B", h.value),
+    };
     let l1 = format!(
-        "T={:.3}S F={:.0}HZ PEGEL={:.0}DB",
+        "T={:.3}S F={:.0}HZ {val}",
         h.t_ms / 1000.0,
         freq_of_bin(h.bin),
-        h.db,
     );
     let l2 = h.frame.map_or_else(
         || "KEIN FRAME".to_string(),
         |f| {
             format!(
-                "{} {} {:.0}MS {}B {:.1}KBPS",
+                "{} {} {:.0}MS {}B {:.1}KBPS C{} P{}",
                 f.mode,
                 f.bandwidth.short(),
                 f.duration_ms,
                 f.bytes,
                 f.kbps,
+                f.packing,
+                f.pad_bytes,
             )
         },
     );
-    (l1, l2)
+    let l3 = match (h.transient, h.frame_bits) {
+        (Some(t), Some(b)) => format!("TRANS {} SIG {:.0}B", u8::from(t), b),
+        _ => "KEIN CELT".to_string(),
+    };
+    (l1, l2, l3)
 }
 
 /// Fadenkreuz ueber den Wasserfall malen (Overlay, keine Basis).
@@ -147,22 +165,23 @@ fn draw_hover(img: &mut Image, lay: &crate::render::Layout, x: u32, y: u32) {
     }
 }
 
-/// Infotext oben links in den Plot legen (Box + zwei Zeilen).
-fn draw_panel(img: &mut Image, lay: &crate::render::Layout, l1: &str, l2: &str) {
-    let w = l1.len().max(l2.len()) as u32 * 6 + 10;
+/// Infotext oben links in den Plot legen (Box + drei Zeilen).
+fn draw_panel(img: &mut Image, lay: &crate::render::Layout, l1: &str, l2: &str, l3: &str) {
+    let w = l1.len().max(l2.len()).max(l3.len()) as u32 * 6 + 10;
     let (x, y) = (lay.plot_x + 4, lay.plot_y + 4);
-    img.rect(x, y, w, 24, [10, 12, 18]);
+    img.rect(x, y, w, 33, [10, 12, 18]);
     img.rect(x, y, w, 1, GRID);
-    img.rect(x, y + 23, w, 1, GRID);
-    img.rect(x, y, 1, 24, GRID);
-    img.rect(x + w - 1, y, 1, 24, GRID);
+    img.rect(x, y + 32, w, 1, GRID);
+    img.rect(x, y, 1, 33, GRID);
+    img.rect(x + w - 1, y, 1, 33, GRID);
     img.text(x + 5, y + 4, l1, FG);
     img.text(x + 5, y + 13, l2, FG);
+    img.text(x + 5, y + 22, l3, FG);
 }
 
 /// Bedienhinweis in die Legendenzeile (nur Viewer, nicht PNG).
 fn draw_hint(img: &mut Image, lay: &crate::render::Layout) {
-    let hint = "RAD:ZOOM DRAG:PAN R:RESET ESC:ENDE";
+    let hint = "RAD:ZOOM DRAG:PAN 1-4:ANSICHT R:RESET ESC:ENDE";
     let x = lay.width.saturating_sub(8 + hint.len() as u32 * 6);
     img.text(x, lay.legend_y, hint, FG);
 }
@@ -172,7 +191,8 @@ fn draw_hint(img: &mut Image, lay: &crate::render::Layout) {
 /// `max_frames` begrenzt die Schleife (Test-Haken; normal `u64::MAX`).
 pub fn show_interactive(
     analysis: &Analysis,
-    cols: &[[f32; BINS]],
+    src: &Sources,
+    initial: Source,
     title: &str,
     max_frames: u64,
 ) -> Result<(), Error> {
@@ -182,7 +202,8 @@ pub fn show_interactive(
         .map_err(|e| Error::Show(format!("oeffnen: {e}")))?;
     window.set_target_fps(30);
     let mut view = View::full(analysis.summary.duration_ms);
-    let mut base = render_range(analysis, cols, view.t0, view.t1, lay.plot_w);
+    let mut source = initial;
+    let mut base = render_range(analysis, src, source, view.t0, view.t1, lay.plot_w);
     draw_hint(&mut base, &lay);
     let mut prev_mouse: Option<(f32, f32)> = None;
     let mut frames = 0;
@@ -192,7 +213,7 @@ pub fn show_interactive(
         if pressed.contains(&Key::Escape) {
             break; // Kurzer Tastendruck (kein Halten) beendet auch.
         }
-        let mut dirty = handle_keys(&window, &mut view, &pressed);
+        let mut dirty = handle_keys(&window, &mut view, &mut source, &pressed);
         if let Some((_, dy)) = window.get_scroll_wheel()
             && dy != 0.0
         {
@@ -215,12 +236,12 @@ pub fn show_interactive(
         }
         prev_mouse = mouse;
         if dirty {
-            base = render_range(analysis, cols, view.t0, view.t1, lay.plot_w);
+            base = render_range(analysis, src, source, view.t0, view.t1, lay.plot_w);
             draw_hint(&mut base, &lay);
         }
         let mut frame = base.clone();
-        if let Some((mx, my)) = mouse {
-            draw_hover_state(&mut frame, &lay, analysis, cols, &view, mx, my);
+        if let Some(mouse) = mouse {
+            draw_hover_state(&mut frame, &lay, analysis, src, source, &view, mouse);
         }
         window
             .update_with_buffer(&pack(&frame), w, h)
@@ -230,8 +251,20 @@ pub fn show_interactive(
     Ok(())
 }
 
-/// Tasten: `+`/`-` Zoom, Pfeile Pan, `R` Reset. Rueckgabe = geaendert.
-fn handle_keys(window: &Window, view: &mut View, pressed: &[Key]) -> bool {
+/// Tasten: `+`/`-` Zoom, Pfeile Pan, `1`-`4` Ansicht, `R` Reset.
+/// Rueckgabe = geaendert.
+fn handle_keys(window: &Window, view: &mut View, source: &mut Source, pressed: &[Key]) -> bool {
+    for (key, src) in [
+        (Key::Key1, Source::Spectrum),
+        (Key::Key2, Source::Bitstream),
+        (Key::Key3, Source::Divergence),
+        (Key::Key4, Source::Density),
+    ] {
+        if pressed.contains(&key) && *source != src {
+            *source = src;
+            return true;
+        }
+    }
     let mid = view.pixel_to_ms(600.0, VIEW_PLOT_W);
     if window.is_key_down(Key::Equal) || window.is_key_down(Key::NumPadPlus) {
         view.zoom_around(mid, 0.95);
@@ -258,30 +291,35 @@ fn draw_hover_state(
     img: &mut Image,
     lay: &crate::render::Layout,
     analysis: &Analysis,
-    cols: &[[f32; BINS]],
+    src: &Sources,
+    source: Source,
     view: &View,
-    mx: f32,
-    my: f32,
+    mouse: (f32, f32),
 ) {
+    let (mx, my) = mouse;
     let (px, py) = (mx as i32, my as i32);
     let in_x = px >= lay.plot_x as i32 && px < (lay.plot_x + lay.plot_w) as i32;
     let in_y = py >= lay.plot_y as i32 && py < (lay.plot_y + BINS as u32) as i32;
+    let cols = src.cols(source);
     if !in_x || !in_y || cols.is_empty() {
         return;
     }
     let (x, y) = (px as u32, py as u32);
     draw_hover(img, lay, x, y);
     let t_ms = view.pixel_to_ms(mx - lay.plot_x as f32, lay.plot_w);
-    let bin = BINS - 1 - (y - lay.plot_y) as usize;
-    let hop = (t_ms / HOP_MS).floor() as usize;
-    let db = cols[hop.min(cols.len() - 1)][bin.min(BINS - 1)];
-    let (l1, l2) = hover_lines(Hover {
+    let bin = (BINS - 1 - (y - lay.plot_y) as usize).min(BINS - 1);
+    let hop = ((t_ms / HOP_MS).floor() as usize).min(cols.len() - 1);
+    let celt = src.available.get(hop).copied().unwrap_or(false);
+    let (l1, l2, l3) = hover_lines(Hover {
         t_ms,
-        bin: bin.min(BINS - 1),
-        db,
+        bin,
+        value: cols[hop][bin],
+        source,
         frame: analysis.frame_at(t_ms),
+        transient: celt.then(|| src.transient.get(hop).copied().unwrap_or(false)),
+        frame_bits: celt.then(|| src.frame_bits.get(hop).copied().unwrap_or(0.0)),
     });
-    draw_panel(img, lay, &l1, &l2);
+    draw_panel(img, lay, &l1, &l2, &l3);
 }
 
 /// RGB-Bytes → `0x00RRGGBB`-Puffer (minifb-Format, rein/testbar).
@@ -359,22 +397,42 @@ mod tests {
             channels: 1,
             bytes: 61,
             kbps: 24.4,
+            packing: 2,
+            pad_bytes: 5,
         };
-        let (l1, l2) = hover_lines(Hover {
+        let (l1, l2, l3) = hover_lines(Hover {
             t_ms: 1234.567,
             bin: 93, // ≈ 440 Hz.
-            db: -12.3,
+            value: -12.3,
+            source: Source::Spectrum,
             frame: Some(&f),
+            transient: Some(true),
+            frame_bits: Some(1822.0),
         });
         assert_eq!(l1, "T=1.235S F=441HZ PEGEL=-12DB");
-        assert_eq!(l2, "SILK WB 20MS 61B 24.4KBPS");
-        let (_, l2) = hover_lines(Hover {
+        assert_eq!(l2, "SILK WB 20MS 61B 24.4KBPS C2 P5");
+        assert_eq!(l3, "TRANS 1 SIG 1822B");
+        let (l1, _, l3) = hover_lines(Hover {
             t_ms: 0.0,
             bin: 0,
-            db: -72.0,
+            value: f32::NAN,
+            source: Source::Divergence,
             frame: None,
+            transient: None,
+            frame_bits: None,
         });
-        assert_eq!(l2, "KEIN FRAME");
+        assert_eq!(l1, "T=0.000S F=50HZ DIV=---");
+        assert_eq!(l3, "KEIN CELT");
+        let (l1, _, _) = hover_lines(Hover {
+            t_ms: 0.0,
+            bin: 0,
+            value: 2.34,
+            source: Source::Density,
+            frame: None,
+            transient: None,
+            frame_bits: None,
+        });
+        assert_eq!(l1, "T=0.000S F=50HZ DICHTE=2.3B");
     }
 
     #[test]

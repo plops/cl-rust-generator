@@ -23,6 +23,12 @@ pub fn analyze_reader<R: Read>(reader: R, total_bytes: u64) -> Result<Analysis, 
     while let Some(packet) = reader.read_packet()? {
         let info = toc::parse(&packet.data)?;
         let kbps = packet.data.len() as f64 * 8.0 / info.duration_ms;
+        // Pad aus dem Splitter; faellt der Split fehl (striktes RFC),
+        // nimmt Hover Pad 0 (Analyse bleibt robust).
+        let packing = packet.data[0] & 0x03;
+        let pad_bytes = crate::split::split(&packet.data)
+            .map(|s| s.pad_bytes)
+            .unwrap_or(0);
         frames.push(FrameMeta {
             index: frames.len(),
             t_start_ms: t_ms,
@@ -32,6 +38,8 @@ pub fn analyze_reader<R: Read>(reader: R, total_bytes: u64) -> Result<Analysis, 
             channels: info.channels,
             bytes: packet.data.len(),
             kbps,
+            packing,
+            pad_bytes,
         });
         t_ms += info.duration_ms;
     }
@@ -136,6 +144,8 @@ mod tests {
             channels: 1,
             bytes,
             kbps: bytes as f64 * 8.0 / ms,
+            packing: 0,
+            pad_bytes: 0,
         }
     }
 

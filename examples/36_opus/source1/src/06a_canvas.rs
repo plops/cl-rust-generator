@@ -92,6 +92,28 @@ pub fn colormap(t: f32) -> [u8; 3] {
     ]
 }
 
+/// Divergierend: tiefblau → schwarz (0) → amber. `t` in [-1, 1].
+#[must_use]
+pub fn diverging(t: f32) -> [u8; 3] {
+    const NEG: [u8; 3] = [40, 110, 220];
+    const MID: [u8; 3] = [10, 10, 16];
+    const POS: [u8; 3] = [255, 170, 60];
+    let t = t.clamp(-1.0, 1.0);
+    let (c0, c1, f) = if t < 0.0 {
+        (NEG, MID, t + 1.0)
+    } else {
+        (MID, POS, t)
+    };
+    [
+        (f32::from(c0[0]) + (f32::from(c1[0]) - f32::from(c0[0])) * f) as u8,
+        (f32::from(c0[1]) + (f32::from(c1[1]) - f32::from(c0[1])) * f) as u8,
+        (f32::from(c0[2]) + (f32::from(c1[2]) - f32::from(c0[2])) * f) as u8,
+    ]
+}
+
+/// Farbe fuer fehlende Werte (NaN): neutrales Grau, kein Daten-Farbton.
+pub const NAN_COLOR: [u8; 3] = [74, 76, 84];
+
 /// 5x7-Glyphen: A–M (je 7 Zeilen, 5 Bit).
 const GLYPH_AM: [(char, [u8; 7]); 13] = [
     ('A', [0x0e, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11]),

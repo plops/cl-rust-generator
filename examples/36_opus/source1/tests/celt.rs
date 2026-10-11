@@ -14,6 +14,7 @@ fn sweep_packets(packets: &[Vec<u8>]) -> (usize, f32, f32) {
     let mut n = 0;
     let mut max_dev: i32 = 0;
     let mut max_e = 0.0f32;
+    let mut max_bal = 0.0f32;
     let mut worst = String::new();
     for (pi, p) in packets.iter().enumerate() {
         let toc = opus_vis::toc::parse(p).unwrap();
@@ -53,6 +54,19 @@ fn sweep_packets(packets: &[Vec<u8>]) -> (usize, f32, f32) {
             for b in 0..end {
                 sum += cf.coarse_bits[b] + (ch as i32) * cf.ebits[b] * 8;
             }
+            if cf.alloc_bits > 0 {
+                let r = cf.balance as f32 / cf.alloc_bits as f32;
+                if r > 0.5 {
+                    eprintln!(
+                        "BAL pkt {pi} frm {fi}: alloc {} bal {} coded {} len {}",
+                        cf.alloc_bits,
+                        cf.balance,
+                        cf.coded_bands,
+                        f.len()
+                    );
+                }
+                max_bal = max_bal.max(r);
+            }
             let dev = (sum - cf.alloc_bits.max(0)).abs();
             if dev > max_dev {
                 max_dev = dev;
@@ -76,6 +90,7 @@ fn sweep_packets(packets: &[Vec<u8>]) -> (usize, f32, f32) {
     if max_dev > 24 {
         eprintln!("WORST: {worst}");
     }
+    eprintln!("max Bilanz/Alloc: {max_bal:.3}");
     (n, max_dev as f32 / 8.0, max_e)
 }
 

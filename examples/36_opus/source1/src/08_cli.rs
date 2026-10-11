@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
+use crate::bitstream::Source;
 use crate::types::{Analysis, CliConfig, Error, Input, Output};
 
 /// Hilfe-Text.
@@ -16,6 +17,7 @@ optionen:
   -o DATEI       PNG-Ausgabe (Default: <stamm>.png, - = stdout)
   --json DATEI   JSON-Metadaten schreiben (- = stdout)
   --width N      Plot-Breite in px (64-4096, Default: automatisch)
+  --view NAME    ansicht: spektrum|bitstrom|divergenz|dichte (1-4)
   --show         Bild zusaetzlich im X11-Fenster zeigen (Feature show)
   --frames N     Fenster nach N Frames schliessen (Test-Haken)
   -h, --help     diese Hilfe
@@ -23,8 +25,8 @@ optionen:
 fenster-steuerung (--show):
   rad            zeit-zoom um cursor    links-drag  verschieben
   +/-            zoom um mitte          pfeile      verschieben
-  R              gesamtansicht          ESC         ende
-  hover          fadenkreuz + details (zeit, frequenz, modus, bitrate)
+  1-4            ansicht wechseln       R           gesamtansicht
+  ESC            ende                   hover       details + celt-zeile
 ";
 
 /// Parse-Ergebnis: Hilfe oder Konfiguration.
@@ -44,6 +46,7 @@ pub fn parse(args: impl Iterator<Item = OsString>) -> Result<Action, Error> {
     let mut png_out: Option<Output> = None;
     let mut json_out: Option<Output> = None;
     let mut width: Option<u32> = None;
+    let mut view = Source::Spectrum;
     let mut show = false;
     let mut show_frames = u64::MAX;
     while let Some(arg) = args.next() {
@@ -58,6 +61,12 @@ pub fn parse(args: impl Iterator<Item = OsString>) -> Result<Action, Error> {
                     v.parse::<u32>()
                         .map_err(|_| Error::Usage("--width braucht eine Zahl".into()))?,
                 );
+            }
+            "--view" => {
+                let v = value(&mut args, "--view")?;
+                view = Source::parse(&v).ok_or_else(|| {
+                    Error::Usage("--view: spektrum|bitstrom|divergenz|dichte erwartet".into())
+                })?;
             }
             "--show" => show = true,
             "--frames" => {
@@ -90,6 +99,7 @@ pub fn parse(args: impl Iterator<Item = OsString>) -> Result<Action, Error> {
         png_out: png_out.unwrap(),
         json_out,
         width,
+        view,
         show,
         show_frames,
     }))
@@ -188,10 +198,12 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<(), Error> {
     let analysis = crate::analyze::analyze_reader(&bytes[..], total)?;
     let pcm = crate::decode::decode_mono(&bytes)?;
     let cols = crate::spectrum::stft(&pcm.samples);
+    let bs = crate::bitstream::analyze_bytes(&bytes)?;
+    let src = crate::bitstream::Sources::build(&cols, &bs);
     let width = cfg
         .width
         .unwrap_or_else(|| (cols.len() as u32).clamp(320, 4096));
-    let img = crate::render::render(&analysis, &cols, width.clamp(64, 4096));
+    let img = crate::render::render(&analysis, &src, cfg.view, width.clamp(64, 4096));
     let png = crate::png::encode_rgb(img.width, img.height, &img.rgb);
     write_output(&cfg.png_out, &png)?;
     if let Some(json_out) = &cfg.json_out {
@@ -206,7 +218,7 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<(), Error> {
         s.ratio,
     );
     if cfg.show {
-        show_viewer(&cfg, &analysis, &cols)?;
+        show_viewer(&cfg, &analysis, &src)?;
     }
     Ok(())
 }
@@ -229,13 +241,13 @@ fn write_output(out: &Output, bytes: &[u8]) -> Result<(), Error> {
 fn show_viewer(
     cfg: &CliConfig,
     analysis: &Analysis,
-    cols: &[[f32; crate::spectrum::BINS]],
+    src: &crate::bitstream::Sources,
 ) -> Result<(), Error> {
     let title = match &cfg.input {
         Input::Stdin => "opus-vis (stdin)".to_string(),
         Input::Path(p) => format!("opus-vis: {}", p.display()),
     };
-    crate::show::show_interactive(analysis, cols, &title, cfg.show_frames)
+    crate::show::show_interactive(analysis, src, cfg.view, &title, cfg.show_frames)
 }
 
 /// Viewer ohne Feature → Hinweis-Fehler.
@@ -243,7 +255,7 @@ fn show_viewer(
 fn show_viewer(
     _cfg: &CliConfig,
     _analysis: &Analysis,
-    _cols: &[[f32; crate::spectrum::BINS]],
+    _src: &crate::bitstream::Sources,
 ) -> Result<(), Error> {
     Err(Error::Usage(
         "--show braucht den Build mit --features show".into(),
@@ -261,8 +273,8 @@ mod tests {
     #[test]
     fn full_flags_parse() {
         let a = parse(args(&[
-            "opus-vis", "-o", "a.png", "--json", "b.json", "--width", "500", "--show", "--frames",
-            "7", "in.opus",
+            "opus-vis", "-o", "a.png", "--json", "b.json", "--width", "500", "--view", "dichte",
+            "--show", "--frames", "7", "in.opus",
         ]));
         let Action::Run(cfg) = a.unwrap() else {
             panic!("kein Run")
@@ -270,9 +282,30 @@ mod tests {
         assert_eq!(cfg.png_out, Output::Path(PathBuf::from("a.png")));
         assert_eq!(cfg.json_out, Some(Output::Path(PathBuf::from("b.json"))));
         assert_eq!(cfg.width, Some(500));
+        assert_eq!(cfg.view, Source::Density);
         assert!(cfg.show);
         assert_eq!(cfg.show_frames, 7);
         assert_eq!(cfg.input, Input::Path(PathBuf::from("in.opus")));
+    }
+
+    #[test]
+    fn view_defaults_and_rejects_garbage() {
+        let Action::Run(cfg) = parse(args(&["opus-vis", "x.opus"])).unwrap() else {
+            panic!("kein Run")
+        };
+        assert_eq!(cfg.view, Source::Spectrum);
+        let Action::Run(cfg) = parse(args(&["opus-vis", "--view", "3", "x.opus"])).unwrap() else {
+            panic!("kein Run")
+        };
+        assert_eq!(cfg.view, Source::Divergence);
+        assert!(matches!(
+            parse(args(&["opus-vis", "--view", "falsch", "x.opus"])),
+            Err(Error::Usage(_))
+        ));
+        assert!(matches!(
+            parse(args(&["opus-vis", "--view"])),
+            Err(Error::Usage(_))
+        ));
     }
 
     #[test]

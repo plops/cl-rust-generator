@@ -13,7 +13,7 @@
 
 use opus_pure::OggOpusReader;
 
-use crate::alloc::{EBANDS, NB};
+use crate::alloc::{EBANDS, NB, drain_shares};
 use crate::celt::{CeltState, endband_of, energy_db, lm_of_ms, parse_celt_frame};
 use crate::spectrum::{BINS, DB_FLOOR, FMAX, FMIN, HOP, RATE};
 use crate::types::{Error, Mode};
@@ -64,10 +64,122 @@ fn bin_to_band() -> [usize; BINS] {
 pub struct Bitstream {
     /// dB-Spalten (`DB_FLOOR` wo unverfuegbar).
     pub spectrum: Vec<[f32; BINS]>,
-    /// Bits je Bin (summiert ≈ Frame-Bits; 0 wo unverfuegbar).
+    /// Bits je Bin (summiert = Allokation − Header-Overhead; 0 wo n/a).
     pub density: Vec<[f32; BINS]>,
     /// `true` wo ein CELT-Paket den Hop traegt.
     pub available: Vec<bool>,
+    /// Transient-Flag je Hop (Oder ueber Frames; Hover).
+    pub transient: Vec<bool>,
+    /// Signal-Bits je Hop (Coarse + Fine; Hover).
+    pub frame_bits: Vec<f32>,
+}
+
+/// Wasserfall-Quelle (Ansicht 1–4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Source {
+    /// Decodiertes STFT-Spektrum in dB.
+    #[default]
+    Spectrum,
+    /// Encoder-Band-Energien in dB.
+    Bitstream,
+    /// STFT − Bitstrom in dB (divergierend).
+    Divergence,
+    /// Bits je Bin (Informationsdichte).
+    Density,
+}
+
+impl Source {
+    /// Alle vier in Tasten-Reihenfolge.
+    pub const ALL: [Source; 4] = [
+        Source::Spectrum,
+        Source::Bitstream,
+        Source::Divergence,
+        Source::Density,
+    ];
+
+    /// Anzeigename (Kopfzeile, `--view`).
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Source::Spectrum => "SPEKTRUM",
+            Source::Bitstream => "BITSTROM",
+            Source::Divergence => "DIVERGENZ",
+            Source::Density => "DICHTE",
+        }
+    }
+
+    /// Aus `--view`-Wert (case-insensitiv) oder Taste 1–4.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Source> {
+        match s.to_ascii_uppercase().as_str() {
+            "SPEKTRUM" | "SPECTRUM" | "1" => Some(Source::Spectrum),
+            "BITSTROM" | "BITSTREAM" | "2" => Some(Source::Bitstream),
+            "DIVERGENZ" | "DIVERGENCE" | "3" => Some(Source::Divergence),
+            "DICHTE" | "DENSITY" | "4" => Some(Source::Density),
+            _ => None,
+        }
+    }
+}
+
+/// Alle vier Spalten-Saetze, auf gemeinsame Laenge gekuerzt.
+pub struct Sources {
+    /// STFT-Spalten (dB).
+    pub spectrum: Vec<[f32; BINS]>,
+    /// Bitstrom-Spalten (dB).
+    pub bitstream: Vec<[f32; BINS]>,
+    /// Dichte-Spalten (Bits/Bin).
+    pub density: Vec<[f32; BINS]>,
+    /// Divergenz-Spalten (dB, NaN wo unverfuegbar).
+    pub divergence: Vec<[f32; BINS]>,
+    /// Verfuegbarkeit je Hop.
+    pub available: Vec<bool>,
+    /// Transient-Flag je Hop.
+    pub transient: Vec<bool>,
+    /// Signal-Bits je Hop.
+    pub frame_bits: Vec<f32>,
+    /// Globales Dichte-Maximum (Normierung).
+    pub density_max: f32,
+}
+
+impl Sources {
+    /// Baut aus STFT + Bitstrom alle Ansichten (kuerzt auf Minimum).
+    #[must_use]
+    pub fn build(stft: &[[f32; BINS]], bs: &Bitstream) -> Self {
+        let n = stft.len().min(bs.spectrum.len());
+        let mut out = Self {
+            spectrum: stft[..n].to_vec(),
+            bitstream: bs.spectrum[..n].to_vec(),
+            density: bs.density[..n].to_vec(),
+            divergence: Vec::with_capacity(n),
+            available: bs.available[..n].to_vec(),
+            transient: bs.transient[..n].to_vec(),
+            frame_bits: bs.frame_bits[..n].to_vec(),
+            density_max: 0.0,
+        };
+        for h in 0..n {
+            out.divergence.push(divergence(
+                &out.spectrum[h],
+                &out.bitstream[h],
+                out.available[h],
+            ));
+            for v in &out.density[h] {
+                out.density_max = out.density_max.max(*v);
+            }
+        }
+        out.density_max = out.density_max.max(1e-6);
+        out
+    }
+
+    /// Spalten einer Quelle (fuer Renderer/Hover).
+    #[must_use]
+    pub fn cols(&self, src: Source) -> &[[f32; BINS]] {
+        match src {
+            Source::Spectrum => &self.spectrum,
+            Source::Bitstream => &self.bitstream,
+            Source::Divergence => &self.divergence,
+            Source::Density => &self.density,
+        }
+    }
 }
 
 /// Parst alle Pakete und baut die Hop-Spalten (Pre-Skip beachtet).
@@ -90,8 +202,9 @@ pub fn analyze_bytes(data: &[u8]) -> Result<Bitstream, Error> {
     // CELT-Frames sequentiell parsen (Zustand + Reset bei Moduswechsel).
     let mut state = CeltState::new();
     let mut last_mode: Option<Mode> = None;
-    // Je Paket: gemittelte Band-Energien (dB) + summierte Bits/Band.
-    type PacketBands = ([[f32; NB]; 2], [f32; NB]);
+    // Je Paket: gemittelte Band-Energien (dB) + summierte Bits/Band +
+    // Transient-Oder + Signal-Bits (Hover).
+    type PacketBands = ([[f32; NB]; 2], [f32; NB], bool, f32);
     let mut per_packet: Vec<Option<PacketBands>> = Vec::new();
     for p in &packets {
         let toc = crate::toc::parse(p)?;
@@ -112,8 +225,10 @@ pub fn analyze_bytes(data: &[u8]) -> Result<Bitstream, Error> {
         let mut pow = [[0.0f32; NB]; 2];
         let mut bits = [0.0f32; NB];
         let mut n = 0;
+        let mut transient = false;
         for f in &split.frames {
             let cf = parse_celt_frame(f, lm, ch, 0, end, &mut state).map_err(Error::BadPacket)?;
+            transient |= cf.transient;
             for (pc, lc) in pow.iter_mut().zip(cf.log_e.iter()).take(ch) {
                 for (b, (p, l)) in pc.iter_mut().zip(lc.iter()).enumerate().take(end) {
                     *p += 10.0f32.powf(bitstream_db(*l, b) / 10.0);
@@ -126,6 +241,14 @@ pub fn analyze_bytes(data: &[u8]) -> Result<Bitstream, Error> {
             {
                 *dst += *crs as f32 / 8.0 + ch as f32 * *eb as f32;
             }
+            // Bilanz-Reservoir fliesst per Drain-Regel an die Baender.
+            for (dst, sh) in bits
+                .iter_mut()
+                .zip(drain_shares(cf.balance, cf.coded_bands.max(0) as usize, 0).iter())
+                .take(end)
+            {
+                *dst += *sh as f32 / 8.0;
+            }
             n += 1;
         }
         let mut db = [[DB_FLOOR; NB]; 2];
@@ -134,7 +257,7 @@ pub fn analyze_bytes(data: &[u8]) -> Result<Bitstream, Error> {
                 *d = 10.0 * (p / n as f32 + 1e-12).log10();
             }
         }
-        per_packet.push(Some((db, bits)));
+        per_packet.push(Some((db, bits, transient, bits.iter().sum())));
     }
     // Hops: Hop h traegt das Paket seiner Hop-Mitte.
     let map = bin_to_band();
@@ -146,6 +269,8 @@ pub fn analyze_bytes(data: &[u8]) -> Result<Bitstream, Error> {
         spectrum: Vec::new(),
         density: Vec::new(),
         available: Vec::new(),
+        transient: Vec::new(),
+        frame_bits: Vec::new(),
     };
     let mut h = 0usize;
     loop {
@@ -155,9 +280,9 @@ pub fn analyze_bytes(data: &[u8]) -> Result<Bitstream, Error> {
         }
         let pi = bounds.partition_point(|&s| s <= center) - 1;
         let (mut col, mut den) = ([DB_FLOOR; BINS], [0.0f32; BINS]);
-        let mut avail = false;
-        if let Some((db, bits)) = &per_packet[pi] {
-            avail = true;
+        let (mut avail, mut trans, mut fbits) = (false, false, 0.0);
+        if let Some((db, bits, tr, fb)) = &per_packet[pi] {
+            (avail, trans, fbits) = (true, *tr, *fb);
             for (j, b) in map.iter().enumerate() {
                 // Kanaele im Leistungs-Mittel; Dichte gleichmaessig je Bin.
                 let p = (10.0f32.powf(db[0][*b] / 10.0) + 10.0f32.powf(db[1][*b] / 10.0)) / 2.0;
@@ -168,6 +293,8 @@ pub fn analyze_bytes(data: &[u8]) -> Result<Bitstream, Error> {
         out.spectrum.push(col);
         out.density.push(den);
         out.available.push(avail);
+        out.transient.push(trans);
+        out.frame_bits.push(fbits);
         h += 1;
     }
     Ok(out)

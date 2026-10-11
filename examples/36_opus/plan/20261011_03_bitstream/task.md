@@ -47,11 +47,18 @@ Verifikation: `cargo test spectrum` gruen (7/7).
 
 ## B4 — Views + Hover (Implementierung + Tests)
 
-- [ ] Render: Quellen-Umschaltung, divergierende Colormap, Band-Achse,
-      `--view` + Tasten 1–4, Hover-Plus (Packing/Pad/Transient/Bits).
-- [ ] Tests: alle 4 Views rendern (Pixel-Smoke je View); Hover-Text.
+- [x] `Source`/`Sources` (05b): 4 Quellen, Divergenz vorberechnet,
+      Dichte-Max; `--view` (+1–4-Alias) + Tasten 1–4; Kopf/Legende/Hover
+      quellen-bewusst (dB/DIV/BITS, Packing/Pad, TRANS/SIG, KEIN CELT).
+- [x] Render: Pooling (Max / betrags-groesst), divergierende Colormap
+      (±12 dB), NaN-Grau, lineare Dichte-Norm, CELT-Bandgitter.
+- [x] Bugfix Allokation: Cap-`<< lm` fehlte (per Trace gegen opus-pure
+      verifiziert, jetzt Puls-fuer-Puls identisch); Bilanz-Drain
+      (`Rest/min(3,Restbaender)`) fliesst in die Dichte ein.
+- [x] Tests: 4-View-Pixel-Smoke (paarweise > 5 % Diff), NaN-Grau,
+      Hover-Text, Pooling-Unit, Cap-/Drain-Units.
 
-Verifikation: `cargo test --all-features` gruen.
+Verifikation: `cargo test --all-features` gruen (71).
 
 ## B5 — HIL + Hygiene + Walkthrough
 

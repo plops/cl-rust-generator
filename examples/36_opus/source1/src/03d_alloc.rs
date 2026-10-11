@@ -390,6 +390,22 @@ pub(crate) fn compute_allocation(
     )
 }
 
+/// Ideal-Abfluss des Bilanz-Reservoirs auf codierte Baender (1/8-Bit).
+/// Regel aus `quant_all_bands`: Band i erhaelt `Rest / min(3, Restbaender)`
+/// als Extra-Budget ueber `pulses[i]` hinaus; das letzte Band nimmt den Rest.
+/// Summe = `balance` exakt (Trunkierung schluckt das letzte Band).
+pub(crate) fn drain_shares(balance: i32, coded: usize, start: usize) -> [i32; NB] {
+    let mut shares = [0i32; NB];
+    let mut rest = balance.max(0);
+    for (i, sh) in shares.iter_mut().enumerate().take(coded.min(NB)).skip(start) {
+        let div = 3.min(coded - i) as i32;
+        let take = rest / div;
+        *sh = take;
+        rest -= take;
+    }
+    shares
+}
+
 /// Ergebnis der Mid-Section: Caps, Dynalloc-Boosts, Trim, Collapse-Reserve.
 pub(crate) struct MidSection {
     pub(crate) offsets: [i32; NB],
@@ -410,7 +426,7 @@ pub(crate) fn dynalloc_section(
 ) -> MidSection {
     let mut cap = [0i32; NB];
     for (i, cap_i) in cap.iter_mut().enumerate() {
-        let n = EBANDS[i + 1] - EBANDS[i];
+        let n = (EBANDS[i + 1] - EBANDS[i]) << lm;
         *cap_i =
             ((i32::from(CAPS[NB * (2 * lm + channels - 1) + i]) + 64) * channels as i32 * n) >> 2;
     }
@@ -472,6 +488,31 @@ mod tests {
         assert_eq!(EBANDS.len(), NB + 1);
     }
 
+    #[test]
+    fn caps_scale_with_frame_size() {
+        // Formel: ((CAPS + 64) * C * (Breite << lm)) >> 2.
+        // Der `<< lm` fehlte einmal (Caps 8x zu klein bei lm=3, alles
+        // kaskadierte in die Bilanz); diese Werte pinnen ihn fest.
+        let mut rc = RangeDec::new(&[]);
+        let mid = dynalloc_section(&mut rc, 0, 3, 2, 0, 21, false);
+        assert_eq!(mid.cap[0], 1072); // ((204 + 64) * 2 * 8) >> 2
+        assert_eq!(mid.cap[20], 9152); // ((40 + 64) * 2 * 176) >> 2
+        let mut rc = RangeDec::new(&[]);
+        let mid = dynalloc_section(&mut rc, 0, 0, 2, 0, 21, false);
+        assert_eq!(mid.cap[0], 144); // ((224 + 64) * 2 * 1) >> 2, CAPS-Zeile 1
+    }
+
+    #[test]
+    fn drain_splits_balance_front_loaded() {
+        let s = drain_shares(900, 5, 0);
+        assert_eq!(s[..5], [300, 200, 133, 133, 134]);
+        assert_eq!(s.iter().sum::<i32>(), 900);
+        // Leere/faulige Faelle: nichts, kein Panik.
+        assert_eq!(drain_shares(0, 21, 0).iter().sum::<i32>(), 0);
+        assert_eq!(drain_shares(-50, 21, 0).iter().sum::<i32>(), 0);
+        assert_eq!(drain_shares(100, 0, 0).iter().sum::<i32>(), 0);
+    }
+
     /// Allocation conservation over synthetic budgets: bands + rest +
     /// header overhead must equal the budget exactly (LCG fuzz, no deps).
     #[test]
@@ -489,7 +530,7 @@ mod tests {
             let trim = (next() % 11) as i32;
             let mut cap = [0i32; NB];
             for (i, c) in cap.iter_mut().enumerate() {
-                let n = EBANDS[i + 1] - EBANDS[i];
+                let n = (EBANDS[i + 1] - EBANDS[i]) << lm;
                 *c = ((i32::from(CAPS[NB * (2 * lm + ch - 1) + i]) + 64) * ch as i32 * n) >> 2;
             }
             let mut offsets = [0i32; NB];

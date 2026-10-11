@@ -147,6 +147,10 @@ pub struct FrameMeta {
     pub bytes: usize,
     /// Momentan-Bitrate in kbit/s.
     pub kbps: f64,
+    /// Packing-Code 0–3 (TOC-Bits 0–1).
+    pub packing: u8,
+    /// Padding-Bytes im Paket (Nutzdaten-fremd).
+    pub pad_bytes: usize,
 }
 
 /// Datei-Summary fuer Kopfzeile und JSON.
@@ -216,6 +220,8 @@ pub struct CliConfig {
     pub json_out: Option<Output>,
     /// Plot-Breite (`None` = automatisch).
     pub width: Option<u32>,
+    /// Wasserfall-Quelle (Default: Spektrum).
+    pub view: crate::bitstream::Source,
     /// Fenster anzeigen.
     pub show: bool,
     /// Fenster-Frames (Test-Haken, Default `u64::MAX`).

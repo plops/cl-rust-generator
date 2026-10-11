@@ -155,6 +155,13 @@ fn density_sums_to_allocated_bits() {
             for b in 0..end {
                 sum += cf.coarse_bits[b] as f32 / 8.0 + ch as f32 * cf.ebits[b] as f32;
             }
+            // Drain-Regel unabhaengig transkribiert (s. 03d_alloc).
+            let mut rest = cf.balance.max(0);
+            for i in 0..cf.coded_bands.max(0) as usize {
+                let take = rest / 3.min(cf.coded_bands.max(0) as usize - i) as i32;
+                sum += take as f32 / 8.0;
+                rest -= take;
+            }
         }
         totals.push(sum);
     }
