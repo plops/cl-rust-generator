@@ -5,7 +5,7 @@
 
 use minifb::{Key, Window, WindowOptions};
 
-use crate::render::Image;
+use crate::canvas::Image;
 use crate::types::Error;
 
 /// Bild ins Fenster bringen (blockiert bis ESC/schliessen/Limit).

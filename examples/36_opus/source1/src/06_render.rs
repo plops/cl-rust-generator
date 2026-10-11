@@ -1,75 +1,11 @@
-//! Renderer: Bildpuffer, Colormap, 5x7-Font, Layout, Ebenen.
+//! Renderer: Layout plus Opus-Ebenen (Wasserfall, Streifen, Lane).
 //!
-//! Ebenen: Kopfzeilen, Wasserfall (mit Modus-Toenung + Bandgrenze),
+//! Kopfzeilen, Wasserfall (Modus-Toenung, Bandgrenze),
 //! Modus-Streifen, Bitraten-Lane, Legende, Achsen.
 
+use crate::canvas::{BG, FG, GRID, Image, colormap};
 use crate::spectrum::{BINS, DB_FLOOR, HOP_MS};
 use crate::types::{Analysis, Mode};
-
-/// RGB-Bild, Zeilen von oben nach unten.
-#[derive(Debug, Clone)]
-pub struct Image {
-    /// Breite in px.
-    pub width: u32,
-    /// Hoehe in px.
-    pub height: u32,
-    /// RGB-Tripel, `width*height*3` Bytes.
-    pub rgb: Vec<u8>,
-}
-
-impl Image {
-    /// Neues Bild, gefuellt mit `bg`.
-    #[must_use]
-    pub fn new(width: u32, height: u32, bg: [u8; 3]) -> Self {
-        let mut rgb = vec![0; width as usize * height as usize * 3];
-        for px in rgb.as_chunks_mut::<3>().0 {
-            *px = bg;
-        }
-        Self { width, height, rgb }
-    }
-
-    /// Pixel setzen (stummes Clipping ausserhalb).
-    pub fn set(&mut self, x: i32, y: i32, c: [u8; 3]) {
-        if x >= 0 && y >= 0 && (x as u32) < self.width && (y as u32) < self.height {
-            let i = (y as usize * self.width as usize + x as usize) * 3;
-            self.rgb[i..i + 3].copy_from_slice(&c);
-        }
-    }
-
-    /// Pixel lesen (fuer Tests).
-    #[must_use]
-    pub fn get(&self, x: u32, y: u32) -> [u8; 3] {
-        let i = (y as usize * self.width as usize + x as usize) * 3;
-        [self.rgb[i], self.rgb[i + 1], self.rgb[i + 2]]
-    }
-
-    /// Gefuelltes Rechteck (stummes Clipping).
-    pub fn rect(&mut self, x: u32, y: u32, w: u32, h: u32, c: [u8; 3]) {
-        for dy in 0..h {
-            for dx in 0..w {
-                self.set(x as i32 + dx as i32, y as i32 + dy as i32, c);
-            }
-        }
-    }
-
-    /// Pixel mit Alpha (0.0–1.0) ueberblenden.
-    pub fn blend(&mut self, x: u32, y: u32, c: [u8; 3], a: f32) {
-        if x < self.width && y < self.height {
-            let i = (y as usize * self.width as usize + x as usize) * 3;
-            for (old, target) in self.rgb[i..i + 3].iter_mut().zip(c) {
-                let o = f32::from(*old);
-                *old = (o + (f32::from(target) - o) * a) as u8;
-            }
-        }
-    }
-}
-
-/// Hintergrund, Text, Linie.
-pub const BG: [u8; 3] = [13, 17, 23];
-/// Siehe `BG`.
-pub const FG: [u8; 3] = [220, 225, 235];
-/// Siehe `BG`.
-pub const GRID: [u8; 3] = [60, 66, 78];
 
 /// Modus-Farbe: SILK blau, Hybrid violett, CELT amber.
 #[must_use]
@@ -78,128 +14,6 @@ pub fn mode_color(mode: Mode) -> [u8; 3] {
         Mode::Silk => [70, 170, 255],
         Mode::Hybrid => [185, 120, 255],
         Mode::Celt => [255, 178, 70],
-    }
-}
-
-/// Heatmap: schwarz → indigo → magenta → orange → gelb → weiss.
-#[must_use]
-pub fn colormap(t: f32) -> [u8; 3] {
-    const STOPS: [(f32, [u8; 3]); 6] = [
-        (0.0, [10, 10, 16]),
-        (0.2, [62, 22, 86]),
-        (0.4, [182, 42, 92]),
-        (0.6, [242, 122, 42]),
-        (0.8, [250, 222, 120]),
-        (1.0, [255, 255, 240]),
-    ];
-    let t = t.clamp(0.0, 1.0);
-    let mut s = 0;
-    while s + 2 < STOPS.len() && t > STOPS[s + 1].0 {
-        s += 1;
-    }
-    let (t0, c0) = STOPS[s];
-    let (t1, c1) = STOPS[s + 1];
-    let f = if t1 > t0 { (t - t0) / (t1 - t0) } else { 0.0 };
-    [
-        (f32::from(c0[0]) + (f32::from(c1[0]) - f32::from(c0[0])) * f) as u8,
-        (f32::from(c0[1]) + (f32::from(c1[1]) - f32::from(c0[1])) * f) as u8,
-        (f32::from(c0[2]) + (f32::from(c1[2]) - f32::from(c0[2])) * f) as u8,
-    ]
-}
-
-/// 5x7-Glyphen: A–M (je 7 Zeilen, 5 Bit).
-const GLYPH_AM: [(char, [u8; 7]); 13] = [
-    ('A', [0x0e, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11]),
-    ('B', [0x1e, 0x11, 0x11, 0x1e, 0x11, 0x11, 0x1e]),
-    ('C', [0x0e, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0e]),
-    ('D', [0x1e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1e]),
-    ('E', [0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x1f]),
-    ('F', [0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x10]),
-    ('G', [0x0e, 0x11, 0x10, 0x13, 0x11, 0x11, 0x0f]),
-    ('H', [0x11, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11]),
-    ('I', [0x0e, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0e]),
-    ('J', [0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0c]),
-    ('K', [0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11]),
-    ('L', [0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1f]),
-    ('M', [0x11, 0x1b, 0x15, 0x15, 0x11, 0x11, 0x11]),
-];
-
-/// 5x7-Glyphen: N–Z.
-const GLYPH_NZ: [(char, [u8; 7]); 13] = [
-    ('N', [0x11, 0x19, 0x19, 0x15, 0x13, 0x13, 0x11]),
-    ('O', [0x0e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0e]),
-    ('P', [0x1e, 0x11, 0x11, 0x1e, 0x10, 0x10, 0x10]),
-    ('Q', [0x0e, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0d]),
-    ('R', [0x1e, 0x11, 0x11, 0x1e, 0x14, 0x12, 0x11]),
-    ('S', [0x0f, 0x10, 0x10, 0x0e, 0x01, 0x01, 0x1e]),
-    ('T', [0x1f, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04]),
-    ('U', [0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0e]),
-    ('V', [0x11, 0x11, 0x11, 0x11, 0x11, 0x0a, 0x04]),
-    ('W', [0x11, 0x11, 0x11, 0x15, 0x15, 0x1b, 0x11]),
-    ('X', [0x11, 0x11, 0x0a, 0x04, 0x0a, 0x11, 0x11]),
-    ('Y', [0x11, 0x11, 0x0a, 0x04, 0x04, 0x04, 0x04]),
-    ('Z', [0x1f, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1f]),
-];
-
-/// 5x7-Glyphen: Ziffern.
-const GLYPH_09: [(char, [u8; 7]); 10] = [
-    ('0', [0x0e, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0e]),
-    ('1', [0x04, 0x0c, 0x04, 0x04, 0x04, 0x04, 0x0e]),
-    ('2', [0x0e, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1f]),
-    ('3', [0x1f, 0x02, 0x04, 0x02, 0x01, 0x11, 0x0e]),
-    ('4', [0x02, 0x06, 0x0a, 0x12, 0x1f, 0x02, 0x02]),
-    ('5', [0x1f, 0x10, 0x1e, 0x01, 0x01, 0x11, 0x0e]),
-    ('6', [0x06, 0x08, 0x10, 0x1e, 0x11, 0x11, 0x0e]),
-    ('7', [0x1f, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08]),
-    ('8', [0x0e, 0x11, 0x11, 0x0e, 0x11, 0x11, 0x0e]),
-    ('9', [0x0e, 0x11, 0x11, 0x0f, 0x01, 0x02, 0x0c]),
-];
-
-/// 5x7-Glyphen: Satzzeichen (Rest: `?`, klein → gross).
-const GLYPH_SYM: [(char, [u8; 7]); 12] = [
-    (' ', [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
-    ('.', [0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x06]),
-    (',', [0x00, 0x00, 0x00, 0x00, 0x06, 0x04, 0x08]),
-    (':', [0x00, 0x06, 0x06, 0x00, 0x06, 0x06, 0x00]),
-    ('-', [0x00, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x00]),
-    ('/', [0x01, 0x01, 0x02, 0x04, 0x08, 0x10, 0x10]),
-    ('%', [0x18, 0x19, 0x02, 0x04, 0x08, 0x13, 0x03]),
-    ('(', [0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02]),
-    (')', [0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08]),
-    ('_', [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f]),
-    ('?', [0x0e, 0x11, 0x01, 0x02, 0x04, 0x00, 0x04]),
-    ('=', [0x00, 0x00, 0x1f, 0x00, 0x1f, 0x00, 0x00]),
-];
-
-/// Glyphe suchen (klein → gross, unbekannt → `?`).
-fn glyph(c: char) -> [u8; 7] {
-    let c = c.to_ascii_uppercase();
-    for table in [&GLYPH_AM[..], &GLYPH_NZ[..], &GLYPH_09[..], &GLYPH_SYM[..]] {
-        for (k, g) in table {
-            if *k == c {
-                return *g;
-            }
-        }
-    }
-    glyph('?')
-}
-
-impl Image {
-    /// Text (6 px/Zeichen), Rueckgabe = Breite in px.
-    pub fn text(&mut self, x: u32, y: u32, s: &str, fg: [u8; 3]) -> u32 {
-        let mut dx = 0;
-        for c in s.chars() {
-            let g = glyph(c);
-            for (row, bits) in g.iter().enumerate() {
-                for col in 0..5 {
-                    if bits & (0x10 >> col) != 0 {
-                        self.set(x as i32 + dx + col, y as i32 + row as i32, fg);
-                    }
-                }
-            }
-            dx += 6;
-        }
-        dx as u32
     }
 }
 
@@ -255,28 +69,50 @@ fn bin_of(hz: f32) -> usize {
     (b.round() as usize).min(BINS - 1)
 }
 
+/// Frequenz in Hz zu Log-Bin-Index `b` (fuer Hover-Angaben).
+#[must_use]
+pub fn freq_of_bin(b: usize) -> f32 {
+    50.0 * 400.0f32.powf(b.min(BINS - 1) as f32 / BINS as f32)
+}
+
 /// Rendert Analyse + Spektrum-Spalten (ein Hop = 20 ms).
 #[must_use]
 pub fn render(analysis: &Analysis, cols: &[[f32; BINS]], plot_w: u32) -> Image {
+    render_range(analysis, cols, 0.0, analysis.summary.duration_ms, plot_w)
+}
+
+/// Rendert den Zeitbereich `[t0_ms, t1_ms)` (Viewer-Aussicht).
+#[must_use]
+pub fn render_range(
+    analysis: &Analysis,
+    cols: &[[f32; BINS]],
+    t0_ms: f64,
+    t1_ms: f64,
+    plot_w: u32,
+) -> Image {
     let lay = layout(plot_w);
     let mut img = Image::new(lay.width, lay.height, BG);
-    header(&mut img, analysis);
-    if cols.is_empty() || analysis.frames.is_empty() {
+    header(&mut img, analysis, t0_ms, t1_ms);
+    let h0 = (t0_ms / HOP_MS).floor().max(0.0) as usize;
+    let h1 = (t1_ms / HOP_MS).ceil().max(h0 as f64 + 1.0) as usize;
+    let h1 = h1.min(cols.len());
+    if h1 <= h0 || analysis.frames.is_empty() {
         img.text(lay.plot_x + 8, lay.plot_y + 8, "KEINE FRAMES", FG);
         return img;
     }
-    waterfall(&mut img, &lay, analysis, cols);
-    strip(&mut img, &lay, analysis, cols.len());
-    lane(&mut img, &lay, analysis);
-    axes(&mut img, &lay, analysis);
+    let hops = &cols[h0..h1];
+    waterfall(&mut img, &lay, analysis, hops, h0);
+    strip(&mut img, &lay, analysis, hops.len(), h0);
+    lane(&mut img, &lay, analysis, t0_ms, t1_ms);
+    axes(&mut img, &lay, t0_ms, t1_ms);
     legend(&mut img, &lay);
     img
 }
 
-/// Kopfzeilen: Kennzahlen der Summary.
-fn header(img: &mut Image, a: &Analysis) {
+/// Kopfzeilen: Kennzahlen der Summary (+ Sicht bei Zoom).
+fn header(img: &mut Image, a: &Analysis, t0_ms: f64, t1_ms: f64) {
     let s = &a.summary;
-    let l1 = format!(
+    let mut l1 = format!(
         "FRAMES {} DAUER {:.1}S AVG {:.1}KBPS ROH {:.1}X CH {}",
         s.frames,
         s.duration_ms / 1000.0,
@@ -284,6 +120,9 @@ fn header(img: &mut Image, a: &Analysis) {
         s.ratio,
         s.channels,
     );
+    if let Some(note) = range_note(t0_ms, t1_ms, s.duration_ms) {
+        l1.push_str(&note);
+    }
     let l2 = format!(
         "SILK {:.0}% HYBRID {:.0}% CELT {:.0}% OVERHEAD {:.1}%",
         s.frac_silk * 100.0,
@@ -295,8 +134,21 @@ fn header(img: &mut Image, a: &Analysis) {
     img.text(8, 15, &l2, FG);
 }
 
+/// Sicht-Hinweis fuer die Kopfzeile (`None` = Gesamtansicht).
+fn range_note(t0_ms: f64, t1_ms: f64, dur_ms: f64) -> Option<String> {
+    if t0_ms <= 0.5 && t1_ms >= dur_ms - 0.5 {
+        None
+    } else {
+        Some(format!(
+            " SICHT {:.1}-{:.1}S",
+            t0_ms / 1000.0,
+            t1_ms / 1000.0
+        ))
+    }
+}
+
 /// Wasserfall: dB → Farbe, Modus-Toenung, Bandgrenze weiss.
-fn waterfall(img: &mut Image, lay: &Layout, a: &Analysis, cols: &[[f32; BINS]]) {
+fn waterfall(img: &mut Image, lay: &Layout, a: &Analysis, cols: &[[f32; BINS]], hop_base: usize) {
     let n = cols.len() as u32;
     for x in 0..lay.plot_w {
         // Hops dieses Pixels (Max-Pooling = spitzenerhaltend).
@@ -309,7 +161,7 @@ fn waterfall(img: &mut Image, lay: &Layout, a: &Analysis, cols: &[[f32; BINS]]) 
                 *d = d.max(*v);
             }
         }
-        let t_ms = (h0 + h1) as f64 / 2.0 * HOP_MS;
+        let t_ms = (hop_base as f64 + (h0 + h1) as f64 / 2.0) * HOP_MS;
         let frame = a.frame_at(t_ms);
         let tint = frame.map(|f| mode_color(f.mode));
         for (b, d) in db.iter().enumerate() {
@@ -330,25 +182,30 @@ fn waterfall(img: &mut Image, lay: &Layout, a: &Analysis, cols: &[[f32; BINS]]) 
 }
 
 /// Modus-Streifen: Vollfarbe pro Pixel (Mitte des hops entscheidet).
-fn strip(img: &mut Image, lay: &Layout, a: &Analysis, hops: usize) {
+fn strip(img: &mut Image, lay: &Layout, a: &Analysis, hops: usize, hop_base: usize) {
     for x in 0..lay.plot_w {
         let h = (u64::from(x) * hops as u64 / u64::from(lay.plot_w)) as usize;
-        if let Some(f) = a.frame_at(h as f64 * HOP_MS) {
+        if let Some(f) = a.frame_at((hop_base + h) as f64 * HOP_MS) {
             img.rect(lay.plot_x + x, lay.strip_y, 1, 12, mode_color(f.mode));
         }
     }
 }
 
-/// Bitraten-Lane: Balken pro Frame + AVG-Linie.
-fn lane(img: &mut Image, lay: &Layout, a: &Analysis) {
+/// Bitraten-Lane: Balken pro Frame + AVG-Linie (Skala global).
+fn lane(img: &mut Image, lay: &Layout, a: &Analysis, t0_ms: f64, t1_ms: f64) {
     let s = &a.summary;
     let max = a.frames.iter().map(|f| f.kbps).fold(0.0f64, f64::max);
     let scale = (2.0 * s.avg_kbps).max(max).max(1.0);
-    let dur = s.duration_ms.max(1.0);
+    let span = (t1_ms - t0_ms).max(1.0);
     img.rect(lay.plot_x, lay.lane_y, lay.plot_w, lay.lane_h, [20, 24, 32]);
     for f in &a.frames {
-        let x0 = (f.t_start_ms / dur * lay.plot_w as f64) as u32;
-        let x1 = ((f.t_start_ms + f.duration_ms) / dur * lay.plot_w as f64).ceil() as u32;
+        let x0f = (f.t_start_ms - t0_ms) / span * lay.plot_w as f64;
+        let x1f = (f.t_start_ms + f.duration_ms - t0_ms) / span * lay.plot_w as f64;
+        if x1f <= 0.0 || x0f >= lay.plot_w as f64 {
+            continue; // Ausserhalb der Sicht.
+        }
+        let x0 = x0f.max(0.0) as u32;
+        let x1 = x1f.ceil().max(0.0) as u32;
         let h = (f.kbps / scale * lay.lane_h as f64).ceil() as u32;
         let h = h.clamp(1, lay.lane_h);
         img.rect(
@@ -368,7 +225,7 @@ fn lane(img: &mut Image, lay: &Layout, a: &Analysis) {
 }
 
 /// Achsen: Frequenz-Ticks links, Zeit-Ticks unter der Lane.
-fn axes(img: &mut Image, lay: &Layout, a: &Analysis) {
+fn axes(img: &mut Image, lay: &Layout, t0_ms: f64, t1_ms: f64) {
     for (hz, label) in [
         (100.0, "100"),
         (500.0, "500"),
@@ -381,33 +238,43 @@ fn axes(img: &mut Image, lay: &Layout, a: &Analysis) {
         img.rect(0, y, lay.plot_x - 2, 1, GRID);
         img.text(2, y.saturating_sub(3), label, FG);
     }
-    let dur_s = a.summary.duration_ms / 1000.0;
-    let step = nice_step(dur_s, lay.plot_w);
-    let mut t = 0.0;
-    while t <= dur_s {
-        let x = lay.plot_x + (t / dur_s * lay.plot_w as f64) as u32;
+    let (t0_s, t1_s) = (t0_ms / 1000.0, t1_ms / 1000.0);
+    let span = (t1_s - t0_s).max(0.001);
+    let step = nice_step(span, lay.plot_w);
+    let mut t = (t0_s / step).ceil() * step;
+    if t < t0_s {
+        t = t0_s; // Rundungsschutz.
+    }
+    while t <= t1_s + 1e-9 {
+        let x = lay.plot_x + ((t - t0_s) / span * lay.plot_w as f64) as u32;
         img.rect(x, lay.lane_y + lay.lane_h + 2, 1, 4, GRID);
-        img.text(x + 2, lay.lane_y + lay.lane_h + 3, &fmt_time(t), FG);
+        img.text(x + 2, lay.lane_y + lay.lane_h + 3, &fmt_time(t, step), FG);
         t += step;
     }
 }
 
-/// Zeitschritt, sodass hoechstens ~1 Tick pro 60 px steht.
-fn nice_step(dur_s: f64, plot_w: u32) -> f64 {
-    for s in [1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0] {
-        if dur_s / s <= f64::from(plot_w) / 60.0 {
+/// Zeitschritt, sodass hoechstens ~1 Tick pro 100 px steht.
+fn nice_step(span_s: f64, plot_w: u32) -> f64 {
+    for s in [
+        0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0,
+    ] {
+        if span_s / s <= f64::from(plot_w) / 100.0 {
             return s;
         }
     }
     600.0
 }
 
-/// Sekunden → "NS" bzw. "M:SS".
-fn fmt_time(t: f64) -> String {
+/// Sekunden → "NS" bzw. "M:SS" (bei Fein-Step mit Dezimale).
+fn fmt_time(t: f64, step: f64) -> String {
     if t < 60.0 {
-        format!("{t:.0}S")
+        if step < 1.0 {
+            format!("{t:.1}S")
+        } else {
+            format!("{t:.0}S")
+        }
     } else {
-        format!("{}:{:02.0}", t / 60.0, t % 60.0)
+        format!("{}:{:02.0}", (t / 60.0) as u32, t % 60.0)
     }
 }
 
@@ -438,29 +305,6 @@ fn legend(img: &mut Image, lay: &Layout) {
 mod tests {
     use super::*;
     use crate::types::{Bandwidth, FrameMeta, Summary};
-
-    #[test]
-    fn colormap_spans_dark_to_bright() {
-        let dark = colormap(0.0);
-        let bright = colormap(1.0);
-        assert!(dark[0] + dark[1] + dark[2] < 60);
-        assert!(bright[0] as u16 + bright[1] as u16 > 500);
-        // Mitte ist bunt (nicht grau).
-        let mid = colormap(0.5);
-        assert!(mid[0].abs_diff(mid[2]) > 40);
-    }
-
-    #[test]
-    fn text_advances_and_marks_pixels() {
-        let mut img = Image::new(40, 10, BG);
-        let w = img.text(0, 0, "AB", FG);
-        assert_eq!(w, 12);
-        assert!(img.rgb.iter().any(|&v| v > 200));
-        // Unbekanntes Zeichen → Ersatzglyphe (kein Panic, kein Leer).
-        let mut img2 = Image::new(40, 10, BG);
-        img2.text(0, 0, "ä", FG);
-        assert!(img2.rgb.iter().any(|&v| v > 0));
-    }
 
     fn two_frames() -> Analysis {
         let mk = |index: usize, t: f64, mode: Mode| FrameMeta {
@@ -520,5 +364,57 @@ mod tests {
                 .iter()
                 .any(|&v| v > 200)
         );
+    }
+
+    #[test]
+    fn full_range_matches_render_bytes() {
+        let a = two_frames();
+        let cols = vec![[DB_FLOOR; BINS], [-6.0; BINS]];
+        let full = render(&a, &cols, 64);
+        let range = render_range(&a, &cols, 0.0, 40.0, 64);
+        assert_eq!(full.rgb, range.rgb);
+        assert_eq!((full.width, full.height), (range.width, range.height));
+    }
+
+    #[test]
+    fn zoomed_range_shows_only_visible_modes() {
+        let a = two_frames(); // 0-20 ms SILK, 20-40 ms CELT.
+        let cols = vec![[DB_FLOOR; BINS], [-6.0; BINS]];
+        let lay = layout(64);
+        let silk = render_range(&a, &cols, 0.0, 20.0, 64);
+        let celt = render_range(&a, &cols, 20.0, 40.0, 64);
+        for x in 0..lay.plot_w {
+            assert_eq!(
+                silk.get(lay.plot_x + x, lay.strip_y),
+                mode_color(Mode::Silk),
+                "x={x}"
+            );
+            assert_eq!(
+                celt.get(lay.plot_x + x, lay.strip_y),
+                mode_color(Mode::Celt),
+                "x={x}"
+            );
+        }
+    }
+
+    #[test]
+    fn range_note_and_time_format() {
+        assert_eq!(range_note(0.0, 6000.0, 6000.0), None);
+        assert_eq!(
+            range_note(12000.0, 18000.0, 30000.0).as_deref(),
+            Some(" SICHT 12.0-18.0S")
+        );
+        assert_eq!(fmt_time(5.0, 1.0), "5S");
+        assert_eq!(fmt_time(5.25, 0.5), "5.2S");
+        assert_eq!(fmt_time(90.0, 30.0), "1:30");
+        assert_eq!(nice_step(6.0, 800), 1.0);
+        assert_eq!(nice_step(0.4, 800), 0.1);
+    }
+
+    #[test]
+    fn freq_of_bin_spans_audio_band() {
+        assert!((freq_of_bin(0) - 50.0).abs() < 1.0);
+        assert!(freq_of_bin(255) > 19000.0);
+        assert!(freq_of_bin(100) < freq_of_bin(200));
     }
 }

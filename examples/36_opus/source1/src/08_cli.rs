@@ -220,13 +220,13 @@ fn write_output(out: &Output, bytes: &[u8]) -> Result<(), Error> {
 
 /// Fenster anzeigen (nur mit Feature `show` verfuegbar).
 #[cfg(feature = "show")]
-fn show_image(img: &crate::render::Image, cfg: &CliConfig) -> Result<(), Error> {
+fn show_image(img: &crate::canvas::Image, cfg: &CliConfig) -> Result<(), Error> {
     crate::show::show(img, "opus-vis", cfg.show_frames)
 }
 
 /// Fenster anzeigen ohne Feature → Hinweis-Fehler.
 #[cfg(not(feature = "show"))]
-fn show_image(_img: &crate::render::Image, _cfg: &CliConfig) -> Result<(), Error> {
+fn show_image(_img: &crate::canvas::Image, _cfg: &CliConfig) -> Result<(), Error> {
     Err(Error::Usage(
         "--show braucht den Build mit --features show".into(),
     ))
