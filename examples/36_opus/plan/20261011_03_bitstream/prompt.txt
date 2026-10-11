@@ -1,0 +1,7 @@
+Follow-up zu 02_interactive: Divergenz zwischen dekodiertem Spektrum
+und Bitstrom-Sicht zeigen; zusaetzliche View fuer spektrale
+Informationsdichte. Frage: Gibt es Rust-Opus-Libs mit tiefem
+Paket-Protokoll-Zugriff, sodass die Implementierung moeglichst simpel
+bleibt? Antwort (recherchiert): nein — keine Lib legt Band-Energien,
+Flags oder Allokation ueber stabile API offen (Details in plan.md §5).
+Also: eigene minimale Parser, keine neuen Deps.
