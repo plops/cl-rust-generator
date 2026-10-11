@@ -19,6 +19,12 @@ optionen:
   --show         Bild zusaetzlich im X11-Fenster zeigen (Feature show)
   --frames N     Fenster nach N Frames schliessen (Test-Haken)
   -h, --help     diese Hilfe
+
+fenster-steuerung (--show):
+  rad            zeit-zoom um cursor    links-drag  verschieben
+  +/-            zoom um mitte          pfeile      verschieben
+  R              gesamtansicht          ESC         ende
+  hover          fadenkreuz + details (zeit, frequenz, modus, bitrate)
 ";
 
 /// Parse-Ergebnis: Hilfe oder Konfiguration.
@@ -200,7 +206,7 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<(), Error> {
         s.ratio,
     );
     if cfg.show {
-        show_image(&img, &cfg)?;
+        show_viewer(&cfg, &analysis, &cols)?;
     }
     Ok(())
 }
@@ -218,15 +224,27 @@ fn write_output(out: &Output, bytes: &[u8]) -> Result<(), Error> {
     Ok(())
 }
 
-/// Fenster anzeigen (nur mit Feature `show` verfuegbar).
+/// Viewer starten (nur mit Feature `show` verfuegbar).
 #[cfg(feature = "show")]
-fn show_image(img: &crate::canvas::Image, cfg: &CliConfig) -> Result<(), Error> {
-    crate::show::show(img, "opus-vis", cfg.show_frames)
+fn show_viewer(
+    cfg: &CliConfig,
+    analysis: &Analysis,
+    cols: &[[f32; crate::spectrum::BINS]],
+) -> Result<(), Error> {
+    let title = match &cfg.input {
+        Input::Stdin => "opus-vis (stdin)".to_string(),
+        Input::Path(p) => format!("opus-vis: {}", p.display()),
+    };
+    crate::show::show_interactive(analysis, cols, &title, cfg.show_frames)
 }
 
-/// Fenster anzeigen ohne Feature → Hinweis-Fehler.
+/// Viewer ohne Feature → Hinweis-Fehler.
 #[cfg(not(feature = "show"))]
-fn show_image(_img: &crate::canvas::Image, _cfg: &CliConfig) -> Result<(), Error> {
+fn show_viewer(
+    _cfg: &CliConfig,
+    _analysis: &Analysis,
+    _cols: &[[f32; crate::spectrum::BINS]],
+) -> Result<(), Error> {
     Err(Error::Usage(
         "--show braucht den Build mit --features show".into(),
     ))
