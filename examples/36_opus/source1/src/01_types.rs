@@ -3,6 +3,7 @@
 //! Keine Abhaengigkeiten ausser `std` (+ `opus-pure`-Fehler als Quelle).
 
 use std::fmt;
+use std::path::PathBuf;
 
 /// Alle Fehler von `opus-vis`, mit Exit-Code-Mapping fuer `main`.
 #[derive(Debug)]
@@ -15,6 +16,8 @@ pub enum Error {
     EmptyPacket,
     /// Defektes Paket (z.B. Frame-Zahl 0 bei Packing-Code 3).
     BadPacket(&'static str),
+    /// Fenster-Fehler (nur Feature `show`).
+    Show(String),
     /// Mehr als 2 Kanaele werden nicht visualisiert.
     UnsupportedChannels(u8),
     /// Falscher Aufruf (fuer `--help`-nahe Meldungen).
@@ -28,6 +31,7 @@ impl fmt::Display for Error {
             Self::Opus(err) => write!(f, "opus: {err}"),
             Self::EmptyPacket => write!(f, "opus: leeres Paket (kein TOC-Byte)"),
             Self::BadPacket(why) => write!(f, "opus: defektes Paket ({why})"),
+            Self::Show(msg) => write!(f, "fenster: {msg}"),
             Self::UnsupportedChannels(ch) => {
                 write!(f, "nur 1-2 Kanaele werden unterstuetzt, Datei hat {ch}")
             }
@@ -181,4 +185,39 @@ pub struct Analysis {
     pub frames: Vec<FrameMeta>,
     /// Aggregierte Kennzahlen.
     pub summary: Summary,
+}
+
+/// Eingabe: Datei oder stdin (`-`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Input {
+    /// Von stdin lesen.
+    Stdin,
+    /// Aus Datei lesen.
+    Path(PathBuf),
+}
+
+/// Ausgabe: Datei oder stdout (`-`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Output {
+    /// Nach stdout schreiben.
+    Stdout,
+    /// In Datei schreiben.
+    Path(PathBuf),
+}
+
+/// Geparste CLI-Argumente.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CliConfig {
+    /// Eingabedatei.
+    pub input: Input,
+    /// PNG-Ausgabe (Default: Eingabe-Stamm + `.png`).
+    pub png_out: Output,
+    /// JSON-Ausgabe (optional).
+    pub json_out: Option<Output>,
+    /// Plot-Breite (`None` = automatisch).
+    pub width: Option<u32>,
+    /// Fenster anzeigen.
+    pub show: bool,
+    /// Fenster-Frames (Test-Haken, Default `u64::MAX`).
+    pub show_frames: u64,
 }
