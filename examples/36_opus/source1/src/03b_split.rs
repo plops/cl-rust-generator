@@ -52,7 +52,7 @@ pub fn split(packet: &[u8]) -> Result<Split<'_>, Error> {
         }
         1 => {
             let rest = &packet[pos..];
-            if rest.len() % 2 != 0 {
+            if !rest.len().is_multiple_of(2) {
                 return Err(Error::BadPacket("Code 1 ungerade"));
             }
             let half = rest.len() / 2;
@@ -71,16 +71,14 @@ pub fn split(packet: &[u8]) -> Result<Split<'_>, Error> {
             frames.push(&rest[s0..]);
         }
         _ => {
-            let count_byte =
-                *packet.get(pos).ok_or(Error::BadPacket("Count fehlt"))?;
+            let count_byte = *packet.get(pos).ok_or(Error::BadPacket("Count fehlt"))?;
             pos += 1;
             let m = usize::from(count_byte & 0x3f).max(1); // 0 vorab abgewiesen.
             vbr = count_byte & 0x80 != 0;
             // Padding-Laenge (vorwaerts): 255-Ketten, Ende < 255.
             if count_byte & 0x40 != 0 {
                 loop {
-                    let p =
-                        *packet.get(pos).ok_or(Error::BadPacket("Pad fehlt"))?;
+                    let p = *packet.get(pos).ok_or(Error::BadPacket("Pad fehlt"))?;
                     pos += 1;
                     if p == 255 {
                         pad_bytes += 254;
@@ -122,7 +120,7 @@ pub fn split(packet: &[u8]) -> Result<Split<'_>, Error> {
             } else {
                 header_end = pos;
                 let rest = end - pos;
-                if rest % m != 0 {
+                if !rest.is_multiple_of(m) {
                     return Err(Error::BadPacket("Code 3 CBR ungleich"));
                 }
                 let each = rest / m;
@@ -138,7 +136,13 @@ pub fn split(packet: &[u8]) -> Result<Split<'_>, Error> {
     if frames.iter().any(|f| f.len() > MAX_FRAME) {
         return Err(Error::BadPacket("Frame ueber 1275 B"));
     }
-    Ok(Split { code, vbr, frames, pad_bytes, header_bytes: pos })
+    Ok(Split {
+        code,
+        vbr,
+        frames,
+        pad_bytes,
+        header_bytes: pos,
+    })
 }
 
 #[cfg(test)]

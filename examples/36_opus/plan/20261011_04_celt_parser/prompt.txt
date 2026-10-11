@@ -1,0 +1,20 @@
+Follow-up zu 20261011_03_bitstream (B0+B1 stehen: Plan, Library-Entscheid,
+Packet-Splitter; 42 Tests gruen).
+
+B2 — CELT-Bitstrom-Parser (Implementierung + Tests):
+
+1. Eigenen minimalen Parser schreiben (keine neuen Deps — keine Rust-Opus-Lib
+   legt Band-Energien/Allokation offen): Range-Reader (bit-exakt),
+   silence/prefilter/transient/intra, Coarse-+Fine-Energien mit Zustand,
+   Dynalloc/Trim/Intensitaet/Dual, Allokations-Port (Bits/Band).
+2. Hybrid-Grenze klaeren: Wo beginnt die CELT-Schicht im Hybrid-Frame?
+   (Ergebnis: teilt sich einen Range-Coder mit SILK → ohne SILK-Decode
+   nicht exakt parbar → SILK/Hybrid wird markiert, nicht geparst.)
+3. Tests als Orakel (der Range-Coder meldet nie Fehler — nur Werte beweisen
+   Sync): Allokations-Identitaet exakt, Korrelation Energie↔PCM > 0,7,
+   Sweep-Peak-Tracking, Determinismus, Sweep ueber die offiziellen
+   libopus-Testvektoren (`/tmp/tv`, len+rng+Paket-BE-Framing).
+4. Modul-Regel einhalten: jede Datei < 600 Zeilen, eine Verantwortung,
+   nummeriert dem Datenfluss folgend; `forbid(unsafe_code)`.
+
+Verifikation: `cargo test celt` gruen, `fmt`, `clippy` ohne Warnungen.
