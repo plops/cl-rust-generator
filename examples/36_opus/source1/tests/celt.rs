@@ -3,26 +3,8 @@
 mod common;
 
 use opus_pure::{Application, OggOpusReader};
-use opus_vis::celt::{CeltState, energy_db, parse_celt_frame};
-use opus_vis::types::{Bandwidth, Mode};
-
-fn lm_of(frame_ms: f64) -> usize {
-    match frame_ms {
-        x if x < 3.0 => 0,
-        x if x < 7.5 => 1,
-        x if x < 15.0 => 2,
-        _ => 3,
-    }
-}
-
-fn endband_of(bw: Bandwidth) -> usize {
-    match bw {
-        Bandwidth::Narrow => 13,
-        Bandwidth::Medium | Bandwidth::Wide => 17,
-        Bandwidth::SuperWide => 19,
-        Bandwidth::Full => 21,
-    }
-}
+use opus_vis::celt::{CeltState, endband_of, energy_db, lm_of_ms as lm_of, parse_celt_frame};
+use opus_vis::types::Mode;
 
 /// Parst alle CELT-Frames der Pakete; gibt (frames, max_sum_dev) zurueck.
 /// `reset_on_mode_change` spiegelt `celt_dec.reset()` im Decoder.
