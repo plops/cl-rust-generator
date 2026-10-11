@@ -32,6 +32,33 @@ pub fn sine_block(freq: f32, frame: usize, offset: usize) -> Vec<f32> {
         .collect()
 }
 
+/// Exponentieller Sweep 200→4000 Hz ueber `total` Frames (phasenstetig).
+pub fn sweep_block(total: usize, frame: usize, offset: usize) -> Vec<f32> {
+    let secs = total as f32 * 960.0 / 48_000.0;
+    let (f0, f1) = (200.0f32, 4000.0f32);
+    (0..frame)
+        .map(|i| {
+            let t = (offset + i) as f32 / 48_000.0;
+            // Phase = Integral der Momentanfrequenz (exponentiell).
+            let phase = 2.0 * std::f32::consts::PI * f0 * secs
+                * ((f1 / f0).powf(t / secs) - 1.0)
+                / (f1 / f0).ln();
+            0.5 * phase.sin()
+        })
+        .collect()
+}
+
+/// Deterministisches Rauschen (LCG, weiss-aehnlich, DC-frei grob).
+pub fn noise_block(frame: usize, offset: usize) -> Vec<f32> {
+    let mut state = (offset as u64).wrapping_mul(0x9E37_79B9) | 1;
+    (0..frame)
+        .map(|_| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((state >> 32) as f32 / u32::MAX as f32 - 0.5) * 0.6
+        })
+        .collect()
+}
+
 /// Encodiert Bloecke in eine `.opus`-Datei (mono, 20-ms-Frames).
 pub fn encode_mono(
     app: Application,

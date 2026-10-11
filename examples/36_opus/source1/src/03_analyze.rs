@@ -100,6 +100,31 @@ fn div(a: f64, b: f64) -> f64 {
     if b > 0.0 { a / b } else { 0.0 }
 }
 
+impl Analysis {
+    /// Frame, der den Zeitpunkt `t_ms` enthaelt (fuer Modus-Toenung).
+    ///
+    /// `None` nur bei leerer Analyse; Zeiten hinter dem Ende klemmen auf
+    /// den letzten Frame (letzter STFT-Hop ragt oft ueber das Ende).
+    #[must_use]
+    pub fn frame_at(&self, t_ms: f64) -> Option<&FrameMeta> {
+        let frames = &self.frames;
+        if frames.is_empty() || t_ms < 0.0 {
+            return None;
+        }
+        let mut lo = 0;
+        let mut hi = frames.len();
+        while lo + 1 < hi {
+            let mid = (lo + hi) / 2;
+            if frames[mid].t_start_ms <= t_ms {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        Some(&frames[lo])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,6 +157,29 @@ mod tests {
         assert_eq!(s.ratio, 768.0 / 80.0); // 320+80 Container
         assert_eq!(s.overhead_pct, 20.0);
         assert_eq!((s.frac_silk, s.frac_hybrid, s.frac_celt), (0.5, 0.0, 0.5));
+    }
+
+    #[test]
+    fn frame_at_finds_mixed_durations() {
+        let mut frames = Vec::new();
+        // 10-ms-, dann 20-ms-Pakete: Grenzen bei 0/10/30/50.
+        for (i, ms) in [10.0, 20.0, 20.0].iter().enumerate() {
+            let mut f = frame(Mode::Celt, *ms, 80);
+            f.index = i;
+            f.t_start_ms = frames.iter().map(|x: &FrameMeta| x.duration_ms).sum();
+            frames.push(f);
+        }
+        let a = Analysis {
+            summary: summarize(&frames, 300, 1),
+            frames,
+        };
+        assert_eq!(a.frame_at(0.0).unwrap().index, 0);
+        assert_eq!(a.frame_at(9.9).unwrap().index, 0);
+        assert_eq!(a.frame_at(10.0).unwrap().index, 1);
+        assert_eq!(a.frame_at(29.9).unwrap().index, 1);
+        assert_eq!(a.frame_at(30.0).unwrap().index, 2);
+        assert_eq!(a.frame_at(999.0).unwrap().index, 2); // Klemmung.
+        assert!(a.frame_at(-1.0).is_none());
     }
 
     #[test]
