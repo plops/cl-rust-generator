@@ -1,0 +1,7 @@
+Follow-up zu 20261011_01_init (opus-vis steht, 33 Tests gruen).
+
+1. prompt.txt und opus-vis.md aus 01_init sollen committet werden.
+2. stephenberry/opus-pure ist jetzt im DeepWiki-Index — abfragen und
+   deps.md/Plan mit den Erkenntnissen aktualisieren.
+3. X11-Fenster interaktiv machen: Zoom/Scroll plus mehr Informationen
+   bei Hover (bisher nur statisches Bild, ESC/schliessen = Ende).

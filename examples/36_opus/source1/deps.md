@@ -21,8 +21,13 @@ opus-pure = "0.2"   # gelockt: 0.2.2, null transitive Deps
   `head.decoder(48_000)` + `Trim::new(&head, 48_000, ch)` →
   `read_packet()` → `decode(&data, MAX_PACKET_SAMPLES, &mut block)`
   → `trim.keep(&packet, &block)`.
-- **DeepWiki**: Repo nicht indexiert (MCP: „Repository not found“) —
-  dokumentierte Ausnahme; stattdessen Quell-Inspektion + Spikes.
+- **DeepWiki** (`stephenberry/opus-pure`, abgefragt 2026-10-11):
+  bestaetigt unser Muster 1:1 (Reader → Decoder+Trim → `read_packet`
+  → `decode` → `trim.keep`); `OggPacket` = `{data, page_granule,
+  end_of_stream}`; Pre-Skip/End-Trim via `Trim`; `OpusMSDecoder`
+  fuer Multistream (wir lehnen >2ch weiter ab);
+  `read_packet_into()` als alloc-freie Reserve (ungenutzt);
+  `Error::InvalidStream` bei defektem Header, CRC-Fehler = Fehler.
 - **Version**: 0.2.2 (neueste, `cargo upgrade` bestaetigt).
 
 ## `emoon/rust_minifb` — X11-Fenster (optional, Feature `show`)
