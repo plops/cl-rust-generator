@@ -7,6 +7,8 @@
 
 #[path = "03_analyze.rs"]
 pub mod analyze;
+#[path = "03b_split.rs"]
+pub mod split;
 #[path = "06a_canvas.rs"]
 pub mod canvas;
 #[path = "08_cli.rs"]

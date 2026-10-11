@@ -39,6 +39,25 @@ fn audio_music_yields_celt_near_target_bitrate() {
 }
 
 #[test]
+fn splitter_partition_holds_on_real_packets() {
+    for name in ["tests/data/ref.opus"] {
+        let data = std::fs::read(name).unwrap();
+        let mut reader = opus_pure::OggOpusReader::new(&data[..]).unwrap();
+        let mut n = 0;
+        while let Some(p) = reader.read_packet().unwrap() {
+            let s = opus_vis::split::split(&p.data).unwrap();
+            let audio: usize = s.frames.iter().map(|f| f.len()).sum();
+            assert_eq!(s.header_bytes + audio + s.pad_bytes, p.data.len());
+            // Split-Stueckzahl stimmt mit TOC-Parser ueberein.
+            let toc = opus_vis::toc::parse(&p.data).unwrap();
+            assert_eq!(s.frames.len(), toc.frame_count);
+            n += 1;
+        }
+        assert!(n > 40, "zu wenig Pakete in {name}");
+    }
+}
+
+#[test]
 fn libopus_reference_file_opens_and_decodes_meta() {
     let data = std::fs::read("tests/data/ref.opus").unwrap();
     let a = analyze_reader(&data[..], data.len() as u64).unwrap();
