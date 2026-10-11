@@ -62,9 +62,10 @@ Verifikation: `cargo test --all-features` gruen (71).
 
 ## B5 — HIL + Hygiene + Walkthrough
 
-- [ ] Alle Views headless rendern + `ffprobe`; Viewer-Screenshots
-      (Tasten 1–4 via xdotool) sichten; `interact.sh` erweitern.
-- [ ] `fmt`, `clippy -D warnings`, `upgrade --dry-run`, README,
-      `walkthrough.md`, Commits je Task.
+- [x] Alle Views headless rendern + `ffprobe` (4× png 1264×402);
+      Viewer-Screenshots (Tasten 1–4 via xdotool) gesichtet;
+      `interact.sh` erweitert (8/8 Asserts).
+- [x] `fmt`, `clippy -D warnings`, `upgrade --dry-run` (aktuell),
+      README, `walkthrough.md`, Commits je Task.
 
 Verifikation: `smoke.sh` gruen, `git log` zeigt B0–B5.

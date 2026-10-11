@@ -48,6 +48,13 @@ xdotool keydown --window "$WID" R sleep 0.4
 xdotool keyup --window "$WID" R sleep 0.5 || true
 scrot /tmp/hil_reset.png
 
+echo "== ansichten 1-4 (halten) =="
+for k in 1 2 3 4; do
+  xdotool keydown --window "$WID" "$k" sleep 0.4
+  xdotool keyup --window "$WID" "$k" sleep 0.5 || true
+  scrot "/tmp/hil_view$k.png"
+done
+
 echo "== ende (Escape halten) =="
 xdotool keydown --window "$WID" Escape sleep 0.4
 # keyup kann fehlschlagen (Fenster schon zu) — kein Fehler.
@@ -68,4 +75,8 @@ differ /tmp/hil_base.png /tmp/hil_hover.png
 differ /tmp/hil_hover.png /tmp/hil_zoom.png
 differ /tmp/hil_zoom.png /tmp/hil_pan.png
 differ /tmp/hil_pan.png /tmp/hil_reset.png
+differ /tmp/hil_reset.png /tmp/hil_view2.png
+differ /tmp/hil_view1.png /tmp/hil_view2.png
+differ /tmp/hil_view2.png /tmp/hil_view3.png
+differ /tmp/hil_view3.png /tmp/hil_view4.png
 echo "shots: /tmp/hil_*.png"

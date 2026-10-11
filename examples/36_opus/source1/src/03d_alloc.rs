@@ -397,7 +397,12 @@ pub(crate) fn compute_allocation(
 pub(crate) fn drain_shares(balance: i32, coded: usize, start: usize) -> [i32; NB] {
     let mut shares = [0i32; NB];
     let mut rest = balance.max(0);
-    for (i, sh) in shares.iter_mut().enumerate().take(coded.min(NB)).skip(start) {
+    for (i, sh) in shares
+        .iter_mut()
+        .enumerate()
+        .take(coded.min(NB))
+        .skip(start)
+    {
         let div = 3.min(coded - i) as i32;
         let take = rest / div;
         *sh = take;
