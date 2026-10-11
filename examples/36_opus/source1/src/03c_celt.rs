@@ -21,6 +21,7 @@
 
 use crate::alloc::{NB, compute_allocation, dynalloc_section};
 use crate::range::{BITRES, RangeDec};
+use crate::types::Bandwidth;
 
 /// Log-energy means per band (`E_MEANS`): amplitude = energy + mean.
 pub const E_MEANS: [f32; 25] = [
@@ -250,6 +251,26 @@ pub struct CeltFrame {
 /// Log2 energy (+ band mean) converted to dB.
 pub fn energy_db(log_e: f32, band: usize) -> f32 {
     6.0206 * (log_e + E_MEANS[band.min(20)])
+}
+
+/// Frame-size exponent from the TOC frame duration (2.5 ms → 0 … 20 ms → 3).
+pub fn lm_of_ms(frame_ms: f64) -> usize {
+    match frame_ms {
+        x if x < 3.0 => 0,
+        x if x < 7.5 => 1,
+        x if x < 15.0 => 2,
+        _ => 3,
+    }
+}
+
+/// Last coded CELT band from the packet bandwidth (RFC 6716 §3.1).
+pub fn endband_of(bandwidth: Bandwidth) -> usize {
+    match bandwidth {
+        Bandwidth::Narrow => 13,
+        Bandwidth::Medium | Bandwidth::Wide => 17,
+        Bandwidth::SuperWide => 19,
+        Bandwidth::Full => 21,
+    }
 }
 
 /// Walk one CELT frame's header. `data` is the frame payload WITHOUT the TOC

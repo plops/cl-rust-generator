@@ -35,12 +35,15 @@ Verifikation: `cargo test celt` gruen.
 
 ## B3 — Bitstrom-Spektrum + Dichte (Modell, Implementierung + Tests)
 
-- [ ] Energien → dB-Spalten (21 Baender → 256 Bins); Bits/Band →
-      Dichte-Spalten; Divergenz = STFT − Bitstrom (dB).
-- [ ] Tests: Sweep liefert wandernde Bitstrom-Peaks; Dichte ≈
-      Allokation; Divergenz ≈ 0 dB auf Fixture (±3 dB Median).
+- [x] `05b_bitstream.rs`: Energien → dB-Spalten (21 Baender → 256 Bins,
+      kalibriert: CAL −76,5 dB + De-Emphasis); Bits/Band →
+      Dichte-Spalten (Summe = Frame-Bits); Divergenz = STFT − Bitstrom
+      (NaN wo unverfuegbar); Hop-Mapping ueber Pre-Skip + Paketgrenzen.
+- [x] Tests: Sweep-Peaks ±1 Band; Dichte exakt = Allokation (rel. < 1e-4);
+      Skalen-Anker Sinus ±2 dB; Divergenz-Spitzen-Median ±4 dB
+      (Rest methodisch: Fenster + Sweep-Smear), global ±6 dB.
 
-Verifikation: `cargo test spectrum` gruen.
+Verifikation: `cargo test spectrum` gruen (7/7).
 
 ## B4 — Views + Hover (Implementierung + Tests)
 

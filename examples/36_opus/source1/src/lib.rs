@@ -9,6 +9,8 @@
 pub mod alloc;
 #[path = "03_analyze.rs"]
 pub mod analyze;
+#[path = "05b_bitstream.rs"]
+pub mod bitstream;
 #[path = "06a_canvas.rs"]
 pub mod canvas;
 #[path = "03c_celt.rs"]
