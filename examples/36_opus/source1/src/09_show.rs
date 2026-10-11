@@ -32,7 +32,11 @@ impl View {
     #[must_use]
     pub fn full(dur_ms: f64) -> Self {
         let dur = dur_ms.max(1.0);
-        Self { t0: 0.0, t1: dur, dur }
+        Self {
+            t0: 0.0,
+            t1: dur,
+            dur,
+        }
     }
 
     /// Aktuelle Spanne in ms.
@@ -122,7 +126,11 @@ pub fn hover_lines(h: Hover<'_>) -> (String, String) {
         |f| {
             format!(
                 "{} {} {:.0}MS {}B {:.1}KBPS",
-                f.mode, f.bandwidth.short(), f.duration_ms, f.bytes, f.kbps,
+                f.mode,
+                f.bandwidth.short(),
+                f.duration_ms,
+                f.bytes,
+                f.kbps,
             )
         },
     );
@@ -178,35 +186,31 @@ pub fn show_interactive(
     draw_hint(&mut base, &lay);
     let mut prev_mouse: Option<(f32, f32)> = None;
     let mut frames = 0;
-    while window.is_open() && !window.is_key_down(Key::Escape) && frames < max_frames
-    {
+    while window.is_open() && !window.is_key_down(Key::Escape) && frames < max_frames {
         let mouse = window.get_mouse_pos(MouseMode::Clamp);
         let pressed = window.get_keys_pressed(KeyRepeat::No);
         if pressed.contains(&Key::Escape) {
             break; // Kurzer Tastendruck (kein Halten) beendet auch.
         }
         let mut dirty = handle_keys(&window, &mut view, &pressed);
-        if let Some((_, dy)) = window.get_scroll_wheel() {
-            if dy != 0.0 {
-                let anchor = mouse.map_or_else(
-                    || view.pixel_to_ms(lay.plot_w as f32 / 2.0, lay.plot_w),
-                    |(mx, _)| {
-                        view.pixel_to_ms(mx - lay.plot_x as f32, lay.plot_w)
-                    },
-                );
-                view.zoom_around(anchor, if dy > 0.0 { 0.8 } else { 1.25 });
-                dirty = true;
-            }
+        if let Some((_, dy)) = window.get_scroll_wheel()
+            && dy != 0.0
+        {
+            let anchor = mouse.map_or_else(
+                || view.pixel_to_ms(lay.plot_w as f32 / 2.0, lay.plot_w),
+                |(mx, _)| view.pixel_to_ms(mx - lay.plot_x as f32, lay.plot_w),
+            );
+            view.zoom_around(anchor, if dy > 0.0 { 0.8 } else { 1.25 });
+            dirty = true;
         }
         // Drag relativ zur Vorframe-Position (faengt auch Spruenge).
-        if window.get_mouse_down(MouseButton::Left) {
-            if let (Some((mx, _)), Some((px, _))) = (mouse, prev_mouse) {
-                let dx_ms =
-                    f64::from((px - mx) / lay.plot_w as f32) * view.span();
-                if dx_ms != 0.0 {
-                    view.pan_by(dx_ms);
-                    dirty = true;
-                }
+        if window.get_mouse_down(MouseButton::Left)
+            && let (Some((mx, _)), Some((px, _))) = (mouse, prev_mouse)
+        {
+            let dx_ms = f64::from((px - mx) / lay.plot_w as f32) * view.span();
+            if dx_ms != 0.0 {
+                view.pan_by(dx_ms);
+                dirty = true;
             }
         }
         prev_mouse = mouse;
@@ -232,8 +236,7 @@ fn handle_keys(window: &Window, view: &mut View, pressed: &[Key]) -> bool {
     if window.is_key_down(Key::Equal) || window.is_key_down(Key::NumPadPlus) {
         view.zoom_around(mid, 0.95);
         true
-    } else if window.is_key_down(Key::Minus) || window.is_key_down(Key::NumPadMinus)
-    {
+    } else if window.is_key_down(Key::Minus) || window.is_key_down(Key::NumPadMinus) {
         view.zoom_around(mid, 1.05);
         true
     } else if window.is_key_down(Key::Left) {
@@ -334,7 +337,11 @@ mod tests {
 
     #[test]
     fn pixel_mapping_roundtrips() {
-        let v = View { t0: 1000.0, t1: 3000.0, dur: 10_000.0 };
+        let v = View {
+            t0: 1000.0,
+            t1: 3000.0,
+            dur: 10_000.0,
+        };
         assert_eq!(v.pixel_to_ms(0.0, 1200), 1000.0);
         assert_eq!(v.pixel_to_ms(1200.0, 1200), 3000.0);
         assert_eq!(v.pixel_to_ms(600.0, 1200), 2000.0);
@@ -372,7 +379,11 @@ mod tests {
 
     #[test]
     fn pack_orders_rgb_channels() {
-        let img = Image { width: 2, height: 1, rgb: vec![255, 0, 0, 0, 17, 34] };
+        let img = Image {
+            width: 2,
+            height: 1,
+            rgb: vec![255, 0, 0, 0, 17, 34],
+        };
         assert_eq!(pack(&img), vec![0x00ff_0000, 0x0000_1122]);
     }
 }
