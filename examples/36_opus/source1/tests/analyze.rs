@@ -28,22 +28,14 @@ fn voip_forced_wideband_yields_silk() {
 
 #[test]
 fn audio_music_yields_celt_near_target_bitrate() {
-    let data = common::encode_mono(
-        Application::Audio,
-        96_000,
-        None,
-        None,
-        10,
-        |fr, off| common::sine_block(880.0, fr, off),
-    );
+    let data = common::encode_mono(Application::Audio, 96_000, None, None, 10, |fr, off| {
+        common::sine_block(880.0, fr, off)
+    });
     let a = analyze_reader(&data[..], data.len() as u64).unwrap();
     assert_eq!(a.frames.len(), 10);
     assert!(a.frames.iter().all(|f| f.mode == Mode::Celt));
     let avg = a.summary.avg_kbps;
-    assert!(
-        (64.0..128.0).contains(&avg),
-        "avg_kbps {avg} weitab von 96"
-    );
+    assert!((64.0..128.0).contains(&avg), "avg_kbps {avg} weitab von 96");
 }
 
 #[test]

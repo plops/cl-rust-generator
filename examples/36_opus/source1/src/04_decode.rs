@@ -17,8 +17,7 @@ pub struct Decoded {
 
 /// Decodiert komplette `.opus`-Bytes zu Mono (nur 1–2 Kanaele).
 pub fn decode_mono(data: &[u8]) -> Result<Decoded, Error> {
-    let mut reader =
-        opus_pure::OggOpusReader::new(std::io::Cursor::new(data))?;
+    let mut reader = opus_pure::OggOpusReader::new(std::io::Cursor::new(data))?;
     let head: OpusHead = reader.head().clone();
     let channels = usize::from(head.channel_count);
     if channels > 2 {
@@ -32,9 +31,7 @@ pub fn decode_mono(data: &[u8]) -> Result<Decoded, Error> {
         let n = decoder.decode(&packet.data, MAX_PACKET_SAMPLES, &mut block)?;
         let kept = trim.keep(&packet, &block[..n * channels]);
         if channels == 2 {
-            samples.extend(
-                kept.chunks_exact(2).map(|s| 0.5 * (s[0] + s[1])),
-            );
+            samples.extend(kept.as_chunks::<2>().0.iter().map(|s| 0.5 * (s[0] + s[1])));
         } else {
             samples.extend_from_slice(kept);
         }

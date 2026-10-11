@@ -16,10 +16,7 @@ pub fn show(img: &Image, title: &str, max_frames: u64) -> Result<(), Error> {
     window.set_target_fps(30);
     let buf = pack(img);
     let mut frames = 0;
-    while window.is_open()
-        && !window.is_key_down(Key::Escape)
-        && frames < max_frames
-    {
+    while window.is_open() && !window.is_key_down(Key::Escape) && frames < max_frames {
         window
             .update_with_buffer(&buf, w, h)
             .map_err(|e| Error::Show(format!("anzeige: {e}")))?;
@@ -31,10 +28,10 @@ pub fn show(img: &Image, title: &str, max_frames: u64) -> Result<(), Error> {
 /// RGB-Bytes → `0x00RRGGBB`-Puffer (minifb-Format, rein/testbar).
 fn pack(img: &Image) -> Vec<u32> {
     img.rgb
-        .chunks_exact(3)
-        .map(|p| {
-            (u32::from(p[0]) << 16) | (u32::from(p[1]) << 8) | u32::from(p[2])
-        })
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|p| (u32::from(p[0]) << 16) | (u32::from(p[1]) << 8) | u32::from(p[2]))
         .collect()
 }
 

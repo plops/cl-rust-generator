@@ -31,9 +31,7 @@ pub enum Action {
 }
 
 /// Argumente parsen (reine Funktion, gut testbar).
-pub fn parse(
-    args: impl Iterator<Item = OsString>,
-) -> Result<Action, Error> {
+pub fn parse(args: impl Iterator<Item = OsString>) -> Result<Action, Error> {
     let mut args = args.peekable();
     let _argv0 = args.next();
     let mut input: Option<Input> = None;
@@ -50,16 +48,17 @@ pub fn parse(
             "--json" => json_out = Some(output(value(&mut args, "--json")?)?),
             "--width" => {
                 let v = value(&mut args, "--width")?;
-                width = Some(v.parse::<u32>().map_err(|_| {
-                    Error::Usage("--width braucht eine Zahl".into())
-                })?);
+                width = Some(
+                    v.parse::<u32>()
+                        .map_err(|_| Error::Usage("--width braucht eine Zahl".into()))?,
+                );
             }
             "--show" => show = true,
             "--frames" => {
                 let v = value(&mut args, "--frames")?;
-                show_frames = v.parse::<u64>().map_err(|_| {
-                    Error::Usage("--frames braucht eine Zahl".into())
-                })?;
+                show_frames = v
+                    .parse::<u64>()
+                    .map_err(|_| Error::Usage("--frames braucht eine Zahl".into()))?;
             }
             s if s.starts_with('-') && s.len() > 1 => {
                 return Err(Error::Usage(format!("unbekannte Option: {s}")));
@@ -91,10 +90,7 @@ pub fn parse(
 }
 
 /// Optionswert holen oder Usage-Fehler.
-fn value(
-    args: &mut impl Iterator<Item = OsString>,
-    flag: &str,
-) -> Result<String, Error> {
+fn value(args: &mut impl Iterator<Item = OsString>, flag: &str) -> Result<String, Error> {
     match args.next() {
         Some(v) => Ok(v.to_string_lossy().into_owned()),
         None => Err(Error::Usage(format!("{flag} braucht einen Wert"))),
@@ -186,9 +182,9 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<(), Error> {
     let analysis = crate::analyze::analyze_reader(&bytes[..], total)?;
     let pcm = crate::decode::decode_mono(&bytes)?;
     let cols = crate::spectrum::stft(&pcm.samples);
-    let width = cfg.width.unwrap_or_else(|| {
-        (cols.len() as u32).clamp(320, 4096)
-    });
+    let width = cfg
+        .width
+        .unwrap_or_else(|| (cols.len() as u32).clamp(320, 4096));
     let img = crate::render::render(&analysis, &cols, width.clamp(64, 4096));
     let png = crate::png::encode_rgb(img.width, img.height, &img.rgb);
     write_output(&cfg.png_out, &png)?;
@@ -224,20 +220,16 @@ fn write_output(out: &Output, bytes: &[u8]) -> Result<(), Error> {
 
 /// Fenster anzeigen (nur mit Feature `show` verfuegbar).
 #[cfg(feature = "show")]
-fn show_image(
-    img: &crate::render::Image,
-    cfg: &CliConfig,
-) -> Result<(), Error> {
+fn show_image(img: &crate::render::Image, cfg: &CliConfig) -> Result<(), Error> {
     crate::show::show(img, "opus-vis", cfg.show_frames)
 }
 
 /// Fenster anzeigen ohne Feature → Hinweis-Fehler.
 #[cfg(not(feature = "show"))]
-fn show_image(
-    _img: &crate::render::Image,
-    _cfg: &CliConfig,
-) -> Result<(), Error> {
-    Err(Error::Usage("--show braucht den Build mit --features show".into()))
+fn show_image(_img: &crate::render::Image, _cfg: &CliConfig) -> Result<(), Error> {
+    Err(Error::Usage(
+        "--show braucht den Build mit --features show".into(),
+    ))
 }
 
 #[cfg(test)]
@@ -251,10 +243,12 @@ mod tests {
     #[test]
     fn full_flags_parse() {
         let a = parse(args(&[
-            "opus-vis", "-o", "a.png", "--json", "b.json", "--width", "500",
-            "--show", "--frames", "7", "in.opus",
+            "opus-vis", "-o", "a.png", "--json", "b.json", "--width", "500", "--show", "--frames",
+            "7", "in.opus",
         ]));
-        let Action::Run(cfg) = a.unwrap() else { panic!("kein Run") };
+        let Action::Run(cfg) = a.unwrap() else {
+            panic!("kein Run")
+        };
         assert_eq!(cfg.png_out, Output::Path(PathBuf::from("a.png")));
         assert_eq!(cfg.json_out, Some(Output::Path(PathBuf::from("b.json"))));
         assert_eq!(cfg.width, Some(500));
@@ -272,9 +266,7 @@ mod tests {
         assert_eq!(cfg.png_out, Output::Path(PathBuf::from("out.png")));
         assert_eq!(cfg.json_out, None);
         assert!(!cfg.show);
-        let Action::Run(cfg) =
-            parse(args(&["opus-vis", "x.opus", "-o", "-"])).unwrap()
-        else {
+        let Action::Run(cfg) = parse(args(&["opus-vis", "x.opus", "-o", "-"])).unwrap() else {
             panic!("kein Run")
         };
         assert_eq!(cfg.png_out, Output::Stdout);
@@ -283,10 +275,7 @@ mod tests {
     #[test]
     fn help_and_errors() {
         assert!(matches!(parse(args(&["opus-vis", "-h"])), Ok(Action::Help)));
-        assert!(matches!(
-            parse(args(&["opus-vis"])),
-            Err(Error::Usage(_))
-        ));
+        assert!(matches!(parse(args(&["opus-vis"])), Err(Error::Usage(_))));
         assert!(matches!(
             parse(args(&["opus-vis", "--nope", "x"])),
             Err(Error::Usage(_))

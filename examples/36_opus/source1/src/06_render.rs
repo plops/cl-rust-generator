@@ -22,16 +22,15 @@ impl Image {
     #[must_use]
     pub fn new(width: u32, height: u32, bg: [u8; 3]) -> Self {
         let mut rgb = vec![0; width as usize * height as usize * 3];
-        for px in rgb.chunks_exact_mut(3) {
-            px.copy_from_slice(&bg);
+        for px in rgb.as_chunks_mut::<3>().0 {
+            *px = bg;
         }
         Self { width, height, rgb }
     }
 
     /// Pixel setzen (stummes Clipping ausserhalb).
     pub fn set(&mut self, x: i32, y: i32, c: [u8; 3]) {
-        if x >= 0 && y >= 0 && (x as u32) < self.width && (y as u32) < self.height
-        {
+        if x >= 0 && y >= 0 && (x as u32) < self.width && (y as u32) < self.height {
             let i = (y as usize * self.width as usize + x as usize) * 3;
             self.rgb[i..i + 3].copy_from_slice(&c);
         }
@@ -57,9 +56,9 @@ impl Image {
     pub fn blend(&mut self, x: u32, y: u32, c: [u8; 3], a: f32) {
         if x < self.width && y < self.height {
             let i = (y as usize * self.width as usize + x as usize) * 3;
-            for k in 0..3 {
-                let old = f32::from(self.rgb[i + k]);
-                self.rgb[i + k] = (old + (f32::from(c[k]) - old) * a) as u8;
+            for (old, target) in self.rgb[i..i + 3].iter_mut().zip(c) {
+                let o = f32::from(*old);
+                *old = (o + (f32::from(target) - o) * a) as u8;
             }
         }
     }
@@ -194,11 +193,7 @@ impl Image {
             for (row, bits) in g.iter().enumerate() {
                 for col in 0..5 {
                     if bits & (0x10 >> col) != 0 {
-                        self.set(
-                            x as i32 + dx + col,
-                            y as i32 + row as i32,
-                            fg,
-                        );
+                        self.set(x as i32 + dx + col, y as i32 + row as i32, fg);
                     }
                 }
             }
@@ -262,11 +257,7 @@ fn bin_of(hz: f32) -> usize {
 
 /// Rendert Analyse + Spektrum-Spalten (ein Hop = 20 ms).
 #[must_use]
-pub fn render(
-    analysis: &Analysis,
-    cols: &[[f32; BINS]],
-    plot_w: u32,
-) -> Image {
+pub fn render(analysis: &Analysis, cols: &[[f32; BINS]], plot_w: u32) -> Image {
     let lay = layout(plot_w);
     let mut img = Image::new(lay.width, lay.height, BG);
     header(&mut img, analysis);
@@ -305,21 +296,16 @@ fn header(img: &mut Image, a: &Analysis) {
 }
 
 /// Wasserfall: dB → Farbe, Modus-Toenung, Bandgrenze weiss.
-fn waterfall(
-    img: &mut Image,
-    lay: &Layout,
-    a: &Analysis,
-    cols: &[[f32; BINS]],
-) {
+fn waterfall(img: &mut Image, lay: &Layout, a: &Analysis, cols: &[[f32; BINS]]) {
     let n = cols.len() as u32;
     for x in 0..lay.plot_w {
         // Hops dieses Pixels (Max-Pooling = spitzenerhaltend).
         let h0 = (u64::from(x) * u64::from(n) / u64::from(lay.plot_w)) as usize;
-        let h1 = (u64::from(x + 1) * u64::from(n) / u64::from(lay.plot_w))
-            .max(h0 as u64 + 1) as usize;
+        let h1 =
+            (u64::from(x + 1) * u64::from(n) / u64::from(lay.plot_w)).max(h0 as u64 + 1) as usize;
         let mut db = [DB_FLOOR; BINS];
-        for h in h0..h1.min(cols.len()) {
-            for (d, v) in db.iter_mut().zip(&cols[h]) {
+        for col in &cols[h0..h1.min(cols.len())] {
+            for (d, v) in db.iter_mut().zip(col) {
                 *d = d.max(*v);
             }
         }
@@ -356,18 +342,13 @@ fn strip(img: &mut Image, lay: &Layout, a: &Analysis, hops: usize) {
 /// Bitraten-Lane: Balken pro Frame + AVG-Linie.
 fn lane(img: &mut Image, lay: &Layout, a: &Analysis) {
     let s = &a.summary;
-    let max = a
-        .frames
-        .iter()
-        .map(|f| f.kbps)
-        .fold(0.0f64, f64::max);
+    let max = a.frames.iter().map(|f| f.kbps).fold(0.0f64, f64::max);
     let scale = (2.0 * s.avg_kbps).max(max).max(1.0);
     let dur = s.duration_ms.max(1.0);
     img.rect(lay.plot_x, lay.lane_y, lay.plot_w, lay.lane_h, [20, 24, 32]);
     for f in &a.frames {
         let x0 = (f.t_start_ms / dur * lay.plot_w as f64) as u32;
-        let x1 = ((f.t_start_ms + f.duration_ms) / dur * lay.plot_w as f64)
-            .ceil() as u32;
+        let x1 = ((f.t_start_ms + f.duration_ms) / dur * lay.plot_w as f64).ceil() as u32;
         let h = (f.kbps / scale * lay.lane_h as f64).ceil() as u32;
         let h = h.clamp(1, lay.lane_h);
         img.rect(
@@ -379,8 +360,7 @@ fn lane(img: &mut Image, lay: &Layout, a: &Analysis) {
         );
     }
     // AVG-Linie gestrichelt weiss.
-    let y = lay.lane_y + lay.lane_h
-        - (s.avg_kbps / scale * lay.lane_h as f64) as u32;
+    let y = lay.lane_y + lay.lane_h - (s.avg_kbps / scale * lay.lane_h as f64) as u32;
     for x in (0..lay.plot_w).step_by(4) {
         img.set(lay.plot_x as i32 + x as i32, y as i32, [255; 3]);
     }
@@ -535,6 +515,10 @@ mod tests {
         }
         assert!(bars > lay.plot_w / 2);
         // Kopfzeile enthaelt helle Textpixel.
-        assert!(img.rgb[..lay.width as usize * 30 * 3].iter().any(|&v| v > 200));
+        assert!(
+            img.rgb[..lay.width as usize * 30 * 3]
+                .iter()
+                .any(|&v| v > 200)
+        );
     }
 }

@@ -12,10 +12,7 @@ use crate::toc;
 use crate::types::{Analysis, Error, FrameMeta, Mode, Summary};
 
 /// Analysiert einen Opus-Stream; `total_bytes` = Dateigroesse (Overhead).
-pub fn analyze_reader<R: Read>(
-    reader: R,
-    total_bytes: u64,
-) -> Result<Analysis, Error> {
+pub fn analyze_reader<R: Read>(reader: R, total_bytes: u64) -> Result<Analysis, Error> {
     let mut reader = OggOpusReader::new(reader)?;
     let channels = reader.head().channel_count;
     if channels > 2 {
@@ -78,8 +75,7 @@ fn summarize(frames: &[FrameMeta], total_bytes: u64, channels: u8) -> Summary {
         raw_kbps,
         ratio: div(raw_kbps, total_kbps),
         overhead_pct: if total_bytes > 0 {
-            (total_bytes - audio_bytes.min(total_bytes)) as f64 * 100.0
-                / total_bytes as f64
+            (total_bytes - audio_bytes.min(total_bytes)) as f64 * 100.0 / total_bytes as f64
         } else {
             0.0
         },

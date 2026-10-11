@@ -3,9 +3,12 @@
 //! Damit testen wir ohne externe Dateien; die einzige committete Datei
 //! (`data/ref.opus`) stammt aus `opusenc` und prueft Fremd-Kompatibilitaet.
 
+// Jede Test-Datei kompiliert dieses Modul separat; ungenutzte Helfer je
+// Target sind normal (kein toter Code im eigentlichen Sinn).
+#![allow(dead_code)]
+
 use opus_pure::{
-    Application, Bandwidth, MAX_PACKET_BYTES, OggOpusWriter, OpusEncoder,
-    OpusHead, Signal,
+    Application, Bandwidth, MAX_PACKET_BYTES, OggOpusWriter, OpusEncoder, OpusHead, Signal,
 };
 
 /// Sprach-aehnliches Signal: 130 Hz + Obertoene, 5-Hz-Tremolo.
@@ -14,7 +17,8 @@ pub fn speech_block(frame: usize, offset: usize) -> Vec<f32> {
     for (i, s) in out.iter_mut().enumerate() {
         let t = (offset + i) as f32 / 48_000.0;
         let trem = 0.6 + 0.4 * (2.0 * std::f32::consts::PI * 5.0 * t).sin();
-        *s = trem * 0.4
+        *s = trem
+            * 0.4
             * ((2.0 * std::f32::consts::PI * 130.0 * t).sin()
                 + 0.3 * (2.0 * std::f32::consts::PI * 260.0 * t).sin()
                 + 0.15 * (2.0 * std::f32::consts::PI * 900.0 * t).sin());
@@ -40,8 +44,7 @@ pub fn sweep_block(total: usize, frame: usize, offset: usize) -> Vec<f32> {
         .map(|i| {
             let t = (offset + i) as f32 / 48_000.0;
             // Phase = Integral der Momentanfrequenz (exponentiell).
-            let phase = 2.0 * std::f32::consts::PI * f0 * secs
-                * ((f1 / f0).powf(t / secs) - 1.0)
+            let phase = 2.0 * std::f32::consts::PI * f0 * secs * ((f1 / f0).powf(t / secs) - 1.0)
                 / (f1 / f0).ln();
             0.5 * phase.sin()
         })
@@ -85,8 +88,7 @@ pub fn encode_mono(
 
 /// Erste TOC-Config je Paket (zur Modus-Kontrolle in Tests).
 pub fn configs(data: &[u8]) -> Vec<u8> {
-    let mut reader =
-        opus_pure::OggOpusReader::new(std::io::Cursor::new(data)).unwrap();
+    let mut reader = opus_pure::OggOpusReader::new(std::io::Cursor::new(data)).unwrap();
     let mut out = Vec::new();
     while let Some(p) = reader.read_packet().unwrap() {
         out.push(p.data[0] >> 3);

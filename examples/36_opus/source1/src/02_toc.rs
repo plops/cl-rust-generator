@@ -108,14 +108,38 @@ mod tests {
         use Bandwidth::{SuperWide as SWB, Wide as WB};
         use Mode::{Celt as C, Hybrid as H, Silk as S};
         let cases = [
-            (S, NB, 10.0), (S, NB, 20.0), (S, NB, 40.0), (S, NB, 60.0),
-            (S, MB, 10.0), (S, MB, 20.0), (S, MB, 40.0), (S, MB, 60.0),
-            (S, WB, 10.0), (S, WB, 20.0), (S, WB, 40.0), (S, WB, 60.0),
-            (H, SWB, 10.0), (H, SWB, 20.0), (H, FB, 10.0), (H, FB, 20.0),
-            (C, NB, 2.5), (C, NB, 5.0), (C, NB, 10.0), (C, NB, 20.0),
-            (C, WB, 2.5), (C, WB, 5.0), (C, WB, 10.0), (C, WB, 20.0),
-            (C, SWB, 2.5), (C, SWB, 5.0), (C, SWB, 10.0), (C, SWB, 20.0),
-            (C, FB, 2.5), (C, FB, 5.0), (C, FB, 10.0), (C, FB, 20.0),
+            (S, NB, 10.0),
+            (S, NB, 20.0),
+            (S, NB, 40.0),
+            (S, NB, 60.0),
+            (S, MB, 10.0),
+            (S, MB, 20.0),
+            (S, MB, 40.0),
+            (S, MB, 60.0),
+            (S, WB, 10.0),
+            (S, WB, 20.0),
+            (S, WB, 40.0),
+            (S, WB, 60.0),
+            (H, SWB, 10.0),
+            (H, SWB, 20.0),
+            (H, FB, 10.0),
+            (H, FB, 20.0),
+            (C, NB, 2.5),
+            (C, NB, 5.0),
+            (C, NB, 10.0),
+            (C, NB, 20.0),
+            (C, WB, 2.5),
+            (C, WB, 5.0),
+            (C, WB, 10.0),
+            (C, WB, 20.0),
+            (C, SWB, 2.5),
+            (C, SWB, 5.0),
+            (C, SWB, 10.0),
+            (C, SWB, 20.0),
+            (C, FB, 2.5),
+            (C, FB, 5.0),
+            (C, FB, 10.0),
+            (C, FB, 20.0),
         ];
         assert_eq!(cases.len(), 32);
         for (config, (mode, bw, ms)) in cases.iter().enumerate() {
@@ -160,9 +184,6 @@ mod tests {
     fn empty_packet_is_error() {
         assert!(matches!(parse(&[]), Err(Error::EmptyPacket)));
         assert!(matches!(parse(&[0xfb]), Err(Error::EmptyPacket)));
-        assert!(matches!(
-            parse(&[0xfb, 0xc0]),
-            Err(Error::BadPacket(_))
-        ));
+        assert!(matches!(parse(&[0xfb, 0xc0]), Err(Error::BadPacket(_))));
     }
 }

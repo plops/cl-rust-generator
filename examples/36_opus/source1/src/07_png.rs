@@ -56,7 +56,11 @@ fn crc_table() -> [u32; 256] {
     for (i, slot) in table.iter_mut().enumerate() {
         let mut c = i as u32;
         for _ in 0..8 {
-            c = if c & 1 == 1 { 0xedb8_8320 ^ (c >> 1) } else { c >> 1 };
+            c = if c & 1 == 1 {
+                0xedb8_8320 ^ (c >> 1)
+            } else {
+                c >> 1
+            };
         }
         *slot = c;
     }
@@ -137,15 +141,13 @@ mod tests {
         let raw = &zlib[7..7 + n];
         assert_eq!(raw.len(), 4 * (1 + 15)); // Filter + 5 RGB-Pixel.
         let mut back = Vec::new();
-        for row in raw.chunks_exact(16) {
+        for row in raw.as_chunks::<16>().0 {
             assert_eq!(row[0], 0);
             back.extend_from_slice(&row[1..]);
         }
         assert_eq!(back, rgb);
         // Adler32 pruefen.
-        let adler = u32::from_be_bytes(
-            zlib[7 + n..11 + n].try_into().unwrap(),
-        );
+        let adler = u32::from_be_bytes(zlib[7 + n..11 + n].try_into().unwrap());
         assert_eq!(adler, adler32(raw));
     }
 }

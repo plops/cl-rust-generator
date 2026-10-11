@@ -23,10 +23,7 @@ pub const DB_FLOOR: f32 = -72.0;
 /// Hann-Fenster der Laenge `n`.
 pub fn hann(n: usize) -> Vec<f32> {
     (0..n)
-        .map(|i| {
-            0.5 - 0.5
-                * (2.0 * std::f32::consts::PI * i as f32 / n as f32).cos()
-        })
+        .map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / n as f32).cos())
         .collect()
 }
 
@@ -102,11 +99,7 @@ impl LogAxis {
 }
 
 /// Eine Spalte: Fenster → FFT → Betraege → Log-Bins (dB).
-pub fn column(
-    samples: &[f32],
-    window: &[f32],
-    axis: &LogAxis,
-) -> [f32; BINS] {
+pub fn column(samples: &[f32], window: &[f32], axis: &LogAxis) -> [f32; BINS] {
     debug_assert_eq!(window.len(), FFT_SIZE);
     let mut re = [0.0f32; FFT_SIZE];
     let mut im = [0.0f32; FFT_SIZE];
@@ -174,8 +167,9 @@ mod tests {
     #[test]
     fn fft_matches_naive_dft() {
         // Deterministisches Pseudo-Signal (kein RNG nötig).
-        let x: Vec<f32> =
-            (0..64).map(|i| ((i * 37) % 11) as f32 / 11.0 - 0.5).collect();
+        let x: Vec<f32> = (0..64)
+            .map(|i| ((i * 37) % 11) as f32 / 11.0 - 0.5)
+            .collect();
         let mut re = x.clone();
         let mut im = vec![0.0f32; 64];
         fft(&mut re, &mut im);
@@ -190,9 +184,7 @@ mod tests {
         let w = hann(FFT_SIZE);
         let axis = LogAxis::new(FFT_SIZE);
         let pcm: Vec<f32> = (0..FFT_SIZE)
-            .map(|i| {
-                (2.0 * std::f32::consts::PI * 440.0 * i as f32 / RATE).sin()
-            })
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / RATE).sin())
             .collect();
         let col = column(&pcm, &w, &axis);
         let peak = col
@@ -214,17 +206,13 @@ mod tests {
         let col = column(&vec![0.0; FFT_SIZE], &w, &axis);
         assert!(col.iter().all(|&v| v == DB_FLOOR));
         // Parseval: Fenster-Energie = Spektrum-Energie/N (±5 %).
-        let x: Vec<f32> =
-            (0..FFT_SIZE).map(|i| ((i * 13) % 7) as f32 / 7.0).collect();
-        let time_e: f32 =
-            x.iter().zip(&w).map(|(s, h)| (s * h).powi(2)).sum();
-        let mut re: Vec<f32> =
-            x.iter().zip(&w).map(|(s, h)| s * h).collect();
+        let x: Vec<f32> = (0..FFT_SIZE).map(|i| ((i * 13) % 7) as f32 / 7.0).collect();
+        let time_e: f32 = x.iter().zip(&w).map(|(s, h)| (s * h).powi(2)).sum();
+        let mut re: Vec<f32> = x.iter().zip(&w).map(|(s, h)| s * h).collect();
         let mut im = vec![0.0f32; FFT_SIZE];
         fft(&mut re, &mut im);
         let freq_e: f32 =
-            re.iter().zip(&im).map(|(r, i)| r * r + i * i).sum::<f32>()
-                / FFT_SIZE as f32;
+            re.iter().zip(&im).map(|(r, i)| r * r + i * i).sum::<f32>() / FFT_SIZE as f32;
         assert!((time_e - freq_e).abs() / time_e < 0.05);
     }
 

@@ -5,8 +5,7 @@
 //! ```
 
 use opus_pure::{
-    Application, Bandwidth, MAX_PACKET_BYTES, OggOpusWriter, OpusEncoder,
-    OpusHead, Signal,
+    Application, Bandwidth, MAX_PACKET_BYTES, OggOpusWriter, OpusEncoder, OpusHead, Signal,
 };
 
 fn speech(frame: usize, offset: usize) -> Vec<f32> {
@@ -14,7 +13,8 @@ fn speech(frame: usize, offset: usize) -> Vec<f32> {
     for (i, s) in out.iter_mut().enumerate() {
         let t = (offset + i) as f32 / 48_000.0;
         let trem = 0.6 + 0.4 * (2.0 * std::f32::consts::PI * 5.0 * t).sin();
-        *s = trem * 0.4
+        *s = trem
+            * 0.4
             * ((2.0 * std::f32::consts::PI * 130.0 * t).sin()
                 + 0.3 * (2.0 * std::f32::consts::PI * 260.0 * t).sin()
                 + 0.15 * (2.0 * std::f32::consts::PI * 900.0 * t).sin());
@@ -28,8 +28,7 @@ fn music(frame: usize, offset: usize) -> Vec<f32> {
             // Musik-Segment laeuft absolut bei 3–6 s, Sweep bei 0–3 s.
             let t = (offset + i) as f32 / 48_000.0 - 3.0;
             // Sweep 300→3000 Hz ueber 3 s + Oktave (Phase = Integral).
-            let ph = 2.0 * std::f32::consts::PI * 300.0 * 3.0
-                * ((10.0f32).powf(t / 3.0) - 1.0)
+            let ph = 2.0 * std::f32::consts::PI * 300.0 * 3.0 * ((10.0f32).powf(t / 3.0) - 1.0)
                 / (10.0f32).ln();
             0.3 * ph.sin() + 0.15 * (2.0 * ph).sin()
         })
