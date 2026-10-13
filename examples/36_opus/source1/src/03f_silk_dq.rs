@@ -175,3 +175,51 @@ mod tests {
         assert_eq!(h[1], h[0]);
     }
 }
+
+/// Signaltyp-Kurzname (Hover, JSON, Report).
+pub fn signal_name(signal: i8) -> &'static str {
+    match signal {
+        2 => "STIMMHAFT",
+        1 => "STIMMLOS",
+        _ => "INAKTIV",
+    }
+}
+
+/// Paket-Mittel aus SILK-Frames (`None` bei leerem Paket).
+pub fn summarize(frames: &[crate::silk::SilkFrame]) -> Option<crate::silk::SilkSummary> {
+    if frames.is_empty() {
+        return None;
+    }
+    let mut signal = 0i8;
+    let mut gain_pow = 0.0f64;
+    let mut gain_n = 0u32;
+    let mut pitch_sum = 0.0f64;
+    let mut pitch_n = 0u32;
+    let mut header = frames.len() as i32 + 1; // VAD je Frame + LBRR.
+    let mut pulses = 0i32;
+    for f in frames {
+        signal = signal.max(f.signal_type);
+        for (g, h) in f.gains_db.iter().zip(f.pitch_hz.iter()).take(f.nb_subfr) {
+            gain_pow += 10.0f64.powf(f64::from(*g) / 10.0);
+            gain_n += 1;
+            if *h > 0.0 {
+                pitch_sum += f64::from(*h);
+                pitch_n += 1;
+            }
+        }
+        header += f.bits.signal + f.bits.gains + f.bits.nlsf + f.bits.ltp + f.bits.seed;
+        pulses += f.bits.pulses;
+    }
+    Some(crate::silk::SilkSummary {
+        signal,
+        gains_db: (10.0 * (gain_pow / gain_n.max(1) as f64 + 1e-12).log10()) as f32,
+        pitch_hz: if pitch_n > 0 {
+            (pitch_sum / pitch_n as f64) as f32
+        } else {
+            0.0
+        },
+        header_bits: header,
+        pulse_bits: pulses,
+        n_frames: frames.len(),
+    })
+}

@@ -51,18 +51,23 @@ Verifikation: `cargo test silk` gruen; Bestand unveraendert gruen.
 
 ## S2a — Anzeigen ohne Huelle (Integration + Tests)
 
-- [ ] `Bitstream` += SILK-Spalten (voicing, pitch_hz, gain_db je Hop,
+Erledigt: `Bitstream`/Hops tragen SILK (Summary je Paket, Kennzahlen je
+Hop), F0-/Voicing-Lane im Renderer, Hover-Zeile 3 SILK-bewusst, JSON
+`silk`-Objekt, Report `stimme:`-Zeile + 2 Regeln, `08c_json.rs` als
+JSON-Split (600er-Regel). 105 Tests gruen (89 + 16).
+
+- [x] `Bitstream` += SILK-Spalten (voicing, pitch_hz, gain_db je Hop,
       hop-aligned wie CELT, Pre-Skip beachtet); `Sources::build`
       ohne Vollkopien (V1-Prinzip aus 05_verstehen wahren).
-- [ ] Pitch-/Voicing-Ebene im Renderer (Ebene, nicht vierte
+- [x] Pitch-/Voicing-Ebene im Renderer (Ebene, nicht vierte
       Wasserfall-Farbe: Farblegende erweitern); Hover-Zeile 3 meldet
       SILK-Werte (`STIMMHAFT F0=..HZ GAIN=..DB`), sonst weiter
       ehrliches Grau/`DIV=---`.
-- [ ] JSON-Frames mit `silk`-Objekt (`signal_type`, `gains_db`,
+- [x] JSON-Frames mit `silk`-Objekt (`signal_type`, `gains_db`,
       `pitch_hz`, `ltp_gains`, `nlsf_interp`, `bits` je Komponente;
       Einheiten im Namen); Report-Kennzahlen (Voicing-Anteile,
       Pitch-Ø/Spanne, Gain-Dynamik) + je neue Regel ein Test.
-- [ ] Unit-Tests (Hop-Mapping, Pooling, Hover-Format) + Gold-Snapshot
+- [x] Unit-Tests (Hop-Mapping, Pooling, Hover-Format) + Gold-Snapshot
       des Fixture-Reports erst nach Sichtung jeder Zahl.
 
 Verifikation: Fixture rendert Pitch/Voicing sichtbar; alle Tests gruen.

@@ -117,6 +117,8 @@ pub struct Hover<'a> {
     pub transient: Option<bool>,
     /// Signal-Bits des Hops (`None` = kein CELT).
     pub frame_bits: Option<f32>,
+    /// SILK-Werte des Hops: (Signal, Pitch-Hz, Gain-dB), `None` = kein SILK.
+    pub silk: Option<(i8, f32, f32)>,
 }
 
 /// Drei Panel-Zeilen aus Hover-Punkt (rein/testbar).
@@ -148,8 +150,13 @@ pub fn hover_lines(h: Hover<'_>) -> (String, String, String) {
             )
         },
     );
-    let l3 = match (h.transient, h.frame_bits) {
-        (Some(t), Some(b)) => format!("TRANS {} SIG {:.0}B", u8::from(t), b),
+    let l3 = match (h.silk, h.transient, h.frame_bits) {
+        (Some((sig, pitch, gain)), _, _) if sig >= 2 => {
+            format!("STIMMHAFT F0={:.0}HZ GAIN={:.0}DB", pitch, gain)
+        }
+        (Some((1, _, gain)), _, _) => format!("STIMMLOS GAIN={:.0}DB", gain),
+        (Some(_), _, _) => "INAKTIV".to_string(),
+        (None, Some(t), Some(b)) => format!("TRANS {} SIG {:.0}B", u8::from(t), b),
         _ => "KEIN CELT".to_string(),
     };
     (l1, l2, l3)
@@ -311,6 +318,7 @@ fn draw_hover_state(
     let hop = ((t_ms / HOP_MS).floor() as usize).min(cols.len() - 1);
     let bs = &src.bitstream;
     let celt = bs.available.get(hop).copied().unwrap_or(false);
+    let silk = bs.silk_available.get(hop).copied().unwrap_or(false);
     let (l1, l2, l3) = hover_lines(Hover {
         t_ms,
         bin,
@@ -319,6 +327,13 @@ fn draw_hover_state(
         frame: analysis.frame_at(t_ms),
         transient: celt.then(|| bs.transient.get(hop).copied().unwrap_or(false)),
         frame_bits: celt.then(|| bs.frame_bits.get(hop).copied().unwrap_or(0.0)),
+        silk: silk.then(|| {
+            (
+                bs.silk_signal.get(hop).copied().unwrap_or(0),
+                bs.silk_pitch.get(hop).copied().unwrap_or(0.0),
+                bs.silk_gain.get(hop).copied().unwrap_or(0.0),
+            )
+        }),
     });
     draw_panel(img, lay, &l1, &l2, &l3);
 }
@@ -410,6 +425,7 @@ mod tests {
             frame: Some(&f),
             transient: Some(true),
             frame_bits: Some(1822.0),
+            silk: None,
         });
         assert_eq!(l1, "T=1.235S F=441HZ PEGEL=-12DB");
         assert_eq!(l2, "SILK WB 20MS 61B 24.4KBPS C2 P5");
@@ -422,6 +438,7 @@ mod tests {
             frame: None,
             transient: None,
             frame_bits: None,
+            silk: None,
         });
         assert_eq!(l1, "T=0.000S F=50HZ DIV=---");
         assert_eq!(l3, "KEIN CELT");
@@ -433,8 +450,34 @@ mod tests {
             frame: None,
             transient: None,
             frame_bits: None,
+            silk: None,
         });
         assert_eq!(l1, "T=0.000S F=50HZ DICHTE=2.3B");
+    }
+
+    #[test]
+    fn hover_lines_silk() {
+        let base = Hover {
+            t_ms: 0.0,
+            bin: 0,
+            value: 0.0,
+            source: Source::Spectrum,
+            frame: None,
+            transient: None,
+            frame_bits: None,
+            silk: Some((2, 142.4, 34.6)),
+        };
+        assert_eq!(hover_lines(base).2, "STIMMHAFT F0=142HZ GAIN=35DB");
+        let unvoiced = Hover {
+            silk: Some((1, 0.0, 28.1)),
+            ..base
+        };
+        assert_eq!(hover_lines(unvoiced).2, "STIMMLOS GAIN=28DB");
+        let inactive = Hover {
+            silk: Some((0, 0.0, 0.0)),
+            ..base
+        };
+        assert_eq!(hover_lines(inactive).2, "INAKTIV");
     }
 
     #[test]

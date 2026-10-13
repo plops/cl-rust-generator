@@ -4,7 +4,7 @@
 //! deterministischen Regel-Tabelle ([`erklaerungen`], je Regel ein
 //! Test). Reine Funktionen, keine Deps ausser `std`.
 
-use crate::fakten::{EncoderFakten, HeadFakten, PcmFakten, TagFakten};
+use crate::fakten::{EncoderFakten, HeadFakten, PcmFakten, SilkFakten, TagFakten};
 use crate::types::Analysis;
 
 /// Hoechstens so viele Einordnungs-Saetze stehen im Report.
@@ -19,6 +19,7 @@ pub fn report(
     tags: &TagFakten,
     enc: &EncoderFakten,
     pcm: &PcmFakten,
+    silk: &SilkFakten,
 ) -> String {
     let s = &a.summary;
     let mut o = format!("opus-report: {name}\n");
@@ -54,6 +55,7 @@ pub fn report(
     ));
     o.push_str(&format!("wechsel: {}\n", runs_zeile(enc)));
     o.push_str(&format!("bandbreite: {}\n", bw_zeile(enc)));
+    o.push_str(&format!("stimme: {}\n", stimme_zeile(silk)));
     o.push_str(&format!(
         "signal: peak {:.3} / rms {:.1} dbfs, clipping {}, schwerpunkt {:.0} hz{}\n",
         pcm.peak[0].max(pcm.peak[1]),
@@ -80,10 +82,27 @@ pub fn report(
         }
     ));
     o.push_str("einordnung:\n");
-    for satz in erklaerungen(a, enc, pcm, head) {
+    for satz in erklaerungen(a, enc, pcm, head, silk) {
         o.push_str(&format!("- {satz}\n"));
     }
     o
+}
+
+/// Stimm-Zeile: Anteile, Tonhoehe, Gain-Dynamik (oder ehrlich nichts).
+fn stimme_zeile(silk: &SilkFakten) -> String {
+    if silk.silk_ms <= 0.0 {
+        return "kein SILK (nichts Stimmhaftes parsbar)".to_string();
+    }
+    let voiced_pct = silk.voiced_ms / silk.silk_ms * 100.0;
+    format!(
+        "stimmhaft {:.1} % von {:.1} s SILK, tonhoehe median {:.0} hz ({:.0}-{:.0}), gain-dynamik {:.0} db",
+        voiced_pct,
+        silk.silk_ms / 1000.0,
+        silk.pitch_med_hz,
+        silk.pitch_min_hz,
+        silk.pitch_max_hz,
+        silk.gain_max_db - silk.gain_min_db,
+    )
 }
 
 /// Moduswechsel kompakt: bis zu 6 Abschnitte, sonst gezaehlt.
@@ -156,6 +175,7 @@ pub fn erklaerungen(
     enc: &EncoderFakten,
     pcm: &PcmFakten,
     head: &HeadFakten,
+    silk: &SilkFakten,
 ) -> Vec<String> {
     let s = &a.summary;
     let mut out = Vec::new();
@@ -175,6 +195,18 @@ pub fn erklaerungen(
     if s.frac_hybrid > 0.3 {
         out.push(
             "viel hybrid: mischung aus sprache und musik, z. b. gesang mit begleitung".to_string(),
+        );
+    }
+    if silk.silk_ms > 0.0 && silk.voiced_ms / silk.silk_ms > 0.6 {
+        out.push(format!(
+            "spricht fuer gesprochene sprache: stimmhaft-dominiert ({:.0} %, median {:.0} hz)",
+            silk.voiced_ms / silk.silk_ms * 100.0,
+            silk.pitch_med_hz,
+        ));
+    } else if silk.silk_ms > 0.0 && (silk.unvoiced_ms + silk.inactive_ms) / silk.silk_ms > 0.5 {
+        out.push(
+            "viele stimmlose anteile: fluestern, zischlaute oder pausen im sprachsignal"
+                .to_string(),
         );
     }
     if enc.vbr_index > 0.5 {
@@ -244,7 +276,7 @@ pub fn erklaerungen(
 mod tests {
     use super::*;
     use crate::decode::ChannelStats;
-    use crate::fakten::{HeadFakten, PcmFakten, TagFakten};
+    use crate::fakten::{HeadFakten, PcmFakten, SilkFakten, TagFakten};
     use crate::types::{Bandwidth, FrameMeta, Mode, Summary};
 
     fn analysis(modes: &[(Mode, f64)], kbps: &[f64]) -> Analysis {
@@ -330,6 +362,20 @@ mod tests {
         (enc, pcm, head, tags)
     }
 
+    fn silk_f(voiced_ms: f64, unvoiced_ms: f64) -> SilkFakten {
+        SilkFakten {
+            silk_ms: voiced_ms + unvoiced_ms,
+            voiced_ms,
+            unvoiced_ms,
+            inactive_ms: 0.0,
+            pitch_med_hz: if voiced_ms > 0.0 { 142.0 } else { 0.0 },
+            pitch_min_hz: if voiced_ms > 0.0 { 100.0 } else { 0.0 },
+            pitch_max_hz: if voiced_ms > 0.0 { 200.0 } else { 0.0 },
+            gain_min_db: 20.0,
+            gain_max_db: 40.0,
+        }
+    }
+
     #[test]
     fn sprache_regel_feuert_bei_silk_und_schmal() {
         let mut a = analysis(&[(Mode::Silk, 80.0), (Mode::Celt, 20.0)], &[24.0]);
@@ -339,7 +385,7 @@ mod tests {
             }
         }
         let (enc, pcm, head, _) = fakten(&a, &[], None, 0);
-        let s = erklaerungen(&a, &enc, &pcm, &head);
+        let s = erklaerungen(&a, &enc, &pcm, &head, &silk_f(0.0, 0.0));
         assert!(s.iter().any(|x| x.contains("sprache")), "{s:?}");
     }
 
@@ -347,7 +393,7 @@ mod tests {
     fn musik_regel_feuert_bei_celt_vollband() {
         let a = analysis(&[(Mode::Celt, 100.0)], &[96.0]);
         let (enc, pcm, head, _) = fakten(&a, &[], None, 0);
-        let s = erklaerungen(&a, &enc, &pcm, &head);
+        let s = erklaerungen(&a, &enc, &pcm, &head, &silk_f(0.0, 0.0));
         assert!(s.iter().any(|x| x.contains("musik")), "{s:?}");
     }
 
@@ -355,11 +401,11 @@ mod tests {
     fn vbr_und_cbr_regeln_schliessen_sich_aus() {
         let vbr = analysis(&[(Mode::Celt, 20.0); 10], &[10.0, 200.0]);
         let (enc, pcm, head, _) = fakten(&vbr, &[], None, 0);
-        let s = erklaerungen(&vbr, &enc, &pcm, &head);
+        let s = erklaerungen(&vbr, &enc, &pcm, &head, &silk_f(0.0, 0.0));
         assert!(s.iter().any(|x| x.contains("variable bitrate")), "{s:?}");
         let cbr = analysis(&[(Mode::Celt, 20.0); 10], &[64.0]);
         let (enc, pcm, head, _) = fakten(&cbr, &[], None, 0);
-        let s = erklaerungen(&cbr, &enc, &pcm, &head);
+        let s = erklaerungen(&cbr, &enc, &pcm, &head, &silk_f(0.0, 0.0));
         assert!(s.iter().any(|x| x.contains("konstante bitrate")), "{s:?}");
     }
 
@@ -367,7 +413,7 @@ mod tests {
     fn clipping_und_stereo_regeln() {
         let a = analysis(&[(Mode::Celt, 100.0)], &[96.0]);
         let (enc, pcm, head, _) = fakten(&a, &[], Some(0.1), 7);
-        let s = erklaerungen(&a, &enc, &pcm, &head);
+        let s = erklaerungen(&a, &enc, &pcm, &head, &silk_f(0.0, 0.0));
         assert!(s.iter().any(|x| x.contains("clipping")), "{s:?}");
         assert!(s.iter().any(|x| x.contains("breites stereo")), "{s:?}");
     }
@@ -376,7 +422,7 @@ mod tests {
     fn leerlauf_gibt_fallback_satz() {
         let a = analysis(&[(Mode::Celt, 20.0)], &[64.0]);
         let (enc, pcm, head, _) = fakten(&a, &[], None, 0);
-        let s = erklaerungen(&a, &enc, &pcm, &head);
+        let s = erklaerungen(&a, &enc, &pcm, &head, &silk_f(0.0, 0.0));
         assert!(!s.is_empty() && s.len() <= MAX_SAETZE, "{s:?}");
     }
 
@@ -384,7 +430,15 @@ mod tests {
     fn report_enthaelt_alle_abschnitte() {
         let a = analysis(&[(Mode::Silk, 40.0), (Mode::Celt, 60.0)], &[24.0, 96.0]);
         let (enc, pcm, head, tags) = fakten(&a, &[false, true], None, 0);
-        let r = report("demo.opus", &a, &head, &tags, &enc, &pcm);
+        let r = report(
+            "demo.opus",
+            &a,
+            &head,
+            &tags,
+            &enc,
+            &pcm,
+            &silk_f(30.0, 10.0),
+        );
         for abschnitt in [
             "opus-report:",
             "datei:",
@@ -394,6 +448,7 @@ mod tests {
             "modi:",
             "wechsel:",
             "bandbreite:",
+            "stimme:",
             "signal:",
             "stille:",
             "transienten:",
@@ -401,6 +456,23 @@ mod tests {
         ] {
             assert!(r.contains(abschnitt), "{abschnitt} fehlt in:\n{r}");
         }
+        assert!(r.contains("stimmhaft 75.0 %"), "stimm-zeile fehlt in:\n{r}");
+    }
+
+    #[test]
+    fn stimmhaft_regel_feuert_bei_voiced_dominanz() {
+        let a = analysis(&[(Mode::Silk, 100.0)], &[24.0]);
+        let (enc, pcm, head, _) = fakten(&a, &[], None, 0);
+        let s = erklaerungen(&a, &enc, &pcm, &head, &silk_f(80.0, 20.0));
+        assert!(s.iter().any(|x| x.contains("gesprochene sprache")), "{s:?}");
+    }
+
+    #[test]
+    fn stimmlos_regel_feuert_bei_unvoiced_dominanz() {
+        let a = analysis(&[(Mode::Silk, 100.0)], &[24.0]);
+        let (enc, pcm, head, _) = fakten(&a, &[], None, 0);
+        let s = erklaerungen(&a, &enc, &pcm, &head, &silk_f(20.0, 80.0));
+        assert!(s.iter().any(|x| x.contains("stimmlose anteile")), "{s:?}");
     }
 
     #[test]
@@ -413,7 +485,7 @@ mod tests {
         let (enc, pcm, head, _) = fakten(&a, &[true; 20], Some(0.95), 3);
         let mut head = head;
         head.gain_db = 2.0;
-        let s = erklaerungen(&a, &enc, &pcm, &head);
+        let s = erklaerungen(&a, &enc, &pcm, &head, &silk_f(0.0, 0.0));
         assert!(s.len() <= MAX_SAETZE, "{s:?}");
     }
 }

@@ -18,7 +18,8 @@ fn fixture_report() -> String {
     let tags = fakten::tag_fakten(&ps.tags);
     let enc = fakten::encoder_fakten(&a, &bs.transient);
     let pcm_f = fakten::pcm_fakten(&pcm.samples, &cols, &pcm.stats);
-    report::report("fixture.opus", &a, &head, &tags, &enc, &pcm_f)
+    let silk_f = fakten::silk_fakten(&bs);
+    report::report("fixture.opus", &a, &head, &tags, &enc, &pcm_f, &silk_f)
 }
 
 #[test]
@@ -33,6 +34,7 @@ fn report_names_sections_and_fixture_facts() {
         "modi:",
         "wechsel:",
         "bandbreite: FB 100.0 %",
+        "stimme: kein SILK",
         "signal:",
         "schwerpunkt 441 hz",
         "stille:",

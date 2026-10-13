@@ -202,6 +202,69 @@ pub fn pcm_fakten(samples: &[f32], cols: &[[f32; BINS]], stats: &ChannelStats) -
     }
 }
 
+/// SILK-Stimm-Fakten aus den Hop-Spalten (Report + Einordnung).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SilkFakten {
+    /// SILK-Zeit in ms (verfuegbare Hops × 20 ms).
+    pub silk_ms: f64,
+    /// Stimmhafte Zeit in ms.
+    pub voiced_ms: f64,
+    /// Stimmlose Zeit in ms.
+    pub unvoiced_ms: f64,
+    /// Inaktive Zeit in ms.
+    pub inactive_ms: f64,
+    /// Median der Tonhoehe ueber stimmhafte Hops in Hz (0 ohne).
+    pub pitch_med_hz: f32,
+    /// Spanne der Tonhoehe in Hz (min, max; 0 ohne).
+    pub pitch_min_hz: f32,
+    /// Siehe `pitch_min_hz`.
+    pub pitch_max_hz: f32,
+    /// Gain-Spanne ueber SILK-Hops in dB (min, max).
+    pub gain_min_db: f32,
+    /// Siehe `gain_min_db`.
+    pub gain_max_db: f32,
+}
+
+/// Stimmanteile, Tonhoehen-Statistik und Gain-Dynamik aus `Bitstream`.
+#[must_use]
+pub fn silk_fakten(bs: &crate::bitstream::Bitstream) -> SilkFakten {
+    use crate::spectrum::HOP_MS;
+    let mut voiced = Vec::new();
+    let mut gains = Vec::new();
+    let (mut v, mut u, mut ina) = (0u32, 0u32, 0u32);
+    for i in 0..bs.silk_available.len() {
+        if !bs.silk_available[i] {
+            continue;
+        }
+        let (sig, pitch, gain) = (bs.silk_signal[i], bs.silk_pitch[i], bs.silk_gain[i]);
+        match sig {
+            2 => {
+                v += 1;
+                if pitch > 0.0 {
+                    voiced.push(pitch);
+                }
+            }
+            1 => u += 1,
+            _ => ina += 1,
+        }
+        gains.push(gain);
+    }
+    voiced.sort_by(|a, b| a.total_cmp(b));
+    gains.sort_by(|a, b| a.total_cmp(b));
+    let n = v + u + ina;
+    SilkFakten {
+        silk_ms: f64::from(n) * HOP_MS,
+        voiced_ms: f64::from(v) * HOP_MS,
+        unvoiced_ms: f64::from(u) * HOP_MS,
+        inactive_ms: f64::from(ina) * HOP_MS,
+        pitch_med_hz: voiced.get(voiced.len() / 2).copied().unwrap_or(0.0),
+        pitch_min_hz: voiced.first().copied().unwrap_or(0.0),
+        pitch_max_hz: voiced.last().copied().unwrap_or(0.0),
+        gain_min_db: gains.first().copied().unwrap_or(0.0),
+        gain_max_db: gains.last().copied().unwrap_or(0.0),
+    }
+}
+
 /// Nearest-Rank-Perzentil ueber sortierte Werte (0 bei Leere).
 fn percentile(sorted: &[f64], q: f64) -> f64 {
     if sorted.is_empty() {
@@ -394,5 +457,61 @@ mod tests {
         let h = head_fakten(&head);
         assert_eq!((h.pre_skip_ms, h.gain_db), (6.5, 1.0));
         assert_eq!(h.input_rate_hz, 48_000);
+    }
+}
+
+#[cfg(test)]
+mod silk_tests {
+    use super::*;
+    use crate::bitstream::Bitstream;
+    use crate::silk::SilkSummary;
+    use crate::spectrum::BINS;
+
+    fn bitstream_mit_silk(signals: &[i8]) -> Bitstream {
+        let n = signals.len();
+        Bitstream {
+            spectrum: vec![[0.0; BINS]; n],
+            density: vec![[0.0; BINS]; n],
+            available: vec![false; n],
+            transient: vec![false; n],
+            frame_bits: vec![0.0; n],
+            packets: vec![None; n],
+            silk_packets: vec![None; n],
+            silk_available: vec![true; n],
+            silk_signal: signals.to_vec(),
+            silk_pitch: signals
+                .iter()
+                .map(|&s| if s == 2 { 140.0 } else { 0.0 })
+                .collect(),
+            silk_gain: vec![30.0; n],
+        }
+    }
+
+    #[test]
+    fn silk_fakten_zaehlt_stimmanteile() {
+        let bs = bitstream_mit_silk(&[2, 2, 1, 0]);
+        let f = silk_fakten(&bs);
+        assert_eq!(
+            (f.voiced_ms, f.unvoiced_ms, f.inactive_ms),
+            (40.0, 20.0, 20.0)
+        );
+        assert_eq!(f.silk_ms, 80.0);
+        assert_eq!(f.pitch_med_hz, 140.0);
+        assert_eq!((f.gain_min_db, f.gain_max_db), (30.0, 30.0));
+        let leer = bitstream_mit_silk(&[]);
+        let l = silk_fakten(&leer);
+        assert_eq!((l.silk_ms, l.pitch_med_hz), (0.0, 0.0));
+    }
+
+    #[test]
+    fn silk_summary_typ_name() {
+        let _ = SilkSummary {
+            signal: 2,
+            gains_db: 30.0,
+            pitch_hz: 140.0,
+            header_bits: 40,
+            pulse_bits: 300,
+            n_frames: 1,
+        };
     }
 }

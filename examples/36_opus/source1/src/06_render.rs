@@ -43,6 +43,10 @@ pub struct Layout {
     pub lane_y: u32,
     /// Siehe `lane_y`.
     pub lane_h: u32,
+    /// Tonhoehen-Lane oben/Hoehe (SILK-Stimmverlauf).
+    pub pitch_y: u32,
+    /// Siehe `pitch_y`.
+    pub pitch_h: u32,
     /// Legende oben.
     pub legend_y: u32,
 }
@@ -56,7 +60,9 @@ pub fn layout(plot_w: u32) -> Layout {
     let strip_y = plot_y + BINS as u32 + 4;
     let lane_y = strip_y + 14 + 4;
     let lane_h = 56;
-    let legend_y = lane_y + lane_h + 16;
+    let pitch_y = lane_y + lane_h + 4;
+    let pitch_h = 30;
+    let legend_y = pitch_y + pitch_h + 16;
     Layout {
         width: plot_x + plot_w + 8,
         height: legend_y + 22,
@@ -66,6 +72,8 @@ pub fn layout(plot_w: u32) -> Layout {
         strip_y,
         lane_y,
         lane_h,
+        pitch_y,
+        pitch_h,
         legend_y,
     }
 }
@@ -120,6 +128,7 @@ pub fn render_range(
     waterfall(&mut img, &lay, analysis, src, view, hops, h0);
     strip(&mut img, &lay, analysis, hops.len(), h0);
     lane(&mut img, &lay, analysis, t0_ms, t1_ms);
+    pitch_lane(&mut img, &lay, src, t0_ms, t1_ms);
     axes(&mut img, &lay, t0_ms, t1_ms);
     legend(&mut img, &lay, view, src.density_max);
     img
@@ -294,6 +303,53 @@ fn lane(img: &mut Image, lay: &Layout, a: &Analysis, t0_ms: f64, t1_ms: f64) {
     img.text(2, lay.lane_y, &format!("{:.0}K", scale), FG);
 }
 
+/// Tonhoehen-Lane: Stimmverlauf je Hop (SILK), sonst leer.
+///
+/// Stimmhaft = amberner Punkt auf Log-Hoehe (50–500 Hz), stimmlos =
+/// blauer Strich unten, inaktiv = grauer Strich unten.
+fn pitch_lane(img: &mut Image, lay: &Layout, src: &Sources, t0_ms: f64, t1_ms: f64) {
+    img.rect(
+        lay.plot_x,
+        lay.pitch_y,
+        lay.plot_w,
+        lay.pitch_h,
+        [20, 24, 32],
+    );
+    img.text(2, lay.pitch_y, "F0", FG);
+    let n = src.spectrum.len().min(src.bitstream.silk_available.len());
+    if n == 0 {
+        return;
+    }
+    let span = (t1_ms - t0_ms).max(1.0);
+    for x in 0..lay.plot_w {
+        let t_ms = t0_ms + (f64::from(x) + 0.5) / f64::from(lay.plot_w) * span;
+        let hop = ((t_ms / HOP_MS).floor() as usize).min(n - 1);
+        if !src.bitstream.silk_available[hop] {
+            continue;
+        }
+        let (sig, pitch) = (
+            src.bitstream.silk_signal[hop],
+            src.bitstream.silk_pitch[hop],
+        );
+        let (color, y) = if sig >= 2 && pitch > 0.0 {
+            let f = (pitch.clamp(50.0, 500.0) / 50.0).ln() / 10.0f32.ln();
+            let y = lay.pitch_y + lay.pitch_h - 1 - (f * (lay.pitch_h - 1) as f32) as u32;
+            ([255, 190, 90], y)
+        } else if sig == 1 {
+            ([70, 170, 255], lay.pitch_y + lay.pitch_h - 1)
+        } else {
+            (GRID, lay.pitch_y + lay.pitch_h - 1)
+        };
+        img.rect(
+            lay.plot_x + x,
+            y.saturating_sub(1),
+            1,
+            2.min(lay.pitch_h),
+            color,
+        );
+    }
+}
+
 /// Achsen: Frequenz-Ticks links, Zeit-Ticks unter der Lane.
 fn axes(img: &mut Image, lay: &Layout, t0_ms: f64, t1_ms: f64) {
     for (hz, label) in [
@@ -317,8 +373,8 @@ fn axes(img: &mut Image, lay: &Layout, t0_ms: f64, t1_ms: f64) {
     }
     while t <= t1_s + 1e-9 {
         let x = lay.plot_x + ((t - t0_s) / span * lay.plot_w as f64) as u32;
-        img.rect(x, lay.lane_y + lay.lane_h + 2, 1, 4, GRID);
-        img.text(x + 2, lay.lane_y + lay.lane_h + 3, &fmt_time(t, step), FG);
+        img.rect(x, lay.pitch_y + lay.pitch_h + 2, 1, 4, GRID);
+        img.text(x + 2, lay.pitch_y + lay.pitch_h + 3, &fmt_time(t, step), FG);
         t += step;
     }
 }
@@ -432,6 +488,11 @@ mod tests {
             transient: vec![false, false],
             frame_bits: vec![256.0, 256.0],
             packets: vec![None, None],
+            silk_packets: vec![None, None],
+            silk_available: vec![false, false],
+            silk_signal: vec![0, 0],
+            silk_pitch: vec![0.0, 0.0],
+            silk_gain: vec![0.0, 0.0],
         };
         Sources::build(cols, bs)
     }

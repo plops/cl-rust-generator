@@ -120,3 +120,38 @@ fn missing_and_garbage_inputs_error() {
     ));
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn silk_frames_carry_silk_object() {
+    use opus_pure::{Bandwidth as PureBw, Signal as PureSig};
+    let data = common::encode_mono(
+        Application::Voip,
+        24_000,
+        Some(PureBw::Wideband),
+        Some(PureSig::Voice),
+        10,
+        common::speech_block,
+    );
+    let dir = tmp("cli_silk");
+    std::fs::create_dir_all(&dir).unwrap();
+    let inp = dir.join("in.opus");
+    let png = dir.join("out.png");
+    let js = dir.join("out.json");
+    std::fs::write(&inp, &data).unwrap();
+    let a = args(&[
+        "opus-vis",
+        "-o",
+        png.to_str().unwrap(),
+        "--json",
+        js.to_str().unwrap(),
+        "--width",
+        "200",
+        inp.to_str().unwrap(),
+    ]);
+    cli::run(a.into_iter()).unwrap();
+    let text = std::fs::read_to_string(&js).unwrap();
+    assert!(text.contains("\"mode\":\"silk\""), "kein SILK-Modus");
+    assert!(text.contains("\"silk\":{\"signal\":"), "kein silk-Objekt");
+    assert!(text.contains("\"pitch_hz\":"), "kein pitch_hz");
+    std::fs::remove_dir_all(&dir).ok();
+}

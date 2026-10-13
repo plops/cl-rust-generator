@@ -91,6 +91,11 @@ fn divergence_nan_renders_neutral_gray() {
         transient: vec![false; 4],
         frame_bits: vec![0.0; 4],
         packets: vec![None; 4],
+        silk_packets: vec![None; 4],
+        silk_available: vec![false; 4],
+        silk_signal: vec![0; 4],
+        silk_pitch: vec![0.0; 4],
+        silk_gain: vec![0.0; 4],
     };
     let src = Sources::build(stft, bs);
     let bytes = sine_bytes();
@@ -116,4 +121,35 @@ fn sine_bytes() -> Vec<u8> {
     common::encode_mono(Application::Audio, 64_000, None, None, 4, |fr, off| {
         common::sine_block(880.0, fr, off)
     })
+}
+
+#[test]
+fn pitch_lane_zeigt_stimmhaft_amber() {
+    let stft = vec![[-60.0; 256]; 4];
+    let bs = opus_vis::bitstream::Bitstream {
+        spectrum: vec![[-72.0; 256]; 4],
+        density: vec![[0.0; 256]; 4],
+        available: vec![false; 4],
+        transient: vec![false; 4],
+        frame_bits: vec![0.0; 4],
+        packets: vec![None; 4],
+        silk_packets: vec![None; 4],
+        silk_available: vec![true; 4],
+        silk_signal: vec![2; 4],
+        silk_pitch: vec![140.0; 4],
+        silk_gain: vec![30.0; 4],
+    };
+    let src = Sources::build(stft, bs);
+    let bytes = sine_bytes();
+    let a = analyze::analyze_reader(&bytes[..], 0).unwrap();
+    let img = render::render(&a, &src, Source::Spectrum, 64);
+    let lay = render::layout(64);
+    let amber = img
+        .rgb
+        .chunks_exact(3)
+        .skip((lay.pitch_y * img.width + lay.plot_x) as usize)
+        .take((lay.pitch_h * img.width) as usize)
+        .filter(|px| px[0] == 255 && px[1] == 190 && px[2] == 90)
+        .count();
+    assert!(amber > 10, "kein amberner Pitch-Punkt in der Lane");
 }

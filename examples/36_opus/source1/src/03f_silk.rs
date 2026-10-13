@@ -190,6 +190,23 @@ pub struct SilkTrail {
     pub red: Option<(bool, usize)>,
 }
 
+/// Paket-gemittelte SILK-Kennzahlen (Hops, JSON, Report).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SilkSummary {
+    /// Stimmhaftestes Frame (0 inaktiv, 1 stimmlos, 2 stimmhaft).
+    pub signal: i8,
+    /// Leistungs-Mittel der Subframe-Gains in dB.
+    pub gains_db: f32,
+    /// Mittel ueber stimmhafte Subframes in Hz (0 ohne).
+    pub pitch_hz: f32,
+    /// Indices-Bits inkl. Flags (VAD/LBRR als Frames+1).
+    pub header_bits: i32,
+    /// Excitation-Bits.
+    pub pulse_bits: i32,
+    /// Gewalkte SILK-Frames im Paket.
+    pub n_frames: usize,
+}
+
 /// Walk-Ergebnis eines Pakets (mehrere Payloads je moeglich).
 pub struct PacketSilk {
     pub frames: Vec<SilkFrame>,

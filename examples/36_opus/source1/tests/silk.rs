@@ -21,16 +21,12 @@ fn fixture() -> Vec<u8> {
 }
 
 struct Row {
-    pkt: usize,
     sig: i8,
-    gains_db: [f32; 4],
     gains_idx: [i8; 4],
     pitch_hz: [f32; 4],
     total: i32,
     end_tell: i32,
-    end_frac: i32,
     red: Option<(bool, usize)>,
-    sections: [i32; 6],
 }
 
 /// Sondiert alle SILK-Pakete (ein Payload je Paket in dieser Fixture).
@@ -39,7 +35,7 @@ fn sweep(data: &[u8]) -> Vec<Row> {
     let mut state = SilkState::new();
     let mut last_mode: Option<Mode> = None;
     let mut rows = Vec::new();
-    for (pi, p) in ps.packets.iter().enumerate() {
+    for p in &ps.packets {
         let toc = parse(&p.data).unwrap();
         if Some(toc.mode) != last_mode {
             state.reset();
@@ -49,7 +45,7 @@ fn sweep(data: &[u8]) -> Vec<Row> {
             continue;
         }
         let sp = split(&p.data).unwrap();
-        let payloads: Vec<&[u8]> = sp.frames.iter().copied().collect();
+        let payloads: Vec<&[u8]> = sp.frames.to_vec();
         let walked = walk_packet(
             &payloads,
             toc.frame_ms,
@@ -60,23 +56,12 @@ fn sweep(data: &[u8]) -> Vec<Row> {
         assert!(!walked.unsupported, "Fixture ist mono ohne LBRR");
         for (f, t) in walked.frames.iter().zip(walked.trail.iter()) {
             rows.push(Row {
-                pkt: pi,
                 sig: f.signal_type,
-                gains_db: f.gains_db,
                 gains_idx: f.gains_idx,
                 pitch_hz: f.pitch_hz,
                 total: t.total,
                 end_tell: t.end_tell,
-                end_frac: t.end_frac,
                 red: t.red,
-                sections: [
-                    f.bits.signal,
-                    f.bits.gains,
-                    f.bits.nlsf,
-                    f.bits.ltp,
-                    f.bits.seed,
-                    f.bits.pulses,
-                ],
             });
         }
     }
@@ -176,7 +161,7 @@ fn nlsf_ist_sortiert_und_begrenzt() {
             continue;
         }
         let sp = split(&p.data).unwrap();
-        let payloads: Vec<&[u8]> = sp.frames.iter().copied().collect();
+        let payloads: Vec<&[u8]> = sp.frames.to_vec();
         let w = walk_packet(
             &payloads,
             toc.frame_ms,
@@ -226,7 +211,7 @@ fn synthetische_sprache_ist_stimmhaft_bei_130hz() {
             continue;
         }
         let sp = split(&p.data).unwrap();
-        let payloads: Vec<&[u8]> = sp.frames.iter().copied().collect();
+        let payloads: Vec<&[u8]> = sp.frames.to_vec();
         let w = walk_packet(
             &payloads,
             toc.frame_ms,

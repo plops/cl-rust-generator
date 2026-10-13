@@ -13,8 +13,10 @@
 
 use crate::alloc::{EBANDS, NB, drain_shares};
 use crate::celt::{CeltState, endband_of, energy_db, lm_of_ms, parse_celt_frame};
+use crate::silk::{Bandwidth as SilkBw, SilkState, SilkSummary, walk_packet};
+use crate::silk_dq::summarize;
 use crate::spectrum::{BINS, DB_FLOOR, FMAX, FMIN, HOP, RATE};
-use crate::types::{Error, Mode};
+use crate::types::{Bandwidth, Error, Mode};
 
 /// Preemphasis-Koeffizient (CELT @48 kHz): y[i] = x[i] − 0,85·x[i−1].
 const PREEMPH: f32 = 0.85;
@@ -83,6 +85,25 @@ pub struct Bitstream {
     pub frame_bits: Vec<f32>,
     /// Banddaten je Paket (`None` wo kein CELT; fuer JSON/Report).
     pub packets: Vec<Option<PacketCelt>>,
+    /// SILK-Kennzahlen je Paket (`None` wo kein SILK; fuer JSON/Report).
+    pub silk_packets: Vec<Option<SilkSummary>>,
+    /// `true` wo ein SILK-Paket den Hop traegt.
+    pub silk_available: Vec<bool>,
+    /// Stimmhaftestes Signal je Hop (0/1/2).
+    pub silk_signal: Vec<i8>,
+    /// Mittlere Tonhoehe je Hop in Hz (0 wo stimmlos).
+    pub silk_pitch: Vec<f32>,
+    /// Mittlerer Gain je Hop in dB.
+    pub silk_gain: Vec<f32>,
+}
+
+/// SILK-Bandbreite aus TOC (NB/MB direkt, Rest = WB-Decodierung).
+fn silk_bw(bw: Bandwidth) -> SilkBw {
+    match bw {
+        Bandwidth::Narrow => SilkBw::Narrow,
+        Bandwidth::Medium => SilkBw::Medium,
+        _ => SilkBw::Wide,
+    }
 }
 
 /// Wasserfall-Quelle (Ansicht 1–4).
@@ -158,6 +179,10 @@ impl Sources {
         bs.available.truncate(n);
         bs.transient.truncate(n);
         bs.frame_bits.truncate(n);
+        bs.silk_available.truncate(n);
+        bs.silk_signal.truncate(n);
+        bs.silk_pitch.truncate(n);
+        bs.silk_gain.truncate(n);
         let mut div_cols = Vec::with_capacity(n);
         let mut density_max = 0.0f32;
         for (h, scol) in stft.iter().enumerate().take(n) {
@@ -209,22 +234,50 @@ pub fn analyze_packets(ps: &crate::analyze::PacketSet) -> Result<Bitstream, Erro
         bounds.push(last + (toc.duration_ms * 48.0) as usize);
     }
     let total = *bounds.last().unwrap();
-    // CELT-Frames sequentiell parsen (Zustand + Reset bei Moduswechsel).
+    // CELT-/SILK-Frames sequentiell parsen (Zustand + Reset bei Moduswechsel).
     let mut state = CeltState::new();
+    let mut silk_state = SilkState::new();
     let mut last_mode: Option<Mode> = None;
     // Je Paket: gemittelte Band-Energien (dB) + summierte Bits/Band +
     // Transient-Oder + Signal-Bits (Hover).
     type PacketBands = ([[f32; NB]; 2], [f32; NB], bool, f32);
     let mut per_packet: Vec<Option<PacketBands>> = Vec::new();
     let mut celt_packets: Vec<Option<PacketCelt>> = Vec::new();
+    let mut silk_packets: Vec<Option<SilkSummary>> = Vec::new();
     for (p, toc) in packets.iter().zip(tocs.iter()) {
         if Some(toc.mode) != last_mode {
             state.reset();
+            silk_state.reset();
             last_mode = Some(toc.mode);
+        }
+        if toc.mode == Mode::Silk {
+            let summary = if toc.channels == 1 {
+                let split = crate::split::split(&p.data)?;
+                let payloads: Vec<&[u8]> = split.frames.to_vec();
+                let walked = walk_packet(
+                    &payloads,
+                    toc.frame_ms,
+                    silk_bw(toc.bandwidth),
+                    toc.channels as usize,
+                    &mut silk_state,
+                );
+                if walked.unsupported {
+                    None
+                } else {
+                    summarize(&walked.frames)
+                }
+            } else {
+                None
+            };
+            per_packet.push(None);
+            celt_packets.push(None);
+            silk_packets.push(summary);
+            continue;
         }
         if toc.mode != Mode::Celt {
             per_packet.push(None);
             celt_packets.push(None);
+            silk_packets.push(None);
             continue;
         }
         let split = crate::split::split(&p.data)?;
@@ -274,6 +327,7 @@ pub fn analyze_packets(ps: &crate::analyze::PacketSet) -> Result<Bitstream, Erro
             bits,
             channels: ch,
         }));
+        silk_packets.push(None);
     }
     // Hops: Hop h traegt das Paket seiner Hop-Mitte.
     let map = bin_to_band();
@@ -288,6 +342,11 @@ pub fn analyze_packets(ps: &crate::analyze::PacketSet) -> Result<Bitstream, Erro
         transient: Vec::new(),
         frame_bits: Vec::new(),
         packets: celt_packets,
+        silk_packets,
+        silk_available: Vec::new(),
+        silk_signal: Vec::new(),
+        silk_pitch: Vec::new(),
+        silk_gain: Vec::new(),
     };
     let mut h = 0usize;
     loop {
@@ -298,6 +357,10 @@ pub fn analyze_packets(ps: &crate::analyze::PacketSet) -> Result<Bitstream, Erro
         let pi = bounds.partition_point(|&s| s <= center) - 1;
         let (mut col, mut den) = ([DB_FLOOR; BINS], [0.0f32; BINS]);
         let (mut avail, mut trans, mut fbits) = (false, false, 0.0);
+        let (mut s_avail, mut s_sig, mut s_pitch, mut s_gain) = (false, 0i8, 0.0f32, DB_FLOOR);
+        if let Some(s) = out.silk_packets.get(pi).and_then(|o| o.as_ref()) {
+            (s_avail, s_sig, s_pitch, s_gain) = (true, s.signal, s.pitch_hz, s.gains_db);
+        }
         if let Some((db, bits, tr, fb)) = &per_packet[pi] {
             (avail, trans, fbits) = (true, *tr, *fb);
             for (j, b) in map.iter().enumerate() {
@@ -312,6 +375,10 @@ pub fn analyze_packets(ps: &crate::analyze::PacketSet) -> Result<Bitstream, Erro
         out.available.push(avail);
         out.transient.push(trans);
         out.frame_bits.push(fbits);
+        out.silk_available.push(s_avail);
+        out.silk_signal.push(s_sig);
+        out.silk_pitch.push(s_pitch);
+        out.silk_gain.push(s_gain);
         h += 1;
     }
     Ok(out)

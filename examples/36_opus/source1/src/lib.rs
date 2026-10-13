@@ -21,6 +21,8 @@ pub mod cli;
 pub mod decode;
 #[path = "03e_fakten.rs"]
 pub mod fakten;
+#[path = "08c_json.rs"]
+pub mod json;
 #[path = "07_png.rs"]
 pub mod png;
 #[path = "03c_range.rs"]
