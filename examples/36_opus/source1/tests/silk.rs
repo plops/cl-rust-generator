@@ -280,3 +280,161 @@ fn bilanz_schwaenze_und_rest_in_band() {
         "Rest ausserhalb Terminierungs-Band"
     );
 }
+
+/// Formant-Vokal synthetisieren: 120-Hz-Harmonische mit geformter
+/// Huelle (Bumps bei 700 + 2200 Hz).
+fn vokal_block(fr: usize, off: usize) -> Vec<f32> {
+    let mut out = [0.0f32; 960];
+    for (i, s) in out.iter_mut().enumerate() {
+        let t = (off + i) as f32 / 48_000.0;
+        let mut v = 0.0f32;
+        let mut k = 1u32;
+        while 120.0 * k as f32 <= 7900.0 {
+            let f = 120.0 * k as f32;
+            let bump = (-((f - 700.0) / 400.0).powi(2)).exp()
+                + 0.8 * (-((f - 2200.0) / 800.0).powi(2)).exp()
+                + 0.01;
+            v += bump * (2.0 * std::f32::consts::PI * f * t).sin();
+            k += 1;
+        }
+        *s = 0.05 * v;
+    }
+    let _ = fr;
+    out.to_vec()
+}
+
+/// End-zu-End-Orakel: bekannte Formanten muessen in der gewalkten Huelle stehen.
+#[test]
+fn huelle_trifft_eingeformte_formanten() {
+    use opus_pure::{Application, Bandwidth as PureBw, Signal as PureSig};
+    use opus_vis::silk::{SilkState, walk_packet};
+    use opus_vis::silk_dq::lpc_envelope_db;
+    use opus_vis::spectrum::{BINS, FMAX, FMIN};
+    let bytes = common::encode_mono(
+        Application::Voip,
+        24_000,
+        Some(PureBw::Wideband),
+        Some(PureSig::Voice),
+        20,
+        vokal_block,
+    );
+    let ps = read_packets(&bytes, bytes.len() as u64).unwrap();
+    let mut state = SilkState::new();
+    let mut treffer = 0u32;
+    let mut stimmhaft = 0u32;
+    for p in &ps.packets {
+        let toc = parse(&p.data).unwrap();
+        if toc.mode != Mode::Silk {
+            continue;
+        }
+        let sp = split(&p.data).unwrap();
+        let payloads: Vec<&[u8]> = sp.frames.to_vec();
+        let w = walk_packet(
+            &payloads,
+            toc.frame_ms,
+            silk_bw(toc.bandwidth),
+            1,
+            &mut state,
+        );
+        for f in &w.frames {
+            if f.signal_type != 2 {
+                continue;
+            }
+            stimmhaft += 1;
+            let env = lpc_envelope_db(&f.nlsf_q15, f.lpc_order, f.fs_khz);
+            let mut peaks = Vec::new();
+            for b in 1..BINS - 1 {
+                let f_hz = FMIN * (FMAX / FMIN).powf((b as f32 + 0.5) / BINS as f32);
+                if f_hz > 7500.0 {
+                    break;
+                }
+                if env[b] > env[b - 1] && env[b] >= env[b + 1] && env[b] > -25.0 {
+                    peaks.push((f_hz, env[b]));
+                }
+            }
+            peaks.sort_by(|a, b| b.1.total_cmp(&a.1));
+            // Welligkeit-tolerant: Spitze in Naehe UND hoeher als Max-12 dB.
+            let nah = |ziel: f32| {
+                peaks
+                    .iter()
+                    .any(|(f, h)| (f / ziel - 1.0).abs() < 0.25 && *h > -12.0)
+            };
+            if nah(700.0) && nah(2200.0) {
+                treffer += 1;
+            }
+        }
+    }
+    eprintln!("vokal: stimmhaft={stimmhaft} beide-formanten={treffer}");
+    assert!(stimmhaft >= 10, "zu wenig stimmhaft");
+    assert!(
+        treffer as f32 / stimmhaft as f32 > 0.5,
+        "Formanten fehlen systematisch"
+    );
+}
+
+/// Huelle ist hop-spezifisch: gleiche Huelle vs. STFT sieben Hops weiter
+/// korreliert deutlich schlechter (Permutations-Kontrolle, Tilt inklusive).
+#[test]
+fn huelle_ist_hop_spezifisch() {
+    use opus_vis::decode::decode_mono;
+    use opus_vis::spectrum::{BINS, FMAX, FMIN, stft};
+    let data = fixture();
+    let bs = opus_vis::bitstream::analyze_bytes(&data).unwrap();
+    let pcm = decode_mono(&data).unwrap();
+    let cols = stft(&pcm.samples);
+    let bin_of = |f: f32| {
+        ((BINS as f32 * (f / FMIN).ln() / (FMAX / FMIN).ln()) - 0.5)
+            .round()
+            .clamp(0.0, (BINS - 1) as f32) as usize
+    };
+    let harm_r = |h: usize, s0: usize| {
+        let f0 = bs.silk_pitch[h];
+        let (mut e, mut s) = (Vec::new(), Vec::new());
+        let mut k = 1u32;
+        while f0 * (k as f32) < 7500.0 {
+            let b = bin_of(f0 * (k as f32));
+            if cols[s0][b].is_finite() {
+                e.push(bs.spectrum[h][b]);
+                s.push(cols[s0][b]);
+            }
+            k += 1;
+        }
+        if e.len() < 5 {
+            return f32::NAN;
+        }
+        let me = e.iter().sum::<f32>() / e.len() as f32;
+        let ms = s.iter().sum::<f32>() / s.len() as f32;
+        let (mut num, mut de, mut ds) = (0.0f32, 0.0f32, 0.0f32);
+        for (a, b) in e.iter().zip(s.iter()) {
+            num += (a - me) * (b - ms);
+            de += (a - me) * (a - me);
+            ds += (b - ms) * (b - ms);
+        }
+        num / (de * ds + 1e-12).sqrt()
+    };
+    let n = cols.len().min(bs.spectrum.len());
+    let mut own = Vec::new();
+    let mut null = Vec::new();
+    for h in 0..n {
+        if !bs.silk_available[h] || bs.silk_signal[h] != 2 || bs.silk_pitch[h] <= 0.0 {
+            continue;
+        }
+        own.push(harm_r(h, h));
+        if h + 7 < n {
+            null.push(harm_r(h, h + 7));
+        }
+    }
+    own.retain(|r| r.is_finite());
+    null.retain(|r| r.is_finite());
+    own.sort_by(|a, b| a.total_cmp(b));
+    null.sort_by(|a, b| a.total_cmp(b));
+    let med = |v: &[f32]| v[v.len() / 2];
+    eprintln!(
+        "eigene-hop r={:.2}, fremd-hop r={:.2}",
+        med(&own),
+        med(&null)
+    );
+    assert!(med(&own) >= 0.45, "Huelle folgt eigenem Hop nicht");
+    assert!(med(&null) <= 0.40, "Kontrolle unerwartet hoch");
+    assert!(med(&own) - med(&null) >= 0.15, "kein Hop-Signal");
+}

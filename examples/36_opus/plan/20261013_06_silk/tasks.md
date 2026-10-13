@@ -74,12 +74,19 @@ Verifikation: Fixture rendert Pitch/Voicing sichtbar; alle Tests gruen.
 
 ## S2b — LPC-Huelle (Implementierung + Tests)
 
-- [ ] NLSF-Codebuecher + Decode-Port, LPC-Frequenzgang auf die
+Erledigt ohne Fallback: Float-Huelle (LSF→LPC→Frequenzgang, gamma=0.99
+als Decoder-bwexpander-Analogon), NLSF-Interpolation wortwoertlich nach
+Referenz (Verlauf aus ROH-Vektor), Ansicht 2 = Huelle / Ansicht 3 =
+STFT-Huelle, Pegel bleibt Peak-0 (Gain-Referenz streut zu stark).
+Orakel: 1-kHz- + Zwei-Formanten-Position, Vokal 19/19, Hop-Spezifitaet
+(0,52 vs. 0,31). 109 Tests gruen.
+
+- [x] NLSF-Codebuecher + Decode-Port, LPC-Frequenzgang auf die
       256 Log-Bins; Ansicht 2 = Huelle (SILK) / Baender (CELT),
       Ansicht 3 = STFT − Huelle (NaN wo unverfuegbar, wie bisher).
-- [ ] Huellen-Korrelation gegen PCM (Schwelle wie CELT-Orakel) als
+- [x] Huellen-Korrelation gegen PCM (Schwelle wie CELT-Orakel) als
       Sync-Beweis; Sinus-Anker ±2 dB wie in 03_bitstream.
-- [ ] Fallback-Regel: Sprengt S2b inkl. Tabellen die 600er-Grenze
+- [x] Fallback-Regel: Sprengt S2b inkl. Tabellen die 600er-Grenze
       auch nach Split, wird Ansicht 2 als Gain-/Pitch-Wasserfall
       gebaut (hier entscheiden, nicht aufschieben).
 

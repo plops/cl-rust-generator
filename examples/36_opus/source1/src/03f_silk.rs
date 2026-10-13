@@ -112,6 +112,7 @@ pub struct SilkState {
     ec_prev_signal: i8,
     ec_prev_lag: i16,
     last_gain: i8,
+    prev_nlsf: [i16; MAX_LPC_ORDER],
     /// Wie `first_frame_after_reset`: erzwingt Interp = 4 (kein Vor-Nlsf).
     first: bool,
     fs_khz: i32,
@@ -123,6 +124,7 @@ impl SilkState {
             ec_prev_signal: 0,
             ec_prev_lag: 0,
             last_gain: 10,
+            prev_nlsf: [0; MAX_LPC_ORDER],
             first: true,
             fs_khz: 0,
         }
@@ -205,6 +207,12 @@ pub struct SilkSummary {
     pub pulse_bits: i32,
     /// Gewalkte SILK-Frames im Paket.
     pub n_frames: usize,
+    /// Interpolierter NLSF-Vektor Q15 (nur `order` Eintraege belegt).
+    pub nlsf_q15: [i16; MAX_LPC_ORDER],
+    /// LPC-Ordnung (10 NB/MB, 16 WB).
+    pub order: usize,
+    /// Interne Rate in kHz (Nyquist-Grenze der Huelle).
+    pub fs_khz: i32,
 }
 
 /// Walk-Ergebnis eines Pakets (mehrere Payloads je moeglich).
@@ -395,8 +403,21 @@ pub fn walk_silk_frame(rc: &mut RangeDec<'_>, ctx: &SilkCtx, state: &mut SilkSta
             *h = fs as f32 * 1000.0 / (*lag).max(1) as f32;
         }
     }
-    let nlsf_q15 = dequant_nlsf(&idx.nlsf, ctx.bw.nlsf_cb());
+    let fresh = dequant_nlsf(&idx.nlsf, ctx.bw.nlsf_cb());
     let interp = if state.first { 4 } else { idx.interp };
+    // NLSF-Interpolation mit Vor-Frame, Formel und Verlauf wortwoertlich
+    // aus der Referenz (`decode_parameters`): Verlauf aus ROH-Vektor.
+    let order = ctx.bw.lpc_order();
+    let mut nlsf_q15 = [0i16; MAX_LPC_ORDER];
+    for i in 0..order {
+        let (p, c) = (i32::from(state.prev_nlsf[i]), i32::from(fresh[i]));
+        nlsf_q15[i] = if interp < 4 {
+            (p + ((i32::from(interp) * (c - p)) >> 2)) as i16
+        } else {
+            fresh[i]
+        };
+    }
+    state.prev_nlsf = fresh;
     state.first = false;
 
     SilkFrame {

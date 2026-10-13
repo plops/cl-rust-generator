@@ -14,7 +14,7 @@
 use crate::alloc::{EBANDS, NB, drain_shares};
 use crate::celt::{CeltState, endband_of, energy_db, lm_of_ms, parse_celt_frame};
 use crate::silk::{Bandwidth as SilkBw, SilkState, SilkSummary, walk_packet};
-use crate::silk_dq::summarize;
+use crate::silk_dq::{lpc_envelope_db, summarize};
 use crate::spectrum::{BINS, DB_FLOOR, FMAX, FMIN, HOP, RATE};
 use crate::types::{Bandwidth, Error, Mode};
 
@@ -186,7 +186,11 @@ impl Sources {
         let mut div_cols = Vec::with_capacity(n);
         let mut density_max = 0.0f32;
         for (h, scol) in stft.iter().enumerate().take(n) {
-            div_cols.push(divergence(scol, &bs.spectrum[h], bs.available[h]));
+            div_cols.push(divergence(
+                scol,
+                &bs.spectrum[h],
+                bs.available[h] || bs.silk_available[h],
+            ));
             for v in &bs.density[h] {
                 density_max = density_max.max(*v);
             }
@@ -360,6 +364,8 @@ pub fn analyze_packets(ps: &crate::analyze::PacketSet) -> Result<Bitstream, Erro
         let (mut s_avail, mut s_sig, mut s_pitch, mut s_gain) = (false, 0i8, 0.0f32, DB_FLOOR);
         if let Some(s) = out.silk_packets.get(pi).and_then(|o| o.as_ref()) {
             (s_avail, s_sig, s_pitch, s_gain) = (true, s.signal, s.pitch_hz, s.gains_db);
+            // SILK-Huelle statt Boden: Ansicht 2 zeigt LPC, Ansicht 3 STFT-Huelle.
+            col = lpc_envelope_db(&s.nlsf_q15, s.order, s.fs_khz);
         }
         if let Some((db, bits, tr, fb)) = &per_packet[pi] {
             (avail, trans, fbits) = (true, *tr, *fb);

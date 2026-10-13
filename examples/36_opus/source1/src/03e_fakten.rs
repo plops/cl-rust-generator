@@ -512,6 +512,9 @@ mod silk_tests {
             header_bits: 40,
             pulse_bits: 300,
             n_frames: 1,
+            nlsf_q15: [0; 16],
+            order: 16,
+            fs_khz: 16,
         };
     }
 }

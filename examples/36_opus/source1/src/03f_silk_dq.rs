@@ -210,6 +210,14 @@ pub fn summarize(frames: &[crate::silk::SilkFrame]) -> Option<crate::silk::SilkS
         header += f.bits.signal + f.bits.gains + f.bits.nlsf + f.bits.ltp + f.bits.seed;
         pulses += f.bits.pulses;
     }
+    let last = &frames[frames.len() - 1];
+    let order = if last.fs_khz == 16 {
+        MAX_LPC_ORDER
+    } else {
+        MIN_LPC_ORDER
+    };
+    let mut nlsf_q15 = [0i16; MAX_LPC_ORDER];
+    nlsf_q15[..order].copy_from_slice(&last.nlsf_q15[..order]);
     Some(crate::silk::SilkSummary {
         signal,
         gains_db: (10.0 * (gain_pow / gain_n.max(1) as f64 + 1e-12).log10()) as f32,
@@ -221,5 +229,149 @@ pub fn summarize(frames: &[crate::silk::SilkFrame]) -> Option<crate::silk::SilkS
         header_bits: header,
         pulse_bits: pulses,
         n_frames: frames.len(),
+        nlsf_q15,
+        order,
+        fs_khz: last.fs_khz,
     })
+}
+
+/// LPC-Huellkurve in dB aus NLSF (Peak = 0 dB) auf den 256 Log-Bins.
+///
+/// Eigene Float-Rechnung (Lehrbuch-Formel LSF→LPC→Frequenzgang, kein
+/// Festkomma-Port): LSF-Radianten, P/Q-Polynome aus Biquad-Kaskaden,
+/// A=(P+Q)/2, |H|=1/|A|. Ueber Nyquist der SILK-Rate steht Boden
+/// (kein Modell, kein Signal). Orakel in `tests/silk.rs`.
+pub fn lpc_envelope_db(
+    nlsf_q15: &[i16],
+    order: usize,
+    fs_khz: i32,
+) -> [f32; crate::spectrum::BINS] {
+    use crate::spectrum::{BINS, DB_FLOOR, FMAX, FMIN};
+    use std::f64::consts::PI;
+    let d = order.min(nlsf_q15.len()).min(MAX_LPC_ORDER) & !1;
+    if d < 2 {
+        return [0.0; BINS];
+    }
+    let mut w = [0.0f64; MAX_LPC_ORDER];
+    for (o, n) in w.iter_mut().zip(nlsf_q15.iter()).take(d) {
+        *o = f64::from(*n) / 32768.0 * PI;
+    }
+    // P aus LSF 1,3,5.. (0-indexiert gerade), Q aus 2,4,6...
+    let mut p = [0.0f64; MAX_LPC_ORDER + 1];
+    let mut q = [0.0f64; MAX_LPC_ORDER + 1];
+    p[0] = 1.0;
+    q[0] = 1.0;
+    let (mut np, mut nq) = (0usize, 0usize);
+    for (i, wi) in w.iter().enumerate().take(d) {
+        let (poly, n) = if i % 2 == 0 {
+            (&mut p, &mut np)
+        } else {
+            (&mut q, &mut nq)
+        };
+        let c = -2.0 * wi.cos();
+        let mut nxt = [0.0f64; MAX_LPC_ORDER + 1];
+        for k in 0..=*n {
+            nxt[k] += poly[k];
+            nxt[k + 1] += c * poly[k];
+            nxt[k + 2] += poly[k];
+        }
+        let len = poly.len();
+        poly.copy_from_slice(&nxt[..len]);
+        *n += 2;
+    }
+    let mut a = [0.0f64; MAX_LPC_ORDER + 1];
+    for (k, v) in a.iter_mut().enumerate().take(d + 1) {
+        *v = 0.5 * (p[k] + q[k]);
+    }
+    // Anzeige-Stabilisierung (Decoder-Analogon `silk_bwexpander`): enge
+    // LSF-Paare legen Pole fast auf den Einheitskreis (unendlich schmal,
+    // Bin-Raster trifft sie per Lotterie). gamma=0.99 zieht sie nach innen
+    // (Mindest-Bandbreite ~50 Hz) — Formant-LAGEN bleiben erhalten.
+    for (k, v) in a.iter_mut().enumerate().take(d + 1) {
+        *v *= 0.99f64.powi(k as i32);
+    }
+    let nyq = f64::from(fs_khz) * 500.0;
+    let mut out = [DB_FLOOR; BINS];
+    let mut peak = f64::NEG_INFINITY;
+    let mut mags = [f64::NEG_INFINITY; BINS];
+    for (b, m) in mags.iter_mut().enumerate() {
+        let f = f64::from(FMIN) * f64::from(FMAX / FMIN).powf((b as f64 + 0.5) / BINS as f64);
+        if f > nyq {
+            continue;
+        }
+        // Filter lebt auf der SILK-Rate (nicht 48 kHz!): sonst wandert
+        // der Peak um den Faktor 48/fs_khz (hier 3x bei WB).
+        let om = f / (f64::from(fs_khz) * 1000.0) * 2.0 * PI;
+        let (mut re, mut im) = (0.0f64, 0.0f64);
+        for (k, ak) in a.iter().enumerate().take(d + 1) {
+            re += ak * (k as f64 * om).cos();
+            im -= ak * (k as f64 * om).sin();
+        }
+        *m = -10.0 * (re * re + im * im + 1e-30).log10();
+        peak = peak.max(*m);
+    }
+    for (b, o) in out.iter_mut().enumerate() {
+        if mags[b] > f64::NEG_INFINITY {
+            *o = (mags[b] - peak) as f32;
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod envelope_tests {
+    use super::*;
+    use crate::spectrum::{BINS, FMAX, FMIN};
+
+    fn peak_hz(env: &[f32; BINS]) -> f32 {
+        let (mut bi, mut bv) = (0, f32::NEG_INFINITY);
+        for (b, v) in env.iter().enumerate() {
+            if *v > bv {
+                (bi, bv) = (b, *v);
+            }
+        }
+        FMIN * (FMAX / FMIN).powf((bi as f32 + 0.5) / BINS as f32)
+    }
+
+    #[test]
+    fn formant_bei_1khz_trifft_1khz() {
+        // NLSF-Paar um 1000 Hz (32768 = Nyquist 8 kHz): Huellen-Peak muss dort liegen.
+        let d = 100i16;
+        let mut nlsf = [0i16; MAX_LPC_ORDER];
+        nlsf[0] = 4096 - d;
+        nlsf[1] = 4096 + d;
+        let env = lpc_envelope_db(&nlsf, 2, 16);
+        let peak = peak_hz(&env);
+        eprintln!("peak={peak:.0}Hz");
+        assert!((800.0..1250.0).contains(&peak), "peak {peak}");
+    }
+
+    #[test]
+    fn zwei_formanten_treffen_beide() {
+        // Paare bei 500 Hz (nlsf 2048) und 2500 Hz (nlsf 10240), Ordnung 4:
+        // die zwei groessten lokalen Maxima muessen dort liegen (±20 %).
+        let nlsf = [2048 - 100, 2048 + 100, 10240 - 100, 10240 + 100];
+        let env = lpc_envelope_db(&nlsf, 4, 16);
+        let mut peaks = Vec::new();
+        for b in 1..BINS - 1 {
+            if env[b] > env[b - 1] && env[b] >= env[b + 1] {
+                peaks.push((
+                    FMIN * (FMAX / FMIN).powf((b as f32 + 0.5) / BINS as f32),
+                    env[b],
+                ));
+            }
+        }
+        peaks.sort_by(|a, b| b.1.total_cmp(&a.1));
+        eprintln!("formanten={peaks:.0?}");
+        assert!(peaks.len() >= 2);
+        for ziel in [500.0, 2500.0] {
+            assert!(
+                peaks
+                    .iter()
+                    .take(2)
+                    .any(|(f, _)| (f / ziel - 1.0).abs() < 0.2),
+                "formant {ziel} fehlt in {peaks:.0?}"
+            );
+        }
+    }
 }
