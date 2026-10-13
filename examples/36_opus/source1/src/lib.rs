@@ -32,6 +32,14 @@ pub mod report;
 #[path = "09_show.rs"]
 #[cfg(feature = "show")]
 pub mod show;
+#[path = "03f_silk.rs"]
+pub mod silk;
+#[path = "03f_silk_dq.rs"]
+pub mod silk_dq;
+#[path = "03f_silk_pulse.rs"]
+pub(crate) mod silk_pulse;
+#[path = "03f_silk_tab.rs"]
+pub mod silk_tab;
 #[path = "05_spectrum.rs"]
 pub mod spectrum;
 #[path = "03b_split.rs"]

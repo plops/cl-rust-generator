@@ -11,7 +11,10 @@ const EC_CODE_EXTRA: u32 = 7;
 pub(crate) const BITRES: i32 = 3;
 
 /// Bare range decoder over borrowed bytes; raw bits come from the packet end.
-pub(crate) struct RangeDec<'a> {
+///
+/// Oeffentlich, weil `silk::walk_silk_frame` den Coder beim Aufrufer laesst
+/// (S3 reicht denselben an CELT weiter); Felder bleiben crate-intern.
+pub struct RangeDec<'a> {
     pub(crate) buf: &'a [u8],
     pub(crate) storage: u32,
     pub(crate) end_offs: u32,
