@@ -136,11 +136,16 @@ Verifikation: `scripts/smoke.sh` (inkl. HIL-Skip-Regel) gruen.
 
 ## S5 — Hygiene + Walkthrough
 
-- [ ] `cargo fmt`, `clippy -D warnings`, `cargo test --all-features`,
+Erledigt: Gates gruen (113 Tests, fmt, clippy 0, Smoke-Teile),
+`cargo upgrade --dry-run` (beide `latest`), Dateigroessen < 600,
+keine Temp-Debugs, `walkthrough.md` (deutsch, Mermaid, Orakel-Tabelle),
+Commits je Schritt geprueft (S0/S1/S2a/S2b/S3/S4 + Checkpoint).
+
+- [x] `cargo fmt`, `clippy -D warnings`, `cargo test --all-features`,
       `cargo upgrade --dry-run`, `scripts/smoke.sh`.
-- [ ] `plan/20261013_06_silk/walkthrough.md` schreiben (Deutsch,
+- [x] `plan/20261013_06_silk/walkthrough.md` schreiben (Deutsch,
       Mermaid, Glossar-Ergaenzung, Orakel-Tabelle zu plan.md
       §Code Review, Pakete-Tabelle: keine Aenderung).
-- [ ] Commits je S-Schritt pruefen (`git log --oneline`).
+- [x] Commits je S-Schritt pruefen (`git log --oneline`).
 
 Verifikation: alle Gates gruen, Walkthrough liegt bei.
