@@ -372,6 +372,8 @@ mod tests {
             silk_signal: vec![],
             silk_pitch: vec![],
             silk_gain: vec![],
+            hybrid_silk: Vec::new(),
+            hybrid: Vec::new(),
         };
         let text = crate::json::json(&a, &head, &tags, &enc, &pcm, &bs);
         assert!(text.contains("\"schema\":2"), "schema fehlt");

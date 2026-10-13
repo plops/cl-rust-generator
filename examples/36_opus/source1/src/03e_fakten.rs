@@ -484,6 +484,8 @@ mod silk_tests {
                 .map(|&s| if s == 2 { 140.0 } else { 0.0 })
                 .collect(),
             silk_gain: vec![30.0; n],
+            hybrid_silk: Vec::new(),
+            hybrid: Vec::new(),
         }
     }
 

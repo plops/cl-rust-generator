@@ -11,6 +11,8 @@ pub mod alloc;
 pub mod analyze;
 #[path = "05b_bitstream.rs"]
 pub mod bitstream;
+#[path = "05c_hybrid.rs"]
+pub mod hybrid;
 #[path = "06a_canvas.rs"]
 pub mod canvas;
 #[path = "03c_celt.rs"]

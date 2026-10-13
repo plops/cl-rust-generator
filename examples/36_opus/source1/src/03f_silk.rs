@@ -442,7 +442,7 @@ pub fn walk_silk_frame(rc: &mut RangeDec<'_>, ctx: &SilkCtx, state: &mut SilkSta
 
 /// VAD/LBRR-Flags am Paket-Anfang lesen (`dec_api.rs`).
 /// `None` bei LBRR — S1-Grenze, ehrlich grau statt geraten.
-fn packet_flags(rc: &mut RangeDec<'_>, n_silk: usize) -> Option<Vec<i32>> {
+pub(crate) fn packet_flags(rc: &mut RangeDec<'_>, n_silk: usize) -> Option<Vec<i32>> {
     let mut vad = Vec::with_capacity(n_silk);
     for _ in 0..n_silk {
         vad.push(i32::from(rc.decode_bit_logp(1)));

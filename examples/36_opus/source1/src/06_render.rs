@@ -493,6 +493,8 @@ mod tests {
             silk_signal: vec![0, 0],
             silk_pitch: vec![0.0, 0.0],
             silk_gain: vec![0.0, 0.0],
+            hybrid_silk: Vec::new(),
+            hybrid: Vec::new(),
         };
         Sources::build(cols, bs)
     }

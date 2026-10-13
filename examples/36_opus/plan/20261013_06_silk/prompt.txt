@@ -1,0 +1,27 @@
+Follow-up zu 20261011_01_init bis 20261013_05_verstehen (opus-vis
+steht: PNG/JSON/Report mit 4 Ansichten, interaktiver X11-Viewer,
+eigener CELT-Bitstrom-Parser, 89 Tests gruen, nur 2 Deps).
+
+Befund: `silk.opus` ist zu 100 % Hybrid (61641 Pakete, Config 15),
+`silk.webm` (20:32, Stereo-Opus) enthaelt viel Sprache. Die
+Ansichten 2-4 (Bitstrom, Divergenz, Dichte) sind CELT-only und
+bleiben bei SILK/Hybrid grau (`available=false`, NaN-Divergenz).
+Neu liegt `silk_silk.opus` bei: 61641 Pakete, alle Config 9
+(SILK WB 20 ms, mono), kodiert mit
+`ffmpeg -i silk.webm -map 0:a -ac 1 -ar 16000 -c:a libopus
+-application voip -b:a 24k -frame_duration 20 silk_silk.opus`.
+
+Auftrag (Planung, noch keine Umsetzung):
+1. Code in source1 reviewen (05b_bitstream, 03c_celt, 06_render,
+   09_show, 08_cli/08b_report) plus opus-pure-0.2.2-SILK-Quellen
+   (`silk/decode_indices.rs`: Seiteninfo-Reihenfolge bis Seed).
+2. Umbau entwerfen: SILK-Header-Walk (`03f_silk.rs`) nach dem
+   Vorbild des CELT-Walks (Seiteninfo lesen, Excitation ueberspringen),
+   SILK-Ansichten (LPC-Huelle, Pitch/Voicing, Bitanteile), Hybrid als
+   Dividende (SILK-Praefix liefert CELT-Start im gemeinsamen Range-Coder).
+3. Leitplanken bleiben: keine neue Crate (auch nicht dev), jede Datei
+   < 600 Zeilen, `forbid(unsafe_code)`, Orakel-Tests statt
+   Plausibilitaet (Lehre aus 04_celt_parser).
+4. Ergebnis: neuer Ordner plan/20261013_06_silk/ mit prompt.txt,
+   plan.md und tasks.md als ausfuehrbare Planung. Rueckwaerts-
+   kompatibilitaet ist nicht gefordert (Tests/Goldens anpassen).

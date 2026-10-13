@@ -96,6 +96,8 @@ fn divergence_nan_renders_neutral_gray() {
         silk_signal: vec![0; 4],
         silk_pitch: vec![0.0; 4],
         silk_gain: vec![0.0; 4],
+        hybrid_silk: Vec::new(),
+        hybrid: Vec::new(),
     };
     let src = Sources::build(stft, bs);
     let bytes = sine_bytes();
@@ -138,6 +140,8 @@ fn pitch_lane_zeigt_stimmhaft_amber() {
         silk_signal: vec![2; 4],
         silk_pitch: vec![140.0; 4],
         silk_gain: vec![30.0; 4],
+        hybrid_silk: Vec::new(),
+        hybrid: Vec::new(),
     };
     let src = Sources::build(stft, bs);
     let bytes = sine_bytes();

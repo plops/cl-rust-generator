@@ -103,6 +103,10 @@ pub(crate) fn walk_pulses(
         }
         sums[i] = s;
     }
+    // Lesereihenfolge wortwoertlich aus der Referenz (`silk_decode_pulses`):
+    // erst alle Shell-Bloecke, dann alle LSBs, dann alle Vorzeichen.
+    // (Verzahnt pro Block liest andere Bits — S3-Orakel hat die
+    // Verschiebung im Hybrid-CELT entlarvt.)
     let mut pulses = [0i16; 320];
     iter = iter.min(20);
     for i in 0..iter {
@@ -114,7 +118,10 @@ pub(crate) fn walk_pulses(
                 sums[i],
             );
         }
+    }
+    for i in 0..iter {
         if shifts[i] > 0 {
+            let start = i * SHELL_CODEC_FRAME_LENGTH;
             for p in pulses
                 .iter_mut()
                 .take(start + SHELL_CODEC_FRAME_LENGTH)
@@ -128,6 +135,9 @@ pub(crate) fn walk_pulses(
             }
             sums[i] |= shifts[i] << 5;
         }
+    }
+    for i in 0..iter {
+        let start = i * SHELL_CODEC_FRAME_LENGTH;
         signs_block(
             rc,
             &mut pulses[start..start + SHELL_CODEC_FRAME_LENGTH],

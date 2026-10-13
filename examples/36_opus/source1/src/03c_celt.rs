@@ -285,13 +285,39 @@ pub fn parse_celt_frame(
     end: usize,
     state: &mut CeltState,
 ) -> Result<CeltFrame, &'static str> {
-    let channels = channels.clamp(1, 2);
-    let end = end.min(NB).max(start);
-    let total_bits = data.len() as i32 * 8;
-    if lm > 3 || data.is_empty() {
+    if data.is_empty() {
         return Err("bad celt frame parameters");
     }
     let mut rc = RangeDec::new(data);
+    parse_celt_frame_rc(
+        &mut rc,
+        data.len() as i32 * 8,
+        lm,
+        channels,
+        start,
+        end,
+        state,
+    )
+}
+
+/// Walk one CELT frame's header on an already positioned range coder
+/// (Hybrid: derselbe Coder nach dem SILK-Praefix; `total_bits` ist die
+/// effektive CELT-Laenge nach Redundanz-Abzug, Rueckwaerts-Bits lesen
+/// vom Payload-Ende wie in der Referenz ohne Storage-Kuerzung).
+pub fn parse_celt_frame_rc(
+    rc: &mut RangeDec<'_>,
+    total_bits: i32,
+    lm: usize,
+    channels: usize,
+    start: usize,
+    end: usize,
+    state: &mut CeltState,
+) -> Result<CeltFrame, &'static str> {
+    let channels = channels.clamp(1, 2);
+    let end = end.min(NB).max(start);
+    if lm > 3 || total_bits < 0 {
+        return Err("bad celt frame parameters");
+    }
 
     // Mono packet in stereo state: predict from the hotter channel.
     if channels == 1 {
@@ -328,16 +354,16 @@ pub fn parse_celt_frame(
         false
     };
 
-    unquant_coarse(start, end, &mut state.e, intra, &mut rc, channels, lm);
+    unquant_coarse(start, end, &mut state.e, intra, &mut *rc, channels, lm);
     let mut tf_res = [0i32; NB];
-    tf_decode(start, end, transient, &mut tf_res, lm as i32, &mut rc);
+    tf_decode(start, end, transient, &mut tf_res, lm as i32, &mut *rc);
     let spread = if rc.tell() + 4 <= total_bits {
         rc.decode_icdf(&SPREAD_ICDF, 5)
     } else {
         SPREAD_NORMAL
     };
 
-    let mid = dynalloc_section(&mut rc, total_bits, lm, channels, start, end, transient);
+    let mid = dynalloc_section(&mut *rc, total_bits, lm, channels, start, end, transient);
     let (offsets, cap, trim, anti_collapse_rsv) =
         (mid.offsets, mid.cap, mid.trim, mid.anti_collapse_rsv);
 
@@ -365,7 +391,7 @@ pub fn parse_celt_frame(
         &mut fine_priority,
         channels as i32,
         lm as i32,
-        &mut rc,
+        &mut *rc,
         &mut overhead,
         &mut total_rsv,
     );
@@ -373,7 +399,7 @@ pub fn parse_celt_frame(
     if coded < 0 {
         return Err("allocation failed");
     }
-    unquant_fine(start, end, &mut state.e, &ebits, &mut rc, channels);
+    unquant_fine(start, end, &mut state.e, &ebits, &mut *rc, channels);
 
     // Frame-end bookkeeping (mirrors decode_impl_from_rc).
     if silence {

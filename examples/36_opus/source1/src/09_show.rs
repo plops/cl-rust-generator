@@ -119,6 +119,13 @@ pub struct Hover<'a> {
     pub frame_bits: Option<f32>,
     /// SILK-Werte des Hops: (Signal, Pitch-Hz, Gain-dB), `None` = kein SILK.
     pub silk: Option<(i8, f32, f32)>,
+    /// SILK-Bit-Anteil des Hops (Hybrid), `None` = kein Hybrid.
+    pub hybrid: Option<f32>,
+}
+
+/// Hybrid-Anteil als Hover-Anhang (`""` wo kein Hybrid).
+fn hybrid_tag(hybrid: Option<f32>) -> String {
+    hybrid.map_or_else(String::new, |f| format!(" SILK={:.0}%", 100.0 * f))
 }
 
 /// Drei Panel-Zeilen aus Hover-Punkt (rein/testbar).
@@ -151,10 +158,15 @@ pub fn hover_lines(h: Hover<'_>) -> (String, String, String) {
         },
     );
     let l3 = match (h.silk, h.transient, h.frame_bits) {
-        (Some((sig, pitch, gain)), _, _) if sig >= 2 => {
-            format!("STIMMHAFT F0={:.0}HZ GAIN={:.0}DB", pitch, gain)
+        (Some((sig, pitch, gain)), _, _) if sig >= 2 => format!(
+            "STIMMHAFT F0={:.0}HZ GAIN={:.0}DB{}",
+            pitch,
+            gain,
+            hybrid_tag(h.hybrid)
+        ),
+        (Some((1, _, gain)), _, _) => {
+            format!("STIMMLOS GAIN={:.0}DB{}", gain, hybrid_tag(h.hybrid))
         }
-        (Some((1, _, gain)), _, _) => format!("STIMMLOS GAIN={:.0}DB", gain),
         (Some(_), _, _) => "INAKTIV".to_string(),
         (None, Some(t), Some(b)) => format!("TRANS {} SIG {:.0}B", u8::from(t), b),
         _ => "KEIN CELT".to_string(),
@@ -334,6 +346,7 @@ fn draw_hover_state(
                 bs.silk_gain.get(hop).copied().unwrap_or(0.0),
             )
         }),
+        hybrid: bs.hybrid.get(hop).copied().flatten(),
     });
     draw_panel(img, lay, &l1, &l2, &l3);
 }
@@ -426,6 +439,7 @@ mod tests {
             transient: Some(true),
             frame_bits: Some(1822.0),
             silk: None,
+            hybrid: None,
         });
         assert_eq!(l1, "T=1.235S F=441HZ PEGEL=-12DB");
         assert_eq!(l2, "SILK WB 20MS 61B 24.4KBPS C2 P5");
@@ -439,6 +453,7 @@ mod tests {
             transient: None,
             frame_bits: None,
             silk: None,
+            hybrid: None,
         });
         assert_eq!(l1, "T=0.000S F=50HZ DIV=---");
         assert_eq!(l3, "KEIN CELT");
@@ -451,6 +466,7 @@ mod tests {
             transient: None,
             frame_bits: None,
             silk: None,
+            hybrid: None,
         });
         assert_eq!(l1, "T=0.000S F=50HZ DICHTE=2.3B");
     }
@@ -466,6 +482,7 @@ mod tests {
             transient: None,
             frame_bits: None,
             silk: Some((2, 142.4, 34.6)),
+            hybrid: None,
         };
         assert_eq!(hover_lines(base).2, "STIMMHAFT F0=142HZ GAIN=35DB");
         let unvoiced = Hover {
@@ -478,6 +495,14 @@ mod tests {
             ..base
         };
         assert_eq!(hover_lines(inactive).2, "INAKTIV");
+        let hybrid = Hover {
+            hybrid: Some(0.625),
+            ..base
+        };
+        assert_eq!(
+            hover_lines(hybrid).2,
+            "STIMMHAFT F0=142HZ GAIN=35DB SILK=62%"
+        );
     }
 
     #[test]
