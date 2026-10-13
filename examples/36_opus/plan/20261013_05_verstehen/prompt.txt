@@ -1,0 +1,18 @@
+Follow-up zu 20261011_01_init bis 20261011_04_celt_parser (opus-vis
+steht: PNG/JSON mit 4 Ansichten, interaktiver X11-Viewer, eigener
+CELT-Bitstrom-Parser, 71 Tests gruen, nur 2 Deps).
+
+Auftrag (Planung, noch keine Umsetzung):
+1. Alle plan/*/walkthrough.md lesen und den Code in source1 reviewen.
+2. Verbesserungen vorschlagen. Leitplanken bleiben: moeglichst geringe
+   Dependencies (Ziel: keine neue Crate), kleiner/uebersichtlicher
+   Code, jede Datei < 600 Zeilen, forbid(unsafe_code).
+3. Zweck schaerfen: Das Tool soll dem Nutzer helfen, OPUS zu verstehen,
+   und interessante Informationen ueber codierte Sound-Dateien aufzeigen
+   (nicht nur sie rendern).
+4. Ergebnis: neuer Ordner plan/20261013_05_verstehen/ mit prompt.txt,
+   plan.md und task.md als ausfuehrbare Planung der Verbesserung.
+5. Nachtrag (2026-10-13): Ausgabe-Dateien und Verhalten muessen nicht
+   backward compatible sein — JSON-Schema, CLI-Verhalten und
+   PNG-Inhalt duerfen frei neu entworfen werden; alte Tests/Goldens
+   werden angepasst statt alte Formate weiterzuschleppen.
