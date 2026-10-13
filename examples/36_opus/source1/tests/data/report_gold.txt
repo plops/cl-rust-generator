@@ -1,0 +1,14 @@
+opus-report: fixture.opus
+datei: 4527 bytes, 0.500 s, 1 kanal, pre-skip 6.500 ms
+encoder: opus-pure 0.2.2 (eingang 48000 hz, gain +0.00 db, mapping 0)
+bitrate: avg 69.456 kbit/s (min 65.200, p50 66.400, p95 71.200, max 127.600), vbr-index 0.173
+kompression: roh 768.0 kbit/s -> 10.603x (overhead 4.11 %, 0 split-fallbacks)
+modi: silk 0.0 %, hybrid 0.0 %, celt 100.0 % (1 abschnitt)
+wechsel: [0.0-0.5] CELT
+bandbreite: FB 100.0 %
+signal: peak 0.507 / rms -9.0 dbfs, clipping 0, schwerpunkt 441 hz, mono
+stille: keine abschnitte ab 200 ms (dtx-pakete 0)
+transienten: 1 (z. b. bei 0.0 s)
+einordnung:
+- spricht fuer musik in vollband: fast nur CELT bis 20 khz (encoder nutzt musikmodell)
+- durchgehend ein modus: keine umschaltung erkannt

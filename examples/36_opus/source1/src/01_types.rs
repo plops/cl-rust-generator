@@ -103,6 +103,15 @@ pub enum Bandwidth {
 }
 
 impl Bandwidth {
+    /// Alle fuenf Stufen in aufsteigender Reihenfolge.
+    pub const ALL: [Bandwidth; 5] = [
+        Bandwidth::Narrow,
+        Bandwidth::Medium,
+        Bandwidth::Wide,
+        Bandwidth::SuperWide,
+        Bandwidth::Full,
+    ];
+
     /// Obere Grenzfrequenz in Hz (fuer Achse und BW-Linie).
     #[must_use]
     pub fn hz(self) -> u32 {
@@ -147,6 +156,8 @@ pub struct FrameMeta {
     pub bytes: usize,
     /// Momentan-Bitrate in kbit/s.
     pub kbps: f64,
+    /// TOC-Config 0–31 (obere 5 Bit des TOC-Bytes).
+    pub config: u8,
     /// Packing-Code 0–3 (TOC-Bits 0–1).
     pub packing: u8,
     /// Padding-Bytes im Paket (Nutzdaten-fremd).
@@ -189,6 +200,8 @@ pub struct Analysis {
     pub frames: Vec<FrameMeta>,
     /// Aggregierte Kennzahlen.
     pub summary: Summary,
+    /// Pakete, deren Split fehlschlug (Pad als 0 angenommen).
+    pub split_fallbacks: usize,
 }
 
 /// Eingabe: Datei oder stdin (`-`).
@@ -226,4 +239,6 @@ pub struct CliConfig {
     pub show: bool,
     /// Fenster-Frames (Test-Haken, Default `u64::MAX`).
     pub show_frames: u64,
+    /// Report unterdruecken (Default: Report wird gedruckt).
+    pub quiet: bool,
 }

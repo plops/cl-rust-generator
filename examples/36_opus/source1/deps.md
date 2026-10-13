@@ -2,7 +2,9 @@
 
 Zwei Crates, sonst nur `std`: TOC-Parser, FFT, PNG-Writer, Font und
 CLI-Parsing sind eigener Code. `cargo upgrade --dry-run` (2026-10-11):
-beide auf `latest`.
+beide auf `latest`. Stand 2026-10-13 (`05_verstehen`: Fakten, Report,
+JSON-Schema-2 — alles `std`-only): weiter genau diese zwei, `cargo
+tree` ohne `show` zeigt nur `opus-pure 0.2.2`.
 
 ## `stephenberry/opus-pure` — Ogg-Demux + Opus-Codec (Pflicht)
 

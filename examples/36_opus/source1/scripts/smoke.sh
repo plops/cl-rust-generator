@@ -19,14 +19,28 @@ echo "== png pruefen (ffprobe) =="
 ffprobe -v error -show_entries stream=codec_name,width,height \
   -of csv=p=0 /tmp/smoke.png
 
+echo "== report pruefen (stdout + --quiet) =="
+./$BIN /tmp/smoke_demo.opus -o /tmp/smoke_report.png --width 200 \
+  > /tmp/smoke_report.txt
+grep -q "^opus-report:" /tmp/smoke_report.txt
+grep -q "^einordnung:" /tmp/smoke_report.txt
+grep -q "variable bitrate" /tmp/smoke_report.txt
+./$BIN /tmp/smoke_demo.opus -o /tmp/smoke_quiet.png --width 200 --quiet \
+  > /tmp/smoke_quiet.txt
+test ! -s /tmp/smoke_quiet.txt
+
 echo "== json pruefen (json.tool) =="
 python3 -m json.tool /tmp/smoke.json > /dev/null
 python3 -c "
 import json
 d = json.load(open('/tmp/smoke.json'))
+assert d['schema'] == 2, d.get('schema')
 assert len(d['frames']) == 300, len(d['frames'])
-assert d['summary']['silk'] > 0.4
-assert d['summary']['celt'] > 0.4
+assert d['summary']['silk_frac'] > 0.4
+assert d['summary']['celt_frac'] > 0.4
+assert 'head' in d and 'tags' in d and 'encoder' in d and 'pcm' in d
+assert d['frames'][0]['mode'] == 'silk' and d['frames'][0]['celt'] is None
+assert d['frames'][-1]['celt'] is not None
 print('json ok:', d['summary']['frames'], 'frames')
 "
 

@@ -399,6 +399,7 @@ mod tests {
             channels: 1,
             bytes: 80,
             kbps: 32.0,
+            config: 31,
             packing: 0,
             pad_bytes: 0,
         };
@@ -418,6 +419,7 @@ mod tests {
                 frac_celt: 0.5,
                 channels: 1,
             },
+            split_fallbacks: 0,
         }
     }
 
@@ -429,8 +431,9 @@ mod tests {
             available: vec![true, true],
             transient: vec![false, false],
             frame_bits: vec![256.0, 256.0],
+            packets: vec![None, None],
         };
-        Sources::build(&cols, &bs)
+        Sources::build(cols, bs)
     }
 
     #[test]

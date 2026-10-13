@@ -19,7 +19,7 @@ fn sine_2s() -> (opus_vis::types::Analysis, Sources) {
     let pcm = decode::decode_mono(&data).unwrap();
     let cols = spectrum::stft(&pcm.samples);
     let bs = bitstream::analyze_bytes(&data).unwrap();
-    (a, Sources::build(&cols, &bs))
+    (a, Sources::build(cols, bs))
 }
 
 #[test]
@@ -90,8 +90,9 @@ fn divergence_nan_renders_neutral_gray() {
         available: vec![false; 4],
         transient: vec![false; 4],
         frame_bits: vec![0.0; 4],
+        packets: vec![None; 4],
     };
-    let src = Sources::build(&stft, &bs);
+    let src = Sources::build(stft, bs);
     let bytes = sine_bytes();
     let a = analyze::analyze_reader(&bytes[..], 0).unwrap();
     let img = render::render(&a, &src, Source::Divergence, 64);

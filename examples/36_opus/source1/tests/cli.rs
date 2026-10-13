@@ -40,10 +40,17 @@ fn run_writes_png_and_json() {
     let bytes = std::fs::read(&png).unwrap();
     assert_eq!(&bytes[..8], &opus_vis::png::MAGIC);
     let text = std::fs::read_to_string(&js).unwrap();
-    assert!(text.contains("\"frames\":["));
+    assert!(text.contains("\"schema\":2"));
+    assert!(text.contains("\"head\":{"));
+    assert!(text.contains("\"tags\":{"));
     assert!(text.contains("\"summary\":{"));
-    assert!(text.contains("\"mode\":\"CELT\""));
+    assert!(text.contains("\"encoder\":{"));
+    assert!(text.contains("\"pcm\":{"));
+    assert!(text.contains("\"frames\":["));
+    assert!(text.contains("\"mode\":\"celt\""));
     assert!(text.contains("\"avg_kbps\":"));
+    assert!(text.contains("\"config\":"));
+    assert!(text.contains("\"split_fallbacks\":"));
     std::fs::remove_dir_all(&dir).ok();
 }
 

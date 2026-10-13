@@ -19,12 +19,16 @@ pub mod celt;
 pub mod cli;
 #[path = "04_decode.rs"]
 pub mod decode;
+#[path = "03e_fakten.rs"]
+pub mod fakten;
 #[path = "07_png.rs"]
 pub mod png;
 #[path = "03c_range.rs"]
 pub mod range;
 #[path = "06_render.rs"]
 pub mod render;
+#[path = "08b_report.rs"]
+pub mod report;
 #[path = "09_show.rs"]
 #[cfg(feature = "show")]
 pub mod show;

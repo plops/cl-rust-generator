@@ -124,6 +124,21 @@ pub fn column(samples: &[f32], window: &[f32], axis: &LogAxis) -> [f32; BINS] {
     out
 }
 
+/// Spektral-Schwerpunkt einer dB-Spalte in Hz (Leistungs-Mittel der
+/// Bin-Mitten; Boden-Anteile zaehlen praktisch nicht mit).
+#[must_use]
+pub fn centroid_db(col: &[f32; BINS]) -> f32 {
+    let mut num = 0.0f64;
+    let mut den = 0.0f64;
+    for (b, db) in col.iter().enumerate() {
+        let p = 10.0f64.powf(f64::from(*db) / 10.0);
+        let f = f64::from(FMIN) * f64::from(FMAX / FMIN).powf((b as f64 + 0.5) / BINS as f64);
+        num += p * f;
+        den += p;
+    }
+    if den > 0.0 { (num / den) as f32 } else { 0.0 }
+}
+
 /// STFT ueber alles PCM: Hop `HOP`, letzte Spalte null-aufgefuellt.
 #[must_use]
 pub fn stft(pcm: &[f32]) -> Vec<[f32; BINS]> {
@@ -197,6 +212,21 @@ mod tests {
         assert!((80..105).contains(&peak), "peak {peak}");
         assert!(col[peak] > -12.0, "peak pegel {}", col[peak]);
         assert!(col[10] < -40.0, "rauschen {}", col[10]);
+    }
+
+    #[test]
+    fn centroid_tracks_sine_frequency() {
+        let w = hann(FFT_SIZE);
+        let axis = LogAxis::new(FFT_SIZE);
+        let pcm: Vec<f32> = (0..FFT_SIZE)
+            .map(|i| (2.0 * std::f32::consts::PI * 880.0 * i as f32 / RATE).sin())
+            .collect();
+        let col = column(&pcm, &w, &axis);
+        let c = centroid_db(&col);
+        assert!((500.0..1500.0).contains(&c), "schwerpunkt {c}");
+        // Boden ueberall: Schwerpunkt der Achse selbst, endlich.
+        let floor = centroid_db(&[DB_FLOOR; BINS]);
+        assert!(floor.is_finite() && floor > 0.0, "boden {floor}");
     }
 
     #[test]

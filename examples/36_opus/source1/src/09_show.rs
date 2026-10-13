@@ -309,15 +309,16 @@ fn draw_hover_state(
     let t_ms = view.pixel_to_ms(mx - lay.plot_x as f32, lay.plot_w);
     let bin = (BINS - 1 - (y - lay.plot_y) as usize).min(BINS - 1);
     let hop = ((t_ms / HOP_MS).floor() as usize).min(cols.len() - 1);
-    let celt = src.available.get(hop).copied().unwrap_or(false);
+    let bs = &src.bitstream;
+    let celt = bs.available.get(hop).copied().unwrap_or(false);
     let (l1, l2, l3) = hover_lines(Hover {
         t_ms,
         bin,
         value: cols[hop][bin],
         source,
         frame: analysis.frame_at(t_ms),
-        transient: celt.then(|| src.transient.get(hop).copied().unwrap_or(false)),
-        frame_bits: celt.then(|| src.frame_bits.get(hop).copied().unwrap_or(0.0)),
+        transient: celt.then(|| bs.transient.get(hop).copied().unwrap_or(false)),
+        frame_bits: celt.then(|| bs.frame_bits.get(hop).copied().unwrap_or(0.0)),
     });
     draw_panel(img, lay, &l1, &l2, &l3);
 }
@@ -397,6 +398,7 @@ mod tests {
             channels: 1,
             bytes: 61,
             kbps: 24.4,
+            config: 9,
             packing: 2,
             pad_bytes: 5,
         };

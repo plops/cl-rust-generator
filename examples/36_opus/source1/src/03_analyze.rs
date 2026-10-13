@@ -1,34 +1,78 @@
-//! Datei-Analyse: Ogg lesen, TOC parsen, Zeitachse + Summary bauen.
+//! Datei-Analyse: Ogg einmal lesen, TOC parsen, Zeitachse + Summary bauen.
 //!
-//! Streaming: Pakete werden einzeln gelesen und sofort in `FrameMeta`
-//! verwandelt; nur die Metadaten liegen am Ende komplett vor.
+//! Ein Ogg-Durchlauf liefert ein [`PacketSet`] (Pakete + Kopf + Tags);
+//! Analyse, Decode und Bitstrom teilen sich diese Paketliste statt je
+//! eines eigenen Readers.
 
 use std::io::Read;
-use std::path::Path;
 
-use opus_pure::OggOpusReader;
+use opus_pure::{OggOpusReader, OggPacket, OpusHead, OpusTags};
 
 use crate::toc;
 use crate::types::{Analysis, Error, FrameMeta, Mode, Summary};
 
+/// Einmalig gelesene Datei: Pakete plus Kopf und Tags.
+#[derive(Debug, Clone)]
+pub struct PacketSet {
+    /// Volle Ogg-Pakete in Zeitreihenfolge (inkl. Granule-Metadaten
+    /// fuer `Trim`; Nutzdaten unter `packet.data`).
+    pub packets: Vec<OggPacket>,
+    /// Kopf der Datei (Kanaele, Pre-Skip, Gain, Mapping ...).
+    pub head: OpusHead,
+    /// Tags der Datei (Vendor + Kommentare).
+    pub tags: OpusTags,
+    /// Datei-Bytes gesamt (Container inkl. Header, fuer Overhead).
+    pub total_bytes: u64,
+}
+
+/// Liest eine komplette `.opus`-Datei genau einmal (Demux + Kopf + Tags).
+pub fn read_packets(data: &[u8], total_bytes: u64) -> Result<PacketSet, Error> {
+    let mut reader = OggOpusReader::new(data)?;
+    let head = reader.head().clone();
+    if head.channel_count > 2 {
+        return Err(Error::UnsupportedChannels(head.channel_count));
+    }
+    let tags = reader.tags().clone();
+    let mut packets = Vec::new();
+    while let Some(packet) = reader.read_packet()? {
+        packets.push(packet);
+    }
+    Ok(PacketSet {
+        packets,
+        head,
+        tags,
+        total_bytes,
+    })
+}
+
 /// Analysiert einen Opus-Stream; `total_bytes` = Dateigroesse (Overhead).
 pub fn analyze_reader<R: Read>(reader: R, total_bytes: u64) -> Result<Analysis, Error> {
-    let mut reader = OggOpusReader::new(reader)?;
-    let channels = reader.head().channel_count;
-    if channels > 2 {
-        return Err(Error::UnsupportedChannels(channels));
-    }
-    let mut frames = Vec::new();
+    let mut buf = Vec::new();
+    let mut reader = reader;
+    reader.read_to_end(&mut buf)?;
+    analyze_packets(&read_packets(&buf, total_bytes)?)
+}
+
+/// Baut die Analyse aus einer einmal gelesenen Paketliste.
+pub fn analyze_packets(ps: &PacketSet) -> Result<Analysis, Error> {
+    let channels = ps.head.channel_count;
+    let mut frames = Vec::with_capacity(ps.packets.len());
+    let mut split_fallbacks = 0usize;
     let mut t_ms = 0.0;
-    while let Some(packet) = reader.read_packet()? {
-        let info = toc::parse(&packet.data)?;
-        let kbps = packet.data.len() as f64 * 8.0 / info.duration_ms;
+    for packet in &ps.packets {
+        let data = &packet.data;
+        let info = toc::parse(data)?;
+        let kbps = data.len() as f64 * 8.0 / info.duration_ms;
         // Pad aus dem Splitter; faellt der Split fehl (striktes RFC),
-        // nimmt Hover Pad 0 (Analyse bleibt robust).
-        let packing = packet.data[0] & 0x03;
-        let pad_bytes = crate::split::split(&packet.data)
-            .map(|s| s.pad_bytes)
-            .unwrap_or(0);
+        // zaehlt der Fallback (Pad 0) statt still zu verschwinden.
+        let packing = data[0] & 0x03;
+        let pad_bytes = match crate::split::split(data) {
+            Ok(s) => s.pad_bytes,
+            Err(_) => {
+                split_fallbacks += 1;
+                0
+            }
+        };
         frames.push(FrameMeta {
             index: frames.len(),
             t_start_ms: t_ms,
@@ -36,24 +80,19 @@ pub fn analyze_reader<R: Read>(reader: R, total_bytes: u64) -> Result<Analysis, 
             mode: info.mode,
             bandwidth: info.bandwidth,
             channels: info.channels,
-            bytes: packet.data.len(),
+            bytes: data.len(),
             kbps,
+            config: info.config,
             packing,
             pad_bytes,
         });
         t_ms += info.duration_ms;
     }
     Ok(Analysis {
-        summary: summarize(&frames, total_bytes, channels),
+        summary: summarize(&frames, ps.total_bytes, channels),
         frames,
+        split_fallbacks,
     })
-}
-
-/// Analysiert eine Datei (Pfad `-` = stdin ist Sache von `cli`).
-pub fn analyze_path(path: &Path) -> Result<Analysis, Error> {
-    let file = std::fs::File::open(path)?;
-    let total = file.metadata()?.len();
-    analyze_reader(file, total)
 }
 
 /// Baut die Summary aus Frame-Metadaten (reine Funktion, gut testbar).
@@ -144,6 +183,7 @@ mod tests {
             channels: 1,
             bytes,
             kbps: bytes as f64 * 8.0 / ms,
+            config: 31,
             packing: 0,
             pad_bytes: 0,
         }
@@ -178,6 +218,7 @@ mod tests {
         let a = Analysis {
             summary: summarize(&frames, 300, 1),
             frames,
+            split_fallbacks: 0,
         };
         assert_eq!(a.frame_at(0.0).unwrap().index, 0);
         assert_eq!(a.frame_at(9.9).unwrap().index, 0);

@@ -11,8 +11,6 @@
 //! (`NaN` wo unverfuegbar — ehrlich statt 0 dB vorgetaeuschter
 //! Uebereinstimmung).
 
-use opus_pure::OggOpusReader;
-
 use crate::alloc::{EBANDS, NB, drain_shares};
 use crate::celt::{CeltState, endband_of, energy_db, lm_of_ms, parse_celt_frame};
 use crate::spectrum::{BINS, DB_FLOOR, FMAX, FMIN, HOP, RATE};
@@ -60,6 +58,17 @@ fn bin_to_band() -> [usize; BINS] {
     map
 }
 
+/// CELT-Banddaten eines Pakets (ueber seine Frames gemittelt).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PacketCelt {
+    /// Band-Energien in dB je Kanal (`NB` Baender, nur `channels` belegt).
+    pub bands_db: [[f32; NB]; 2],
+    /// Signal-Bits je Band (Coarse + Fine + Drain-Anteil).
+    pub bits: [f32; NB],
+    /// Belegte Kanaele (1/2).
+    pub channels: usize,
+}
+
 /// Bitstrom-Spalten einer Datei, hop-aligned zu [`crate::spectrum::stft`].
 pub struct Bitstream {
     /// dB-Spalten (`DB_FLOOR` wo unverfuegbar).
@@ -72,6 +81,8 @@ pub struct Bitstream {
     pub transient: Vec<bool>,
     /// Signal-Bits je Hop (Coarse + Fine; Hover).
     pub frame_bits: Vec<f32>,
+    /// Banddaten je Paket (`None` wo kein CELT; fuer JSON/Report).
+    pub packets: Vec<Option<PacketCelt>>,
 }
 
 /// Wasserfall-Quelle (Ansicht 1–4).
@@ -122,21 +133,16 @@ impl Source {
 }
 
 /// Alle vier Spalten-Saetze, auf gemeinsame Laenge gekuerzt.
+///
+/// `bitstream` wird per Move uebernommen (keine Spalten-Kopie):
+/// STFT-Spalten kommen als owned `Vec`, der Rest wandert aus `bs`.
 pub struct Sources {
     /// STFT-Spalten (dB).
     pub spectrum: Vec<[f32; BINS]>,
-    /// Bitstrom-Spalten (dB).
-    pub bitstream: Vec<[f32; BINS]>,
-    /// Dichte-Spalten (Bits/Bin).
-    pub density: Vec<[f32; BINS]>,
+    /// Bitstrom-Spalten (dB, Dichte, Verfuegbarkeit je Hop).
+    pub bitstream: Bitstream,
     /// Divergenz-Spalten (dB, NaN wo unverfuegbar).
     pub divergence: Vec<[f32; BINS]>,
-    /// Verfuegbarkeit je Hop.
-    pub available: Vec<bool>,
-    /// Transient-Flag je Hop.
-    pub transient: Vec<bool>,
-    /// Signal-Bits je Hop.
-    pub frame_bits: Vec<f32>,
     /// Globales Dichte-Maximum (Normierung).
     pub density_max: f32,
 }
@@ -144,30 +150,28 @@ pub struct Sources {
 impl Sources {
     /// Baut aus STFT + Bitstrom alle Ansichten (kuerzt auf Minimum).
     #[must_use]
-    pub fn build(stft: &[[f32; BINS]], bs: &Bitstream) -> Self {
+    pub fn build(mut stft: Vec<[f32; BINS]>, mut bs: Bitstream) -> Self {
         let n = stft.len().min(bs.spectrum.len());
-        let mut out = Self {
-            spectrum: stft[..n].to_vec(),
-            bitstream: bs.spectrum[..n].to_vec(),
-            density: bs.density[..n].to_vec(),
-            divergence: Vec::with_capacity(n),
-            available: bs.available[..n].to_vec(),
-            transient: bs.transient[..n].to_vec(),
-            frame_bits: bs.frame_bits[..n].to_vec(),
-            density_max: 0.0,
-        };
-        for h in 0..n {
-            out.divergence.push(divergence(
-                &out.spectrum[h],
-                &out.bitstream[h],
-                out.available[h],
-            ));
-            for v in &out.density[h] {
-                out.density_max = out.density_max.max(*v);
+        stft.truncate(n);
+        bs.spectrum.truncate(n);
+        bs.density.truncate(n);
+        bs.available.truncate(n);
+        bs.transient.truncate(n);
+        bs.frame_bits.truncate(n);
+        let mut div_cols = Vec::with_capacity(n);
+        let mut density_max = 0.0f32;
+        for (h, scol) in stft.iter().enumerate().take(n) {
+            div_cols.push(divergence(scol, &bs.spectrum[h], bs.available[h]));
+            for v in &bs.density[h] {
+                density_max = density_max.max(*v);
             }
         }
-        out.density_max = out.density_max.max(1e-6);
-        out
+        Self {
+            spectrum: stft,
+            bitstream: bs,
+            divergence: div_cols,
+            density_max: density_max.max(1e-6),
+        }
     }
 
     /// Spalten einer Quelle (fuer Renderer/Hover).
@@ -175,26 +179,32 @@ impl Sources {
     pub fn cols(&self, src: Source) -> &[[f32; BINS]] {
         match src {
             Source::Spectrum => &self.spectrum,
-            Source::Bitstream => &self.bitstream,
+            Source::Bitstream => &self.bitstream.spectrum,
             Source::Divergence => &self.divergence,
-            Source::Density => &self.density,
+            Source::Density => &self.bitstream.density,
         }
     }
 }
 
 /// Parst alle Pakete und baut die Hop-Spalten (Pre-Skip beachtet).
 pub fn analyze_bytes(data: &[u8]) -> Result<Bitstream, Error> {
-    let mut reader = OggOpusReader::new(data)?;
-    let pre_skip = reader.head().pre_skip as usize;
-    let mut packets = Vec::new();
-    while let Some(p) = reader.read_packet()? {
-        packets.push(p.data);
+    let ps = crate::analyze::read_packets(data, data.len() as u64)?;
+    analyze_packets(&ps)
+}
+
+/// Parst eine einmal gelesene Paketliste (TOC je Paket genau einmal).
+pub fn analyze_packets(ps: &crate::analyze::PacketSet) -> Result<Bitstream, Error> {
+    let pre_skip = ps.head.pre_skip as usize;
+    let packets = &ps.packets;
+    // TOC einmal je Paket parsen (fuer Grenzen und Frame-Walk).
+    let mut tocs = Vec::with_capacity(packets.len());
+    for p in packets {
+        tocs.push(crate::toc::parse(&p.data)?);
     }
     // Paketgrenzen in Stream-Samples (48 kHz).
     let mut bounds = Vec::with_capacity(packets.len() + 1);
     bounds.push(0usize);
-    for p in &packets {
-        let toc = crate::toc::parse(p)?;
+    for toc in &tocs {
         let last = *bounds.last().unwrap();
         bounds.push(last + (toc.duration_ms * 48.0) as usize);
     }
@@ -206,17 +216,18 @@ pub fn analyze_bytes(data: &[u8]) -> Result<Bitstream, Error> {
     // Transient-Oder + Signal-Bits (Hover).
     type PacketBands = ([[f32; NB]; 2], [f32; NB], bool, f32);
     let mut per_packet: Vec<Option<PacketBands>> = Vec::new();
-    for p in &packets {
-        let toc = crate::toc::parse(p)?;
+    let mut celt_packets: Vec<Option<PacketCelt>> = Vec::new();
+    for (p, toc) in packets.iter().zip(tocs.iter()) {
         if Some(toc.mode) != last_mode {
             state.reset();
             last_mode = Some(toc.mode);
         }
         if toc.mode != Mode::Celt {
             per_packet.push(None);
+            celt_packets.push(None);
             continue;
         }
-        let split = crate::split::split(p)?;
+        let split = crate::split::split(&p.data)?;
         let (lm, end, ch) = (
             lm_of_ms(toc.frame_ms),
             endband_of(toc.bandwidth),
@@ -258,6 +269,11 @@ pub fn analyze_bytes(data: &[u8]) -> Result<Bitstream, Error> {
             }
         }
         per_packet.push(Some((db, bits, transient, bits.iter().sum())));
+        celt_packets.push(Some(PacketCelt {
+            bands_db: db,
+            bits,
+            channels: ch,
+        }));
     }
     // Hops: Hop h traegt das Paket seiner Hop-Mitte.
     let map = bin_to_band();
@@ -271,6 +287,7 @@ pub fn analyze_bytes(data: &[u8]) -> Result<Bitstream, Error> {
         available: Vec::new(),
         transient: Vec::new(),
         frame_bits: Vec::new(),
+        packets: celt_packets,
     };
     let mut h = 0usize;
     loop {
