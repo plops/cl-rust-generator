@@ -52,3 +52,14 @@ minifb = { version = "0.29", default-features = false,
 - `TadeuszWolfGang/Rusopus` (`opus-decoder` 0.1.1, nur Decoder).
 - `RustAudio/ogg` (0.9.2, nur Container — `opus-pure` kann beides).
 - `SpaceManiac/opus-rs` (`opus` 0.4.0, braucht System-`libopus`).
+
+## SILK-Fixtures (`06_silk`, keine Dep-Aenderung)
+
+- `tests/data/silk_sample.opus` (30 KB, committet): 10 s Sprache aus
+  `silk.webm`-Minute 1, 501 Pakete alle Config 9 (SILK WB 20 ms,
+  mono, -25,6 dB mittlerer Pegel, keine Stille).
+- Voll-Datei `silk_silk.opus` (3,3 MB, ungecommittet, neben der Quelle):
+  61641 Pakete, alle Config 9, kodiert mit
+  `ffmpeg -i silk.webm -map 0:a -ac 1 -ar 16000 -c:a libopus
+  -application voip -b:a 24k -frame_duration 20 silk_silk.opus`
+  (16 kHz erzwingt SILK-only; Gegenprobe `silk.opus` = 100 % Hybrid).
