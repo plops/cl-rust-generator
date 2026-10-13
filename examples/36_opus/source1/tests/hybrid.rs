@@ -35,14 +35,16 @@ fn band_power(pcm: &[f32], k0: usize, k1: usize) -> f64 {
     sum / cnt.max(1) as f64
 }
 
-/// Hochband-Orakel: decodiertes PCM gegen gewalkte Baender 17..`end`.
+/// Cutoff-Orakel: Baender ab `coded_from` baut der Decoder nicht aus
+/// (kein PVQ) — decodiertes PCM ist dort still, der Walk zeigt Boden.
+/// Baender darunter sind Tracker-Schaetzung (PVQ-Skip, dokumentiert).
 #[test]
-fn hybrid_highband_matches_reference_decode() {
+fn hybrid_cutoff_bands_are_silent_in_reference_decode() {
     let data = fixture();
     let ps = read_packets(&data, data.len() as u64).unwrap();
     let bs = analyze_bytes(&data).unwrap();
     let mut dec = OpusDecoder::new(48_000, 1).unwrap();
-    let mut deltas = Vec::new();
+    let mut worst = f64::NEG_INFINITY;
     let mut n = 0;
     for (i, p) in ps.packets.iter().enumerate() {
         if n >= 30 {
@@ -56,36 +58,39 @@ fn hybrid_highband_matches_reference_decode() {
         let got = dec.decode(&p.data, 960, &mut pcm).unwrap();
         assert_eq!(got, 960);
         let end = endband_of(toc.bandwidth).min(21);
-        let lo = EBANDS[17] as usize * 200;
-        let hi = EBANDS[end] as usize * 200;
-        let p_pcm = band_power(&pcm, lo / 50, hi / 50);
         let pkt = bs.packets[i].as_ref().expect("Hybrid traegt CELT");
         let silk = bs.silk_packets[i].as_ref().expect("Hybrid traegt SILK");
         assert_eq!(silk.n_frames, 1);
-        let mut p_walk = 0.0f64;
-        let mut nbins_tot = 0u32;
-        for b in 17..end {
+        assert!(
+            (17..=end).contains(&pkt.coded_from),
+            "Cutoff {} ausserhalb [17, {}]",
+            pkt.coded_from,
+            end
+        );
+        // Intern konsistent: jenseits des Cutoffs nur Drain-Restbits.
+        for b in pkt.coded_from..end {
+            assert!(
+                pkt.bits[b] < 3.0,
+                "Paket {i} Band {b}: {:.1} Bits jenseits Cutoff",
+                pkt.bits[b]
+            );
+        }
+        // Extern still: Decoder-PCM jenseits des Cutoffs am Boden.
+        for b in pkt.coded_from..end {
             let blo = EBANDS[b] as usize * 200;
             let bhi = EBANDS[b + 1] as usize * 200;
-            let nbins = (bhi - blo) / 50;
-            nbins_tot += nbins as u32;
-            p_walk += 10.0f64.powf(pkt.bands_db[0][b] as f64 / 10.0) * nbins as f64;
+            let pwr = band_power(&pcm, blo / 50 + 1, bhi / 50);
+            let db = 10.0 * pwr.max(1e-12).log10();
+            worst = worst.max(db);
+            assert!(
+                db < -70.0,
+                "Paket {i} Band {b}: PCM {db:.1} dB jenseits Cutoff"
+            );
         }
-        p_walk /= nbins_tot.max(1) as f64;
-        let d = 10.0 * (p_walk / p_pcm.max(1e-12)).log10();
-        eprintln!("pkt {i}: walk={:.1}dB pcm={:.1}dB delta={:+.1}dB", 10.0 * p_walk.log10(), 10.0 * p_pcm.log10(), d);
-        deltas.push(d);
         n += 1;
     }
     assert_eq!(n, 30);
-    deltas.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let med = deltas[deltas.len() / 2];
-    eprintln!("median={med:.2} min={:.2} max={:.2}", deltas[0], deltas[deltas.len() - 1]);
-    assert!(med.abs() < 3.0, "Hochband systematisch daneben: {med:.2} dB");
-    assert!(
-        deltas.iter().all(|d| d.abs() < 8.0),
-        "Ausreisser im Hochband-Orakel"
-    );
+    eprintln!("cutoff-silence worst={worst:.1} dB (30 Pakete)");
 }
 
 /// Aufteilung stabil: jeder Hybrid-Anteil in (0, 1), SILK ueberall da.
@@ -125,7 +130,10 @@ fn hybrid_views_are_available() {
     let data = fixture();
     let bs = analyze_bytes(&data).unwrap();
     let avail = bs.available.iter().filter(|v| **v).count();
-    assert!(avail > bs.available.len() * 9 / 10, "nur {avail} Hops verfuegbar");
+    assert!(
+        avail > bs.available.len() * 9 / 10,
+        "nur {avail} Hops verfuegbar"
+    );
     assert!(bs.silk_available.iter().any(|v| *v), "F0-Lane leer");
     assert!(bs.hybrid.iter().any(|v| v.is_some()), "kein Hop-Anteil");
 }

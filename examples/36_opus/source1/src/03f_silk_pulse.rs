@@ -88,7 +88,7 @@ pub(crate) fn walk_pulses(
 ) -> i32 {
     let t0 = rc.tell();
     let rate = rc.decode_icdf(&SILK_RATE_LEVELS_ICDF[(signal >> 1) as usize], 8) as usize;
-    let mut iter = frame_length.div_ceil(SHELL_CODEC_FRAME_LENGTH);
+    let iter = frame_length.div_ceil(SHELL_CODEC_FRAME_LENGTH);
     let mut sums = [0i32; 20];
     let mut shifts = [0i32; 20];
     for i in 0..iter {
@@ -108,19 +108,19 @@ pub(crate) fn walk_pulses(
     // (Verzahnt pro Block liest andere Bits — S3-Orakel hat die
     // Verschiebung im Hybrid-CELT entlarvt.)
     let mut pulses = [0i16; 320];
-    iter = iter.min(20);
-    for i in 0..iter {
+    let iter = iter.min(20);
+    for (i, sum) in sums.iter().enumerate().take(iter) {
         let start = i * SHELL_CODEC_FRAME_LENGTH;
-        if sums[i] > 0 {
+        if *sum > 0 {
             shell_block(
                 rc,
                 &mut pulses[start..start + SHELL_CODEC_FRAME_LENGTH],
-                sums[i],
+                *sum,
             );
         }
     }
-    for i in 0..iter {
-        if shifts[i] > 0 {
+    for (i, (sum, shift)) in sums.iter_mut().zip(shifts.iter()).enumerate().take(iter) {
+        if *shift > 0 {
             let start = i * SHELL_CODEC_FRAME_LENGTH;
             for p in pulses
                 .iter_mut()
@@ -128,22 +128,22 @@ pub(crate) fn walk_pulses(
                 .skip(start)
             {
                 let mut q = *p as i32;
-                for _ in 0..shifts[i] {
+                for _ in 0..*shift {
                     q = (q << 1) + rc.decode_icdf(&SILK_LSB_ICDF, 8);
                 }
                 *p = q as i16;
             }
-            sums[i] |= shifts[i] << 5;
+            *sum |= *shift << 5;
         }
     }
-    for i in 0..iter {
+    for (i, sum) in sums.iter().enumerate().take(iter) {
         let start = i * SHELL_CODEC_FRAME_LENGTH;
         signs_block(
             rc,
             &mut pulses[start..start + SHELL_CODEC_FRAME_LENGTH],
             signal,
             quant,
-            sums[i],
+            *sum,
         );
     }
     rc.tell() - t0

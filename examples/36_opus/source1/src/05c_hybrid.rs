@@ -65,8 +65,7 @@ pub fn walk_hybrid_packet(
     let mut coded_from = end;
     let mut ok = channels == 1;
     let nb_subfr = if frame_ms < 15.0 { 2 } else { 4 };
-    let mut g = 0usize;
-    for f in &split.frames {
+    for (g, f) in split.frames.iter().enumerate() {
         if !ok {
             break;
         }
@@ -89,7 +88,6 @@ pub fn walk_hybrid_packet(
             },
         };
         silk_frames.push(walk_silk_frame(&mut rc, &ctx, silk_state));
-        g += 1;
         silk_bits_sum += rc.tell();
         total_bits_sum += f.len() as i32 * 8;
         // Hybrid-Redundanz: Bit(12), Bit(1), uint(256)+2 Rest-Bytes.

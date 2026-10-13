@@ -265,7 +265,10 @@ fn bilanz_schwaenze_und_rest_in_band() {
             None => plain.push(r.total - r.end_tell),
         }
     }
-    assert!((30..=90).contains(&reds), "Schwanz-Anteil driftet: {reds}");
+    // Reines SILK ohne Moduswechsel: keine Redundanz erwartet (S3-Fund:
+    // die alten 30–90 waren Fehlalarme auf verschobener Puls-Position;
+    // korrekt ausgerichtet sagt das Bit ueberall 0).
+    assert!((0..=5).contains(&reds), "Schwanz-Anteil driftet: {reds}");
     plain.sort();
     let med = plain[plain.len() / 2];
     eprintln!(

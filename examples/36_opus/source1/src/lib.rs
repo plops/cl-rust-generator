@@ -11,8 +11,6 @@ pub mod alloc;
 pub mod analyze;
 #[path = "05b_bitstream.rs"]
 pub mod bitstream;
-#[path = "05c_hybrid.rs"]
-pub mod hybrid;
 #[path = "06a_canvas.rs"]
 pub mod canvas;
 #[path = "03c_celt.rs"]
@@ -23,6 +21,8 @@ pub mod cli;
 pub mod decode;
 #[path = "03e_fakten.rs"]
 pub mod fakten;
+#[path = "05c_hybrid.rs"]
+pub mod hybrid;
 #[path = "08c_json.rs"]
 pub mod json;
 #[path = "07_png.rs"]

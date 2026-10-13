@@ -150,7 +150,9 @@ fn pitch_lane_zeigt_stimmhaft_amber() {
     let lay = render::layout(64);
     let amber = img
         .rgb
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .skip((lay.pitch_y * img.width + lay.plot_x) as usize)
         .take((lay.pitch_h * img.width) as usize)
         .filter(|px| px[0] == 255 && px[1] == 190 && px[2] == 90)

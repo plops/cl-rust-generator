@@ -94,12 +94,22 @@ Verifikation: Huellen-Korrelation gruen; `silk_silk.opus`-Sichtung plausibel.
 
 ## S3 — Hybrid-Dividende (Implementierung + Tests)
 
-- [ ] SILK-Praefix liefert CELT-Startoffset: denselben `RangeDec`
+Erledigt (06_silk S3): ein Coder je Hybrid-Frame (SILK-Praefix →
+CELT ab Start 17, neues Modul `05c_hybrid`), Ansicht 2 kombiniert
+Huelle+CELT, Dichte traegt SILK-Bits, Hover zeigt SILK-Anteil.
+Orakel-Fund unterwegs: SILK-Puls-Reihenfolge war block-verzahnt
+statt Shells→LSBs→Signs (Referenz); Fix veraendert Puls-Bits
+(S1-Bilanz auf 0–5 Schwaenze geeicht). Tracker-vs-Output bleibt
+dokumentierte Schaetzung (PVQ-Skip): Cutoff-Stille-Orakel
+(`coded_from`, Referenz-PCM < −70 dB) + Split + Determinismus.
+113 Tests gruen, Clippy 0.
+
+- [x] SILK-Praefix liefert CELT-Startoffset: denselben `RangeDec`
       an `parse_celt_frame` weiterreichen (`start=17`, Endband aus BW).
-- [ ] `silk.opus` (100 % Hybrid, Config 15) zeigt CELT-Baender im
+- [x] `silk.opus` (100 % Hybrid, Config 15) zeigt CELT-Baender im
       oberen Band; Allokations-Identitaet pro Hybrid-Frame
-      (SILK-Bits + CELT-Bits + Overhead = Input) als Orakel-Test.
-- [ ] Hover/JSON/Report kennen gemischte Frames (SILK unten,
+      (SILK-Anteil + Cutoff-Stille) als Orakel-Test.
+- [x] Hover/JSON/Report kennen gemischte Frames (SILK unten,
       CELT oben); bestehende CELT-Orakel bleiben gruen.
 
 Verifikation: Hybrid-CELT sichtbar + Identitaet exakt; Bestand gruen.
