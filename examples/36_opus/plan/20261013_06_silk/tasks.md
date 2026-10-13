@@ -116,6 +116,16 @@ Verifikation: Hybrid-CELT sichtbar + Identitaet exakt; Bestand gruen.
 
 ## S4 — Feinschliff
 
+Erledigt: README (Hybrid-Absatz, SILK-Plan-Link, Module `03f`/`05c`),
+`deps.md` (Hybrid-Fixture, weiter 2 Crates mit `cargo-tree`-Beleg),
+Smoke um SILK/Hybrid-Asserts erweitert (alle Ansichten +
+501/501 Frames mit SILK+CELT bzw. SILK; Demo- und Stdin-Pfad
+unveraendert gruen; xvfb-Luecke vorbestehend).
+
+- [x] README, `deps.md`, Smoke-SILK-Assert
+
+Verifikation: Smoke-Teile gruen (ohne xvfb, vorbestehend).
+
 - [ ] README (SILK-Ansichten, Fixture + Kodier-Rezept), `deps.md`
       bestaetigen (keine neue Dep, `cargo tree`-Beleg), Smoke um
       SILK-Assert erweitern (Fixture-Modusanteile, Report-Abschnitt).

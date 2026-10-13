@@ -63,3 +63,10 @@ minifb = { version = "0.29", default-features = false,
   `ffmpeg -i silk.webm -map 0:a -ac 1 -ar 16000 -c:a libopus
   -application voip -b:a 24k -frame_duration 20 silk_silk.opus`
   (16 kHz erzwingt SILK-only; Gegenprobe `silk.opus` = 100 % Hybrid).
+- `tests/data/hybrid_sample.opus` (30 KB, committet): 10 s Sprache aus
+  `silk.opus`-Minute 1, 501 Pakete alle Config 15 (Hybrid FB 20 ms,
+  mono) — Orakel-Fixture fuer S3 (Split, Cutoff-Stille, Determinismus).
+
+Stand 2026-10-13 (`06_silk` S3: Hybrid-Modul `05c`, Puls-Fix): weiter
+genau diese zwei Crates; `cargo tree` (Default-Features) zeigt nur
+`opus-pure 0.2.2` (`minifb` optional, deaktiviert).

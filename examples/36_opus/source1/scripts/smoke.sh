@@ -44,6 +44,35 @@ assert d['frames'][-1]['celt'] is not None
 print('json ok:', d['summary']['frames'], 'frames')
 "
 
+echo "== silk/hybrid-fixtures (alle ansichten) =="
+./$BIN tests/data/silk_sample.opus -o /tmp/smoke_silk.png --width 400 --quiet
+./$BIN tests/data/hybrid_sample.opus -o /tmp/smoke_hyb2.png \
+  --view bitstrom --width 400 --quiet
+./$BIN tests/data/hybrid_sample.opus -o /tmp/smoke_hyb3.png \
+  --view divergenz --width 400 --quiet
+./$BIN tests/data/hybrid_sample.opus -o /tmp/smoke_hyb4.png \
+  --view dichte --width 400 --quiet
+./$BIN tests/data/hybrid_sample.opus --json /tmp/smoke_hyb.json \
+  -o /tmp/smoke_hyb.png --width 400 --quiet
+python3 -c "
+import json
+d = json.load(open('/tmp/smoke_hyb.json'))
+assert d['summary']['hybrid_frac'] == 1.0, d['summary']
+assert all(f['mode'] == 'hybrid' for f in d['frames'])
+assert all(f['silk'] is not None for f in d['frames']), 'F0-Lane leer'
+assert all(f['celt'] is not None for f in d['frames']), 'Ansicht 2-4 leer'
+print('hybrid ok:', d['summary']['frames'], 'frames mit SILK+CELT')
+"
+./$BIN tests/data/silk_sample.opus --json /tmp/smoke_silk.json \
+  -o /tmp/smoke_silk2.png --width 400 --quiet
+python3 -c "
+import json
+d = json.load(open('/tmp/smoke_silk.json'))
+assert d['summary']['silk_frac'] == 1.0, d['summary']
+assert all(f['mode'] == 'silk' and f['silk'] is not None for f in d['frames'])
+print('silk ok:', d['summary']['frames'], 'frames mit SILK')
+"
+
 echo "== stdin/stdout-pfad =="
 ./$BIN - -o - --width 320 < /tmp/smoke_demo.opus > /tmp/smoke_stdout.png
 ffprobe -v error -show_entries stream=codec_name -of csv=p=0 \

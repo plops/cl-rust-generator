@@ -21,8 +21,10 @@ Bit-Allokation aus den Paket-Bytes — vier Ansichten:
 - **Divergenz** (3): STFT − Bitstrom in dB (divergierend, ±12 dB).
 - **Dichte** (4): Bits je Bin (Informationsdichte, linear normiert).
 
-SILK/Hybrid-Frames sind nicht exakt parbar (gemeinsamer Range-Coder)
-und erscheinen als Boden/Grau (`KEIN CELT` im Hover).
+SILK-Frames walkt ein eigener Header-Walk (Signaltyp, Gains, Pitch,
+LPC-Huelle aus NLSF); Hybrid-Frames teilen sich einen Coder (SILK
+unten, CELT ab Band 17 oben). Ansicht 2 zeigt Huelle bzw. die
+Kombination, der Hover die Stimm-Klasse plus SILK-Bit-Anteil.
 
 ```sh
 # Report auf stdout + PNG erzeugen:
@@ -47,5 +49,7 @@ und Frame-Details plus CELT-Zeile (Transient/Signal-Bits).
 Details: `../plan/20261011_01_init/plan.md`,
 Bitstrom-Plan: `../plan/20261011_03_bitstream/plan.md`,
 Verstehens-Plan: `../plan/20261013_05_verstehen/plan.md`,
+SILK-Plan: `../plan/20261013_06_silk/plan.md`,
 Abhaengigkeiten: `deps.md`. Modul-Uebersicht: `src/lib.rs`
-(Datenfluss 01→09, Fakten in `03e`, Report in `08b`).
+(Datenfluss 01→09, SILK in `03f`, Hybrid in `05c`,
+Fakten in `03e`, Report in `08b`).
