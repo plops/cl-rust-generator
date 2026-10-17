@@ -30,3 +30,6 @@ pub mod textids;
 
 #[path = "10_session.rs"]
 pub mod session;
+
+#[path = "11_pace.rs"]
+pub mod pace;
