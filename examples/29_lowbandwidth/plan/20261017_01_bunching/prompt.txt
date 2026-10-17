@@ -1,0 +1,18 @@
+schau dir plan/20261010_01_instrumentation/walkthrough.md an. dies
+beschreibt den aktuellen zustand des lowbandwidth remote desktop
+systems.
+
+in 
+/workspace/src/cl-rust-generator/examples/29_lowbandwidth/source10_instrumentation/20261017_0614.lbwlog
+habe ich ein server log mitgeschrieben waehrend eine animation im browser auftrat.
+
+mir gefaellt nicht, dass die animation den kanal blockiert. es kommen
+zwar frames an, es scheinen aber mehrere in einem netzwerkpacket zu
+stecken. diese kommen in bunches an und es kommt zu stockenden
+animation: gelegentlich schnell und dann eine lange
+pause. gleichzeitig wird die bandbreite des kanals so stark
+ueberlastet, dass meine maus oder keyboard eingaben nicht registriert
+werden. dabei sollten die die hoechste prioritaet haben.
+
+arbeite wie auch in den anderen prompts auch (rust entwicklungs
+framework, mein nutzername wolpumba, plan und walkthrough...)
