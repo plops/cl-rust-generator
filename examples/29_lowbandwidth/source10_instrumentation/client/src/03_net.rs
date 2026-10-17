@@ -2,7 +2,7 @@
 //!
 //! Ein Netz-Thread verbindet (Backoff 0,5 → 5 s), sendet `Hello`, liest
 //! Frames, dekodiert AV1-Kacheln und reicht fertige Ereignisse an die UI.
-//! Ausgehende Eingaben fließen über einen Kanal (max. ~50 ms Verzögerung).
+//! Ausgehende Eingaben fließen über einen Kanal (max. ~10 ms Verzögerung).
 //! `drop(Net)` beendet Thread und Verbindung. Kein Heartbeat nötig:
 //! Neuaufbau nur bei TCP-Fehler (Stille ist bei statischem Bild normal).
 //!
@@ -130,7 +130,12 @@ fn session(
     rec: &Recorder,
     addr: &str,
 ) -> String {
-    if s.set_read_timeout(Some(Duration::from_millis(50))).is_err() {
+    // Nagle aus: 10-Byte-Eingaben warten nicht auf Paketfüllung.
+    // (Fehler nur melden — die Verbindung ist wichtiger als das Flag.)
+    if let Err(e) = s.set_nodelay(true) {
+        eprintln!("[net] nodelay: {e}");
+    }
+    if s.set_read_timeout(Some(Duration::from_millis(10))).is_err() {
         return "timeout-Flag".into();
     }
     let mut rd = match s.try_clone() {
