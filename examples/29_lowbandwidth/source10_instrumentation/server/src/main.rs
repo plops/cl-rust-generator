@@ -63,6 +63,11 @@ fn run(cfg: Config) -> Result<(), String> {
     for stream in listener.incoming() {
         match stream {
             Ok(s) => {
+                // Nagle aus: Kleine Eingabe-Antworten und Text-Deltas
+                // warten nicht auf Paketfüllung (Bunching-Latenz).
+                if let Err(e) = s.set_nodelay(true) {
+                    eprintln!("[server] nodelay: {e}");
+                }
                 let peer = s
                     .peer_addr()
                     .map(|a| a.to_string())

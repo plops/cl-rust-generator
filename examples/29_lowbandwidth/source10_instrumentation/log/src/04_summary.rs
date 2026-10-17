@@ -32,6 +32,7 @@ pub struct FrameStats {
     pub mask_diff: Lat,
     pub encode: Lat,
     pub send: Lat,
+    pub pace: Lat,
     pub total: Lat,
     pub tiles: usize,
     pub tile_bytes: u64,
@@ -145,8 +146,16 @@ fn dedup(records: &[(&LogRecord, u16)], kind: MsgKind) -> Vec<DedupEntry> {
 
 fn frame_stats(records: &[&LogRecord]) -> FrameStats {
     let mut st = FrameStats::default();
-    let (mut cap, mut det, mut rec, mut md, mut enc, mut snd, mut tot) =
-        (vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
+    let (mut cap, mut det, mut rec, mut md, mut enc, mut snd, mut pac, mut tot) = (
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+    );
     for r in records {
         if let LogRecord::Frame {
             tile,
@@ -162,6 +171,7 @@ fn frame_stats(records: &[&LogRecord]) -> FrameStats {
             md.push(f64::from(ms.mask_diff));
             enc.push(f64::from(ms.encode));
             snd.push(f64::from(ms.send));
+            pac.push(f64::from(ms.pace));
             tot.push(f64::from(ms.total()));
             if *text_changed {
                 st.text_changes += 1;
@@ -178,6 +188,7 @@ fn frame_stats(records: &[&LogRecord]) -> FrameStats {
     st.mask_diff = Lat::of(md);
     st.encode = Lat::of(enc);
     st.send = Lat::of(snd);
+    st.pace = Lat::of(pac);
     st.total = Lat::of(tot);
     st
 }
@@ -482,6 +493,7 @@ mod tests {
                 mask_diff: 8.0,
                 encode: 16.0,
                 send: 32.0,
+                pace: 4.0,
             },
         };
         let files = vec![file(
@@ -495,7 +507,8 @@ mod tests {
         )];
         let s = summarize(&files);
         assert_eq!(s.frames.n, 3);
-        assert_eq!(s.frames.total.p50, 63.0);
+        assert_eq!(s.frames.pace.p50, 4.0);
+        assert_eq!(s.frames.total.p50, 67.0);
         assert_eq!((s.frames.tiles, s.frames.tile_bytes), (2, 200));
         assert_eq!(s.motion.pairs, 1);
         assert_eq!(s.motion.same_rect, 0);

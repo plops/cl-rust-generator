@@ -23,6 +23,7 @@ use crate::capture::FrameSource;
 use crate::config::Config;
 use crate::input::Inject;
 use crate::ocr::Ocr;
+use crate::pace::{Pacer, wait_paced};
 use crate::textids::{assign_ids, diff_texts};
 use crate::tiles::{MASK_PAD, crop_rgb, dirty_bbox, fill_rect, pad_rect};
 
@@ -63,15 +64,30 @@ fn ms(t: Instant) -> f32 {
 }
 
 /// Sendet eine Text-Nachricht mit Recording; `false` bei Abriss.
-fn send_text(wr: &mut TcpStream, rec: &Recorder, m: &ServerMsg, text_bytes: &mut usize) -> bool {
+/// Texte haben Vorfahrt: Sie gehen sofort raus und buchen nur
+/// (`Pacer::note`) — die nächste Kachel trägt ihre Schuld ab.
+fn send_text(
+    wr: &mut TcpStream,
+    rec: &Recorder,
+    pacer: &mut Pacer,
+    m: &ServerMsg,
+    text_bytes: &mut usize,
+) -> bool {
     match write_msg(wr, m) {
         Ok(n) => {
             *text_bytes += n;
+            pacer.note(n);
             rec.msg_server(m, n);
             true
         }
         Err(_) => false,
     }
+}
+
+/// Leitungsbytes einer Tile-Nachricht (Schätzung ohne Nach-Kodieren:
+/// 4 B Frame-Header + ~12 B bincode-Overhead für Variante/x/y/Länge).
+fn tile_wire_len(data_len: usize) -> usize {
+    data_len + 16
 }
 
 /// Bedient genau einen Client bis zum Abriss. `max_frames` begrenzt die
@@ -107,7 +123,9 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
     if version != PROTO_VERSION {
         return Err(format!("Protokoll {version}, erwartet {PROTO_VERSION}"));
     }
+    let mut pacer = Pacer::new(cfg.budget);
     let n = write_msg(&mut wr, &ServerMsg::Hello).map_err(|e| e.to_string())?;
+    pacer.note(n);
     rec.msg_server(&ServerMsg::Hello, n);
 
     // Eingaben laufen in eigenem Thread, damit Tippen nie auf AV1 wartet.
@@ -176,6 +194,7 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
         let mut bytes = 0;
         let mut text_bytes = 0;
         let mut send_ms = 0.0;
+        let mut pace_ms = 0.0;
         let cur = assign_ids(&last_texts, texts, &mut next_text_id);
         let (removed, changed) = diff_texts(&last_texts, &cur);
         let sync_all = frames == 1 && !cur.is_empty();
@@ -184,7 +203,13 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
             let t = Instant::now();
             let mut ok = true;
             if sync_all {
-                ok = send_text(&mut wr, rec, &ServerMsg::ClearText, &mut text_bytes);
+                ok = send_text(
+                    &mut wr,
+                    rec,
+                    &mut pacer,
+                    &ServerMsg::ClearText,
+                    &mut text_bytes,
+                );
             }
             if ok {
                 if sync_all {
@@ -192,6 +217,7 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
                         ok = send_text(
                             &mut wr,
                             rec,
+                            &mut pacer,
                             &ServerMsg::AddText(tm.clone()),
                             &mut text_bytes,
                         );
@@ -201,7 +227,13 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
                     }
                 } else {
                     for id in &removed {
-                        ok = send_text(&mut wr, rec, &ServerMsg::RemoveText(*id), &mut text_bytes);
+                        ok = send_text(
+                            &mut wr,
+                            rec,
+                            &mut pacer,
+                            &ServerMsg::RemoveText(*id),
+                            &mut text_bytes,
+                        );
                         if !ok {
                             break;
                         }
@@ -211,6 +243,7 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
                             ok = send_text(
                                 &mut wr,
                                 rec,
+                                &mut pacer,
                                 &ServerMsg::AddText(tm.clone()),
                                 &mut text_bytes,
                             );
@@ -247,6 +280,17 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
                 Err(e) => break Err(e),
             };
             enc_ms = ms(t);
+            // Pacing: Kachel auf Budget-Rate dosieren, damit der Kanal
+            // einen gleichmäßigen Rinnsal statt Burst-Pause sieht. In
+            // Scheiben, damit ein Disconnect die Session nicht keilt.
+            // Eigene Stufe `pace`: `send` bleibt reiner Kernel-memcpy.
+            let t = Instant::now();
+            if !wait_paced(&mut pacer, tile_wire_len(data.len()), &|| {
+                input.is_finished()
+            }) {
+                break Ok(());
+            }
+            pace_ms += ms(t);
             let msg = ServerMsg::Tile {
                 x: r.x,
                 y: r.y,
@@ -286,6 +330,7 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
                 mask_diff: mask_diff_ms,
                 encode: enc_ms,
                 send: send_ms,
+                pace: pace_ms,
             },
         );
         if cfg.verbose {

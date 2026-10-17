@@ -156,6 +156,7 @@ fn render(s: &Summary) -> String {
         ("mask+diff", &fr.mask_diff),
         ("encode", &fr.encode),
         ("send", &fr.send),
+        ("pace", &fr.pace),
         ("gesamt", &fr.total),
     ] {
         o.push_str(&format!("  {name}: {}\n", lat(l)));

@@ -141,7 +141,7 @@ pub fn to_json(s: &Summary) -> String {
     }
     let f = &s.frames;
     o.push_str(&format!(
-        "],\"frames\":{{\"n\":{},\"capture\":{},\"det\":{},\"rec\":{},\"mask_diff\":{},\"encode\":{},\"send\":{},\"total\":{},\"tiles\":{},\"tile_bytes\":{},\"text_changes\":{}}}",
+        "],\"frames\":{{\"n\":{},\"capture\":{},\"det\":{},\"rec\":{},\"mask_diff\":{},\"encode\":{},\"send\":{},\"pace\":{},\"total\":{},\"tiles\":{},\"tile_bytes\":{},\"text_changes\":{}}}",
         f.n,
         lat_json(&f.capture),
         lat_json(&f.det),
@@ -149,6 +149,7 @@ pub fn to_json(s: &Summary) -> String {
         lat_json(&f.mask_diff),
         lat_json(&f.encode),
         lat_json(&f.send),
+        lat_json(&f.pace),
         lat_json(&f.total),
         f.tiles,
         f.tile_bytes,

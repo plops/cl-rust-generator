@@ -69,6 +69,7 @@ fn write_golden(path: &str) {
             mask_diff: 8.0,
             encode: 16.0,
             send: 32.0,
+            pace: 4.0,
         },
     })
     .unwrap();
@@ -97,7 +98,11 @@ fn summary_reports_expected_lines_and_json() {
         "{s}"
     );
     assert!(
-        s.contains("gesamt: n=1 avg=63.0 p50=63.0 p90=63.0 p99=63.0 max=63.0 ms"),
+        s.contains("pace: n=1 avg=4.0 p50=4.0 p90=4.0 p99=4.0 max=4.0 ms"),
+        "{s}"
+    );
+    assert!(
+        s.contains("gesamt: n=1 avg=67.0 p50=67.0 p90=67.0 p99=67.0 max=67.0 ms"),
         "{s}"
     );
     assert!(s.contains("keine Wiederholungen"), "{s}");
@@ -107,6 +112,7 @@ fn summary_reports_expected_lines_and_json() {
     let j = String::from_utf8(out.stdout).unwrap();
     assert!(j.contains("\"msgs\":1"), "{j}");
     assert!(j.contains("\"tiles\":1"), "{j}");
+    assert!(j.contains("\"pace\":"), "{j}");
     assert!(j.contains("\"clock_offsets\":[]"), "{j}");
     assert!(j.contains("\"p99\":"), "{j}");
 

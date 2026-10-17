@@ -12,9 +12,10 @@ use serde::{Deserialize, Serialize};
 /// Datei-Magic (8 Byte am Dateianfang).
 pub const LOG_MAGIC: [u8; 8] = *b"LBWLOG10";
 /// Record-Format-Version (steht im `Session`-Record).
-/// 1 = v2-Protokoll-Bodies, ≥ 2 = v3-Bodies (`TextItem.id`, `RemoveText`).
-/// Das Record-Format selbst ist unverändert — nur eingebettete Bodies.
-pub const LOG_VERSION: u16 = 2;
+/// 1 = v2-Protokoll-Bodies, 2 = v3-Bodies (`TextItem.id`, `RemoveText`),
+/// ≥ 3 = zusätzlich `FrameMs.pace` (Leaky-Bucket-Wartezeit).
+/// Alte Logs bleiben nicht lesbar (keine Backward-Kompatibilität).
+pub const LOG_VERSION: u16 = 3;
 
 /// Leitungsrichtung einer Nachricht.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -98,13 +99,15 @@ pub struct FrameMs {
     /// Alle `write_msg` des Frames zusammen (nur lokaler Kernel-memcpy —
     /// keine Leitungszeit; echte Zustellung misst `deep::delivery_delays`).
     pub send: f32,
+    /// Leaky-Bucket-Wartezeit vor Tile-Send (0 bei Text-only-Frames).
+    pub pace: f32,
 }
 
 impl FrameMs {
     /// Summe aller Stufen (ohne Sleep zwischen Frames).
     #[must_use]
     pub fn total(&self) -> f32 {
-        self.capture + self.det + self.rec + self.mask_diff + self.encode + self.send
+        self.capture + self.det + self.rec + self.mask_diff + self.encode + self.send + self.pace
     }
 }
 
@@ -307,7 +310,8 @@ mod tests {
             mask_diff: 8.0,
             encode: 16.0,
             send: 32.0,
+            pace: 64.0,
         };
-        assert_eq!(ms.total(), 63.0);
+        assert_eq!(ms.total(), 127.0);
     }
 }

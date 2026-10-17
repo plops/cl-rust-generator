@@ -30,6 +30,10 @@ pub struct Config {
     /// Aufnahme aller Nachrichten + Timings in diese Datei (.lbwlog).
     #[arg(long)]
     pub record: Option<String>,
+    /// Kanalrate in Byte/s: Kacheln werden auf diesen Rinnsal dosiert
+    /// (Texte haben Vorfahrt und gehen sofort raus).
+    #[arg(long, default_value_t = 6000)]
+    pub budget: u32,
     /// Pipeline-Log.
     #[arg(short, long)]
     pub verbose: bool,
@@ -40,6 +44,9 @@ impl Config {
     pub fn validate(&self) -> Result<(), String> {
         if self.quantizer > 255 {
             return Err("--quantizer muss zwischen 0 und 255 liegen".into());
+        }
+        if self.budget == 0 {
+            return Err("--budget muss größer als 0 sein".into());
         }
         Ok(())
     }
@@ -63,6 +70,7 @@ mod tests {
         assert_eq!((c.listen.as_str(), c.quantizer), ("127.0.0.1:7878", 180));
         assert!(!c.is_public() && !c.verbose && !c.cpu);
         assert_eq!(c.record, None);
+        assert_eq!(c.budget, 6000);
         c.validate().unwrap();
     }
 
@@ -83,11 +91,14 @@ mod tests {
             "--cpu",
             "--record",
             "/tmp/x.lbwlog",
+            "--budget",
+            "9000",
             "-v",
         ])
         .unwrap();
         assert!(c.is_public());
         assert_eq!((c.x, c.y, c.quantizer), (10, 20, 99));
+        assert_eq!(c.budget, 9000);
         assert_eq!(c.models, "/m");
         assert_eq!(c.record.as_deref(), Some("/tmp/x.lbwlog"));
         assert!(c.verbose && c.cpu);
@@ -105,6 +116,8 @@ mod tests {
         assert!(Config::try_parse_from(["lbw-server", "--quantizer", "x"]).is_err());
         // Falsche Wertebereiche scheitern bei validate().
         let c = Config::try_parse_from(["lbw-server", "--quantizer", "256"]).unwrap();
+        assert!(c.validate().is_err());
+        let c = Config::try_parse_from(["lbw-server", "--budget", "0"]).unwrap();
         assert!(c.validate().is_err());
     }
 }
