@@ -8,6 +8,8 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
+use clap::Parser;
+
 use lbw_common::framing::{FrameReader, decode_msg, write_msg};
 use lbw_common::{ClientMsg, PROTO_VERSION, ServerMsg};
 use lbw_log::io::{Reader, Recorder};
@@ -463,4 +465,252 @@ fn removed_text_sends_remove_text() {
     drop(s);
     server.join().unwrap().unwrap();
     assert_eq!(removed, vec![first_id]);
+}
+
+fn cfg_budget(budget: u32) -> lbw_server::config::Config {
+    lbw_server::config::Config::try_parse_from(["lbw-server", "--budget", &budget.to_string()])
+        .unwrap()
+}
+
+/// Texte überholen Kacheln: Bei 1 B/s Budget kommt kein Tile je an,
+/// aber ClearText + AddText treffen sofort ein (Vorfahrt ohne Warten).
+#[test]
+fn texts_jump_the_tile_queue() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut src = SharedSource::new(solid(128, 128, [40; 3]));
+        let mut ocr = StubOcr::fixed(vec![item()]);
+        serve_client(
+            stream,
+            &cfg_budget(1),
+            &mut src,
+            &mut ocr,
+            Some(30),
+            &Recorder::none(),
+            None::<Injector>,
+        )
+    });
+
+    let mut s = TcpStream::connect(addr).unwrap();
+    let mut fr = FrameReader::new();
+    write_msg(
+        &mut s,
+        &ClientMsg::Hello {
+            version: PROTO_VERSION,
+        },
+    )
+    .unwrap();
+    // Hello abwarten (ungepaced, winzig).
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| matches!(m, ServerMsg::Hello),
+    );
+    // 2,5 s sammeln: Texte müssen da sein, ein Tile (≥ ~50 B bei
+    // 1 B/s → ≥ ~50 s Wartezeit) darf es nicht geben.
+    let (mut clear, mut adds, mut tiles) = (0, 0, 0);
+    let until = Instant::now() + Duration::from_millis(2500);
+    s.set_read_timeout(Some(Duration::from_millis(200)))
+        .unwrap();
+    while Instant::now() < until {
+        match fr.read(&mut s).unwrap() {
+            lbw_common::framing::Read1::Frame(b) => match decode_msg::<ServerMsg>(&b).unwrap() {
+                ServerMsg::ClearText => clear += 1,
+                ServerMsg::AddText(t) => {
+                    assert_eq!(t.text, "hi");
+                    adds += 1;
+                }
+                ServerMsg::Tile { .. } => tiles += 1,
+                _ => {}
+            },
+            lbw_common::framing::Read1::Idle => {}
+        }
+    }
+    assert_eq!((clear, adds, tiles), (1, 1, 0));
+    // Abbruch: Reader sieht EOF, Pacing bricht in Scheiben ab.
+    drop(s);
+    server.join().unwrap().unwrap();
+}
+
+/// Gepacete Kacheln kommen vollständig und in Reihenfolge an
+/// (Pacing dosiert, verwirft nichts).
+#[test]
+fn paced_tiles_arrive_whole() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let shared = SharedSource::new(solid(128, 128, [40; 3]));
+    let worker_src = shared.clone();
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut src = worker_src;
+        let mut ocr = StubOcr::fixed(vec![]);
+        serve_client(
+            stream,
+            &cfg_budget(3000),
+            &mut src,
+            &mut ocr,
+            Some(30),
+            &Recorder::none(),
+            None::<Injector>,
+        )
+    });
+
+    let mut s = TcpStream::connect(addr).unwrap();
+    let mut fr = FrameReader::new();
+    write_msg(
+        &mut s,
+        &ClientMsg::Hello {
+            version: PROTO_VERSION,
+        },
+    )
+    .unwrap();
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| matches!(m, ServerMsg::Hello),
+    );
+    // Vollbild-Kachel + eine Dirty-Kachel danach, beide ganz.
+    let mut img = solid(128, 128, [40; 3]);
+    img.put_pixel(100, 10, image::Rgb([9; 3]));
+    shared.set(img);
+    let mut got = Vec::new();
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(20),
+        &mut |m| {
+            if let ServerMsg::Tile { x, y, data } = m {
+                assert!(!data.is_empty());
+                got.push((*x, *y, data.len()));
+            }
+            got.len() >= 2
+        },
+    );
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert_eq!((got[0].0, got[0].1), (0, 0)); // Vollbild zuerst
+    drop(s);
+    server.join().unwrap().unwrap();
+}
+
+/// Deterministisches Rauschbild (Xorshift, feste Saat) als
+/// Animations-Ersatz: Vollbild-Dirty pro Frame.
+fn noise(w: u32, h: u32, seed: u64) -> image::RgbImage {
+    let mut img = image::RgbImage::new(w, h);
+    let mut x = seed.max(1);
+    for p in img.pixels_mut() {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        let b = (x & 0xff) as u8;
+        *p = image::Rgb([b, b.wrapping_mul(7), b.wrapping_add(31)]);
+    }
+    img
+}
+
+/// Animations-Soak: 12 Rausch-Vollbilder bei 12 kB/s Budget müssen im
+/// Mittel im Budget bleiben (kein Burst) — der 0614er-Log zeigte
+/// 37 kB/s in einen 6-kB/s-Kanal (~2 MB Queue).
+#[test]
+fn soak_paced_animation_stays_on_budget() {
+    let budget: u32 = 12000;
+    let path = format!(
+        "{}/lbw10-srv-{}-soak.lbwlog",
+        std::env::temp_dir().display(),
+        std::process::id()
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let shared = SharedSource::new(noise(128, 128, 1));
+    let worker_src = shared.clone();
+    let rec = Recorder::create(&path, "lbw-server-test", &["t".into()]).unwrap();
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut src = worker_src;
+        let mut ocr = StubOcr::fixed(vec![]);
+        let r = serve_client(
+            stream,
+            &cfg_budget(budget),
+            &mut src,
+            &mut ocr,
+            Some(40),
+            &rec,
+            None::<Injector>,
+        );
+        drop(rec); // `End` vor dem Lesen schreiben.
+        r
+    });
+
+    let mut s = TcpStream::connect(addr).unwrap();
+    let mut fr = FrameReader::new();
+    write_msg(
+        &mut s,
+        &ClientMsg::Hello {
+            version: PROTO_VERSION,
+        },
+    )
+    .unwrap();
+    // Pro Iteration genau ein Bildwechsel, dann genau eine Kachel
+    // abwarten: Zwischen zwei Wechseln liegt immer ein Grab, also wird
+    // jeder Wechsel genau eine Kachel (kein Verwerfen, kein Extra).
+    // `max_frames` hat Headroom für Grab-ohne-Änderung zwischendrin.
+    let mut seed = 2u64;
+    let mut tiles = 0;
+    for _ in 0..12 {
+        shared.set(noise(128, 128, seed));
+        seed += 1;
+        let mut got = false;
+        read_until(
+            &mut fr,
+            &mut s,
+            Instant::now() + Duration::from_secs(30),
+            &mut |m| {
+                if matches!(m, ServerMsg::Tile { .. }) {
+                    got = true;
+                    return true;
+                }
+                false
+            },
+        );
+        assert!(got, "Kachel blieb aus (Seed {})", seed - 1);
+        tiles += 1;
+    }
+    drop(s);
+    server.join().unwrap().unwrap();
+    assert_eq!(tiles, 12);
+
+    // Auswertung auf Mono-Uhr: Gesamt-Rate und jede Mono-Sekunde im Budget.
+    let recs = Reader::all(&path).unwrap();
+    let mut total = 0u64;
+    let (mut t0, mut t1) = (u64::MAX, 0u64);
+    let mut per_sec = std::collections::HashMap::new();
+    for r in &recs {
+        if let LogRecord::Msg {
+            dir: Dir::SrvToCli,
+            wire_bytes,
+            stamp,
+            ..
+        } = r
+        {
+            total += *wire_bytes as u64;
+            t0 = t0.min(stamp.mono_us);
+            t1 = t1.max(stamp.mono_us);
+            *per_sec.entry(stamp.mono_us / 1_000_000).or_insert(0u64) += *wire_bytes as u64;
+        }
+    }
+    std::fs::remove_file(&path).unwrap();
+    // Wächter: Ohne genug Bytes wäre der Test inhaltsleer (Pacing
+    // griffe nie) — 3× Budget erzwingt echten Stau.
+    assert!(total >= 3 * budget as u64, "zu wenig Stau: {total} B");
+    let span_s = (t1 - t0) as f64 / 1_000_000.0;
+    let rate = total as f64 / span_s;
+    assert!(
+        rate <= 1.5 * budget as f64,
+        "Rate {rate:.0} B/s über Budget"
+    );
+    let peak = *per_sec.values().max().unwrap();
+    assert!(peak <= (25 * budget as u64) / 10, "Bunch {peak} B in 1 s");
 }
