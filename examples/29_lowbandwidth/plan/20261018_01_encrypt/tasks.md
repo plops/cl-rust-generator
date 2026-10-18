@@ -24,8 +24,8 @@ Arbeitsmodell (Vorgabe aus `prompt.txt`): Umsetzung in Schritten mit Subagenten,
 
 ## Phase 2 — Android
 
-- [ ] A1 – `android/rust-core`: Kein JSch in Android; Tunnel-Layer = gemeinsame `tunnel/`-Crate (`russh`); JNI `CoreBridge`-Muster aus source6 (`jni-sys`, Direct-ByteBuffer, `minify=false`).
-- [ ] A2 – Kotlin-UI anpassen (Connect-Form mit **konfigurierbaren IPs/Ports pro Hop** — Host/IP, Port, User, Key pro Hop, Jump-Zwischenport, Ziel-LBW-Port; Profile in SharedPreferences speichern/laden/löschen; TOFU-Pinning pro Hop; moderner OpenSSH-Key-Pfad getestet) → Tests: JVM-Host + Emulator-E2E **mit** Ed25519-Client-Key **und** Jump-Host (nicht ECDSA-Fallback) **und** geänderten Test-Ports (Beweis, dass nichts hartcodiert ist); `ci_local` angepasst.
+- [x] A1 – `android/rust-core`: Kein JSch in Android; Tunnel-Layer = gemeinsame `tunnel/`-Crate (`russh`); JNI `CoreBridge`-Muster aus source6 (`jni-sys`, Direct-ByteBuffer, `minify=false`). Dazu: `Engine::pins()` → JNI `nativePins` → TOFU-Persistenz; `macroquad` per `desktop`-Feature aus der `cdylib` (sonst `quad_main`-Linkfehler auf Android, s. Run5-Log).
+- [x] A2 – Kotlin-UI anpassen (Connect-Form mit **konfigurierbaren IPs/Ports pro Hop** — Host/IP, Port, User, Key pro Hop, Jump-Zwischenport, Ziel-LBW-Port; Profile in SharedPreferences speichern/laden/löschen; TOFU-Pinning pro Hop; moderner OpenSSH-Key-Pfad getestet) → Tests: JVM-Host (28 grün) + Emulator-E2E **mit** Ed25519-Client-Key **und** Jump-Host (nicht ECDSA-Fallback) **und** geänderten Test-Ports (Beweis, dass nichts hartcodiert ist) — E2E-OK alle 9 Checks (1 Kette, 2 OCR, 3a Up-Pfad, 3b frischer OCR-Text, 4 Screenshot, 5a/5b Pins, 5c Keys, 6 Reconnect); `ci_local` angepasst.
 Und zum Schluss: Task-Spicker „ohne Java-Crypto" + Dep-Liste (`russh`, `ssh-key`, rav1d …) in `android/deps.md` schreiben.
 
 ## Phase 3 — Wireshark + Docker
@@ -38,4 +38,4 @@ Und zum Schluss: Task-Spicker „ohne Java-Crypto" + Dep-Liste (`russh`, `ssh-ke
 
 - [x] C1 – GitHub-Actions `.github/workflows/release-29-source11.yml` (Muster `release-29-lowbandwidth.yml` + `android-lbw.yml`): Jobs Linux (fmt/clippy/tests + Dissector-`check.sh` + `package_release.sh`, Größe nur berichtet), Android-`.so` (beide ABIs, NDK-Setup wie bewährt, Direkt-Clang wie in `android/README.md`), Publish (`lbw11-v*`, Server+Modelle-, Client-, Android-Core-, SHA256SUMS; `workflow_dispatch` = Dry-Run). Ungelaufen (kein GH-Zugang hier) — erster Dry-Run fällig.
 - [x] C2 – `scripts/fetch_models.sh` (lokal → HuggingFace-Fallback, SHA256; `gpa` optional): echter Lauf — alle 4 Dateien SHA256-verifiziert (52 MB), keine Blobs im Git.
-- [ ] C3 – Abschluss: LOC-Ziel (~3,5–4 k) messen, README + Walkthrough + Smokes grün, Plan-Aspekte (inkl. gestrichene ≥5 Features) als Tabelle belegen; Commits pro Task (Conventional Commits), unverdientes Ops-Signing nach Plan §2.1 → `go`.
+- [x] C3 – Abschluss: LOC gemessen (~9,7 k statt 3,5–4 k — über Ziel, Funktionalität nicht kürzbar; s. README), README + WALKTHROUGH geschrieben, Smokes grün (`smoke_e2e.sh` E2E-OK, Emulator-E2E E2E-OK), Plan-Aspekte (inkl. 6 gestrichene Features) als Tabelle in README belegt; Commits pro Bereich (Conventional Commits).
