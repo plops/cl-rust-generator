@@ -1,0 +1,184 @@
+name: Release 29-source11
+
+# Publishes a GitHub release for examples/29_lowbandwidth/source11_compact
+# when a tag lbw11-v<version> is pushed. Assets:
+#   lbw11-server-<v>-linux-x86_64.tar.gz   server + OCR models
+#   lbw11-client-<v>-linux-x86_64.tar.gz   desktop client (SSH built in)
+#   lbw11-android-core-<v>.tar.gz          rust-core .so (arm64-v8a, x86_64)
+#   lbw11-dissector-<v>.tar.gz             C plugin + sample.pcap + README
+#   SHA256SUMS.txt
+# workflow_dispatch on a branch is a dry run: everything is built and
+# uploaded as workflow artifacts, but no release is created.
+
+on:
+  push:
+    tags:
+      - 'lbw11-v*'
+  workflow_dispatch:
+
+concurrency:
+  group: release-lbw11-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SRC: examples/29_lowbandwidth/source11_compact
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: Check tag against Cargo.toml
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(awk '/^\[workspace.package\]/{p=1;next} /^\[/{p=0} p&&/^version/{gsub(/"/,"",$3);print $3;exit}' "$SRC/Cargo.toml")
+          [[ "$version" =~ ^[0-9]+\.[0-9]{1,2}\.[0-9]{1,2}(-[0-9A-Za-z.]+)?$ ]] \
+            || { echo "::error::workspace version '$version' invalid" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            [ "$GITHUB_REF_NAME" = "lbw11-v$version" ] \
+              || { echo "::error::tag $GITHUB_REF_NAME != lbw11-v$version" >&2; exit 1; }
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  linux:
+    name: Linux server + client
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+        working-directory: examples/29_lowbandwidth/source11_compact
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: System packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends nasm \
+            openssh-server openssh-client \
+            libxcb1-dev libxcb-shm0-dev libxcb-randr0-dev \
+            xvfb xterm x11-utils xdotool
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal -c rustfmt,clippy
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: examples/29_lowbandwidth/source11_compact
+          key: release-11
+
+      - uses: actions/cache@v6
+        with:
+          path: ${{ env.SRC }}/models
+          key: lbw11-models-${{ hashFiles('examples/29_lowbandwidth/source11_compact/scripts/fetch_models.sh') }}
+
+      - name: fmt, clippy, tests
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+      - name: Dissector check
+        run: |
+          sudo apt-get install -y -q --no-install-recommends tshark libwireshark-dev cmake
+          ./wireshark/check.sh
+
+      - name: Build and package
+        run: |
+          chmod +x scripts/*.sh
+          scripts/package_release.sh "$RUNNER_TEMP/dist"
+          echo "## Größen (nur Messung, kein Gate)" >> "$GITHUB_STEP_SUMMARY"
+          du -sh target/release/lbw-client "$RUNNER_TEMP"/dist/*.tar.gz | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lbw11-linux-release
+          path: ${{ runner.temp }}/dist/*.tar.gz
+          if-no-files-found: error
+
+  android-core:
+    name: Android rust-core .so (arm64 + x86_64)
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: examples/29_lowbandwidth/source11_compact/android/rust-core
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Rust toolchain + targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+
+      - name: Android SDK + NDK (Muster android-lbw.yml)
+        uses: android-actions/setup-android@v4
+
+      - name: Install NDK
+        run: sdkmanager --install "ndk;27.0.12077973" > /dev/null
+      - name: Export NDK home
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+
+      - name: Cross-compile (direkt per NDK-Clang, s. android/README.md)
+        run: |
+          TC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CC_aarch64_linux_android=$TC/aarch64-linux-android26-clang \
+            CXX_aarch64_linux_android=$TC/aarch64-linux-android26-clang++ \
+            AR_aarch64_linux_android=$TC/llvm-ar \
+            CC_x86_64_linux_android=$TC/x86_64-linux-android26-clang \
+            CXX_x86_64_linux_android=$TC/x86_64-linux-android26-clang++ \
+            AR_x86_64_linux_android=$TC/llvm-ar \
+            CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TC/aarch64-linux-android26-clang \
+            CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=$TC/x86_64-linux-android26-clang
+          cargo build --release --target aarch64-linux-android --target x86_64-linux-android
+          ls -la ../../target/*/release/liblbw_android_core.so
+          mkdir -p "$RUNNER_TEMP/dist/android-core"
+          cp ../../target/aarch64-linux-android/release/liblbw_android_core.so \
+             "$RUNNER_TEMP/dist/android-core/liblbw_android_core-arm64-v8a.so"
+          cp ../../target/x86_64-linux-android/release/liblbw_android_core.so \
+             "$RUNNER_TEMP/dist/android-core/liblbw_android_core-x86_64.so"
+          tar -czf "$RUNNER_TEMP/dist/lbw11-android-core-${{ needs.version.outputs.version }}.tar.gz" \
+            -C "$RUNNER_TEMP/dist/android-core" .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lbw11-android-core
+          path: ${{ runner.temp }}/dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: [version, linux, android-core]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+      - run: |
+          cd dist && sha256sum *.tar.gz > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes "source11_compact: SSH-Tunnel-Clients (Linux + Android-Core), Protokoll v4, Modelle im Server-Tar."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

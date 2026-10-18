@@ -267,10 +267,9 @@ Tunnel-Enden **unverschlüsselt über localhost** (SSH verschlüsselt nur
 die Strecke dazwischen). Mitschnitt auf dem Server-Host, Interface
 `lo`, Port 7878 → der C-Dissector (Basis `packet-lbw.c`, Reassembly,
 alle v4-Varianten inkl. `MoveText`, `Challenge`, `Auth`) zeigt alles.
-Auf dem Client läuft der russh-Strom prozessintern (kein lokaler
-TCP-Port); für Live-Analyse dort bekommt der Client einen optionalen
-Debug-Schalter `--tap 127.0.0.1:<port>`, der den Klartext-Strom
-zusätzlich auf einen lokalen Port spiegelt. SSH selbst wird **nicht**
+Auf dem Client läuft der LBW-Strom über den prozesseigenen Forward-Port:
+`--tap <port>` fixiert ihn (Default ephemer), sodass Wireshark den
+kompletten Klartext-Strom auf `lo` mitschneidet (`-d tcp.port==<port>,lbw`). SSH selbst wird **nicht**
 entschlüsselt (OpenSSH/russh geben keine Session-Keys heraus — der
 frühere Keylog-Satz im Plan war falsch und ist gestrichen). Die
 Autorisierung auf dem Klartext-Port regelt das Token-Verfahren aus

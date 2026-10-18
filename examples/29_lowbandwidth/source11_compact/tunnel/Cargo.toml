@@ -1,0 +1,15 @@
+[package]
+name = "lbw-tunnel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait = "0.1"
+russh = "0.64"
+ssh-key = { version = "0.6", features = ["ed25519", "alloc"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "macros", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "macros", "time"] }
