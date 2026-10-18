@@ -261,9 +261,16 @@ pub async fn connect_chain_retry_with_pins(
         if n > 0 {
             tokio::time::sleep(wait).await;
         }
-        match connect_chain_with_pins(policy, hops, target_sshd, lbw_port).await {
-            Ok(c) => return Ok(c),
-            Err(e) => last_err = e,
+        let attempt = tokio::time::timeout(
+            policy.attempt_timeout,
+            connect_chain_with_pins(policy, hops, target_sshd, lbw_port),
+        );
+        match attempt.await {
+            Ok(Ok(c)) => return Ok(c),
+            Ok(Err(e)) => last_err = e,
+            Err(_) => {
+                last_err = format!("Versuch {n}: Timeout nach {:?}", policy.attempt_timeout);
+            }
         }
     }
     Err(format!("alle Versuche: {last_err}"))

@@ -50,6 +50,9 @@ pub struct TunnelPolicy {
     pub keepalive_max: usize,
     /// Wartezeiten zwischen Reconnect-Versuchen.
     pub retry_delays: Vec<std::time::Duration>,
+    /// Deckel je Ketten-Versuch (Handshake/Auth/Kanal haben einzeln keinen
+    /// Timeout — ohne Deckel hinge ein Versuch ewig und Retry griffe nie).
+    pub attempt_timeout: std::time::Duration,
 }
 
 impl Default for TunnelPolicy {
@@ -64,6 +67,7 @@ impl Default for TunnelPolicy {
                 std::time::Duration::from_secs(2),
                 std::time::Duration::from_secs(5),
             ],
+            attempt_timeout: std::time::Duration::from_secs(30),
         }
     }
 }

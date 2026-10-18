@@ -17,6 +17,7 @@ fn quick_policy() -> TunnelPolicy {
         keepalive: Duration::from_secs(15),
         keepalive_max: 3,
         retry_delays: vec![Duration::from_millis(300), Duration::from_millis(300)],
+        attempt_timeout: Duration::from_secs(10),
     }
 }
 
@@ -50,6 +51,36 @@ async fn retry_connects_when_sshd_starts_late() {
         .expect("Retry verbindet nach sshd-Start");
     let back = echo_check(&mut chain.stream, b"spaet").await.expect("Echo");
     assert_eq!(back, b"spaet");
+}
+
+/// Hängender Versuch (SYN ins Leere, TEST-NET-1) blockiert Retry nicht:
+/// Der Attempt-Deckel schlägt zu, danach kommen die nächsten Versuche.
+#[tokio::test]
+async fn retry_attempt_times_out_instead_of_hanging() {
+    let jd = tmpdir("hang");
+    common::sh(&format!(
+        "[ -f {d}/user ] || ssh-keygen -q -t ed25519 -N '' -f {d}/user",
+        d = jd.display()
+    ));
+    let echo = echo_server().await;
+    let hops = vec![pinned_for("root@192.0.2.1:2322", &jd, None)];
+    let policy = TunnelPolicy {
+        attempt_timeout: Duration::from_secs(1),
+        retry_delays: vec![Duration::from_millis(100)],
+        ..quick_policy()
+    };
+    let t = std::time::Instant::now();
+    let r = connect_chain_retry(&policy, &hops, ("127.0.0.1", 2322), echo).await;
+    let dt = t.elapsed();
+    let err = match r {
+        Ok(_) => panic!("ins Leere kein Connect"),
+        Err(e) => e,
+    };
+    assert!(err.contains("Timeout"), "Deckel muss zuschlagen");
+    assert!(
+        dt < Duration::from_secs(5),
+        "Retry darf nicht am Connect-Timeout (5 s) kleben: {dt:?}"
+    );
 }
 
 #[tokio::test]
