@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 jni-sys = "=0.4.1"
-lbw-client = { path = "../../client" }
+lbw-client = { path = "../../client", default-features = false }
 lbw-common = { path = "../../common" }
 lbw-tunnel = { path = "../../tunnel" }
 serde = { version = "1.0", features = ["derive"] }

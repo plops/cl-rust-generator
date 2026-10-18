@@ -9,9 +9,11 @@
 # Nachweise (Exit 0 nur wenn alle gelten):
 #   1. Jump-Kette mit Ed25519-Keys (beide Hops): "link up" im logcat
 #   2. OCR-Text des xterm kommt in der App an (Marker im "texts"-Log)
-#   3. Getippter Text (adb input) landet im xterm → OCR → App-Log
-#   4. Host-Key-Pins beider Hops landen in den Prefs (TOFU), Keys nie
-#   5. HOME → onStop trennt, erneuter Start → onStart verbindet neu
+#   3a. adb-Tasten → App → ClientMsg::Text beim Server (Up-Pfad, Verbose-Log)
+#   3b. Frisch getippter Text (xdotool-direkt) rundet per OCR in die App
+#   4. Screenshot nicht schwarz; Host-Key-Pins beider Hops in Prefs (TOFU)
+#   5. Keys im Klartext in Prefs (erwartet: ja, app-privat)
+#   6. HOME → onStop trennt, erneuter Start → onStart verbindet neu
 #
 # Aufruf: scripts/emulator_e2e.sh [out-dir]
 #   APK: vorher scripts/build_android.sh (oder APK=pfad).
@@ -46,12 +48,41 @@ trap cleanup EXIT
 
 FAIL=0
 check() { if eval "$2"; then echo "OK   $1"; else echo "FAIL $1"; FAIL=1; fi; }
+# Fail-fast statt falscher Messung: Ein alter E2E-Server auf den Test-Ports
+# würde den neuen Start verhindern und die App hinge an einer Leiche
+# (erlebt in run9: „Address already in use" + leere OCR-Checks).
+for p in 2322 2323 7878; do
+  if (echo >/dev/tcp/127.0.0.1/$p) 2>/dev/null; then
+    echo "Port $p belegt (alter E2E-/Live-Server?) — stoppen und erneut fahren"
+    exit 1
+  fi
+done
 wait_log() { # timeout-s muster → logcat (Tag lbw)
   local end=$(( $(date +%s) + $1 ))
   while [ "$(date +%s)" -lt "$end" ]; do
     "$ADB" logcat -d -s lbw:I | grep -q -- "$2" && return 0; sleep 1
   done
   return 1
+}
+wait_file() { # timeout-s muster → lokale Datei (Server-Log)
+  local end=$(( $(date +%s) + $1 ))
+  while [ "$(date +%s)" -lt "$end" ]; do
+    grep -q -- "$2" "$3" 2>/dev/null && return 0; sleep 1
+  done
+  return 1
+}
+wait_do() { # timeout-s befehl… → Befehl per eval bis Erfolg
+  local end=$(( $(date +%s) + $1 )); shift
+  while [ "$(date +%s)" -lt "$end" ]; do
+    eval "$*" >/dev/null 2>&1 && return 0; sleep 1
+  done
+  return 1
+}
+# Die App schickt je Zeichen eine Text-Nachricht (KeyEvent → Unicode):
+# verkettete Eingaben enthalten den Tipp-String am Stück.
+typed_arrived() {
+  grep -a -o 'Text("[^"]*")' "$OUT/server.log" 2>/dev/null \
+    | sed 's/^Text("//; s/")$//' | tr -d '\n' | grep -q "emu-typed-hello"
 }
 launch() { "$ADB" logcat -c; "$ADB" shell am start -S -n "$PKG/.MainActivity" --ez autoconnect true --ez hud true "$@" >/dev/null; }
 
@@ -75,9 +106,13 @@ TFP=$(ssh-keygen -lf "$K/target.pub" | awk '{print $2}')
 Xvfb :99 -screen 0 1280x720x24 >/dev/null 2>&1 & PIDS+=($!)
 sleep 2
 export DISPLAY=:99
-xterm -geometry 100x30+10+10 -e "printf 'EMU-MARKER-11\n'; sleep 120" & PIDS+=($!)
+xterm -geometry 100x30+10+10 -e "printf 'EMU-MARKER-11\n'; sleep 3600" & PIDS+=($!)
+# sleep 3600 (nicht 120): Der Emulator-Boot dauert Minuten — ein totes xterm
+# ließe alle OCR-Checks ins Leere laufen (erlebt in run12: 0 Texte).
 sleep 1
-(cd "$SRC11" && ./target/release/lbw-server --token "$TOKEN" --budget 6000 --cpu >"$OUT/server.log" 2>&1 & echo $! >"$OUT/server.pid")
+(cd "$SRC11" && exec ./target/release/lbw-server --token "$TOKEN" --budget 6000 --cpu --verbose >"$OUT/server.log" 2>&1 & echo $! >"$OUT/server.pid")
+# exec: $! ist der Server selbst (ohne exec bliebe die Subshell als Hülle und
+# kill ließe einen verwaisten Server auf 7878 zurück — erlebt in run9/run10).
 PIDS+=($(cat "$OUT/server.pid"))
 for i in $(seq 1 24); do grep -q "lauscht" "$OUT/server.log" && break; sleep 5; done
 
@@ -99,12 +134,26 @@ launch --es jump_host 10.0.2.2 --ei jump_port 2322 --es jump_user "$USER" --es j
   --es target_host 10.0.2.2 --ei target_port 2323 --es target_user "$USER" --es target_key_b64 "$TKEY_B64" \
   --es target_sshd_host 127.0.0.1 --ei target_sshd_port 2323 --ei lbw_port 7878 --es lbw_token "$TOKEN"
 
-check "1 Kette steht (link up)" "wait_log 90 'link up'"
+check "1 Kette steht (link up)" "wait_log 150 'link up'"
 check "2 OCR-Text kommt an (EMU-MARKER-11)" "wait_log 60 'EMU-MARKER-11'"
+# 3a Up-Pfad: adb-Tasten → App → ClientMsg::Text → Server (sichtbar im
+# Verbose-Serverlog). Unabhängig von der X11-Zustellung.
 "$ADB" shell input text "emu-typed-hello" >/dev/null 2>&1
-check "3 getippter Text rundet (emu-typed-hello)" "wait_log 90 'emu-typed-hello'"
+check "3a App sendet getippten Text (Server sieht Text)" "wait_do 60 typed_arrived"
+# 3b Frischer Text rundet durch OCR: direkt per xdotool ins xterm (wie
+# smoke_e2e). Nicht via enigo: Dessen Tasten-Zustellung arbeitet auf Xvfb
+# nicht (Maus ja, Tasten nein — belegt per enigoprobe), auf echtem Xorg
+# schon. Ohne WM setzt nur windowfocus den Fokus (windowactivate braucht EWMH).
+XWID=$(xdotool search --class xterm 2>/dev/null | head -1)
+[ -n "$XWID" ] && xdotool windowfocus --sync "$XWID" 2>/dev/null
+sleep 1
+xdotool type --delay 40 "emu-fresh-x11" 2>/dev/null
+xdotool key Return 2>/dev/null
+check "3b Frisch getippter Text kommt per OCR zurück" "wait_log 90 'emu-fresh-x11'"
 "$ADB" exec-out screencap -p >"$OUT/screen.png"
 check "4 Screenshot nicht schwarz" "test \$(stat -c%s \"$OUT/screen.png\") -gt 50000"
+# Erste-Launch-Beweise sichern (der Relaunch löscht den logcat-Ring).
+"$ADB" logcat -d >"$OUT/logcat-first.log" 2>/dev/null
 PREFS=$("$ADB" shell "run-as $PKG cat /data/data/$PKG/shared_prefs/lbw.xml" 2>/dev/null)
 echo "$PREFS" >"$OUT/prefs.xml"
 check "5a Pin Jump-Hop gespeichert" "echo \"\$PREFS\" | grep -q '$JFP'"

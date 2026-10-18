@@ -13,8 +13,10 @@ pub mod net;
 #[path = "04_scene.rs"]
 pub mod scene;
 
+#[cfg(feature = "desktop")]
 #[path = "05_app.rs"]
 pub mod app;
 
+#[cfg(feature = "desktop")]
 #[path = "06_font.rs"]
 pub mod font;
