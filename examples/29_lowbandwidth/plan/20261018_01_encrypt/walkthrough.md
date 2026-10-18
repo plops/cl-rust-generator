@@ -411,3 +411,176 @@ bash android/scripts/emulator_e2e.sh   # echte App im Emulator (9 Checks)
 
 Alles andere ist lauffähig: `DEPLOY.md` für den Produktiv-Stack,
 `WALKTHROUGH.md` im Code-Verzeichnis für den Schnelldurchlauf.
+
+## 12. Das Gesamtprojekt: sechs Generationen, eine Idee
+
+Die Kapitel 1–11 beschreiben nur die jüngste Generation. Das Projekt
+ist älter, und die Top-Level-`README.md` fasst die Linie so zusammen
+(wörtlich, weil sie die ehrliche Rangfolge enthält):
+
+| Generation | Was sie gebracht hat | Stand |
+|---|---|---|
+| `source6` | Ausgangsprogramm, ONNX-Experimente, erste Android-Skizze | historisch |
+| `source7_mvp` | MVP: fester 640×640-Ausschnitt, Text als Vektordaten (PP-OCRv6), Rest als AV1 im 10×10-Raster (64×64-Kacheln), TCP direkt | lauffähig, klein |
+| `source8_transpiled` | Transpiler-Eingabe, um `source7` per `cl-rust-generator` zu erzeugen — kein Produkt, sondern Werkzeugschritt | historisch |
+| `source9_gpu` | 1280×720 statt 640×640, GPU-Hybrid (DBNet-Detektor per CUDA-EP auf der GPU, Erkenner auf CPU), eine AV1-Box pro Frame, Protokoll v2 | lauffähig |
+| `source10_instrumentation` | Wie source9, plus Protokoll v3 (stabile Text-IDs, Delta statt Resend) und komplette Instrumentierung: `--record` schreibt `.lbwlog`, `lbw-logstat` wertet offline aus, `lbw-replay` spielt headless nach | **aktuell beste Implementierung** |
+| `source11_compact` | Protokoll v4, Auth (Nonce + Token-MAC), Clients bauen den SSH-Tunnel selbst (`tunnel/`-Crate, Jump-Kette, Android) — aber: Latenz real schlechter als source10 | lauffähig, nicht ablösend |
+
+Die Konstanten über alle Generationen: X11-Grab (kein Wayland),
+PP-OCRv6-Modelle (`PP-OCRv6_small_det.onnx` /
+`PP-OCRv6_small_rec.onnx`, per Symlink aus `source7_mvp/models`,
+nicht im Git), Text als Vektor statt als Bildpixel, AV1 (`rav1e`/
+`rav1d`) für den Rest, `macroquad`-Client, `enigo` für Eingaben,
+Server bindet nur an `127.0.0.1:7878`. Was sich pro Generation
+änderte, waren Auflösung, Rechenort, Protokoll und — in den letzten
+beiden — Messbarkeit bzw. Tunnel-Automatik. Die zwei Problemfelder,
+an denen jede Generation wieder ansetzt, sind **Erkennung** und
+**Verbindung**; die nächsten zwei Kapitel vergleichen sie direkt.
+
+## 13. Problemfeld Erkennung: source10 gegen source11
+
+Zuerst die Überraschung, die jeder Diff sofort zeigt: Die eigentliche
+OCR ist in beiden Generationen **zeilengleich**. `03_detect.rs`
+(DBNet-Boxen, 300 Zeilen) und `04_recognize.rs` (181 Zeilen) sind
+identisch, der Erkennungs-Cache (Hash aus Box + Pixeln, statische
+Zeilen ~0 ms) stammt schon aus source10, und die GPU-Aufteilung
+(Detektor CUDA, Erkenner CPU) aus source9. Wer „kaum Text erkannt"
+in source11 sucht, findet die Ursache nicht im Netz — sondern in
+dem, was source11 *um* die unveränderte OCR herum gebaut bzw.
+weggelassen hat.
+
+**Was source11 dazugebaut hat** (alles in `server/src/05_ocr.rs`,
+353 → 567 Zeilen, plus neues `09_stabilize.rs`, 530 Zeilen):
+
+- `merge_rows`: verschmilzt Detektor-Fragmente gleicher Grundlinie
+  vor der Erkennung (§5). In source10 ging jedes Fragment einzeln
+  durch den Erkenner — mehr Läufe, schlechterer Kontext, mehr
+  Bruchstück-Texte am Client.
+- `keep_line` mit `MIN_SINGLE_CONF = 0.75`: Einzelzeichen brauchen
+  deutlich mehr Konfidenz als Zeilen (≥ 0,5). Filtert Karten- und
+  Icon-Ratetext, den source10 noch als Text meldete.
+- `REC_BUDGET = 32` + `text_full(max_new, hint)`: höchstens 32
+  ungecachte Erkennungen pro Frame, Misses nahe zuletzt gesendeten
+  Rechtecken zuerst. Source10 erkannte im ersten Frame *alles*
+  (~1,5 s Block für einen vollen Bildschirm), dafür stand danach
+  alles auf einmal da; source11 konvergiert in ~3 Frames.
+- Der Stabilisator (§6) existiert in source10 **nicht**: Dort gingen
+  OCR-Rohdeltas (per `09_textids.rs`/`assign_ids` + `diff_texts`)
+  direkt auf den Draht. Jedes Flackern — Box ±2 px, ein falsches
+  Zeichen, ein Aussetzer — wurde zu `NewText`/`RemoveText` am
+  Client. Genau daraus kamen die beiden Nutzerbeschwerden, auf die
+  §5/§6 antworten: Geistertext (weil „weg" frame-gezählt statt
+  zeitbasiert entschieden wurde) und Flacker-Spam.
+
+**Was source11 dafür verloren hat:** die Messbarkeit. Source10
+zeichnet pro Frame die Pipeline-Stufen auf (Capture/Det/Rec/
+Mask+Diff/Encode/Send, Input→Injektion-Latenz) und kann Läufe per
+`lbw-logstat --deep` und `lbw-replay` offline sezieren — Erkennungs-
+probleme sind dort mit Zahlen statt mit Eindruck zu jagen. Source11
+hat `lbw-log` bewusst gestrichen (Kompaktheitsziel); übrig sind
+HUD und Tap-Mitschnitt. Für die *Diagnose* von Erkennungsfehlern
+ist source10 bis heute das bessere Werkzeug, für den *Betrieb*
+(kein Flackern, keine Geister) ist es source11.
+
+Ehrliche Grenze beider: rotierte, ~12 px kleine Karten-Labels
+bleiben Roulette (§11) — das ist eine Modellgrenze von
+PP-OCRv6-small, keine Pipeline-Frage, und in beiden Generationen
+gleich.
+
+## 14. Problemfeld Verbindung: source10 gegen source11
+
+Auf den ersten Blick hat source11 hier „mehr": eine eigene
+`tunnel/`-Crate (294 Zeilen Kettenlogik), die der Client selbst
+aufbaut — Jump-Host-Kette per verschachteltem `direct-tcpip`,
+TOFU-Pins pro Hop, `attempt_timeout` (30 s), Keepalive-Politik
+(15 s/3), Reconnect mit Backoff (0,5 s → 5 s). Source10 kennt davon
+nichts: Dort startet der *Betreiber* den Tunnel von Hand
+(`ssh -N -L 7878:127.0.0.1:7878`), der Client bekommt nur
+`--connect 127.0.0.1:7878`, und der Server lauscht ohne jede Auth —
+„kein Auth!" steht ausdrücklich in beiden READMEs (source9 wie
+source10). Für Android ist der Hand-Tunnel gar keine Option;
+genau dafür wurde source11 gebaut (§3, §8).
+
+Trotzdem steht in der Top-`README.md`: „best implementation
+currently is source10", und zu source11: „latency is actually
+worse". Der Diff erklärt, warum das kein Widerspruch ist:
+
+- **Der Pacer ist identisch.** `08_pace.rs` (source11) und
+  `11_pace.rs` (source10) sind bytegleich (167 Zeilen, Leaky
+  Bucket, Text-Vorfahrt). An der Dosierung liegt die schlechtere
+  Latenz also nicht.
+- **Die Session ist gewachsen, nicht schneller geworden.**
+  `07_session.rs` hat 472 statt 402 Zeilen: dazu kamen der
+  Challenge/Auth-Handshake (Nonce + HMAC, `verify_auth`), der
+  Stabilisator-Aufruf pro Frame und der Tile-Thread mit
+  Writer-Lock (§7). Der Tile-Thread war nötig (früher blockierten
+  Kodierung + Pacing-Schlaf die Hauptschleife 11–13 s), aber jede
+  zusätzliche Stufe kostet im Pfad Grab → Send Zeit, und der
+  Stabilisator fügt bewusst 250 ms Debounce hinzu, bevor neue oder
+  geänderte Texte überhaupt losdürfen. Source10 schickt Rohdeltas
+  sofort — flackernder, aber früher.
+- **Der Tunnel selbst kostet einen Hop mehr Wahrheit.** Die
+  verschachtelte Session (Client → tinyeu → Reverse-Tunnel 2332 →
+  hpz6o-sshd → :7878) ersetzt einen einzelnen SSH-Forward durch
+  zwei Handshakes, zwei Hostkey-Prüfungen und doppelte
+  Verschachtelung jedes Pakets. Das ist der Preis für
+  „kein Hand-Tunnel, auch hinter CGNAT, auch auf Android" —
+  bezahlt wird er in Verbindungsaufbau und Paketweg, nicht im
+  Protokoll (v4-`MoveText` macht Scrollen in beiden Welten fast
+  gratis, §4).
+- **Wieder die Messbarkeit.** Source10s `--record` + `lbw-logstat`
+  liefert Durchsatz, Gaps und Input→Photon-Latenz aus echten
+  Läufen; source11 hat die automatisierte Latenz-p50-Auswertung
+  ausdrücklich vertagt (§11, README-Tabelle: „vertagt"). Die
+  Aussage „Latenz schlechter" ist deshalb Betreiber-Erfahrung aus
+  HUD/Tap, kein CI-Gate — in source10 wäre sie eine Zahl.
+
+Kurz: In der Verbindung hat source11 ein **Reichweiten**-Problem
+gelöst (CGNAT, Android, kein Hand-Tunnel, Auth statt offenem
+localhost-Vertrauen) und dafür an **Latenz und Beobachtbarkeit**
+bezahlt. Wer am selben Schreibtisch-Netz misst und optimiert,
+ist mit source10 besser dran; wer von unterwegs per Handy auf
+einen Rechner hinter CGNAT muss, kommt an source11 nicht vorbei.
+
+## 15. Welche Generation wofür — die ehrliche Rangfolge
+
+| Frage | Antwort |
+|---|---|
+| Beste Implementierung heute (Latenz, Messbarkeit) | `source10_instrumentation` — so steht es in der Top-`README.md`, und §13/§14 zeigen warum |
+| Einzige mit Android-Client und Selbst-Tunnel | `source11_compact` |
+| Einzige mit Auth am Server-Port | `source11_compact` (v4, Nonce + Token-MAC); source9/10: bewusst kein Auth, Tunnel ist Handarbeit |
+| Kleinste verständliche Referenz | `source7_mvp` (640×640, 10×10-Raster) |
+| Erkennungs-Flackern/Geistertext behoben | nur `source11_compact` (Stabilisator, §6) |
+| Läufe offline analysierbar/replaybar | nur `source10_instrumentation` (`.lbwlog`, `lbw-logstat`, `lbw-replay`) |
+
+Der naheliegende nächste Schritt ist damit kein source12, sondern
+Rückportierung in eine der beiden Linien: Stabilisator und
+`merge_rows`/`keep_line` nach source10 (dort fehlt nur das Modul,
+die Session-Schnittstelle `text_full` müsste mitwachsen) — oder
+`lbw-log`-Recording in source11 wieder andocken, damit die
+Latenz-Frage (§14) aus dem Bauch in eine Messung wandert. Beides
+ist im jeweiligen Plan-Ordner anschlussfähig; entschieden ist
+davon noch nichts.
+
+## 16. Offene Punkte über alle Generationen
+
+- **Latenz-p50 als Gate fehlt überall.** Source10 misst, wertet
+  aber nicht automatisch gegen einen Schwellenwert aus; source11
+  misst nicht einmal (Follow-up seit Plan §11 offen).
+- **Automatischer Server-Start fehlt.** Die Top-`README.md` nennt
+  ihn für source11 ausdrücklich als Rest („still needs automatic
+  server start") — der Client baut den Tunnel, startet aber den
+  `lbw-server` hinter dem Tunnel nicht selbst.
+- **Echtes Xorg für Eingaben unbelegt.** `enigo`-Tasten sind nur
+  auf Xvfb widerlegt bzw. per `xdotool` umgangen (§11); der
+  Tasten-Beleg auf echtem Xorg steht generationsübergreifend aus.
+- **CI der jüngsten Linie ungefahren.** Der Release-Workflow für
+  source11 ist geschrieben, aber ohne GitHub-Zugang hier nie
+  gelaufen (§11) — erster Dry-Run fällig, bevor man sich auf
+  Artefakte verlässt.
+- **Modelle nie im Git.** Alle Generationen teilen sich per
+  Symlink dieselben ONNX-Dateien aus `source7_mvp/models`
+  (52 MB, SHA256-geprüft per `scripts/fetch_models.sh` in
+  source11) — wer einen Stand allein auscheckt, muss den
+  Symlink-Graphen mitdenken.
