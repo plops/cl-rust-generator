@@ -1,0 +1,48 @@
+schau dir
+cl-rust-generator/examples/29_lowbandwidth/source10_instrumentation
+und cl-rust-generator/examples/29_lowbandwidth/source6/android_client
+an mach dir auch einen ueberblick ueber die
+cl-rust-generator/examples/29_lowbandwidth/plan/*/walkthrough.md
+dokumente
+
+plane wie in den anderen
+cl-rust-generator/examples/29_lowbandwidth/plan/*/prompt.txt dateien
+eine plan und tasks.md.
+
+ich moechte ein neue version des remote desktop programms.  es soll in
+cl-rust-generator/examples/29_lowbandwidth/source11_compact
+geschrieben werden. ich habe folgende anforderungen:
+
+* reduziere den code auf das minimum um die features zu unterstuetzen
+* protokoll muss nicht kompatibel sein
+* encryption ist eingebaut (wir brauchen kein ssh mehr). schau dir
+  z.b. /workspace/src/mosh-tcp an. ich moechte das moderne encryption
+  (z.b. ed25519 unterstuetzt wird)
+* muss mit limitierter bandbreite garantierte input latenz
+  gewaehrleisten. d.h. die learnings von vorherigen experimenten mit
+  source10 sollen angewandt werden
+* als schrift soll der linux client unifont / oder noto fonts nutzen
+  (so dass auch von paddlepaddle unterstuetzte schriftzeichen wie
+  chinesisch oder japanisch und koreanisch gehen). es muss aber auch
+  einen fallback geben, falls diese fonts nicht verfuegbar sind 
+* es soll einen wireshark dissector fuer das protokoll geben (das auch
+  die decryption kann. wenn noetig und moeglich nutze ein rust modul
+  im dissector)
+* es soll einen android client geben (der android client in source6
+  machte den fehler fuer crypto eine alte java library zu verwenden
+  die nicht die modernen keys unterstuetzt)
+* es soll github actions geben um linux server, client, android client
+  und wireshark dissector zu bauen. die github release des servers
+  soll gewichte enthalten. die clienten sollen moeglichst klein fuer
+  den download sein (es muss eine version des clients mit etwa 2-3MB
+  geben, also ohne grosse fonts).
+* nutze links zu den bereits existierenden neuralen gewichten
+* mache tests im dockercontainer mit der limitierten bandbreite und
+  xvfb oder dem lokalen xserver auf dem host
+
+* bei der umsetzung arbeite in schritten mit subagenten, gib jedem
+  agenten die notwendigen informationen, die er fuer die umsetzung
+  braucht aber versuche den context klein zu halten. nutze auch
+  muse-wonder fuer die planung und ausarbeitung der architektur und
+  muse-spark-1.3 fuer die detailierte umsetzung und interaktion mit
+  dem compiler
