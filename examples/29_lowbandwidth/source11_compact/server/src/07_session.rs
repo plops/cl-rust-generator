@@ -7,27 +7,45 @@
 
 use std::net::TcpStream;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::sync_channel;
+use std::sync::mpsc::{channel, sync_channel};
 use std::time::{Duration, Instant};
 
 use image::RgbImage;
 
 use lbw_common::framing::{FrameReader, Read1, decode_msg, write_msg};
-use lbw_common::{ClientMsg, PROTO_VERSION, ServerMsg, TextItem, verify_auth};
+use lbw_common::{ClientMsg, PROTO_VERSION, Rect, ServerMsg, TextItem, verify_auth};
 
 use crate::av1::encode_rgb;
 use crate::capture::FrameSource;
 use crate::config::Config;
 use crate::input::Inject;
-use crate::ocr::Ocr;
-use crate::pace::{Pacer, wait_paced};
+use crate::ocr::{Ocr, REC_BUDGET};
+use crate::pace::Pacer;
 use crate::stabilize::Stabilizer;
 use crate::tiles::{MASK_PAD, crop_rgb, dirty_bbox, fill_rect, pad_rect};
+
+/// Anteil geänderter Roh-Pixel, ab dem das Fenster als „bewegt" gilt: Die
+/// Maske (aus alten Text-Rechtecken) würde dann Geisterlöcher über den
+/// neuen Inhalt malen — lieber eine rohe, aktuelle Kachel, scharfer Text
+/// folgt über OCR nach.
+const BIG_CHANGE_FRAC: f32 = 0.30;
 
 /// Was die Session zum Erkennen braucht (Tests nutzen Attrappen).
 pub trait Recognize {
     fn text(&mut self, img: &RgbImage) -> Result<Vec<TextItem>, String>;
+    /// Wie [`Recognize::text`], deckelt teure Neuerkennungen auf `max_new`
+    /// (Priorität nahe `hint`) und meldet alle Detektions-Boxen zurück.
+    /// Default: alles auf einmal, keine Boxen (Still-da aus).
+    fn text_full(
+        &mut self,
+        img: &RgbImage,
+        _max_new: usize,
+        _hint: &[Rect],
+    ) -> Result<(Vec<TextItem>, Vec<Rect>), String> {
+        Ok((self.text(img)?, Vec::new()))
+    }
     /// Letzte Inferenz-Zeiten (Detektion, Erkennung) in ms; Default 0.
     fn last_ms(&self) -> (f64, f64) {
         (0.0, 0.0)
@@ -41,6 +59,15 @@ pub trait Recognize {
 impl Recognize for Ocr {
     fn text(&mut self, img: &RgbImage) -> Result<Vec<TextItem>, String> {
         Ocr::text(self, img)
+    }
+
+    fn text_full(
+        &mut self,
+        img: &RgbImage,
+        max_new: usize,
+        hint: &[Rect],
+    ) -> Result<(Vec<TextItem>, Vec<Rect>), String> {
+        self.text_full(img, max_new, hint)
     }
 
     fn last_ms(&self) -> (f64, f64) {
@@ -72,11 +99,24 @@ fn nonce16() -> Result<[u8; 16], String> {
 /// Sendet eine Text-Nachricht; `false` bei Abriss.
 /// Texte haben Vorfahrt: Sie gehen sofort raus und buchen nur
 /// (`Pacer::note`) — die nächste Kachel trägt ihre Schuld ab.
-fn send_text(wr: &mut TcpStream, pacer: &mut Pacer, m: &ServerMsg, text_bytes: &mut usize) -> bool {
-    match write_msg(wr, m) {
+/// Der Lock ist nur eine kurze Abrechnung (kein Schlaf): Text-Latenz hängt
+/// nie von der Kachelgröße ab — Kodieren + Dosieren läuft im Tile-Thread.
+fn send_text(
+    wr: &Mutex<TcpStream>,
+    pacer: &Mutex<Pacer>,
+    m: &ServerMsg,
+    text_bytes: &mut usize,
+) -> bool {
+    match write_msg(
+        &mut *wr.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
+        m,
+    ) {
         Ok(n) => {
             *text_bytes += n;
-            pacer.note(n);
+            pacer
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .note(n);
             true
         }
         Err(_) => false,
@@ -140,9 +180,12 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
     if version != PROTO_VERSION {
         return Err(format!("Protokoll {version}, erwartet {PROTO_VERSION}"));
     }
-    let mut pacer = Pacer::new(cfg.budget);
+    let pacer = Arc::new(Mutex::new(Pacer::new(cfg.budget)));
     let n = write_msg(&mut wr, &ServerMsg::Hello).map_err(|e| e.to_string())?;
-    pacer.note(n);
+    pacer
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .note(n);
 
     // Eingaben laufen in eigenem Thread, damit Tippen nie auf AV1 wartet.
     // Der Reader läuft IMMER (ohne Injektor als Drain): Sein Ende ist das
@@ -153,6 +196,23 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
     rd.set_read_timeout(Some(Duration::from_millis(200)))
         .map_err(|e| e.to_string())?;
     let stop = Arc::new(AtomicBool::new(false));
+    // Kachel-Thread (Latest-wins): Kodieren (rav1e) + Budget-Dosierung
+    // blockieren nie die Text-Schleife — sonst stünde jeder Move erst nach
+    // der großen Kachel an. `slot` trägt die neueste Kachel, `kick` weckt.
+    // Ein Schreiber für beide Threads: Texte (Hauptschleife) und Kacheln
+    // (Tile-Thread) teilen sich den Socket — ohne Lock würden sich große
+    // Tile-`send()`s mit Text-`send()`s auf Byte-Ebene verzahnen und der
+    // Client sähe Protokoll-Müll (Session-Abriss, erlebt im Emulator-E2E).
+    let writer = Arc::new(Mutex::new(wr));
+    let tile_slot = Arc::new(Mutex::new(None::<TileJob>));
+    let (kick_tx, kick_rx) = channel::<()>();
+    let tile_thread = spawn_tile_writer(
+        writer.clone(),
+        kick_rx,
+        tile_slot.clone(),
+        pacer.clone(),
+        stop.clone(),
+    );
     let input = match inj {
         Some(inj) => {
             let (tx, rx) = sync_channel::<ClientMsg>(INPUT_CAP);
@@ -172,6 +232,7 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
     };
 
     let mut prev: Option<RgbImage> = None;
+    let mut prev_raw: Option<RgbImage> = None;
     let mut stabilizer = Stabilizer::new();
     let mut sent_texts: Vec<TextItem> = Vec::new();
     let mut frames: u64 = 0;
@@ -189,14 +250,17 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
             Ok(i) => i,
             Err(e) => break Err(e),
         };
-        let texts = match ocr.text(&img) {
+        // Hint: zuletzt gesendete Rechtecke — beim Verschieben wird
+        // sichtbarer Text im Budget zuerst erkannt.
+        let hint: Vec<Rect> = sent_texts.iter().map(|t| t.rect).collect();
+        let (texts, seen) = match ocr.text_full(&img, REC_BUDGET, &hint) {
             Ok(t) => t,
             Err(e) => break Err(e),
         };
         // Text als Delta (v4): 1. Frame ClearText + NewText je Zeile,
         // danach RemoveText + NewText (Inhalt neu) + MoveText (nur Box neu).
         let mut text_bytes = 0;
-        let delta = stabilizer.step(texts, frames == 1);
+        let delta = stabilizer.step(texts, &seen, frames == 1, Instant::now());
         // Maske aus gesendeten Rechtecken: Stabilizer-IDs → aktuelle Boxen.
         for m in &delta {
             match m {
@@ -220,7 +284,7 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
         if !delta.is_empty() {
             let mut ok = true;
             for m in &delta {
-                ok = send_text(&mut wr, &mut pacer, m, &mut text_bytes);
+                ok = send_text(&writer, &pacer, m, &mut text_bytes);
                 if !ok {
                     break;
                 }
@@ -229,39 +293,44 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
                 break Ok(());
             }
         }
+        // Bewegt? Roh-Vergleich (Maske aus alten Rechtecken würde sonst
+        // Geisterlöcher über den neuen Inhalt malen) → rohe Kachel, Text
+        // folgt über OCR nach. Sonst maskierter Pfad wie bisher.
+        let frame_px = img.width() as f32 * img.height() as f32;
+        let raw_dirty = dirty_bbox(prev_raw.as_ref(), &img);
+        // Erster Frame (kein Vorbild): Vollbild-Kachel, Maske wie sonst auch.
+        let big_move = prev_raw.is_some()
+            && raw_dirty
+                .is_some_and(|r| f32::from(r.w) * f32::from(r.h) / frame_px >= BIG_CHANGE_FRAC);
         let t = Instant::now();
         let mut masked = img.clone();
-        for tm in &cur {
-            let m = pad_rect(tm.rect, MASK_PAD, masked.width(), masked.height());
-            fill_rect(&mut masked, m, tm.bg);
+        if !big_move {
+            for tm in &cur {
+                let m = pad_rect(tm.rect, MASK_PAD, masked.width(), masked.height());
+                fill_rect(&mut masked, m, tm.bg);
+            }
         }
         let dirty = dirty_bbox(prev.as_ref(), &masked);
         let _mask_diff_ms = ms(t);
-        // Genau ein AV1-Bild pro Frame (ein Header-Overhead statt N×).
+        // Genau eine Kachel-Anfrage pro Frame an den Tile-Thread (eigener
+        // Socket, eigenes Pacing): Kodieren + Dosieren halten die
+        // Text-Schleife nie auf. Toter Thread → Kacheln entfallen still.
         let mut tiles = 0;
-        if let Some(r) = dirty {
+        if let Some(r) = dirty
+            && !tile_thread.is_finished()
+        {
             let rgb = crop_rgb(&masked, r);
-            let data = match encode_rgb(&rgb, r.w as usize, r.h as usize, cfg.quantizer) {
-                Ok(d) => d,
-                Err(e) => break Err(e),
-            };
-            // Pacing: Kachel auf Budget-Rate dosieren, damit der Kanal
-            // einen gleichmäßigen Rinnsal statt Burst-Pause sieht. In
-            // Scheiben, damit ein Disconnect die Session nicht keilt.
-            if !wait_paced(&mut pacer, tile_wire_len(data.len()), &|| {
-                input.is_finished()
-            }) {
-                break Ok(());
-            }
-            let msg = ServerMsg::Tile {
+            *tile_slot
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(TileJob {
                 x: r.x,
                 y: r.y,
-                data,
-            };
-            match write_msg(&mut wr, &msg) {
-                Ok(_) => {}
-                Err(_) => break Ok(()),
-            }
+                w: r.w as usize,
+                h: r.h as usize,
+                rgb,
+                quantizer: cfg.quantizer,
+            });
+            let _ = kick_tx.send(());
             tiles = 1;
         }
         if cfg.verbose {
@@ -273,14 +342,87 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
             );
         }
         prev = Some(masked);
+        prev_raw = Some(img);
         // Feste Taktung: nur die Restzeit schlafen, sonst kostet jede
         // Pipeline-Phase (OCR+AV1) zusätzlich volle 100 ms (~6 statt 10 fps).
         std::thread::sleep(FRAME_GAP.saturating_sub(frame_start.elapsed()));
     };
 
     stop.store(true, Ordering::Relaxed);
+    drop(kick_tx);
     let _ = input.join();
+    let _ = tile_thread.join();
     result
+}
+
+/// Eine zu kodierende Kachel (Roh-Crop aus der Hauptschleife).
+struct TileJob {
+    x: u16,
+    y: u16,
+    w: usize,
+    h: usize,
+    rgb: Vec<u8>,
+    quantizer: usize,
+}
+
+/// Kodiert + dosiert + sendet Kacheln auf eigenem Socket, Latest-wins:
+/// Überholte Kacheln verfallen (Slot + Kick-Drain), die Text-Schleife läuft
+/// unbehindert weiter. Der Pacer-Lock deckt nur die Rechenfunktion ab —
+/// geschlafen wird ohne Lock, Texte buchen jederzeit. Ende bei `stop`,
+/// vollem Kanal-Abriss oder geschlossenem `kick` (Session-Ende).
+fn spawn_tile_writer(
+    wr: Arc<Mutex<TcpStream>>,
+    kick_rx: std::sync::mpsc::Receiver<()>,
+    slot: Arc<Mutex<Option<TileJob>>>,
+    pacer: Arc<Mutex<Pacer>>,
+    stop: Arc<AtomicBool>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        for _ in &kick_rx {
+            while kick_rx.try_recv().is_ok() {}
+            let job = slot
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            let Some(job) = job else { continue };
+            let data = match encode_rgb(&job.rgb, job.w, job.h, job.quantizer) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("[tile] {e}");
+                    return;
+                }
+            };
+            let wait = pacer
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .pace(tile_wire_len(data.len()));
+            let mut left = wait;
+            while !left.is_zero() {
+                if stop.load(Ordering::Relaxed) {
+                    return;
+                }
+                let s = left.min(Duration::from_millis(50));
+                std::thread::sleep(s);
+                left -= s;
+            }
+            if stop.load(Ordering::Relaxed) {
+                return;
+            }
+            let msg = ServerMsg::Tile {
+                x: job.x,
+                y: job.y,
+                data,
+            };
+            if write_msg(
+                &mut *wr.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
+                &msg,
+            )
+            .is_err()
+            {
+                return;
+            }
+        }
+    })
 }
 
 /// Liest Client-Nachrichten bis EOF/Stop und ruft `on_msg` je Nachricht.

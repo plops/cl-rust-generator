@@ -3,18 +3,24 @@
 //! PP-OCR liefert pro Frame leicht andere Ergebnisse (Box ±wenige Pixel,
 //! Farben ±wenige Stufen, gelegentlich ein falsches Zeichen, kurzes
 //! Aussetzen). Ohne Dämpfung erzeugt das `NewText`/`RemoveText`-Spam.
-//! Verfahren (10 fps): Normalisieren → Ähnlichkeits-Matching → Debounce
-//! (neu/geändert nach 2 Frames, weg nach 5) → Move-Totband.
+//! Verfahren: Normalisieren → Ähnlichkeits-Matching → zeitbasiertes Debounce
+//! (neu/geändert nach 250 ms gleichem Befund, weg nach 700 ms) →
+//! Move-Totband. Zeit- statt framebasiert: Die Frame-Zeit schwankt je nach
+//! OCR-Last zwischen 0,1 und 2 s — frame-gezählt würde Verschieben
+//! sekundenlang Geistertext stehen lassen. Dazu das Still-da-Urteil:
+//! Eine bekannte Zeile, deren Box noch detektiert wird (Erkennung hängt
+//! im Budget hinterher), gilt als anwesend statt als verschwunden.
 //! Rein funktional über Frame-Folgen, ohne Display/Modelle testbar.
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use lbw_common::{Rect, ServerMsg, TextItem};
 
-/// Frames mit gleichem Befund, bevor Neu/Änderung gesendet wird.
-const CONFIRM_FRAMES: u8 = 2;
-/// Frames ohne Befund, bevor per `RemoveText` gelöscht wird.
-const MISSING_FRAMES: u8 = 5;
+/// Gleicher Befund über diese Zeit, bevor Neu/Änderung gesendet wird.
+const CONFIRM_AFTER: Duration = Duration::from_millis(250);
+/// Ohne Befund (und ohne Box) über diese Zeit, bevor gelöscht wird.
+const REMOVE_AFTER: Duration = Duration::from_millis(700);
 /// Mindest-Ähnlichkeit für ein ID-Match (Text trägt die Identität).
 const MATCH_SIM: f32 = 0.8;
 /// Darunter gilt eine Zeile als verschwunden — außer die Box sitzt noch
@@ -106,10 +112,20 @@ fn cost(c: &Norm, p: &Norm) -> f32 {
 struct Line {
     /// Zuletzt *gesendeter* Inhalt (Referenz für Deltas).
     sent: TextItem,
-    /// Ausstehender neuer Inhalt + Bestätigungszähler.
-    pending: Option<(TextItem, u8)>,
-    /// Frames ohne Befund.
-    missing: u8,
+    /// Ausstehender neuer Inhalt + Zeitpunkt des ersten gleichen Befunds.
+    pending: Option<(TextItem, Instant)>,
+    /// Seit wann ohne Befund (`None` = anwesend).
+    missing_since: Option<Instant>,
+}
+
+/// Box noch da? Mittelpunkt der gesendeten Box liegt in einer detektierten
+/// Box (Erkennung hängt im Budget hinterher — kein Verschwinden).
+fn still_there(sent: &TextItem, seen: &[Rect]) -> bool {
+    let (cx, cy) = center(sent.rect);
+    seen.iter().any(|b| {
+        let (x0, y0) = (f32::from(b.x), f32::from(b.y));
+        cx >= x0 && cx <= x0 + f32::from(b.w) && cy >= y0 && cy <= y0 + f32::from(b.h)
+    })
 }
 
 /// Anti-Flacker-Zustand über Frames hinweg.
@@ -130,7 +146,15 @@ impl Stabilizer {
 
     /// Verarbeitet einen OCR-Frame, liefert das sendefertige Delta.
     /// Erster Aufruf je Verbindung: `ClearText` + alle Zeilen als `NewText`.
-    pub fn step(&mut self, cur: Vec<TextItem>, first: bool) -> Vec<ServerMsg> {
+    /// `seen` sind alle Detektions-Boxen (auch unerkannte) fürs
+    /// Still-da-Urteil; `now` steuert das zeitbasierte Debounce.
+    pub fn step(
+        &mut self,
+        cur: Vec<TextItem>,
+        seen_boxes: &[Rect],
+        first: bool,
+        now: Instant,
+    ) -> Vec<ServerMsg> {
         let cur: Vec<(TextItem, Norm)> = cur
             .into_iter()
             .map(|t| {
@@ -176,7 +200,7 @@ impl Stabilizer {
                 Some(id) => {
                     seen.insert(id, true);
                     let line = self.lines.get_mut(&id).unwrap();
-                    line.missing = 0;
+                    line.missing_since = None;
                     let pn = norm(&line.sent);
                     let sim = similarity(&n.text, &pn.text);
                     let (cx, cy) = center(n.rect);
@@ -189,15 +213,14 @@ impl Stabilizer {
                         // Identisch (nach Normalisierung): Stille.
                         line.pending = None;
                     } else if same {
-                        // Kandidat für Neu/Änderung/Move: 2 Frames bestätigen.
+                        // Kandidat für Neu/Änderung/Move: erst nach
+                        // CONFIRM_AFTER gleichem Befund senden.
                         t.id = id;
-                        let same_pending = line.pending.as_ref().is_some_and(|(p, _)| norm(p) == n);
-                        let cnt = if same_pending {
-                            line.pending.as_ref().unwrap().1 + 1
-                        } else {
-                            1
+                        let since = match &line.pending {
+                            Some((p, since)) if norm(p) == n => *since,
+                            _ => now,
                         };
-                        if cnt >= CONFIRM_FRAMES {
+                        if now.duration_since(since) >= CONFIRM_AFTER {
                             line.pending = None;
                             if norm_text(&n.text) == norm_text(&pn.text)
                                 && n.fg == pn.fg
@@ -220,7 +243,7 @@ impl Stabilizer {
                                 line.sent = t;
                             }
                         } else {
-                            line.pending = Some((t, cnt));
+                            line.pending = Some((t, since));
                         }
                     } else {
                         // Im Hysterese-Band: alten Inhalt behalten, kein Spam.
@@ -239,32 +262,38 @@ impl Stabilizer {
                             Line {
                                 sent: t,
                                 pending: None,
-                                missing: 0,
+                                missing_since: None,
                             },
                         );
                     } else {
-                        // Neue Zeile: erst beim 2. gleichen Befund senden.
+                        // Neue Zeile: erst nach CONFIRM_AFTER senden.
                         self.lines.insert(
                             id,
                             Line {
                                 sent: t.clone(),
-                                pending: Some((t, 1)),
-                                missing: 0,
+                                pending: Some((t, now)),
+                                missing_since: None,
                             },
                         );
                     }
                 }
             }
         }
-        // Verschwundene erst nach 5 Frames löschen.
+        // Verschwundene erst nach REMOVE_AFTER löschen — außer die Box ist
+        // noch detektiert (Still-da: Erkennung hängt im Budget hinterher).
         let mut gone = Vec::new();
         for (id, line) in self.lines.iter_mut() {
             if seen.get(id).is_some_and(|s| *s) {
                 continue;
             }
-            line.missing += 1;
+            if still_there(&line.sent, seen_boxes) {
+                line.missing_since = None;
+                line.pending = None;
+                continue;
+            }
+            let since = *line.missing_since.get_or_insert(now);
             line.pending = None;
-            if line.missing >= MISSING_FRAMES {
+            if now.duration_since(since) >= REMOVE_AFTER {
                 gone.push(*id);
             }
         }
@@ -293,14 +322,25 @@ mod tests {
         }
     }
 
-    fn step_texts(s: &mut Stabilizer, items: Vec<TextItem>, first: bool) -> Vec<ServerMsg> {
-        s.step(items, first)
+    fn t0() -> Instant {
+        Instant::now()
+    }
+
+    fn step_texts(
+        s: &mut Stabilizer,
+        items: Vec<TextItem>,
+        seen: &[Rect],
+        first: bool,
+        now: Instant,
+    ) -> Vec<ServerMsg> {
+        s.step(items, seen, first, now)
     }
 
     #[test]
     fn jitter_produces_no_messages_after_first() {
         let mut s = Stabilizer::new();
-        let first = step_texts(&mut s, vec![item(10, 20, "Hallo Welt")], true);
+        let t = t0();
+        let first = step_texts(&mut s, vec![item(10, 20, "Hallo Welt")], &[], true, t);
         assert!(matches!(first[0], ServerMsg::ClearText));
         assert_eq!(first.len(), 2);
         // Jitter: ±3 px, ±10 Farben, abwechselnd 1 falsches Zeichen.
@@ -318,9 +358,15 @@ mod tests {
             vec![item(12, 21, "Hallo Welt")],
             vec![item(10, 20, "Hallo Welt")],
         ];
-        for f in frames {
+        for (i, f) in frames.into_iter().enumerate() {
             assert_eq!(
-                step_texts(&mut s, f, false),
+                step_texts(
+                    &mut s,
+                    f,
+                    &[],
+                    false,
+                    t + Duration::from_millis(i as u64 * 100)
+                ),
                 vec![],
                 "Jitter muss still sein"
             );
@@ -328,13 +374,23 @@ mod tests {
     }
 
     #[test]
-    fn typing_updates_after_two_frames() {
+    fn typing_updates_after_confirm_time() {
         let mut s = Stabilizer::new();
-        step_texts(&mut s, vec![item(10, 20, "a")], true);
-        // 1. Frame mit getipptem Zeichen: noch nichts.
-        assert_eq!(step_texts(&mut s, vec![item(10, 20, "ab")], false), vec![]);
-        // 2. gleicher Frame: Update.
-        let d = step_texts(&mut s, vec![item(10, 20, "ab")], false);
+        let t = t0();
+        step_texts(&mut s, vec![item(10, 20, "a")], &[], true, t);
+        // Frisch getippt: noch nichts.
+        assert_eq!(
+            step_texts(&mut s, vec![item(10, 20, "ab")], &[], false, t),
+            vec![]
+        );
+        // Gleicher Befund nach 300 ms: Update.
+        let d = step_texts(
+            &mut s,
+            vec![item(10, 20, "ab")],
+            &[],
+            false,
+            t + Duration::from_millis(300),
+        );
         assert_eq!(d.len(), 1);
         match &d[0] {
             ServerMsg::NewText(t) => assert_eq!(t.text, "ab"),
@@ -345,6 +401,7 @@ mod tests {
     #[test]
     fn scroll_sends_only_movetext() {
         let mut s = Stabilizer::new();
+        let t = t0();
         step_texts(
             &mut s,
             vec![
@@ -352,21 +409,26 @@ mod tests {
                 item(10, 40, "zwei"),
                 item(10, 60, "drei"),
             ],
+            &[],
             true,
+            t,
         );
-        // Alle Zeilen −40 px (Scroll): nur MoveText, keine Strings neu.
+        // Alle Zeilen −20 px (Scroll): nur MoveText, keine Strings neu.
         let d = step_texts(
             &mut s,
             vec![item(10, 20, "zwei"), item(10, 40, "drei")],
+            &[],
             false,
+            t,
         );
-        // Neue IDs brauchen 2 Frames — hier zählen nur Moves bestätigter IDs.
-        // Erster Scroll-Frame: noch nichts (Debounce), zweiter: Moves.
+        // Erster Scroll-Frame: noch nichts (Debounce), +300 ms: Moves.
         assert_eq!(d, vec![]);
         let d = step_texts(
             &mut s,
             vec![item(10, 20, "zwei"), item(10, 40, "drei")],
+            &[],
             false,
+            t + Duration::from_millis(300),
         );
         assert_eq!(d.len(), 2);
         for m in &d {
@@ -379,37 +441,75 @@ mod tests {
     }
 
     #[test]
-    fn missing_two_frames_keeps_missing_six_removes() {
+    fn missing_briefly_keeps_after_timeout_removes() {
         let mut s = Stabilizer::new();
+        let t = t0();
         step_texts(
             &mut s,
             vec![item(10, 20, "bleibt"), item(10, 40, "geht")],
+            &[],
             true,
+            t,
         );
-        // 2 Frames ohne "geht": kein RemoveText.
-        for _ in 0..2 {
-            let d = step_texts(&mut s, vec![item(10, 20, "bleibt")], false);
-            assert!(!d.iter().any(|m| matches!(m, ServerMsg::RemoveText(_))));
-        }
-        // Bis Frame 6: genau ein RemoveText.
-        let mut rms = 0;
-        for _ in 2..6 {
-            let d = step_texts(&mut s, vec![item(10, 20, "bleibt")], false);
-            rms += d
-                .iter()
+        // 400 ms ohne "geht": kein RemoveText.
+        let d = step_texts(
+            &mut s,
+            vec![item(10, 20, "bleibt")],
+            &[],
+            false,
+            t + Duration::from_millis(400),
+        );
+        assert!(!d.iter().any(|m| matches!(m, ServerMsg::RemoveText(_))));
+        // Ab 700 ms ohne Befund (hier: +1100 ms): genau ein RemoveText.
+        let d = step_texts(
+            &mut s,
+            vec![item(10, 20, "bleibt")],
+            &[],
+            false,
+            t + Duration::from_millis(1200),
+        );
+        assert_eq!(
+            d.iter()
                 .filter(|m| matches!(m, ServerMsg::RemoveText(_)))
-                .count();
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn box_still_seen_holds_line_despite_missing_text() {
+        let mut s = Stabilizer::new();
+        let t = t0();
+        step_texts(&mut s, vec![item(10, 40, "geht")], &[], true, t);
+        // Erkennung hängt hinterher (Budget), Box aber detektiert:
+        // selbst nach 2 s kein RemoveText, kein Re-New.
+        let seen = [Rect::new(8, 38, 104, 20)];
+        for ms in [500, 1000, 2000] {
+            let d = step_texts(&mut s, vec![], &seen, false, t + Duration::from_millis(ms));
+            assert_eq!(d, vec![], "Still-da muss halten ({ms} ms)");
         }
-        assert_eq!(rms, 1);
+        // Box wirklich weg → 700 ms später genau ein RemoveText.
+        let d = step_texts(&mut s, vec![], &[], false, t + Duration::from_millis(2700));
+        assert!(!d.iter().any(|m| matches!(m, ServerMsg::RemoveText(_))));
+        let d = step_texts(&mut s, vec![], &[], false, t + Duration::from_millis(3400));
+        assert_eq!(
+            d.iter()
+                .filter(|m| matches!(m, ServerMsg::RemoveText(_)))
+                .count(),
+            1
+        );
     }
 
     #[test]
     fn duplicates_match_as_multiset() {
         let mut s = Stabilizer::new();
+        let t = t0();
         let d = step_texts(
             &mut s,
             vec![item(10, 20, "x"), item(10, 40, "x"), item(10, 60, "x")],
+            &[],
             true,
+            t,
         );
         assert_eq!(
             d.iter()
@@ -421,7 +521,9 @@ mod tests {
         let d = step_texts(
             &mut s,
             vec![item(10, 20, "x"), item(10, 40, "x"), item(10, 60, "x")],
+            &[],
             false,
+            t + Duration::from_millis(100),
         );
         assert_eq!(d, vec![]);
     }

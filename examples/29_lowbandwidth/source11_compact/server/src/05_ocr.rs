@@ -36,6 +36,14 @@ use crate::tiles::pad_rect;
 const REC_PAD: u16 = 4;
 /// Mindest-Konfidenz, sonst bleibt die Zeile Bildinhalt.
 const MIN_TEXT_CONF: f32 = 0.5;
+/// Einzelzeichen brauchen deutlich mehr Konfidenz: Der Detektor liefert auf
+/// Karten/Icons viele Kleinst-Fragmente (rotierte Labels, Punkte), deren
+/// Ratetext den Client zumüllen würde — echte UI-Zeichen („X“, „+“) liest das
+/// Netz dagegen mit ≥ 0.9.
+const MIN_SINGLE_CONF: f32 = 0.75;
+/// Max. ungecachte Erkennungen je Frame (Rechenzeit-Deckel während
+/// Bewegung; der Rest kommt in Folgeframes — gecachte Zeilen sind frei).
+pub const REC_BUDGET: usize = 32;
 /// Max. erkannte Zeilen je Frame (Rechenzeit-Deckel).
 const MAX_LINES: usize = 160;
 /// Max. Cache-Einträge (danach alles verwerfen — einfache Politik).
@@ -104,6 +112,88 @@ impl TextCache {
     pub fn stats(&self) -> (u64, u64) {
         (self.hits, self.lookups)
     }
+}
+
+/// Behält die Zeile (`true`) oder lässt sie Bildinhalt bleiben.
+/// Einzelzeichen nur bei hoher Konfidenz (Kleinst-Fragmente filtern).
+#[must_use]
+pub fn keep_line(text: &str, conf: f32) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+    if text.chars().count() <= 1 {
+        conf >= MIN_SINGLE_CONF
+    } else {
+        conf >= MIN_TEXT_CONF
+    }
+}
+
+/// Max. Breite einer verschmolzenen Zeile: Echte Titel/Labels passen
+/// (Titelzeile ~240 px), bandbreite Brücken-Ketten (Karten-Overlays, die per
+/// hoher Box Bänder verbinden) würden sonst ganze Reihen zu einer
+/// Müll-Zeile verketten.
+const MERGE_MAX_W: u16 = 320;
+
+/// Verschmilzt Detektor-Fragmente derselben Zeile („Directi“ + „ons“):
+/// gleiche Grundlinie (Mitten-Differenz ≤ halbe Mindesthöhe), Lücke ≤ halbe
+/// Mindesthöhe, ähnliche Höhe (keine Band-Brücken über hohe Boxen) und
+/// Gesamtbreite ≤ [`MERGE_MAX_W`]. Spalten/Tabs (Lücken ≫ Zeilenhöhe)
+/// bleiben getrennt. Fixpunkt-Schleife, damit Ketten („Ca“ + „eck“ + „.“)
+/// ganz schließen — die Breiten- und Höhen-Bremse begrenzt den Schaden.
+#[must_use]
+pub fn merge_rows(mut boxes: Vec<Rect>) -> Vec<Rect> {
+    // Band-Ordnung wie der Detektor: Zeilenfragmente liegen benachbart.
+    boxes.sort_by_key(|b| (b.y / 16, b.x));
+    loop {
+        let mut out: Vec<Rect> = Vec::with_capacity(boxes.len());
+        let mut changed = false;
+        for b in boxes {
+            let mut merged = false;
+            if let Some(last) = out.last_mut() {
+                let (hmin, hmax) = (
+                    f32::from(last.h.min(b.h).max(1)),
+                    f32::from(last.h.max(b.h).max(1)),
+                );
+                let cy = f32::from(last.y) + f32::from(last.h) / 2.0;
+                let by = f32::from(b.y) + f32::from(b.h) / 2.0;
+                let gap = (f32::from(b.x) - f32::from(last.x + last.w)).max(0.0);
+                let x2 = (last.x + last.w).max(b.x + b.w);
+                if (cy - by).abs() <= hmin / 3.0
+                    && gap <= hmin / 2.0
+                    && hmax <= 2.5 * hmin
+                    && x2 - last.x.min(b.x) <= MERGE_MAX_W
+                {
+                    let y2 = (last.y + last.h).max(b.y + b.h);
+                    last.x = last.x.min(b.x);
+                    last.y = last.y.min(b.y);
+                    last.w = x2 - last.x;
+                    last.h = y2 - last.y;
+                    changed = true;
+                    merged = true;
+                }
+            }
+            if !merged {
+                out.push(b);
+            }
+        }
+        boxes = out;
+        if !changed {
+            break;
+        }
+    }
+    boxes.sort_by_key(|b| (b.y / 16, b.x));
+    boxes
+}
+
+/// Schnittfläche zweier Rechtecke in px² (0 ohne Überlappung).
+fn overlap_area(a: Rect, b: Rect) -> i32 {
+    let (ax, ay) = (u32::from(a.x), u32::from(a.y));
+    let (bx, by) = (u32::from(b.x), u32::from(b.y));
+    let x0 = ax.max(bx);
+    let y0 = ay.max(by);
+    let x1 = (ax + u32::from(a.w)).min(bx + u32::from(b.w));
+    let y1 = (ay + u32::from(a.h)).min(by + u32::from(b.h));
+    (x1.saturating_sub(x0) * y1.saturating_sub(y0)) as i32
 }
 
 fn dist2(a: [u8; 3], b: [u8; 3]) -> u32 {
@@ -232,33 +322,69 @@ impl Ocr {
     /// Das Bild wird für die Detektion auf 32er-Vielfache gepaddet
     /// (1280×720 → 1280×736); Erkennung und Farben laufen auf dem Original.
     pub fn text(&mut self, img: &RgbImage) -> Result<Vec<TextItem>, String> {
+        Ok(self.text_full(img, usize::MAX, &[])?.0)
+    }
+
+    /// Wie [`Ocr::text`], deckelt aber teure Neuerkennungen auf `max_new`
+    /// je Aufruf (der Rest kommt in Folgeframes; Cache-Treffer sind frei).
+    /// Misses nahe `hint` (zuletzt gesendete Rechtecke) laufen zuerst —
+    /// beim Verschieben konvergiert sichtbarer Text zuerst. Liefert
+    /// zusätzlich alle Detektions-Boxen (auch unerkannte) fürs
+    /// Still-da-Urteil des Stabilisators.
+    pub fn text_full(
+        &mut self,
+        img: &RgbImage,
+        max_new: usize,
+        hint: &[Rect],
+    ) -> Result<(Vec<TextItem>, Vec<Rect>), String> {
         let mut out = Vec::new();
         let (padded, ow, oh) = pad_to_32(img);
         let t = std::time::Instant::now();
         let boxes = self.det.detect(&padded)?;
         let det_ms = t.elapsed().as_secs_f64() * 1000.0;
         let t = std::time::Instant::now();
+        let mut rects: Vec<Rect> = Vec::with_capacity(boxes.len());
+        let mut misses: Vec<usize> = Vec::new();
         for r in boxes.into_iter().take(MAX_LINES) {
             let Some(r) = clip_to(r, ow, oh) else {
                 continue;
             };
-            let r = pad_rect(r, REC_PAD, ow, oh);
-            let key = hash_rect(img, r);
+            rects.push(r);
+        }
+        let merged = merge_rows(rects);
+        let mut rects: Vec<Rect> = Vec::with_capacity(merged.len());
+        for r in merged {
+            rects.push(pad_rect(r, REC_PAD, ow, oh));
+        }
+        for (i, r) in rects.iter().enumerate() {
+            let key = hash_rect(img, *r);
             if let Some(c) = self.cache.get(key) {
-                if !c.text.is_empty() && c.conf >= MIN_TEXT_CONF {
+                if keep_line(&c.text, c.conf) && !c.text.is_empty() {
                     out.push(TextItem {
-                        id: 0, // vergibt die Session (`09_textids`)
-                        rect: r,
+                        id: 0, // vergibt der Stabilisator (Inhalts-Matching)
+                        rect: *r,
                         fg: c.fg,
                         bg: c.bg,
                         text: c.text,
                     });
                 }
-                continue;
+            } else {
+                misses.push(i);
             }
+        }
+        // Priorität: erst Nähe zu zuletzt Gesendetem, dann Fläche.
+        misses.sort_by_key(|&i| {
+            let r = rects[i];
+            let area = -(r.w as i32 * r.h as i32);
+            let ov = hint.iter().map(|h| overlap_area(r, *h)).max().unwrap_or(0);
+            (ov == 0, area)
+        });
+        for &i in misses.iter().take(max_new) {
+            let r = rects[i];
+            let key = hash_rect(img, r);
             let (text, conf) = self.rec.recognize(img, r)?;
             let text = text.trim().to_owned();
-            if text.is_empty() || conf < MIN_TEXT_CONF {
+            if !keep_line(&text, conf) {
                 self.cache.insert(
                     key,
                     CachedLine {
@@ -281,7 +407,7 @@ impl Ocr {
                 },
             );
             out.push(TextItem {
-                id: 0, // vergibt die Session (`09_textids`, Positions-Matching)
+                id: 0, // vergibt der Stabilisator (Inhalts-Matching)
                 rect: r,
                 fg,
                 bg,
@@ -289,7 +415,7 @@ impl Ocr {
             });
         }
         self.last_ms = (det_ms, t.elapsed().as_secs_f64() * 1000.0);
-        Ok(out)
+        Ok((out, rects))
     }
 }
 
@@ -322,6 +448,78 @@ mod tests {
         );
         // Andere Maße → anderer Schlüssel (steht im Key).
         assert_ne!(hash_rect(&img, r), hash_rect(&img, Rect::new(4, 4, 17, 16)));
+    }
+
+    #[test]
+    fn merge_rows_joins_fragments_not_columns() {
+        // „Directi“ + „ons“: gleiche Zeile, kleine Lücke → eine Box.
+        let b = merge_rows(vec![
+            Rect::new(437, 560, 60, 22),
+            Rect::new(500, 561, 33, 21),
+        ]);
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0].x, 437);
+        assert_eq!(b[0].x + b[0].w, 533);
+        // Tabs: gleiche Zeile, große Lücke → getrennt.
+        let b = merge_rows(vec![
+            Rect::new(661, 455, 85, 21),
+            Rect::new(802, 454, 67, 23),
+        ]);
+        assert_eq!(b.len(), 2);
+        // Verschiedene Zeilen → getrennt (auch bei x-Überlappung).
+        let b = merge_rows(vec![
+            Rect::new(140, 199, 57, 21),
+            Rect::new(140, 247, 57, 21),
+        ]);
+        assert_eq!(b.len(), 2);
+        // Kette schließt ganz („Ca“ + „eck“ + Rest).
+        let b = merge_rows(vec![
+            Rect::new(1244, 27, 33, 23),
+            Rect::new(1250, 30, 20, 20),
+            Rect::new(1272, 28, 8, 22),
+        ]);
+        assert_eq!(b.len(), 1);
+        // Hohe Box brückt keine Bänder (Karten-Overlay + Fragment).
+        let b = merge_rows(vec![
+            Rect::new(1233, 246, 35, 46),
+            Rect::new(27, 256, 23, 17),
+        ]);
+        assert_eq!(b.len(), 2);
+        // Breiten-Bremse: keine reihenbreiten Müll-Zeilen.
+        let b = merge_rows(vec![
+            Rect::new(21, 689, 42, 12),
+            Rect::new(70, 689, 290, 12),
+            Rect::new(367, 689, 290, 12),
+        ]);
+        assert!(b.len() >= 2);
+        assert!(b.iter().all(|r| r.w <= 320));
+    }
+
+    #[test]
+    fn keep_line_gates_singles_harder() {
+        assert!(keep_line("Hallo", 0.5));
+        assert!(!keep_line("Hallo", 0.49));
+        assert!(!keep_line("", 1.0));
+        // Einzelzeichen: erst ab 0.75 (Karten-Fragmente raus, UI-„X“ drin).
+        assert!(!keep_line("三", 0.6));
+        assert!(keep_line("X", 0.9));
+        assert!(!keep_line("X", 0.7));
+    }
+
+    #[test]
+    fn overlap_area_measures_intersection() {
+        assert_eq!(
+            overlap_area(Rect::new(0, 0, 10, 10), Rect::new(5, 5, 10, 10)),
+            25
+        );
+        assert_eq!(
+            overlap_area(Rect::new(0, 0, 10, 10), Rect::new(10, 0, 10, 10)),
+            0
+        );
+        assert_eq!(
+            overlap_area(Rect::new(0, 0, 10, 10), Rect::new(20, 20, 5, 5)),
+            0
+        );
     }
 
     #[test]
