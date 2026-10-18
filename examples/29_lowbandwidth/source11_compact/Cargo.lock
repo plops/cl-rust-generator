@@ -1742,6 +1742,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "enigo",
+ "fontdue",
  "getrandom 0.2.17",
  "image",
  "lbw-common",
