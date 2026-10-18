@@ -40,6 +40,9 @@ geschrieben werden. ich habe folgende anforderungen:
 * mache tests im dockercontainer mit der limitierten bandbreite und
   xvfb oder dem lokalen xserver auf dem host
 
+hier ist wie der docker container worin du laefst gestartet wurde:
+cl-cl-generator/example/05_dockerfile_meta/source01/examples/03_ai_env $ setup02_run.sh --gpu --host-kmsg --usb --source-isolation --docker-sock --x11 --graphics --host-network
+
 * bei der umsetzung arbeite in schritten mit subagenten, gib jedem
   agenten die notwendigen informationen, die er fuer die umsetzung
   braucht aber versuche den context klein zu halten. nutze auch
