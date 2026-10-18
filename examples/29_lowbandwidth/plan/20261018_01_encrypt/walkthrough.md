@@ -229,6 +229,11 @@ Drei Mechaniken gegen das Flackern — nur das Entfernen ist noch
   Text-Ähnlichkeit (Levenshtein) *und* Lage gepaart: ≥ 0,8 ähnlich
   matcht hart; sonst hält eine Hysterese (0,5–0,8 bei naher Box) den
   alten Inhalt, damit Tippjitter nicht als falsches Zeichen durchschlägt.
+  Die Hysterese ist aber kein Dauerzustand: Wiederholt sich derselbe
+  abweichende Befund dreimal in Folge, ist es neuer Inhalt auf derselben
+  ID und geht als `NewText` raus — sonst bliebe die ID stumm blockiert
+  (Tab-Wechsel auf ähnlich lautende Zeile, real erlebt mit
+  „Unterricht" gegen die Tableiste „Wetterbericht").
 - **Folgeframe-Bestätigung für Neu/Änderung, Zeit-Debounce nur für Weg
   (700 ms).** Neu oder geändert wird gesendet, sobald derselbe Befund in
   zwei aufeinanderfolgenden Frames steht — ein einzelner Flacker-Frame
@@ -238,11 +243,20 @@ Drei Mechaniken gegen das Flackern — nur das Entfernen ist noch
   Szenenwechsel) schwankt: Frame-gezählt hieß „5 Frames weg" im
   Bewegungsfall **8,5 s Geistertext** — exakt die gemeldete Beschwerde.
   Zeitbasiert schrumpft das auf 0,7 s, unabhängig vom Durchsatz.
-- **Still-da-Urteil.** Eine bekannte Zeile, deren *Box* noch detektiert
-  wird (die Erkennung hängt im Budget hinterher), gilt als anwesend —
-  kein vorschnelles `RemoveText` mit anschließendem Re-`NewText`.
+- **Still-da-Urteil mit Szenenwechsel-Ausnahme.** Eine bekannte Zeile,
+  deren *Box* noch detektiert wird (die Erkennung hängt im Budget
+  hinterher), gilt als anwesend — kein vorschnelles `RemoveText` mit
+  anschließendem Re-`NewText`. Ausnahme: Belegt anderslautender Text
+  ihre Box zur Hälfte oder mehr, steht dort wirklich neuer Inhalt
+  (Tab-Wechsel) und der Weg-Timer läuft — sonst hielte Still-da alte
+  Tabs ewig über neuem Inhalt fest (der gemeldete „Geistertext").
   Dazu das Move-Totband (6 px / 4 px Größenänderung), damit
   Subpixel-Jitter keine sinnfreien Moves erzeugt.
+- **Erstbestätigung neuer Zeilen.** Eine Zeile, die nach dem ersten Frame
+  neu auftaucht, bekommt beim zweiten gleichen Befund ihr `NewText`
+  (der Stabilisator merkt sich, ob je gesendet wurde). Zuvor versandete
+  sie in einem toten Zweig — das war der eigentliche
+  „neuer Text wird nicht erkannt"-Fehler.
 
 ## 7. Kacheln im Hintergrund: Text hat immer Vorfahrt
 

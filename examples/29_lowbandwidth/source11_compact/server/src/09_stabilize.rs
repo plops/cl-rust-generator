@@ -12,7 +12,7 @@
 //! plus Frame-Takt. Nur das Entfernen bleibt zeitbasiert, weil dort die
 //! Frame-Zeit je nach OCR-Last zwischen 0,1 und 2 s schwankt und
 //! frame-gezählt sekundenlang Geistertext stehen ließe.
-//! Dazu das Still-da-Urteil:
+//! Dazu das Still-da-Urteil mit Szenenwechsel-Ausnahme:
 //! Eine bekannte Zeile, deren Box noch detektiert wird (Erkennung hängt
 //! im Budget hinterher), gilt als anwesend statt als verschwunden.
 //! Rein funktional über Frame-Folgen, ohne Display/Modelle testbar.
@@ -118,8 +118,26 @@ struct Line {
     /// Ausstehender neuer Inhalt + Zahl der Wiederholungen in Folge
     /// (1 = in zwei aufeinanderfolgenden Frames gesehen = senden).
     pending: Option<(TextItem, u32)>,
+    /// Ging der aktuelle Inhalt je als `NewText` raus? Neue Zeilen werden
+    /// erst bestätigt und brauchen dann ein `NewText` (kein `MoveText`
+    /// für eine dem Client unbekannte ID).
+    live: bool,
     /// Seit wann ohne Befund (`None` = anwesend).
     missing_since: Option<Instant>,
+}
+
+/// Fläche eines Rechtecks in px².
+fn rect_area(r: Rect) -> i64 {
+    i64::from(r.w) * i64::from(r.h)
+}
+
+/// Überlappung zweier Boxen in px² (0 ohne Überlappung).
+fn overlap(a: Rect, b: Rect) -> i64 {
+    let x0 = u32::from(a.x).max(u32::from(b.x));
+    let y0 = u32::from(a.y).max(u32::from(b.y));
+    let x1 = (u32::from(a.x) + u32::from(a.w)).min(u32::from(b.x) + u32::from(b.w));
+    let y1 = (u32::from(a.y) + u32::from(a.h)).min(u32::from(b.y) + u32::from(b.h));
+    i64::from(x1.saturating_sub(x0)) * i64::from(y1.saturating_sub(y0))
 }
 
 /// Box noch da? Mittelpunkt der gesendeten Box liegt in einer detektierten
@@ -228,7 +246,15 @@ impl Stabilizer {
                         };
                         if repeats >= 1 {
                             line.pending = None;
-                            if norm_text(&n.text) == norm_text(&pn.text)
+                            if !line.live {
+                                // Erstbestätigung einer neuen Zeile: Inhalt
+                                // geht erstmals raus (kein Move für eine dem
+                                // Client unbekannte ID).
+                                t.id = id;
+                                out.push(ServerMsg::NewText(t.clone()));
+                                line.sent = t;
+                                line.live = true;
+                            } else if norm_text(&n.text) == norm_text(&pn.text)
                                 && n.fg == pn.fg
                                 && n.bg == pn.bg
                             {
@@ -252,8 +278,25 @@ impl Stabilizer {
                             line.pending = Some((t, repeats));
                         }
                     } else {
-                        // Im Hysterese-Band: alten Inhalt behalten, kein Spam.
-                        line.pending = None;
+                        // Im Hysterese-Band: alten Inhalt behalten, kein Spam —
+                        // aber nicht ewig: Wiederholt sich derselbe
+                        // abweichende Befund, ist es kein Flackern, sondern
+                        // neuer Inhalt auf derselben ID (z. B. Tab-Wechsel auf
+                        // ähnliche, aber andere Zeile). Sonst bliebe die ID
+                        // stumm blockiert und der wahre Inhalt käme nie.
+                        t.id = id;
+                        let h = match &line.pending {
+                            Some((p, r)) if norm(p) == n => *r + 1,
+                            _ => 0,
+                        };
+                        if h >= 2 {
+                            line.pending = None;
+                            out.push(ServerMsg::NewText(t.clone()));
+                            line.sent = t;
+                            line.live = true;
+                        } else {
+                            line.pending = Some((t, h));
+                        }
                     }
                 }
                 None => {
@@ -268,6 +311,7 @@ impl Stabilizer {
                             Line {
                                 sent: t,
                                 pending: None,
+                                live: true,
                                 missing_since: None,
                             },
                         );
@@ -279,6 +323,7 @@ impl Stabilizer {
                             Line {
                                 sent: t.clone(),
                                 pending: Some((t, 0)),
+                                live: false,
                                 missing_since: None,
                             },
                         );
@@ -288,12 +333,23 @@ impl Stabilizer {
         }
         // Verschwundene erst nach REMOVE_AFTER löschen — außer die Box ist
         // noch detektiert (Still-da: Erkennung hängt im Budget hinterher).
+        // Ausnahme: Anderslautender Inhalt belegt die alte Box deutlich —
+        // dort steht jetzt wirklich etwas anderes (z. B. neuer Browser-Tab),
+        // kein hinterherhinkendes Budget. Dann läuft der Weg-Timer, statt
+        // die Zeile ewig festzuhalten.
         let mut gone = Vec::new();
         for (id, line) in self.lines.iter_mut() {
             if seen.get(id).is_some_and(|s| *s) {
                 continue;
             }
-            if still_there(&line.sent, seen_boxes) {
+            let area = rect_area(line.sent.rect);
+            let sent_norm = norm_text(&line.sent.text);
+            let replaced = area > 0
+                && cur.iter().any(|(t, _)| {
+                    overlap(t.rect, line.sent.rect) * 2 >= area
+                        && similarity(&norm_text(&t.text), &sent_norm) < MATCH_SIM
+                });
+            if !replaced && still_there(&line.sent, seen_boxes) {
                 line.missing_since = None;
                 line.pending = None;
                 continue;
@@ -526,6 +582,48 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn tab_switch_replaces_old_with_new() {
+        // Browser-Tab-Wechsel: gleiche Positionen, anderer Inhalt.
+        // Erwartung: neue Zeilen kommen per NewText, alte gehen per
+        // RemoveText — kein ewiges Festhalten, kein Verschlucken.
+        let mut s = Stabilizer::new();
+        let t = t0();
+        step_texts(
+            &mut s,
+            vec![item(10, 20, "Sonnenaufgang"), item(10, 40, "Mietvertrag")],
+            &[],
+            true,
+            t,
+        );
+        let beta = vec![
+            item(10, 20, "Kartoffelsalat"),
+            item(10, 40, "Zahnarzttermin"),
+        ];
+        let seen = [Rect::new(10, 20, 100, 16), Rect::new(10, 40, 100, 16)];
+        let mut news = 0;
+        let mut removes = 0;
+        for i in 1..=12 {
+            let d = step_texts(
+                &mut s,
+                beta.clone(),
+                &seen,
+                false,
+                t + Duration::from_millis(i * 100),
+            );
+            news += d
+                .iter()
+                .filter(|m| matches!(m, ServerMsg::NewText(_)))
+                .count();
+            removes += d
+                .iter()
+                .filter(|m| matches!(m, ServerMsg::RemoveText(_)))
+                .count();
+        }
+        assert_eq!(news, 2, "neuer Tab-Inhalt muss ankommen");
+        assert_eq!(removes, 2, "alter Tab-Inhalt muss gehen");
     }
 
     #[test]
