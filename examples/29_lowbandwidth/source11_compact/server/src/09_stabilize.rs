@@ -3,11 +3,16 @@
 //! PP-OCR liefert pro Frame leicht andere Ergebnisse (Box ±wenige Pixel,
 //! Farben ±wenige Stufen, gelegentlich ein falsches Zeichen, kurzes
 //! Aussetzen). Ohne Dämpfung erzeugt das `NewText`/`RemoveText`-Spam.
-//! Verfahren: Normalisieren → Ähnlichkeits-Matching → zeitbasiertes Debounce
-//! (neu/geändert nach 250 ms gleichem Befund, weg nach 700 ms) →
-//! Move-Totband. Zeit- statt framebasiert: Die Frame-Zeit schwankt je nach
-//! OCR-Last zwischen 0,1 und 2 s — frame-gezählt würde Verschieben
-//! sekundenlang Geistertext stehen lassen. Dazu das Still-da-Urteil:
+//! Verfahren: Normalisieren → Ähnlichkeits-Matching → Folgeframe-Bestätigung
+//! (neu/geändert erst, wenn derselbe Befund in zwei aufeinanderfolgenden
+//! Frames steht; weg nach 700 ms ohne Befund) → Move-Totband.
+//! Die Bestätigung zählt Frames statt Wanduhr: Ein einzelner Flacker-Frame
+//! wird geschluckt, aber es gibt keine künstliche Mindest-Verzögerung —
+//! Text-Latenz ist damit wie ohne Stabilisator (ein Frame), statt 250 ms
+//! plus Frame-Takt. Nur das Entfernen bleibt zeitbasiert, weil dort die
+//! Frame-Zeit je nach OCR-Last zwischen 0,1 und 2 s schwankt und
+//! frame-gezählt sekundenlang Geistertext stehen ließe.
+//! Dazu das Still-da-Urteil:
 //! Eine bekannte Zeile, deren Box noch detektiert wird (Erkennung hängt
 //! im Budget hinterher), gilt als anwesend statt als verschwunden.
 //! Rein funktional über Frame-Folgen, ohne Display/Modelle testbar.
@@ -17,8 +22,6 @@ use std::time::{Duration, Instant};
 
 use lbw_common::{Rect, ServerMsg, TextItem};
 
-/// Gleicher Befund über diese Zeit, bevor Neu/Änderung gesendet wird.
-const CONFIRM_AFTER: Duration = Duration::from_millis(250);
 /// Ohne Befund (und ohne Box) über diese Zeit, bevor gelöscht wird.
 const REMOVE_AFTER: Duration = Duration::from_millis(700);
 /// Mindest-Ähnlichkeit für ein ID-Match (Text trägt die Identität).
@@ -112,8 +115,9 @@ fn cost(c: &Norm, p: &Norm) -> f32 {
 struct Line {
     /// Zuletzt *gesendeter* Inhalt (Referenz für Deltas).
     sent: TextItem,
-    /// Ausstehender neuer Inhalt + Zeitpunkt des ersten gleichen Befunds.
-    pending: Option<(TextItem, Instant)>,
+    /// Ausstehender neuer Inhalt + Zahl der Wiederholungen in Folge
+    /// (1 = in zwei aufeinanderfolgenden Frames gesehen = senden).
+    pending: Option<(TextItem, u32)>,
     /// Seit wann ohne Befund (`None` = anwesend).
     missing_since: Option<Instant>,
 }
@@ -147,7 +151,8 @@ impl Stabilizer {
     /// Verarbeitet einen OCR-Frame, liefert das sendefertige Delta.
     /// Erster Aufruf je Verbindung: `ClearText` + alle Zeilen als `NewText`.
     /// `seen` sind alle Detektions-Boxen (auch unerkannte) fürs
-    /// Still-da-Urteil; `now` steuert das zeitbasierte Debounce.
+    /// Still-da-Urteil; `now` steuert nur noch das zeitbasierte Entfernen
+    /// (Neu/Änderung bestätigt der Folgeframe, nicht die Wanduhr).
     pub fn step(
         &mut self,
         cur: Vec<TextItem>,
@@ -209,18 +214,19 @@ impl Stabilizer {
                     // Gleiche Zeile: Text fast gleich ODER Box noch da
                     // (Tippen/Flackern bei kurzem Text).
                     let same = sim >= MATCH_SIM || (dist <= KEEP_DIST && sim >= KEEP_SIM);
-                    if same && n == pn {
-                        // Identisch (nach Normalisierung): Stille.
-                        line.pending = None;
+                    if same && n == pn && line.pending.is_none() {
+                        // Identisch (nach Normalisierung) und bestätigt: Stille.
                     } else if same {
-                        // Kandidat für Neu/Änderung/Move: erst nach
-                        // CONFIRM_AFTER gleichem Befund senden.
+                        // Kandidat für Neu/Änderung/Move: senden, sobald
+                        // derselbe Befund im Folgeframe steht. Ein einzelner
+                        // Flacker-Frame bleibt stumm — aber keine Wanduhr
+                        // bestimmt mehr die Latenz (ein Frame statt 250 ms).
                         t.id = id;
-                        let since = match &line.pending {
-                            Some((p, since)) if norm(p) == n => *since,
-                            _ => now,
+                        let repeats = match &line.pending {
+                            Some((p, r)) if norm(p) == n => *r + 1,
+                            _ => 0,
                         };
-                        if now.duration_since(since) >= CONFIRM_AFTER {
+                        if repeats >= 1 {
                             line.pending = None;
                             if norm_text(&n.text) == norm_text(&pn.text)
                                 && n.fg == pn.fg
@@ -243,7 +249,7 @@ impl Stabilizer {
                                 line.sent = t;
                             }
                         } else {
-                            line.pending = Some((t, since));
+                            line.pending = Some((t, repeats));
                         }
                     } else {
                         // Im Hysterese-Band: alten Inhalt behalten, kein Spam.
@@ -266,12 +272,13 @@ impl Stabilizer {
                             },
                         );
                     } else {
-                        // Neue Zeile: erst nach CONFIRM_AFTER senden.
+                        // Neue Zeile: senden, sobald der Folgeframe sie
+                        // bestätigt (statt nach fester Wartezeit).
                         self.lines.insert(
                             id,
                             Line {
                                 sent: t.clone(),
-                                pending: Some((t, now)),
+                                pending: Some((t, 0)),
                                 missing_since: None,
                             },
                         );
@@ -394,6 +401,27 @@ mod tests {
         assert_eq!(d.len(), 1);
         match &d[0] {
             ServerMsg::NewText(t) => assert_eq!(t.text, "ab"),
+            m => panic!("NewText erwartet, {m:?}"),
+        }
+    }
+
+    #[test]
+    fn repeat_confirms_without_wall_clock() {
+        // Parität mit source10: Keine 250-ms-Wanduhr mehr — derselbe Befund
+        // im Folgeframe genügt, auch wenn keine einzige Millisekunde
+        // vergangen ist. Mit Wanduhr-Debounce bliebe der zweite Schritt
+        // stumm (Dauer 0 < 250 ms).
+        let mut s = Stabilizer::new();
+        let t = t0();
+        step_texts(&mut s, vec![item(10, 20, "Hallo")], &[], true, t);
+        assert_eq!(
+            step_texts(&mut s, vec![item(10, 20, "Hallo!")], &[], false, t),
+            vec![]
+        );
+        let d = step_texts(&mut s, vec![item(10, 20, "Hallo!")], &[], false, t);
+        assert_eq!(d.len(), 1);
+        match &d[0] {
+            ServerMsg::NewText(t) => assert_eq!(t.text, "Hallo!"),
             m => panic!("NewText erwartet, {m:?}"),
         }
     }

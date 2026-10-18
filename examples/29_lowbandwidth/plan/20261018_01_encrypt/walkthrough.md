@@ -214,7 +214,7 @@ stateDiagram-v2
     [*] --> Neu: neuer Inhalt erkannt
     Neu --> Ausstehend: nicht 1. Frame
     Neu --> Gesendet: 1. Frame (ClearText-Phase)
-    Ausstehend --> Gesendet: gleicher Befund nach 250 ms
+    Ausstehend --> Gesendet: gleicher Befund im Folgeframe
     Gesendet --> Ausstehend: Änderung oder Move erkannt
     Gesendet --> Gehalten: Box noch detektiert
     Gesendet --> Entfernt: kein Befund 700 ms, Box weg
@@ -222,17 +222,22 @@ stateDiagram-v2
     Entfernt --> [*]
 ```
 
-Drei Mechaniken gegen das Flackern — und warum sie *zeit*basiert sind:
+Drei Mechaniken gegen das Flackern — nur das Entfernen ist noch
+*zeit*basiert, Neu/Änderung bestätigt der Folgeframe:
 
 - **Matching statt Position.** Alte und neue Zeile werden per
   Text-Ähnlichkeit (Levenshtein) *und* Lage gepaart: ≥ 0,8 ähnlich
   matcht hart; sonst hält eine Hysterese (0,5–0,8 bei naher Box) den
   alten Inhalt, damit Tippjitter nicht als falsches Zeichen durchschlägt.
-- **Zeit-Debounce statt Frame-Zählen (250 ms neu/geändert, 700 ms weg).**
-  Die Frame-Zeit schwankt zwischen 0,1 s (Cache) und 2 s (voller
-  Szenenwechsel). Frame-gezählt hieß „5 Frames weg" im Bewegungsfall
-  **8,5 s Geistertext** — exakt die gemeldete Beschwerde. Zeitbasiert
-  schrumpft das auf 0,7 s, unabhängig vom Durchsatz.
+- **Folgeframe-Bestätigung für Neu/Änderung, Zeit-Debounce nur für Weg
+  (700 ms).** Neu oder geändert wird gesendet, sobald derselbe Befund in
+  zwei aufeinanderfolgenden Frames steht — ein einzelner Flacker-Frame
+  bleibt stumm, aber keine Wanduhr verzögert mehr (früher: 250 ms plus
+  Frame-Takt, jetzt: ein Frame wie in source10). Nur das Entfernen bleibt
+  zeitbasiert, weil die Frame-Zeit zwischen 0,1 s (Cache) und 2 s (voller
+  Szenenwechsel) schwankt: Frame-gezählt hieß „5 Frames weg" im
+  Bewegungsfall **8,5 s Geistertext** — exakt die gemeldete Beschwerde.
+  Zeitbasiert schrumpft das auf 0,7 s, unabhängig vom Durchsatz.
 - **Still-da-Urteil.** Eine bekannte Zeile, deren *Box* noch detektiert
   wird (die Erkennung hängt im Budget hinterher), gilt als anwesend —
   kein vorschnelles `RemoveText` mit anschließendem Re-`NewText`.
@@ -373,8 +378,8 @@ bash android/scripts/emulator_e2e.sh   # echte App im Emulator (9 Checks)
   Tests, inklusive des Erst-Frame-Masken-Regressionsfalls: Kein
   Big-Move ohne Vorbild!).
 - **Stabilisator** (`09_stabilize.rs`): Jitter bleibt still, Tippen
-  kommt nach 250 ms, Scroll sendet nur Moves, Verschwinden nach
-  700 ms, Still-da hält.
+  bestätigt der Folgeframe (keine Wanduhr mehr), Scroll sendet nur
+  Moves, Verschwinden nach 700 ms, Still-da hält.
 - **Tunnel** (`tunnel/tests/`): Echo durch echte sshd-Paare, Retry bei
   spät startendem sshd, Neustart von sshd, neuer Attempt-Deckel.
 - **Android JVM** (28 Tests, gegen das Host-`.so`): Protokoll-Blob,
@@ -517,9 +522,11 @@ worse". Der Diff erklärt, warum das kein Widerspruch ist:
   Writer-Lock (§7). Der Tile-Thread war nötig (früher blockierten
   Kodierung + Pacing-Schlaf die Hauptschleife 11–13 s), aber jede
   zusätzliche Stufe kostet im Pfad Grab → Send Zeit, und der
-  Stabilisator fügt bewusst 250 ms Debounce hinzu, bevor neue oder
-  geänderte Texte überhaupt losdürfen. Source10 schickt Rohdeltas
-  sofort — flackernder, aber früher.
+  Stabilisator verlangte früher 250 ms Wanduhr-Debounce, bevor neue oder
+  geänderte Texte überhaupt losdurften. Das ist inzwischen auf
+  Folgeframe-Bestätigung umgestellt (ein Frame statt 250 ms plus Takt) —
+  Restunterschied zu source10 ist damit im Wesentlichen der einmalige
+  Auth-Handshake pro Verbindung.
 - **Der Tunnel selbst kostet einen Hop mehr Wahrheit.** Die
   verschachtelte Session (Client → tinyeu → Reverse-Tunnel 2332 →
   hpz6o-sshd → :7878) ersetzt einen einzelnen SSH-Forward durch
