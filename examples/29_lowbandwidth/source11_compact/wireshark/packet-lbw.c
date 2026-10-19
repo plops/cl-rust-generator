@@ -15,7 +15,8 @@
  *
  * v5-Varianten S→C: 0 Challenge{version, nonce[16]}, 1 Hello, 2 ClearText,
  * 3 NewText, 4 MoveText, 5 RemoveText, 6 Tile{x, y, w, h, data} (w/h =
- * Fußabdruck, Pixel ggf. kleiner kodiert). C→S: 0 Auth{mac[32]},
+ * Fußabdruck, Pixel ggf. kleiner kodiert; data = AV1-OBUs TD+SEQ+Frame,
+ * Dissector zeigt OBU-Typen + SEQ-Maße als lbw.av1.*). C→S: 0 Auth{mac[32]},
  * 1 Hello{version}, 2 MouseMove, 3 Button, 4 Text, 5 Key, 6 ResyncText,
  * 7 QualityTile.
  * Vom Auth-Token zeigt der Dissector nur Längen, nie Geheimnisse.
@@ -75,11 +76,13 @@ static guint g_port = LBW_DEFAULT_PORT;
 static int hf_len, hf_msg, hf_raw;
 static int hf_tid, hf_tx, hf_ty, hf_tw, hf_th, hf_fg, hf_bg, hf_str;
 static int hf_tilx, hf_tily, hf_tilw, hf_tilh, hf_tillen, hf_tildata;
+static int hf_av1_obus, hf_av1_obu, hf_av1_profile, hf_av1_still;
+static int hf_av1_level, hf_av1_w, hf_av1_h;
 static int hf_rmid;
 static int hf_ver, hf_mx, hf_my, hf_btn, hf_down, hf_itext, hf_key;
 static int hf_nonce_len, hf_mac_len;
-static int ett_lbw;
-static expert_field ei_trunc, ei_variant;
+static int ett_lbw, ett_av1, ett_obu;
+static expert_field ei_trunc, ei_variant, ei_av1;
 
 /* Lesecursor mit Ende-Marke; jede Entnahme prüft Bounds (trunc-Flag). */
 typedef struct {
@@ -168,6 +171,238 @@ add_string(cur_t *c, proto_tree *t, int hf)
     s = tvb_get_string_enc(c->pool, c->tvb, at, (int)n, ENC_UTF_8);
     proto_tree_add_string(t, hf, c->tvb, at, (int)n, (const char *)s);
     return (const char *)s;
+}
+
+/* --- AV1-Nutzdaten: OBU-Walk, nur Metadaten (kein Dekodieren) ---
+ * Unser Encoder (rav1e 0.8.1, still_picture) schreibt pro Kachel:
+ * Temporal Delimiter + Sequence Header + Frame. Der Sequence Header
+ * trägt Profil, still_picture, reduced_still_picture_header, Level
+ * (5 Bit), dann Breite/Höhe je als (Bitbreite-1 in 4 Bit + Wert).
+ * Achtung: rav1e 0.8.1 schreibt das Profil in 3 Bit (statt 2 laut
+ * AV1-Spezifikation §5.5) — gegen echte Encoder-Frames verifiziert
+ * (ergibt exakt die kodierte Kachelgröße). Quelle: rav1e-0.8.1
+ * src/header.rs (write_sequence_header_obu, write_max_frame_size).
+ * Der Dissector zeigt OBU-Typen + SEQ-Maße; Frame-Payload nur Größe
+ * (Bilder zeigt Wireshark prinzipbedingt nicht). Volle (nicht
+ * reduzierte) Sequence Header werden als OBU gezeigt, Maße dann leer.
+ */
+
+/* Eigener Lookup statt val_to_str (dessen Signatur je nach
+ * Wireshark-Version einen Scope-Allocator verlangt). */
+static const char *
+obu_name(unsigned t)
+{
+    switch (t) {
+    case 0: return "Reserved";
+    case 1: return "Sequence Header";
+    case 2: return "Temporal Delimiter";
+    case 3: return "Frame Header";
+    case 4: return "Tile Group";
+    case 5: return "Metadata";
+    case 6: return "Frame";
+    case 7: return "Redundant Frame Header";
+    case 8: return "Tile List";
+    case 15: return "Padding";
+    default: return "Unbekannt";
+    }
+}
+
+#define LBW_AV1_MAX_OBU 64
+
+typedef struct {
+    unsigned type;
+    int at;   /* OBU-Start (Kopf) */
+    int len;  /* Kopf + Payload */
+    int pay;  /* Payload-Start */
+    int plen; /* Payload-Länge */
+    uint8_t ext;
+    bool has_ext;
+} obu_t;
+
+typedef struct {
+    uint32_t profile, level, w, h;
+    bool still, have;
+} seq_t;
+
+/* Bitleser (MSB zuerst), für den reduzierten Sequence Header. */
+typedef struct {
+    tvbuff_t *tvb;
+    int off;
+    int end;
+    unsigned bit;
+    bool trunc;
+} bit_t;
+
+static uint32_t
+bit_read(bit_t *b, unsigned n)
+{
+    uint32_t v = 0;
+    while (n-- > 0) {
+        if (b->off >= b->end) {
+            b->trunc = true;
+            return 0;
+        }
+        v = (v << 1) | ((tvb_get_uint8(b->tvb, b->off) >> (7 - b->bit)) & 1);
+        if (++b->bit == 8) {
+            b->bit = 0;
+            b->off++;
+        }
+    }
+    return v;
+}
+
+/* AV1-LEB128 (max. 8 Byte); zu lang/abgeschnitten → trunc. */
+static uint64_t
+tvb_leb128(tvbuff_t *tvb, int *off, int end, bool *trunc)
+{
+    uint64_t v = 0;
+    unsigned shift = 0, i;
+    for (i = 0; i < 8; i++) {
+        uint8_t by;
+        if (*off >= end) {
+            *trunc = true;
+            return 0;
+        }
+        by = tvb_get_uint8(tvb, (*off)++);
+        if (shift < 64)
+            v |= (uint64_t)(by & 0x7f) << shift;
+        if (!(by & 0x80))
+            return v;
+        shift += 7;
+    }
+    *trunc = true;
+    return 0;
+}
+
+/* Reduzierter Sequence Header (rav1e-Still-Picture): Maße lesen.
+ * Kein Still/reduziert → have=false (nur OBU zeigen, nicht raten). */
+static void
+parse_seq(tvbuff_t *tvb, int at, int len, seq_t *s)
+{
+    bit_t b = { tvb, at, at + len, 0, false };
+    uint32_t wb, hb;
+    s->have = false;
+    s->profile = bit_read(&b, 3);
+    s->still = bit_read(&b, 1) != 0;
+    if (bit_read(&b, 1) == 0)
+        return; /* kein reduced_still_picture_header */
+    if (!s->still)
+        return;
+    s->level = bit_read(&b, 5);
+    wb = bit_read(&b, 4) + 1;
+    hb = bit_read(&b, 4) + 1;
+    if (wb > 16 || hb > 16)
+        return;
+    s->w = bit_read(&b, wb) + 1;
+    s->h = bit_read(&b, hb) + 1;
+    if (!b.trunc)
+        s->have = true;
+}
+
+/* OBU-Walk über Kachel-Bytes [at, at+len). Erste OBU ungültig →
+ * still zurück (kein AV1?), sonst Baum + Maße (out: have/w/h).
+ * Abbruch später → Expert-Info (echte Korruption, nicht Raten). */
+static void
+add_av1(proto_tree *t, packet_info *pinfo, tvbuff_t *tvb, int at, int len,
+    bool *have, uint32_t *w, uint32_t *h)
+{
+    obu_t obus[LBW_AV1_MAX_OBU];
+    seq_t seq = { 0, 0, 0, 0, false, false };
+    int off = at, end = at + len, n = 0, i;
+    bool cut = false;
+    proto_item *ai;
+    proto_tree *a;
+
+    *have = false;
+    if (len <= 0 || (tvb_get_uint8(tvb, at) & 0x80) != 0)
+        return; /* verbotenes Bit gesetzt: kein OBU-Strom */
+
+    while (off < end && !cut) {
+        obu_t *o;
+        uint8_t hdr = tvb_get_uint8(tvb, off);
+        uint64_t sz;
+        bool t = false;
+        if ((hdr & 0x80) != 0 || n >= LBW_AV1_MAX_OBU) {
+            cut = true;
+            break;
+        }
+        o = &obus[n];
+        o->type = (unsigned)((hdr >> 3) & 15);
+        o->at = off;
+        o->has_ext = ((hdr >> 2) & 1) != 0;
+        off++;
+        if (o->has_ext) {
+            if (off >= end) {
+                cut = true;
+                break;
+            }
+            o->ext = tvb_get_uint8(tvb, off++);
+        } else {
+            o->ext = 0;
+        }
+        if ((hdr >> 1) & 1) {
+            sz = tvb_leb128(tvb, &off, end, &t);
+            if (t) {
+                cut = true;
+                break;
+            }
+        } else {
+            sz = (uint64_t)(end - off); /* nur letzte OBU: Rest */
+        }
+        if (sz > (uint64_t)(end - off)) {
+            cut = true;
+            break;
+        }
+        o->pay = off;
+        o->plen = (int)sz;
+        o->len = off + (int)sz - o->at;
+        if (o->type == 1 && !seq.have)
+            parse_seq(tvb, o->pay, o->plen, &seq);
+        n++;
+        off += (int)sz;
+    }
+    if (n == 0)
+        return;
+
+    if (seq.have) {
+        *have = true;
+        *w = seq.w;
+        *h = seq.h;
+        ai = proto_tree_add_uint_format(t, hf_av1_obus, tvb, at, len,
+            (uint32_t)n, "AV1: %d OBU%s, %" PRIu32 "x%" PRIu32, n,
+            n == 1 ? "" : "s", seq.w, seq.h);
+    } else {
+        ai = proto_tree_add_uint_format(t, hf_av1_obus, tvb, at, len,
+            (uint32_t)n, "AV1: %d OBU%s", n, n == 1 ? "" : "s");
+    }
+    a = proto_item_add_subtree(ai, ett_av1);
+    for (i = 0; i < n; i++) {
+        obu_t *o = &obus[i];
+        const char *name = obu_name(o->type);
+        proto_item *oi;
+        proto_tree *os;
+        if (o->has_ext)
+            oi = proto_tree_add_string_format(a, hf_av1_obu, tvb, o->at,
+                o->len, name, "%s (%d B, ext 0x%02x)", name, o->plen, o->ext);
+        else
+            oi = proto_tree_add_string_format(a, hf_av1_obu, tvb, o->at,
+                o->len, name, "%s (%d B)", name, o->plen);
+        if (o->type == 1 && seq.have) {
+            /* Nur reduzierter Still-Header: volles Layout unbekannt. */
+            os = proto_item_add_subtree(oi, ett_obu);
+            proto_tree_add_uint(os, hf_av1_profile, tvb, o->pay, o->plen,
+                seq.profile);
+            proto_tree_add_boolean(os, hf_av1_still, tvb, o->pay, o->plen,
+                seq.still);
+            proto_tree_add_uint(os, hf_av1_level, tvb, o->pay, o->plen,
+                seq.level);
+            proto_tree_add_uint(os, hf_av1_w, tvb, o->pay, o->plen, seq.w);
+            proto_tree_add_uint(os, hf_av1_h, tvb, o->pay, o->plen, seq.h);
+        }
+    }
+    if (cut || off != end)
+        expert_add_info_format(pinfo, ai, &ei_av1,
+            "AV1-OBUs abgebrochen (%d OBU(s) gelesen)", n);
 }
 
 static unsigned
@@ -311,12 +546,19 @@ dissect_msg(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
             proto_tree_add_uint(t, hf_tilh, tvb, at, c.off - at, (uint32_t)h);
             proto_tree_add_uint(t, hf_tillen, tvb, at, c.off - at, (uint32_t)n);
             proto_tree_add_item(t, hf_tildata, tvb, dat, (int)n, ENC_NA);
-            proto_tree_add_string_format(t, hf_msg, tvb, at, c.off - at,
-                "Tile", "Tile @%" PRIu64 ",%" PRIu64 " %" PRIu64 "x%" PRIu64 " %" PRIu64 "B",
-                x, y, w, h, n);
-            col_add_fstr(pinfo->cinfo, COL_INFO,
-                "S→C Tile @%" PRIu64 ",%" PRIu64 " %" PRIu64 "x%" PRIu64 " %" PRIu64 "B",
-                x, y, w, h, n);
+            {
+                bool have = false;
+                uint32_t aw = 0, ah = 0;
+                add_av1(t, pinfo, tvb, dat, (int)n, &have, &aw, &ah);
+                proto_tree_add_string_format(t, hf_msg, tvb, at, c.off - at,
+                    "Tile", "Tile @%" PRIu64 ",%" PRIu64 " %" PRIu64 "x%" PRIu64 " %" PRIu64 "B",
+                    x, y, w, h, n);
+                col_add_fstr(pinfo->cinfo, COL_INFO,
+                    "S→C Tile @%" PRIu64 ",%" PRIu64 " %" PRIu64 "x%" PRIu64 " %" PRIu64 "B",
+                    x, y, w, h, n);
+                if (have)
+                    col_append_fstr(pinfo->cinfo, COL_INFO, " AV1 %" PRIu32 "x%" PRIu32, aw, ah);
+            }
             break;
         }
         default:
@@ -453,6 +695,13 @@ proto_register_lbw(void)
         { &hf_tilh, { "Kachel-Höhe", "lbw.tile.h", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
         { &hf_tillen, { "Kachel-Bytes", "lbw.tile.len", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
         { &hf_tildata, { "AV1-Daten", "lbw.tile.data", FT_BYTES, BASE_NONE, NULL, 0, NULL, HFILL } },
+        { &hf_av1_obus, { "AV1-OBUs", "lbw.av1.obus", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
+        { &hf_av1_obu, { "AV1-OBU", "lbw.av1.obu", FT_STRING, BASE_NONE, NULL, 0, NULL, HFILL } },
+        { &hf_av1_profile, { "AV1-Profil", "lbw.av1.profile", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
+        { &hf_av1_still, { "AV1-Still-Picture", "lbw.av1.still", FT_BOOLEAN, BASE_NONE, NULL, 0, NULL, HFILL } },
+        { &hf_av1_level, { "AV1-Level", "lbw.av1.level", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
+        { &hf_av1_w, { "AV1-Breite", "lbw.av1.width", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
+        { &hf_av1_h, { "AV1-Höhe", "lbw.av1.height", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
         { &hf_rmid, { "Entferne-ID", "lbw.remove.id", FT_UINT64, BASE_DEC, NULL, 0, NULL, HFILL } },
         { &hf_ver, { "Protokollversion", "lbw.version", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
         { &hf_mx, { "Maus-X", "lbw.mouse.x", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
@@ -464,10 +713,11 @@ proto_register_lbw(void)
         { &hf_nonce_len, { "Nonce-Länge", "lbw.auth.nonce_len", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
         { &hf_mac_len, { "MAC-Länge", "lbw.auth.mac_len", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
     };
-    static int *ett[] = { &ett_lbw };
+    static int *ett[] = { &ett_lbw, &ett_av1, &ett_obu };
     static ei_register_info ei[] = {
         { &ei_trunc, { "lbw.truncated", PI_MALFORMED, PI_ERROR, "Nachricht unvollständig", EXPFILL } },
         { &ei_variant, { "lbw.unknown_variant", PI_PROTOCOL, PI_WARN, "Unbekannte Variante", EXPFILL } },
+        { &ei_av1, { "lbw.av1.truncated", PI_MALFORMED, PI_WARN, "AV1-OBUs abgebrochen", EXPFILL } },
     };
     module_t *mod;
     expert_module_t *exp;

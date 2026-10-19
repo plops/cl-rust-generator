@@ -54,8 +54,13 @@ T -T fields -e lbw.auth.nonce_len 2>/dev/null | grep -qx 16 || { echo "check: FE
 T -T fields -e lbw.auth.mac_len 2>/dev/null | grep -qx 32 || { echo "check: FEHLER — lbw.auth.mac_len" >&2; exit 1; }
 T -T fields -e lbw.text.w 2>/dev/null | grep -qx 300 || { echo "check: FEHLER — lbw.text.w" >&2; exit 1; }
 T -T fields -e lbw.text.id 2>/dev/null | grep -qx 7 || { echo "check: FEHLER — lbw.text.id" >&2; exit 1; }
-T -T fields -e lbw.tile.len 2>/dev/null | grep -qx 4 || { echo "check: FEHLER — lbw.tile.len" >&2; exit 1; }
-T -T fields -e lbw.tile.w 2>/dev/null | grep -qx 128 || { echo "check: FEHLER — lbw.tile.w" >&2; exit 1; }
-T -T fields -e lbw.tile.h 2>/dev/null | grep -qx 64 || { echo "check: FEHLER — lbw.tile.h" >&2; exit 1; }
+T -T fields -e lbw.tile.len 2>/dev/null | grep -qx 20 || { echo "check: FEHLER — lbw.tile.len" >&2; exit 1; }
+T -T fields -e lbw.tile.w 2>/dev/null | grep -qx 64 || { echo "check: FEHLER — lbw.tile.w" >&2; exit 1; }
+T -T fields -e lbw.tile.h 2>/dev/null | grep -qx 32 || { echo "check: FEHLER — lbw.tile.h" >&2; exit 1; }
 T -T fields -e lbw.text.str 2>/dev/null | grep -qx "n€u" || { echo "check: FEHLER — lbw.text.str" >&2; exit 1; }
-echo "check: OK (alle 16 Varianten + Felder zerlegt)"
+# AV1-Metadaten: 3 OBUs (TD + SEQ + Frame), SEQ-Maße 64x32.
+T -T fields -e lbw.av1.obus 2>/dev/null | grep -qx 3 || { echo "check: FEHLER — lbw.av1.obus" >&2; exit 1; }
+T -T fields -e lbw.av1.width 2>/dev/null | grep -qx 64 || { echo "check: FEHLER — lbw.av1.width" >&2; exit 1; }
+T -T fields -e lbw.av1.height 2>/dev/null | grep -qx 32 || { echo "check: FEHLER — lbw.av1.height" >&2; exit 1; }
+T -T fields -e lbw.av1.profile 2>/dev/null | grep -qx 0 || { echo "check: FEHLER — lbw.av1.profile" >&2; exit 1; }
+echo "check: OK (alle 16 Varianten + Felder + AV1-Metadaten zerlegt)"

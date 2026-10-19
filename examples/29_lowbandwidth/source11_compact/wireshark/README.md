@@ -46,7 +46,8 @@ Vom Auth-Token (`Challenge`/`Auth`) zeigt der Dissector nur Längen
 
 Alle 16 v5-Varianten beider Richtungen (Challenge, Hello, ClearText,
 NewText mit ID/Box/Farben/Text, MoveText mit ID/Box, RemoveText,
-Tile mit Position/Fußabdruck/AV1-Bytes, Auth, Hello, MouseMove, Button,
+Tile mit Position/Fußabdruck/AV1-Bytes (OBU-Typen + SEQ-Maße als
+`lbw.av1.*`; Bilder zeigt Wireshark prinzipbedingt nicht), Auth, Hello, MouseMove, Button,
 Text, Key, ResyncText, QualityTile) inkl. TCP-Reassembly (Nachrichten
 über Segmentgrenzen). Unbekannte Varianten/Restbytes erscheinen als
 `lbw.raw` (Protokoll-Erweiterungen bleiben sichtbar), Fragmente als

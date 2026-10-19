@@ -3,7 +3,9 @@
 
 Nur stdlib. Body-Bytes sind per `encode_msg` verifizierte Vektoren
 (common/examples/vecdump.rs); bei Protokolländerung hier + im Dissector
-nachziehen. Kachel absichtlich über zwei TCP-Segmente gesplittet
+nachziehen. Ausnahme: die Kachel-Nutzdaten sind AV1 (TD + echte
+rav1e-SEQ-Bytes + synthetische Frame-Bytes — nur Header werden gelesen,
+s. S_TILE). Kachel absichtlich über zwei TCP-Segmente gesplittet
 (Reassembly-Test). Deterministisch (feste Zeitstempel), echte
 IP/TCP-Prüfsummen.
 Aufruf: ./gen_sample.py [ausgabe.pcap]
@@ -23,8 +25,11 @@ V = {
     # MoveText id=7 rect=10,200,100,16
     "S_MOVE": "04070ac86410",
     "S_RM": "0509",
-    # Tile x=10 y=20 w=128 h=64 data=01020304
-    "S_TILE": "060a1480400401020304",
+    # Tile x=10 y=20 w=64 h=32 data=AV1 (20B): TD + SEQ + Frame.
+    # SEQ-Payload 1fd53ff94250 sind echte rav1e-0.8.1-Still-Bytes
+    # (Profil 0, still, reduziert, Level 31, 64x32 — s. packet-lbw.c);
+    # Frame-Payload aa55.. ist synthetisch (Dissector liest nur Header).
+    "S_TILE": "060a1440201412000a061fd53ff942503208aa55aa55aa55aa55",
     # Unbekannte Variante (Robustheit: als lbw.raw, kein Abort)
     "S_UNKNOWN": "09ff",
     # Hello mit Restbyte (Robustheit: Rest als lbw.raw)

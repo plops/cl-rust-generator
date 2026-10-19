@@ -21,7 +21,7 @@ use crate::av1::encode_rgb;
 use crate::capture::FrameSource;
 use crate::config::Config;
 use crate::input::Inject;
-use crate::ocr::{Ocr, REC_BUDGET};
+use crate::ocr::{Ocr, REC_BUDGET, sample_colors};
 use crate::pace::Pacer;
 use crate::stabilize::Stabilizer;
 use crate::tiles::{MASK_PAD, crop_rgb, dirty_bbox, fill_rect, pad_rect, scale_rgb};
@@ -332,9 +332,17 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
         let t = Instant::now();
         let mut masked = img.clone();
         if !big_move {
-            for tm in &cur {
-                let m = pad_rect(tm.rect, MASK_PAD, masked.width(), masked.height());
-                fill_rect(&mut masked, m, tm.bg);
+            // Maske aus AKTUELLEN Detektionen (`seen`), nicht aus gesendeten
+            // Texten: Gehaltene Alt-Boxen (Still-da, Budget) würden sonst
+            // alten Inhalt über das neue Bild malen (Geister in der Kachel,
+            // live erlebt). Hintergrund frisch am Bild gesampelt statt aus
+            // womöglich altem Stand — auch unerkannte Boxen (Budget, Gatter)
+            // werden so ausmaskiert.
+            for r in &seen {
+                let m = pad_rect(*r, MASK_PAD, masked.width(), masked.height());
+                // sample_colors liefert (Schrift, Hintergrund) zurück.
+                let (_, bg) = sample_colors(&img, m);
+                fill_rect(&mut masked, m, bg);
             }
         }
         let mut dirty = dirty_bbox(prev.as_ref(), &masked);
