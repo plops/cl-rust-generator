@@ -84,6 +84,16 @@ impl Tracer {
         }
     }
 
+    /// Freie Notiz (z. B. empfangene Steuerung) — belegt, dass F2/F3
+    /// ankamen, auch wenn danach gerade nichts zu senden war.
+    pub fn note(&mut self, s: &str) {
+        if self.wr.is_none() {
+            return;
+        }
+        let ms = self.ms();
+        self.line(format!("t={ms} note {s}"));
+    }
+
     /// Sende-Delta des Frames (Stabilisator-Entscheidung, 1:1 was rausgeht).
     pub fn delta(&mut self, n: u64, msgs: &[ServerMsg]) {
         if self.wr.is_none() {

@@ -7,7 +7,7 @@ mod common;
 use common::*;
 
 use std::net::{TcpListener, TcpStream};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clap::Parser;
 use lbw_common::framing::{FrameReader, write_msg};
@@ -40,7 +40,7 @@ fn trace_file_shows_frames_texts_and_deltas() {
             &cfg,
             &mut src,
             &mut ocr,
-            Some(5),
+            Some(60),
             TOKEN,
             None::<Injector>,
         )
@@ -70,6 +70,21 @@ fn trace_file_shows_frames_texts_and_deltas() {
     s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
     let hello: ServerMsg = fr.read_msg(&mut s).unwrap().expect("Hello");
     assert!(matches!(hello, ServerMsg::Hello));
+    // F2-Probe: Resync anfordern — zweites ClearText beweist Behandlung,
+    // "note resync" belegt die Ankunft im Trace (sonst wäre F2 stumm).
+    write_msg(&mut s, &ClientMsg::ResyncText).unwrap();
+    let mut cleared = 0;
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| {
+            if matches!(m, ServerMsg::ClearText) {
+                cleared += 1;
+            }
+            cleared >= 2
+        },
+    );
     server.join().unwrap();
 
     let log = std::fs::read_to_string(&path).unwrap();
@@ -81,6 +96,10 @@ fn trace_file_shows_frames_texts_and_deltas() {
     assert!(
         log.contains("delta still") || log.contains("NewText"),
         "Delta fehlt:\n{log}"
+    );
+    assert!(
+        log.contains("note resync"),
+        "F2-Ankunft nicht im Trace:\n{log}"
     );
     let _ = std::fs::remove_file(&path);
 }

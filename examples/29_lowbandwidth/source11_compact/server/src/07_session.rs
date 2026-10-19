@@ -337,11 +337,19 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
                 fill_rect(&mut masked, m, tm.bg);
             }
         }
-        let dirty = dirty_bbox(prev.as_ref(), &masked);
+        let mut dirty = dirty_bbox(prev.as_ref(), &masked);
+        if big_move {
+            // Szenenwechsel (z. B. Tab): kein Ausschnitt-Flicken, sondern
+            // Vollbild-Reset in laufender Skalierung/Qualität — sonst
+            // bleiben alte Kachel-Reste stehen, die kein Dirty je berührt.
+            // Rohbild (s. oben), kein Alt-Anstrich.
+            dirty = Some(Rect::new(0, 0, img.width() as u16, img.height() as u16));
+        }
         let _mask_diff_ms = ms(t);
         // F2: Voll-Resync aus dem Server-Stand (ClearText + je ein NewText)
         // statt OCR-Neulauf — repariert auseinander gelaufene Client-Szenen.
         if resync.swap(false, Ordering::Relaxed) {
+            trace.note("resync");
             let mut ok = send_text(&writer, &pacer, &ServerMsg::ClearText, &mut text_bytes);
             if ok {
                 for t in &sent_texts {
@@ -365,6 +373,7 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
         // Text-Schleife nie auf. Toter Thread → Kacheln entfallen still.
         let mut tiles = 0;
         if quality.swap(false, Ordering::Relaxed) && !tile_thread.is_finished() {
+            trace.note("quality");
             // F3: Genau EINE hochwertige Vollbild-Kachel (volle Auflösung,
             // `--hq-quantizer`), danach wieder Normalbetrieb — ein guter
             // Blick zum Orientieren, kein Dauerfeuer.

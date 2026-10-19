@@ -270,9 +270,12 @@ durch den Kanal. Drei Regeln halten das erträglich:
   eine AV1-Kopie desselben Texts wäre doppelte Bandbreite *und* doppelt
   gemalt (matschiges Echo unter scharfer Schrift). Die Maske ist ein
   Zuschlag von 6 px je Seite gegen Glyphen-Fransen.
-- **Big-Move-Ausnahme.** Ändert sich >30 % der Roh-Pixel (Fenster
-  verschoben), wäre die Maske aus *alten* Rechtecken ein Lochmuster über
-  neuem Inhalt. Dann geht die Kachel unmaskiert raus: kurz unscharf,
+- **Big-Move-Ausnahme mit Vollbild-Reset.** Ändert sich >30 % der
+  Roh-Pixel (Fenster verschoben, Tab-Wechsel), wäre die Maske aus *alten*
+  Rechtecken ein Lochmuster über neuem Inhalt. Dann geht die Kachel
+  unmaskiert raus — und zwar als **Vollbild** statt Dirty-Ausschnitt,
+  sonst bleiben alte Kachel-Reste stehen, die kein Dirty je berührt
+  (live erlebt als Artefakt-Teppich nach Tab-Wechsel): kurz unscharf,
   aber aktuell — scharfer Text folgt in ~1 s.
 - **Dosierung (Leaky Bucket).** Kacheln werden auf Budget-Rate
   (Standard 6000 B/s) gleichmäßig ausgegeben statt als Burst. Texte

@@ -405,6 +405,54 @@ fn quality_request_sends_exactly_one_full_tile() {
 }
 
 #[test]
+fn big_move_resets_full_frame() {
+    let shared = SharedSource::new(solid(128, 128, [0; 3]));
+    let feed = shared.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut src = shared;
+        let mut ocr = StubOcr::fixed(vec![item()]);
+        serve_client(
+            stream,
+            &test_cfg(),
+            &mut src,
+            &mut ocr,
+            Some(300),
+            TOKEN,
+            None::<Injector>,
+        )
+        .unwrap();
+    });
+
+    let mut s = TcpStream::connect(addr).unwrap();
+    let mut fr = FrameReader::new();
+    assert!(matches!(
+        handshake(&mut s, &mut fr, TOKEN),
+        ServerMsg::Hello
+    ));
+
+    // Erste Vollbild-Kachel (leeres Vorbild).
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| matches!(m, ServerMsg::Tile { w: 128, h: 128, .. }),
+    );
+    // Szenenwechsel (z. B. Tab): komplett anderes Bild — der Reset muss
+    // wieder Vollbild sein, kein Ausschnitt-Flicken (sonst bleiben alte
+    // Kachel-Reste stehen, die kein Dirty je berührt).
+    feed.set(solid(128, 128, [255; 3]));
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| matches!(m, ServerMsg::Tile { w: 128, h: 128, .. }),
+    );
+}
+
+#[test]
 fn tile_scale_keeps_full_footprint() {
     let cfg =
         lbw_server::config::Config::try_parse_from(["lbw-server", "--tile-scale", "2"]).unwrap();
