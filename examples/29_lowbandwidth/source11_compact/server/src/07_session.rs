@@ -259,6 +259,10 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
     let mut prev_raw: Option<RgbImage> = None;
     let mut stabilizer = Stabilizer::new();
     let mut sent_texts: Vec<TextItem> = Vec::new();
+    // F3-Keyframe angefordert: nächster Stabilisator-Schritt läuft wie der
+    // erste Frame (ClearText + Vollbestand), statt gegen Altlasten zu
+    // differenzieren.
+    let mut key_first = false;
     let mut frames: u64 = 0;
     let result = loop {
         if input.is_finished() {
@@ -286,7 +290,9 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
         let mut text_bytes = 0;
         trace.frame(frames);
         trace.ocr(frames, &seen, &texts);
-        let delta = stabilizer.step(texts, &seen, frames == 1, Instant::now());
+        let first = frames == 1 || key_first;
+        key_first = false;
+        let delta = stabilizer.step(texts, &seen, first, Instant::now());
         trace.delta(frames, &delta);
         // Maske aus gesendeten Rechtecken: Stabilizer-IDs → aktuelle Boxen.
         for m in &delta {
@@ -381,10 +387,20 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
         // Text-Schleife nie auf. Toter Thread → Kacheln entfallen still.
         let mut tiles = 0;
         if quality.swap(false, Ordering::Relaxed) && !tile_thread.is_finished() {
-            trace.note("quality");
-            // F3: Genau EINE hochwertige Vollbild-Kachel (volle Auflösung,
+            trace.note("keyframe");
+            // F3-Keyframe: kompletter Neuaufbau ohne Rücksicht auf vorherige
+            // Frames — räumt alle Artefakte weg (stale Texte, alte
+            // Kachel-Reste, gehaltene Stabilisator-Zeilen). Genau EINE
+            // hochwertige Vollbild-Kachel (volle Auflösung,
             // `--hq-quantizer`), danach wieder Normalbetrieb — ein guter
-            // Blick zum Orientieren, kein Dauerfeuer.
+            // Blick zum Orientieren, kein Dauerfeuer. Der Text-Vollstand
+            // folgt im nächsten Frame über `key_first` (ClearText +
+            // NewText je Zeile, wie bei Verbindungsstart); `prev` läuft
+            // ohnehin auf das Keyframe-Bild weiter, danach also wieder
+            // echte Deltas statt Vollbild-Flut.
+            stabilizer = Stabilizer::new();
+            sent_texts.clear();
+            key_first = true;
             let rgb = masked.clone().into_raw();
             let (fw, fh) = (masked.width(), masked.height());
             *tile_slot

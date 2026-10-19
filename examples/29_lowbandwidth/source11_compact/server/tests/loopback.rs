@@ -405,6 +405,104 @@ fn quality_request_sends_exactly_one_full_tile() {
 }
 
 #[test]
+fn quality_keyframe_rebuilds_texts_without_stale_state() {
+    // Tab-Wechsel-Szenario: alter Text ("alt-tab") steht, neuer ("neu-tab")
+    // kommt — F3 muss danach ClearText + Vollbestand (nur neu) + genau eine
+    // Vollbild-Kachel liefern, ohne Rücksicht auf vorherige Frames.
+    // Kleines Bild + großes Budget: Der HQ-Encode (Debug-rav1e) + Pacing
+    // dürfen nicht länger brauchen als die Test-Session (sonst verwirft
+    // das Session-Ende die Kachel — korrekt bei Disconnect, hier Rauschen).
+    use clap::Parser;
+    let cfg =
+        lbw_server::config::Config::try_parse_from(["lbw-server", "--budget", "200000"]).unwrap();
+    let shared = SharedSource::new(solid(64, 64, [40; 3]));
+    let ocr = StubOcr::fixed(vec![item_at(8, 8, "alt-tab")]);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let ocr2 = ocr.clone();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut src = shared;
+        let mut ocr = ocr2;
+        serve_client(
+            stream,
+            &cfg,
+            &mut src,
+            &mut ocr,
+            Some(300),
+            TOKEN,
+            None::<Injector>,
+        )
+        .unwrap();
+    });
+
+    let mut s = TcpStream::connect(addr).unwrap();
+    let mut fr = FrameReader::new();
+    assert!(matches!(
+        handshake(&mut s, &mut fr, TOKEN),
+        ServerMsg::Hello
+    ));
+
+    // Erstbestand: Vollbild-Kachel + NewText("alt-tab").
+    let (mut full, mut old) = (0, 0);
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| {
+            match m {
+                ServerMsg::Tile { w: 64, h: 64, .. } => full += 1,
+                ServerMsg::NewText(t) if t.text == "alt-tab" => old += 1,
+                _ => {}
+            }
+            full >= 1 && old >= 1
+        },
+    );
+    assert_eq!((full, old), (1, 1));
+
+    // Tab-Wechsel: neuer Text, auf Bestätigung warten (Folgeframe-Regel).
+    ocr.set(vec![item_at(8, 8, "neu-tab")]);
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| matches!(m, ServerMsg::NewText(t) if t.text == "neu-tab"),
+    );
+
+    // F3-Keyframe: ClearText, danach nur noch "neu-tab", plus Vollbild.
+    // Reihenfolge offen: Die Kachel kann (schnelles Netz) VOR dem
+    // Text-Vollstand des nächsten Frames eintreffen — nur NewTexts an
+    // ClearText koppeln, die Kachel zählt für sich.
+    write_msg(&mut s, &ClientMsg::QualityTile).unwrap();
+    let (mut clear, mut full2, mut stale) = (0, 0, 0);
+    let mut fresh = 0;
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(30),
+        &mut |m| {
+            match m {
+                ServerMsg::ClearText if clear == 0 => clear += 1,
+                ServerMsg::NewText(t) if clear >= 1 => {
+                    if t.text == "neu-tab" {
+                        fresh += 1;
+                    } else {
+                        stale += 1;
+                    }
+                }
+                ServerMsg::Tile { w: 64, h: 64, .. } => {
+                    full2 += 1;
+                }
+                _ => {}
+            }
+            clear >= 1 && fresh >= 1 && full2 >= 1
+        },
+    );
+    assert_eq!((clear, fresh, full2), (1, 1, 1));
+    assert_eq!(stale, 0, "Keyframe darf keinen Alt-Text neu senden");
+}
+
+#[test]
 fn big_move_resets_full_frame() {
     let shared = SharedSource::new(solid(128, 128, [0; 3]));
     let feed = shared.clone();
