@@ -24,7 +24,8 @@ use crate::input::Inject;
 use crate::ocr::{Ocr, REC_BUDGET};
 use crate::pace::Pacer;
 use crate::stabilize::Stabilizer;
-use crate::tiles::{MASK_PAD, crop_rgb, dirty_bbox, fill_rect, pad_rect};
+use crate::tiles::{MASK_PAD, crop_rgb, dirty_bbox, fill_rect, pad_rect, scale_rgb};
+use crate::trace::Tracer;
 
 /// Anteil geänderter Roh-Pixel, ab dem das Fenster als „bewegt" gilt: Die
 /// Maske (aus alten Text-Rechtecken) würde dann Geisterlöcher über den
@@ -196,6 +197,11 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
     rd.set_read_timeout(Some(Duration::from_millis(200)))
         .map_err(|e| e.to_string())?;
     let stop = Arc::new(AtomicBool::new(false));
+    // Steuerung (F2/F3) läuft am Injektor vorbei direkt in die
+    // Hauptschleife — sonst würde ein Textwunsch getippt und ein
+    // Kachelwunsch verworfen.
+    let resync = Arc::new(AtomicBool::new(false));
+    let quality = Arc::new(AtomicBool::new(false));
     // Kachel-Thread (Latest-wins): Kodieren (rav1e) + Budget-Dosierung
     // blockieren nie die Text-Schleife — sonst stünde jeder Move erst nach
     // der großen Kachel an. `slot` trägt die neueste Kachel, `kick` weckt.
@@ -224,13 +230,31 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
                     }
                 }
             });
-            spawn_reader(rd, fr, stop.clone(), cfg.verbose, move |m| {
-                let _ = tx.try_send(m);
+            let rs = resync.clone();
+            let qs = quality.clone();
+            spawn_reader(rd, fr, stop.clone(), cfg.verbose, move |m| match m {
+                ClientMsg::ResyncText => rs.store(true, Ordering::Relaxed),
+                ClientMsg::QualityTile => qs.store(true, Ordering::Relaxed),
+                m => {
+                    let _ = tx.try_send(m);
+                }
             })
         }
-        None => spawn_reader(rd, fr, stop.clone(), cfg.verbose, |_| {}),
+        None => {
+            let rs = resync.clone();
+            let qs = quality.clone();
+            spawn_reader(rd, fr, stop.clone(), cfg.verbose, move |m| match m {
+                ClientMsg::ResyncText => rs.store(true, Ordering::Relaxed),
+                ClientMsg::QualityTile => qs.store(true, Ordering::Relaxed),
+                _ => {}
+            })
+        }
     };
 
+    let mut trace = match &cfg.trace {
+        Some(p) => Tracer::open(p)?,
+        None => Tracer::disabled(),
+    };
     let mut prev: Option<RgbImage> = None;
     let mut prev_raw: Option<RgbImage> = None;
     let mut stabilizer = Stabilizer::new();
@@ -260,7 +284,10 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
         // Text als Delta (v4): 1. Frame ClearText + NewText je Zeile,
         // danach RemoveText + NewText (Inhalt neu) + MoveText (nur Box neu).
         let mut text_bytes = 0;
+        trace.frame(frames);
+        trace.ocr(frames, &seen, &texts);
         let delta = stabilizer.step(texts, &seen, frames == 1, Instant::now());
+        trace.delta(frames, &delta);
         // Maske aus gesendeten Rechtecken: Stabilizer-IDs → aktuelle Boxen.
         for m in &delta {
             match m {
@@ -312,22 +339,66 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
         }
         let dirty = dirty_bbox(prev.as_ref(), &masked);
         let _mask_diff_ms = ms(t);
+        // F2: Voll-Resync aus dem Server-Stand (ClearText + je ein NewText)
+        // statt OCR-Neulauf — repariert auseinander gelaufene Client-Szenen.
+        if resync.swap(false, Ordering::Relaxed) {
+            let mut ok = send_text(&writer, &pacer, &ServerMsg::ClearText, &mut text_bytes);
+            if ok {
+                for t in &sent_texts {
+                    ok = send_text(
+                        &writer,
+                        &pacer,
+                        &ServerMsg::NewText(t.clone()),
+                        &mut text_bytes,
+                    );
+                    if !ok {
+                        break;
+                    }
+                }
+            }
+            if !ok {
+                break Ok(());
+            }
+        }
         // Genau eine Kachel-Anfrage pro Frame an den Tile-Thread (eigener
         // Socket, eigenes Pacing): Kodieren + Dosieren halten die
         // Text-Schleife nie auf. Toter Thread → Kacheln entfallen still.
         let mut tiles = 0;
-        if let Some(r) = dirty
+        if quality.swap(false, Ordering::Relaxed) && !tile_thread.is_finished() {
+            // F3: Genau EINE hochwertige Vollbild-Kachel (volle Auflösung,
+            // `--hq-quantizer`), danach wieder Normalbetrieb — ein guter
+            // Blick zum Orientieren, kein Dauerfeuer.
+            let rgb = masked.clone().into_raw();
+            let (fw, fh) = (masked.width(), masked.height());
+            *tile_slot
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(TileJob {
+                x: 0,
+                y: 0,
+                fw: fw as u16,
+                fh: fh as u16,
+                rgb,
+                ew: fw as usize,
+                eh: fh as usize,
+                quantizer: cfg.hq_quantizer,
+            });
+            let _ = kick_tx.send(());
+            tiles = 1;
+        } else if let Some(r) = dirty
             && !tile_thread.is_finished()
         {
             let rgb = crop_rgb(&masked, r);
+            let (rgb, ew, eh) = scale_rgb(rgb, u32::from(r.w), u32::from(r.h), cfg.tile_scale);
             *tile_slot
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(TileJob {
                 x: r.x,
                 y: r.y,
-                w: r.w as usize,
-                h: r.h as usize,
+                fw: r.w,
+                fh: r.h,
                 rgb,
+                ew: ew as usize,
+                eh: eh as usize,
                 quantizer: cfg.quantizer,
             });
             let _ = kick_tx.send(());
@@ -355,13 +426,17 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
     result
 }
 
-/// Eine zu kodierende Kachel (Roh-Crop aus der Hauptschleife).
+/// Eine zu kodierende Kachel (Roh-Crop aus der Hauptschleife): Fußabdruck
+/// (`x`, `y`, `fw`, `fh`) im Capture-Raum, Pixel (`rgb`) in Kodiergröße
+/// (`ew`×`eh` — bei `--tile-scale` kleiner, Client skaliert hoch).
 struct TileJob {
     x: u16,
     y: u16,
-    w: usize,
-    h: usize,
+    fw: u16,
+    fh: u16,
     rgb: Vec<u8>,
+    ew: usize,
+    eh: usize,
     quantizer: usize,
 }
 
@@ -385,7 +460,7 @@ fn spawn_tile_writer(
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .take();
             let Some(job) = job else { continue };
-            let data = match encode_rgb(&job.rgb, job.w, job.h, job.quantizer) {
+            let data = match encode_rgb(&job.rgb, job.ew, job.eh, job.quantizer) {
                 Ok(d) => d,
                 Err(e) => {
                     eprintln!("[tile] {e}");
@@ -411,6 +486,8 @@ fn spawn_tile_writer(
             let msg = ServerMsg::Tile {
                 x: job.x,
                 y: job.y,
+                w: job.fw,
+                h: job.fh,
                 data,
             };
             if write_msg(

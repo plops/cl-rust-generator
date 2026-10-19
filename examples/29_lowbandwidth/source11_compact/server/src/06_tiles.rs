@@ -12,6 +12,27 @@ use lbw_common::Rect;
 
 use crate::av1::MIN_TILE;
 
+/// Verkleinert einen RGB-Crop um `scale` (1 = unverändert, sonst 2/4) für
+/// `--tile-scale`. Liefert (Pixel, Breite, Höhe) in Kodiergröße; der
+/// Fußabdruck im Capture-Raum bleibt voll (Client skaliert hoch).
+#[must_use]
+pub fn scale_rgb(rgb: Vec<u8>, w: u32, h: u32, scale: u32) -> (Vec<u8>, u32, u32) {
+    if scale <= 1 {
+        return (rgb, w, h);
+    }
+    // Kodiergröße: gerade und ≥ MIN_TILE (rav1e-Bedingung — sonst stürbe der
+    // Tile-Thread am Encode-Fehler). Der Fußabdruck bleibt voll, der Client
+    // skaliert auf ihn hoch, egal wie klein kodiert wurde.
+    let even = |v: u32| {
+        let t = MIN_TILE as u32;
+        (v / scale).max(t).next_multiple_of(2)
+    };
+    let (ew, eh) = (even(w), even(h));
+    let img = RgbImage::from_raw(w, h, rgb).unwrap_or_else(|| RgbImage::new(ew, eh));
+    let small = image::imageops::resize(&img, ew, eh, image::imageops::FilterType::Triangle);
+    (small.into_raw(), ew, eh)
+}
+
 /// Kleinste Box über allen Änderungen; `prev = None` liefert Vollbild.
 /// Kanten werden gerade und mindestens [`MIN_TILE`] (rav1e-Bedingung);
 /// `None` heißt Standbild (Funkstille). Beide Bilder müssen gleich groß sein
@@ -189,5 +210,28 @@ mod tests {
         // Außerhalb clippen statt panicken.
         fill_rect(&mut img, Rect::new(100, 100, 5, 5), [1; 3]);
         assert_eq!(img.get_pixel(7, 7).0, [0; 3]);
+    }
+
+    #[test]
+    fn scale_one_is_passthrough() {
+        let rgb = vec![7u8; 32 * 32 * 3];
+        assert_eq!(scale_rgb(rgb.clone(), 32, 32, 1), (rgb, 32, 32));
+    }
+
+    #[test]
+    fn scale_two_halves_even_and_clamps_tiny_odd() {
+        let rgb = vec![7u8; 128 * 128 * 3];
+        let (small, ew, eh) = scale_rgb(rgb, 128, 128, 2);
+        assert_eq!((ew, eh), (64, 64));
+        assert_eq!(small.len(), 64 * 64 * 3);
+        // 100/4 = 25 → ungerade, aber rav1e braucht gerade Kanten.
+        let rgb = vec![7u8; 100 * 100 * 3];
+        let (_, ew, eh) = scale_rgb(rgb, 100, 100, 4);
+        assert_eq!((ew, eh), (26, 26));
+        // Winziges wird nicht unter MIN_TILE gedrückt.
+        let rgb = vec![7u8; 20 * 20 * 3];
+        let (_, ew, eh) = scale_rgb(rgb, 20, 20, 4);
+        assert!(ew >= MIN_TILE as u32 && eh >= MIN_TILE as u32);
+        assert_eq!((ew % 2, eh % 2), (0, 0));
     }
 }

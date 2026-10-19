@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use lbw_client::net::{Event, Net};
 use lbw_common::framing::{FrameReader, write_msg};
-use lbw_common::{ClientMsg, Rect, ServerMsg, TextItem, verify_auth};
+use lbw_common::{ClientMsg, PROTO_VERSION, Rect, ServerMsg, TextItem, verify_auth};
 
 const TOKEN: &[u8] = b"client-test-token";
 
@@ -26,14 +26,26 @@ fn mini_server(listener: TcpListener) {
     s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     let mut fr = FrameReader::new();
     let nonce = *b"0123456789abcdef";
-    write_msg(&mut s, &ServerMsg::Challenge { version: 4, nonce }).unwrap();
+    write_msg(
+        &mut s,
+        &ServerMsg::Challenge {
+            version: PROTO_VERSION,
+            nonce,
+        },
+    )
+    .unwrap();
     let auth: ClientMsg = fr.read_msg(&mut s).unwrap().expect("Auth");
     let ClientMsg::Auth { mac } = auth else {
         panic!("Auth erwartet");
     };
     assert!(verify_auth(TOKEN, &nonce, &mac));
     let hello: ClientMsg = fr.read_msg(&mut s).unwrap().expect("Hello");
-    assert!(matches!(hello, ClientMsg::Hello { version: 4 }));
+    assert!(matches!(
+        hello,
+        ClientMsg::Hello {
+            version: PROTO_VERSION
+        }
+    ));
     for m in [
         ServerMsg::Hello,
         ServerMsg::ClearText,
@@ -47,6 +59,8 @@ fn mini_server(listener: TcpListener) {
         ServerMsg::Tile {
             x: 0,
             y: 0,
+            w: 64,
+            h: 32,
             data: vec![0xde, 0xad, 0xbe, 0xef],
         },
     ] {
@@ -97,4 +111,82 @@ fn handshake_text_delta_and_metrics() {
     // Senden ohne Abbruch (Server liest kaum — nur Rauchtest).
     net.send(ClientMsg::Text("x".into()));
     assert!(net.metrics().last_input.is_some());
+}
+
+/// Mini-Server für genau eine skalierte Kachel: 16×16 Pixel kodiert,
+/// Fußabdruck 32×32 — der Client muss auf den Fußabdruck hochziehen.
+fn mini_server_scaled(listener: TcpListener, tile: ServerMsg) {
+    let (mut s, _) = listener.accept().unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let mut fr = FrameReader::new();
+    let nonce = *b"0123456789abcdef";
+    write_msg(
+        &mut s,
+        &ServerMsg::Challenge {
+            version: PROTO_VERSION,
+            nonce,
+        },
+    )
+    .unwrap();
+    let auth: ClientMsg = fr.read_msg(&mut s).unwrap().expect("Auth");
+    let ClientMsg::Auth { mac } = auth else {
+        panic!("Auth erwartet");
+    };
+    assert!(verify_auth(TOKEN, &nonce, &mac));
+    let hello: ClientMsg = fr.read_msg(&mut s).unwrap().expect("Hello");
+    assert!(matches!(
+        hello,
+        ClientMsg::Hello {
+            version: PROTO_VERSION
+        }
+    ));
+    write_msg(&mut s, &ServerMsg::Hello).unwrap();
+    write_msg(&mut s, &tile).unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+}
+
+#[test]
+fn scaled_tile_upscales_to_footprint() {
+    // Echte Kodierung (16×16 einfarbig), Fußabdruck 32×32.
+    let data = lbw_server::av1::encode_rgb(&vec![200u8; 16 * 16 * 3], 16, 16, 255).unwrap();
+    let tile = ServerMsg::Tile {
+        x: 8,
+        y: 8,
+        w: 32,
+        h: 32,
+        data,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    std::thread::spawn(|| mini_server_scaled(listener, tile));
+
+    let net = Net::connect(&addr, TOKEN, None);
+    let until = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < until {
+        while let Ok(e) = net.events.try_recv() {
+            if let Event::Tile {
+                x,
+                y,
+                w,
+                h,
+                rgba,
+                bytes,
+            } = e
+            {
+                assert_eq!((x, y, w, h), (8, 8, 32, 32));
+                assert_eq!(rgba.len(), 32 * 32 * 4);
+                assert!(bytes > 0);
+                // Einfarbig kodiert → fast einfarbig hochgezogen (Nearest
+                // behält Blöcke, AV1-Rauschen minimal).
+                let (chunks, _) = rgba.as_chunks::<4>();
+                let (mn, mx) = chunks.iter().fold((u8::MAX, u8::MIN), |(mn, mx), p| {
+                    (mn.min(p[0]), mx.max(p[0]))
+                });
+                assert!(mx - mn <= 4, "Farbverlauf {mn}..{mx}");
+                return;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("keine skalierte Kachel angekommen");
 }

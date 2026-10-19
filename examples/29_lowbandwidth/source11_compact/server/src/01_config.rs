@@ -38,9 +38,20 @@ pub struct Config {
     /// (Texte haben Vorfahrt und gehen sofort raus).
     #[arg(long, default_value_t = 6000)]
     pub budget: u32,
+    /// Kachel-Auflösung: 1 = voll, 2 = halb, 4 = viertel (kodierte Pixel;
+    /// der Client skaliert auf den vollen Fußabdruck hoch).
+    #[arg(long, default_value_t = 1)]
+    pub tile_scale: u32,
+    /// Quantizer für die eine hochwertige Vollbild-Kachel (F3).
+    #[arg(long, default_value_t = 180)]
+    pub hq_quantizer: usize,
     /// Pipeline-Log.
     #[arg(short, long)]
     pub verbose: bool,
+    /// Ablaufverfolgung in diese Datei (Live-Diagnose, s. `trace`; ohne
+    /// Flag vollständig abgeschaltet).
+    #[arg(long)]
+    pub trace: Option<String>,
 }
 
 impl Config {
@@ -49,8 +60,14 @@ impl Config {
         if self.quantizer > 255 {
             return Err("--quantizer muss zwischen 0 und 255 liegen".into());
         }
+        if self.hq_quantizer > 255 {
+            return Err("--hq-quantizer muss zwischen 0 und 255 liegen".into());
+        }
         if self.budget == 0 {
             return Err("--budget muss größer als 0 sein".into());
+        }
+        if !matches!(self.tile_scale, 1 | 2 | 4) {
+            return Err("--tile-scale kennt nur 1, 2 oder 4".into());
         }
         Ok(())
     }

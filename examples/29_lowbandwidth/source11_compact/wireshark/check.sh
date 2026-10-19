@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prüft den LBW-v4-Dissector: bauen, sample.pcap zerlegen, alle 14 Varianten
+# Prüft den LBW-v5-Dissector: bauen, sample.pcap zerlegen, alle 16 Varianten
 # per tshark-Feld behaupten (exakte Multimenge — fängt auch fehlende oder
 # doppelte Nachrichten). Braucht tshark + libwireshark-dev (der Version
 # wegen); fehlt das, Exit 2 mit Hinweis (wie Modell-Checks in den Smokes).
@@ -39,7 +39,7 @@ OUT=$(T -T fields -e lbw.msg 2>/dev/null)
 echo "$OUT"
 # Unbekannte Variante setzt kein lbw.msg (leere Zeile, wie Rumpf-Segment);
 # Hello-mit-Rest zählt als drittes Hello.
-EXP="Auth Button Challenge ClearText Hello Hello Hello Key MouseMove MoveText NewText RemoveText Text Tile"
+EXP="Auth Button Challenge ClearText Hello Hello Hello Key MouseMove MoveText NewText QualityTile RemoveText ResyncText Text Tile"
 # Leere Zeile = Rumpf-Segment der gesplitteten Kachel (keine Nachricht).
 GOT=$(echo "$OUT" | grep -v '^$' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 [ "$GOT" = "$EXP" ] || { echo "check: FEHLER — Varianten: [$GOT] != [$EXP]" >&2; exit 1; }
@@ -49,11 +49,13 @@ T -V > /dev/null 2>/tmp/lbw11_v.log || { echo "check: FEHLER — tshark -V brach
 grep -E "Dissector bug|CRITICAL|ERROR" /tmp/lbw11_v.log && { echo "check: FEHLER — Baum-Pass meldet Dissector-Fehler" >&2; exit 1; } || true
 # Stichproben: Version, Challenge-Nonce-Länge, Auth-MAC-Länge, Mehrbyte-Varint
 # (w=300, 251-Marker), MoveText-ID, Kachel, UTF-8.
-T -T fields -e lbw.version 2>/dev/null | grep -qx 4 || { echo "check: FEHLER — lbw.version" >&2; exit 1; }
+T -T fields -e lbw.version 2>/dev/null | grep -qx 5 || { echo "check: FEHLER — lbw.version" >&2; exit 1; }
 T -T fields -e lbw.auth.nonce_len 2>/dev/null | grep -qx 16 || { echo "check: FEHLER — lbw.auth.nonce_len" >&2; exit 1; }
 T -T fields -e lbw.auth.mac_len 2>/dev/null | grep -qx 32 || { echo "check: FEHLER — lbw.auth.mac_len" >&2; exit 1; }
 T -T fields -e lbw.text.w 2>/dev/null | grep -qx 300 || { echo "check: FEHLER — lbw.text.w" >&2; exit 1; }
 T -T fields -e lbw.text.id 2>/dev/null | grep -qx 7 || { echo "check: FEHLER — lbw.text.id" >&2; exit 1; }
 T -T fields -e lbw.tile.len 2>/dev/null | grep -qx 4 || { echo "check: FEHLER — lbw.tile.len" >&2; exit 1; }
+T -T fields -e lbw.tile.w 2>/dev/null | grep -qx 128 || { echo "check: FEHLER — lbw.tile.w" >&2; exit 1; }
+T -T fields -e lbw.tile.h 2>/dev/null | grep -qx 64 || { echo "check: FEHLER — lbw.tile.h" >&2; exit 1; }
 T -T fields -e lbw.text.str 2>/dev/null | grep -qx "n€u" || { echo "check: FEHLER — lbw.text.str" >&2; exit 1; }
-echo "check: OK (alle 14 Varianten + Felder zerlegt)"
+echo "check: OK (alle 16 Varianten + Felder zerlegt)"

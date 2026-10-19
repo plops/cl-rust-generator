@@ -40,6 +40,7 @@ struct GtLine {
     rect: lbw_common::Rect,
 }
 
+#[allow(clippy::too_many_arguments)] // Fixture-Helfer (Testcode).
 fn text(
     img: &mut RgbImage,
     font: &fontdue::Font,

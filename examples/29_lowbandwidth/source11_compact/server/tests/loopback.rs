@@ -7,6 +7,7 @@ use common::*;
 use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant};
 
+use clap::Parser;
 use lbw_common::framing::{FrameReader, write_msg};
 use lbw_common::{ClientMsg, PROTO_VERSION, ServerMsg, auth_mac};
 use lbw_server::capture::{SharedSource, solid};
@@ -113,8 +114,11 @@ fn full_frame_then_single_dirty_tile() {
         &mut s,
         Instant::now() + Duration::from_secs(10),
         &mut |m| {
-            if let ServerMsg::Tile { x, y, data } = m {
+            if let ServerMsg::Tile { x, y, w, h, data } = m {
                 assert!(!data.is_empty());
+                // Fußabdruck in Originalgröße: 1-px-Dirty → 16×16
+                // (Mindestgröße, hier unskaliert 1:1).
+                assert_eq!((*w, *h), (16, 16));
                 found = Some((*x, *y));
                 return true;
             }
@@ -293,6 +297,158 @@ fn texts_jump_the_tile_queue() {
         },
     );
     assert!(tile_ok, "gepactes Tile kommt ganz an");
+}
+
+#[test]
+fn resync_request_repeats_clear_and_texts() {
+    let shared = SharedSource::new(solid(128, 128, [40; 3]));
+    let addr = serve_once(shared, vec![item()], 60);
+
+    let mut s = TcpStream::connect(addr).unwrap();
+    let mut fr = FrameReader::new();
+    assert!(matches!(
+        handshake(&mut s, &mut fr, TOKEN),
+        ServerMsg::Hello
+    ));
+
+    // Erstbestand abwarten (ClearText + NewText sind damit verbraucht).
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| matches!(m, ServerMsg::NewText(_)),
+    );
+    // F2: Resync anfordern — ClearText + NewText müssen erneut kommen,
+    // ohne dass sich am Bild etwas ändert (kein OCR-Neulauf nötig).
+    write_msg(&mut s, &ClientMsg::ResyncText).unwrap();
+    let (mut clear, mut texts) = (0, 0);
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| {
+            match m {
+                ServerMsg::ClearText => clear += 1,
+                ServerMsg::NewText(t) => {
+                    assert_eq!(t.text, "hi");
+                    texts += 1;
+                }
+                _ => {}
+            }
+            clear >= 1 && texts >= 1
+        },
+    );
+    assert_eq!((clear, texts), (1, 1));
+}
+
+#[test]
+fn quality_request_sends_exactly_one_full_tile() {
+    let shared = SharedSource::new(solid(128, 128, [40; 3]));
+    let addr = serve_once(shared, vec![item()], 200);
+
+    let mut s = TcpStream::connect(addr).unwrap();
+    let mut fr = FrameReader::new();
+    assert!(matches!(
+        handshake(&mut s, &mut fr, TOKEN),
+        ServerMsg::Hello
+    ));
+
+    // Erste Vollbild-Kachel (Normalbetrieb) abwarten.
+    let mut full = 0;
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| {
+            if let ServerMsg::Tile { w, h, .. } = m
+                && (*w, *h) == (128, 128)
+            {
+                full += 1;
+                return true;
+            }
+            false
+        },
+    );
+    assert_eq!(full, 1);
+    // F3: genau EINE hochwertige Vollbild-Kachel anfordern …
+    write_msg(&mut s, &ClientMsg::QualityTile).unwrap();
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(30),
+        &mut |m| {
+            if let ServerMsg::Tile { w, h, data, .. } = m {
+                assert!(!data.is_empty());
+                if (*w, *h) == (128, 128) {
+                    full += 1;
+                    return true;
+                }
+            }
+            false
+        },
+    );
+    assert_eq!(full, 2);
+    // … und danach kein Dauerfeuer: 2 s Stille (Standbild → keine Tiles).
+    let mut extra = 0;
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(2),
+        &mut |m| {
+            if matches!(m, ServerMsg::Tile { .. }) {
+                extra += 1;
+            }
+            false
+        },
+    );
+    assert_eq!(extra, 0, "HQ muss ein Einzelschuss bleiben");
+}
+
+#[test]
+fn tile_scale_keeps_full_footprint() {
+    let cfg =
+        lbw_server::config::Config::try_parse_from(["lbw-server", "--tile-scale", "2"]).unwrap();
+    let shared = SharedSource::new(solid(128, 128, [40; 3]));
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut src = shared;
+        let mut ocr = StubOcr::fixed(vec![item()]);
+        serve_client(
+            stream,
+            &cfg,
+            &mut src,
+            &mut ocr,
+            Some(60),
+            TOKEN,
+            None::<Injector>,
+        )
+        .unwrap();
+    });
+
+    let mut s = TcpStream::connect(addr).unwrap();
+    let mut fr = FrameReader::new();
+    assert!(matches!(
+        handshake(&mut s, &mut fr, TOKEN),
+        ServerMsg::Hello
+    ));
+
+    // Erste Kachel: Vollbild 128×128 trotz halb kodierter Pixel — der
+    // Fußabdruck bleibt voll, Hochskalieren ist Clientsache.
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| {
+            if let ServerMsg::Tile { w, h, data, .. } = m {
+                assert!(!data.is_empty());
+                assert_eq!((*w, *h), (128, 128));
+                return true;
+            }
+            false
+        },
+    );
 }
 
 #[test]

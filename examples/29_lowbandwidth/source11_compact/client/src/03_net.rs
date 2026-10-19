@@ -321,13 +321,18 @@ fn session(s: TcpStream, ctx: Ctx<'_>) -> String {
                         ServerMsg::RemoveText(id) => {
                             let _ = ev.send(Event::RemoveText(id));
                         }
-                        ServerMsg::Tile { x, y, data } => {
+                        ServerMsg::Tile { x, y, w, h, data } => {
                             let t = Instant::now();
                             let r = dec.decode(&data);
                             let _dms = t.elapsed().as_secs_f32() * 1000.0;
                             match r {
                                 Ok(rgba) => {
                                     metric(shared).last_tile_visible = Some(Instant::now());
+                                    // Kleiner kodiert (`--tile-scale`)? Auf den
+                                    // Fußabdruck hochziehen, sonst falsch
+                                    // platziert bzw. zu klein.
+                                    let rgba =
+                                        crate::av1::upscale_rgba(rgba, w as usize, h as usize);
                                     let _ = ev.send(Event::Tile {
                                         x,
                                         y,

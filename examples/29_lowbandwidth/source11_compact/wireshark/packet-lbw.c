@@ -1,4 +1,4 @@
-/* packet-lbw.c — Wireshark-Dissector für das LBW-Protokoll (v4, source11).
+/* packet-lbw.c — Wireshark-Dissector für das LBW-Protokoll (v5, source11).
  *
  * Rahmen: [u32 LE Länge][bincode-Body] über TCP (Default-Port 7878, als
  * Präferenz änderbar; alternativ „Decode As → TCP → lbw"). Die Daten sind
@@ -13,9 +13,11 @@
  * Alle Body-Bytes in gen_sample.py sind per `encode_msg` verifiziert
  * (common/examples/vecdump.rs).
  *
- * v4-Varianten S→C: 0 Challenge{version, nonce[16]}, 1 Hello, 2 ClearText,
- * 3 NewText, 4 MoveText, 5 RemoveText, 6 Tile. C→S: 0 Auth{mac[32]},
- * 1 Hello{version}, 2 MouseMove, 3 Button, 4 Text, 5 Key.
+ * v5-Varianten S→C: 0 Challenge{version, nonce[16]}, 1 Hello, 2 ClearText,
+ * 3 NewText, 4 MoveText, 5 RemoveText, 6 Tile{x, y, w, h, data} (w/h =
+ * Fußabdruck, Pixel ggf. kleiner kodiert). C→S: 0 Auth{mac[32]},
+ * 1 Hello{version}, 2 MouseMove, 3 Button, 4 Text, 5 Key, 6 ResyncText,
+ * 7 QualityTile.
  * Vom Auth-Token zeigt der Dissector nur Längen, nie Geheimnisse.
  *
  * Bauen: s. CMakeLists.txt (braucht libwireshark-dev derselben Version).
@@ -72,7 +74,7 @@ static guint g_port = LBW_DEFAULT_PORT;
 
 static int hf_len, hf_msg, hf_raw;
 static int hf_tid, hf_tx, hf_ty, hf_tw, hf_th, hf_fg, hf_bg, hf_str;
-static int hf_tilx, hf_tily, hf_tillen, hf_tildata;
+static int hf_tilx, hf_tily, hf_tilw, hf_tilh, hf_tillen, hf_tildata;
 static int hf_rmid;
 static int hf_ver, hf_mx, hf_my, hf_btn, hf_down, hf_itext, hf_key;
 static int hf_nonce_len, hf_mac_len;
@@ -295,7 +297,8 @@ dissect_msg(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
         }
         case 6: {
             int at = 4;
-            uint64_t x = cur_varint(&c), y = cur_varint(&c), n = cur_varint(&c);
+            uint64_t x = cur_varint(&c), y = cur_varint(&c);
+            uint64_t w = cur_varint(&c), h = cur_varint(&c), n = cur_varint(&c);
             int dat;
             if (c.trunc)
                 goto short_frame;
@@ -304,12 +307,16 @@ dissect_msg(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
                 goto short_frame;
             proto_tree_add_uint(t, hf_tilx, tvb, at, c.off - at, (uint32_t)x);
             proto_tree_add_uint(t, hf_tily, tvb, at, c.off - at, (uint32_t)y);
+            proto_tree_add_uint(t, hf_tilw, tvb, at, c.off - at, (uint32_t)w);
+            proto_tree_add_uint(t, hf_tilh, tvb, at, c.off - at, (uint32_t)h);
             proto_tree_add_uint(t, hf_tillen, tvb, at, c.off - at, (uint32_t)n);
             proto_tree_add_item(t, hf_tildata, tvb, dat, (int)n, ENC_NA);
             proto_tree_add_string_format(t, hf_msg, tvb, at, c.off - at,
-                "Tile", "Tile @%" PRIu64 ",%" PRIu64 " %" PRIu64 "B", x, y, n);
+                "Tile", "Tile @%" PRIu64 ",%" PRIu64 " %" PRIu64 "x%" PRIu64 " %" PRIu64 "B",
+                x, y, w, h, n);
             col_add_fstr(pinfo->cinfo, COL_INFO,
-                "S→C Tile @%" PRIu64 ",%" PRIu64 " %" PRIu64 "B", x, y, n);
+                "S→C Tile @%" PRIu64 ",%" PRIu64 " %" PRIu64 "x%" PRIu64 " %" PRIu64 "B",
+                x, y, w, h, n);
             break;
         }
         default:
@@ -385,6 +392,14 @@ dissect_msg(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
             col_add_fstr(pinfo->cinfo, COL_INFO, "C→S Key \"%s\" %s", s, d ? "down" : "up");
             break;
         }
+        case 6:
+            proto_tree_add_string(t, hf_msg, tvb, 4, 1, "ResyncText");
+            col_add_str(pinfo->cinfo, COL_INFO, "C→S ResyncText");
+            break;
+        case 7:
+            proto_tree_add_string(t, hf_msg, tvb, 4, 1, "QualityTile");
+            col_add_str(pinfo->cinfo, COL_INFO, "C→S QualityTile");
+            break;
         default:
             goto unknown;
         }
@@ -434,6 +449,8 @@ proto_register_lbw(void)
         { &hf_str, { "Text", "lbw.text.str", FT_STRING, BASE_NONE, NULL, 0, NULL, HFILL } },
         { &hf_tilx, { "Kachel-X", "lbw.tile.x", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
         { &hf_tily, { "Kachel-Y", "lbw.tile.y", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
+        { &hf_tilw, { "Kachel-Breite", "lbw.tile.w", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
+        { &hf_tilh, { "Kachel-Höhe", "lbw.tile.h", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
         { &hf_tillen, { "Kachel-Bytes", "lbw.tile.len", FT_UINT32, BASE_DEC, NULL, 0, NULL, HFILL } },
         { &hf_tildata, { "AV1-Daten", "lbw.tile.data", FT_BYTES, BASE_NONE, NULL, 0, NULL, HFILL } },
         { &hf_rmid, { "Entferne-ID", "lbw.remove.id", FT_UINT64, BASE_DEC, NULL, 0, NULL, HFILL } },

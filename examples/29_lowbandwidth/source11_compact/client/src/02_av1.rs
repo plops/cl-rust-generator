@@ -24,6 +24,27 @@ pub struct Rgba {
     pub data: Vec<u8>,
 }
 
+/// Skaliert RGBA8 per Nearest-Neighbor auf (`w`, `h`) hoch (oder runter).
+/// Für `--tile-scale`-Kacheln: Der Server kodiert klein, der Client stellt
+/// den vollen Fußabdruck wieder her. Gleich groß = unverändert zurück.
+#[must_use]
+pub fn upscale_rgba(src: Rgba, w: usize, h: usize) -> Rgba {
+    if src.w == w && src.h == h || w == 0 || h == 0 || src.data.len() < src.w * src.h * 4 {
+        return src;
+    }
+    let mut data = vec![0u8; w * h * 4];
+    for y in 0..h {
+        let sy = (y * src.h / h).min(src.h.saturating_sub(1));
+        for x in 0..w {
+            let sx = (x * src.w / w).min(src.w.saturating_sub(1));
+            let s = (sy * src.w + sx) * 4;
+            let d = (y * w + x) * 4;
+            data[d..d + 4].copy_from_slice(&src.data[s..s + 4]);
+        }
+    }
+    Rgba { w, h, data }
+}
+
 /// `-EAGAIN` der dav1d-API (Linux: EAGAIN = 11).
 const EAGAIN: i32 = -11;
 
@@ -150,5 +171,52 @@ mod tests {
         let mut d = Decoder::new().unwrap();
         assert!(d.decode(&[]).is_err());
         assert!(d.decode(&[0x12, 0x00, 0xff, 0xff, 0x01]).is_err());
+    }
+
+    fn rgba2x2() -> Rgba {
+        // rot | grün / blau | weiß
+        Rgba {
+            w: 2,
+            h: 2,
+            data: vec![
+                255, 0, 0, 255, 0, 255, 0, 255, //
+                0, 0, 255, 255, 255, 255, 255, 255,
+            ],
+        }
+    }
+
+    #[test]
+    fn upscale_doubles_each_pixel_to_a_block() {
+        let out = upscale_rgba(rgba2x2(), 4, 4);
+        assert_eq!((out.w, out.h), (4, 4));
+        let px = |x: usize, y: usize| &out.data[(y * 4 + x) * 4..][..4];
+        assert_eq!(px(0, 0), &[255, 0, 0, 255]);
+        assert_eq!(px(1, 0), &[255, 0, 0, 255]);
+        assert_eq!(px(2, 0), &[0, 255, 0, 255]);
+        assert_eq!(px(0, 2), &[0, 0, 255, 255]);
+        assert_eq!(px(3, 3), &[255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn upscale_same_size_and_broken_input_pass_through() {
+        let src = rgba2x2();
+        let out = upscale_rgba(
+            Rgba {
+                w: 2,
+                h: 2,
+                data: src.data.clone(),
+            },
+            2,
+            2,
+        );
+        assert_eq!(out.data, src.data);
+        // Kaputt (zu wenig Bytes) oder Zielfläche 0: liegen lassen statt
+        // zu paniken — blit() ignoriert das dann.
+        let broken = Rgba {
+            w: 2,
+            h: 2,
+            data: vec![1, 2, 3],
+        };
+        assert_eq!(upscale_rgba(broken, 4, 4).data.len(), 3);
     }
 }

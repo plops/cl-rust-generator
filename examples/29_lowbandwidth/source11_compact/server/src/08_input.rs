@@ -71,6 +71,11 @@ impl Inject for Injector {
                     None => Err(format!("unbekannte Taste {key:?}")),
                 }
             }
+            // Steuerung (F2/F3) fängt die Session vor dem Kanal ab — hier
+            // wäre sie ein Verdrahtungsfehler, kein Tastendruck.
+            ClientMsg::ResyncText | ClientMsg::QualityTile => {
+                Err("Steuernachricht erreicht die Injektion".into())
+            }
         }
     }
 }

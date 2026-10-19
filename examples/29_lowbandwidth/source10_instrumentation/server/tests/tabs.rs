@@ -37,6 +37,7 @@ fn fill(img: &mut RgbImage, x: u32, y: u32, w: u32, h: u32, c: [u8; 3]) {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Fixture-Helfer (Testcode).
 fn text(
     img: &mut RgbImage,
     font: &fontdue::Font,

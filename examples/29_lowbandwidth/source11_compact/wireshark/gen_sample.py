@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Erzeugt sample.pcap: eine LBW-v4-Sitzung (alle 14 Nachrichtenvarianten).
+"""Erzeugt sample.pcap: eine LBW-v5-Sitzung (alle 16 Nachrichtenvarianten).
 
 Nur stdlib. Body-Bytes sind per `encode_msg` verifizierte Vektoren
 (common/examples/vecdump.rs); bei Protokolländerung hier + im Dissector
@@ -14,8 +14,8 @@ import sys
 # Verifiziert per vecdump (encode_msg, bincode-2.0-Standard):
 V = {
     # Server -> Client
-    # Challenge version=4 nonce="0123456789abcdef"
-    "S_CHALLENGE": "000430313233343536373839616263646566",
+    # Challenge version=5 nonce="0123456789abcdef"
+    "S_CHALLENGE": "000530313233343536373839616263646566",
     "S_HELLO": "01",
     "S_CLEAR": "02",
     # NewText id=7 rect=1,2,300,16 fg=000000 bg=fffffa text="n€u"
@@ -23,8 +23,8 @@ V = {
     # MoveText id=7 rect=10,200,100,16
     "S_MOVE": "04070ac86410",
     "S_RM": "0509",
-    # Tile x=10 y=20 data=01020304
-    "S_TILE": "060a140401020304",
+    # Tile x=10 y=20 w=128 h=64 data=01020304
+    "S_TILE": "060a1480400401020304",
     # Unbekannte Variante (Robustheit: als lbw.raw, kein Abort)
     "S_UNKNOWN": "09ff",
     # Hello mit Restbyte (Robustheit: Rest als lbw.raw)
@@ -32,11 +32,13 @@ V = {
     # Client -> Server
     # Auth mac=00..1f
     "C_AUTH": "00000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
-    "C_HELLO": "0104",
+    "C_HELLO": "0105",
     "C_MOVE": "0264c8",
     "C_BTN": "030101",
     "C_TEXT": "04026869",
     "C_KEY": "0505456e74657200",
+    "C_RESYNC": "06",
+    "C_QUALITY": "07",
 }
 
 CLI_PORT, SRV_PORT = 54321, 7878
@@ -94,6 +96,8 @@ def main(path: str) -> None:
         (False, frame(V["C_BTN"])),
         (False, frame(V["C_TEXT"])),
         (False, frame(V["C_KEY"])),
+        (False, frame(V["C_RESYNC"])),
+        (False, frame(V["C_QUALITY"])),
     ]
     out = [struct.pack("<IHHIIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1)]
     seq = {True: 1000, False: 5000}

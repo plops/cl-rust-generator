@@ -1,4 +1,4 @@
-//! `01_types` — alle Nachrichtentypen des v4-Protokolls plus Konstanten.
+//! `01_types` — alle Nachrichtentypen des v5-Protokolls plus Konstanten.
 //!
 //! Serialisierung per `serde` + `bincode` (siehe `02_framing`).
 //! Koordinaten sind `u16` im Capture-Raum (immer 1280×720). Farben RGB8.
@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Protokollversion (Auth-Handshake lehnt Abweichungen ab).
-pub const PROTO_VERSION: u16 = 4;
+pub const PROTO_VERSION: u16 = 5;
 /// Default-TCP-Port (nur localhost — dahinter steht immer SSH).
 pub const DEFAULT_PORT: u16 = 7878;
 /// Feste Bildbreite.
@@ -89,10 +89,14 @@ pub enum ServerMsg {
     },
     /// Text mit `id` entfernen.
     RemoveText(u64),
-    /// AV1-Box (Still-Picture, rohe OBUs) an Position (`x`, `y`).
+    /// AV1-Box (Still-Picture, rohe OBUs): Fußabdruck (`x`, `y`, `w`, `h`)
+    /// im Capture-Raum; die kodierten Pixel dürfen kleiner sein
+    /// (`--tile-scale`), der Client skaliert auf den Fußabdruck hoch.
     Tile {
         x: u16,
         y: u16,
+        w: u16,
+        h: u16,
         data: Vec<u8>,
     },
 }
@@ -122,6 +126,12 @@ pub enum ClientMsg {
         key: String,
         down: bool,
     },
+    /// Alle Texte erneut schicken (F2: kaputter Bildschirm — ClearText +
+    /// je ein NewText aus dem Server-Stand, kein OCR-Neulauf).
+    ResyncText,
+    /// Genau eine hochwertige Vollbild-Kachel (`--hq-quantizer`), danach
+    /// wieder Normalbetrieb (F3: einmal orientieren, kein Dauerfeuer).
+    QualityTile,
 }
 
 #[cfg(test)]
@@ -144,7 +154,38 @@ mod tests {
     }
 
     #[test]
-    fn proto_version_is_4() {
-        assert_eq!(PROTO_VERSION, 4);
+    fn proto_version_is_5() {
+        assert_eq!(PROTO_VERSION, 5);
+    }
+
+    #[test]
+    fn control_msgs_roundtrip() {
+        for m in [ClientMsg::ResyncText, ClientMsg::QualityTile] {
+            let back: ClientMsg = bincode::serde::decode_from_slice(
+                &bincode::serde::encode_to_vec(&m, bincode::config::standard()).unwrap(),
+                bincode::config::standard(),
+            )
+            .unwrap()
+            .0;
+            assert_eq!(back, m);
+        }
+    }
+
+    #[test]
+    fn tile_carries_footprint() {
+        let m = ServerMsg::Tile {
+            x: 0,
+            y: 0,
+            w: 128,
+            h: 64,
+            data: vec![1, 2, 3],
+        };
+        let back: ServerMsg = bincode::serde::decode_from_slice(
+            &bincode::serde::encode_to_vec(&m, bincode::config::standard()).unwrap(),
+            bincode::config::standard(),
+        )
+        .unwrap()
+        .0;
+        assert_eq!(back, m);
     }
 }

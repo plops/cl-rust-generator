@@ -1,4 +1,4 @@
-# LBW-v4-Dissector für Wireshark (C-Plugin, kein Lua)
+# LBW-v5-Dissector für Wireshark (C-Plugin, kein Lua)
 
 Warum C statt Lua: Der Dissector läuft pro TCP-Segment — bei Kachel-Sessions
 mit tausenden Nachrichten zählt jede Millisekunde, und das Plugin lädt ohne
@@ -44,12 +44,13 @@ Vom Auth-Token (`Challenge`/`Auth`) zeigt der Dissector nur Längen
 
 ## Was er zeigt
 
-Alle 14 v4-Varianten beider Richtungen (Challenge, Hello, ClearText,
+Alle 16 v5-Varianten beider Richtungen (Challenge, Hello, ClearText,
 NewText mit ID/Box/Farben/Text, MoveText mit ID/Box, RemoveText,
-Tile mit Position/Größe/AV1-Bytes, Auth, Hello, MouseMove, Button, Text,
-Key) inkl. TCP-Reassembly (Nachrichten über Segmentgrenzen). Unbekannte
-Varianten/Restbytes erscheinen als `lbw.raw` (Protokoll-Erweiterungen
-bleiben sichtbar), Fragmente als Expert-Info.
+Tile mit Position/Fußabdruck/AV1-Bytes, Auth, Hello, MouseMove, Button,
+Text, Key, ResyncText, QualityTile) inkl. TCP-Reassembly (Nachrichten
+über Segmentgrenzen). Unbekannte Varianten/Restbytes erscheinen als
+`lbw.raw` (Protokoll-Erweiterungen bleiben sichtbar), Fragmente als
+Expert-Info.
 
 ## Dateien
 
@@ -60,6 +61,6 @@ bleiben sichtbar), Fragmente als Expert-Info.
   per `encode_msg` verifizierte Vektoren
   (`../common/examples/vecdump.rs`) — bei Protokolländerung hier und im
   Dissector nachziehen.
-- `sample.pcap` — committedes Beispiel (16 Pakete).
-- `check.sh` — baut und behauptet alle 14 Varianten per tshark
+- `sample.pcap` — committedes Beispiel (18 Pakete).
+- `check.sh` — baut und behauptet alle 16 Varianten per tshark
   (Exit 2 ohne Toolchain, analog zu den Modell-Checks der Smokes).

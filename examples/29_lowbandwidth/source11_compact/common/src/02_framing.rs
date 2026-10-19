@@ -110,13 +110,13 @@ impl FrameReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ClientMsg, ServerMsg};
+    use crate::types::{ClientMsg, PROTO_VERSION, ServerMsg};
     use std::io::Cursor;
 
     #[test]
     fn auth_challenge_survives_frame_roundtrip() {
         let m = ServerMsg::Challenge {
-            version: 4,
+            version: PROTO_VERSION,
             nonce: *b"0123456789abcdef",
         };
         let mut wire = Vec::new();
@@ -157,7 +157,9 @@ mod tests {
 
     #[test]
     fn client_hello_roundtrip() {
-        let m = ClientMsg::Hello { version: 4 };
+        let m = ClientMsg::Hello {
+            version: PROTO_VERSION,
+        };
         let mut wire = Vec::new();
         write_msg(&mut wire, &m).unwrap();
         let mut fr = FrameReader::new();

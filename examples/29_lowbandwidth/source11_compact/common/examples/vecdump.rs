@@ -1,4 +1,4 @@
-//! Gibt kanonische v4-Body-Vektoren als Hex aus (für gen_sample.py).
+//! Gibt kanonische v5-Body-Vektoren als Hex aus (für gen_sample.py).
 
 use lbw_common::{ClientMsg, Rect, ServerMsg, TextItem, encode_msg};
 
@@ -19,7 +19,7 @@ fn main() {
     let msgs: &[(&str, Vec<u8>)] = &[
         (
             "S_CHALLENGE",
-            encode_msg(&ServerMsg::Challenge { version: 4, nonce }).unwrap(),
+            encode_msg(&ServerMsg::Challenge { version: 5, nonce }).unwrap(),
         ),
         ("S_HELLO", encode_msg(&ServerMsg::Hello).unwrap()),
         ("S_CLEAR", encode_msg(&ServerMsg::ClearText).unwrap()),
@@ -38,6 +38,8 @@ fn main() {
             encode_msg(&ServerMsg::Tile {
                 x: 10,
                 y: 20,
+                w: 128,
+                h: 64,
                 data: vec![1, 2, 3, 4],
             })
             .unwrap(),
@@ -51,7 +53,7 @@ fn main() {
         ("C_AUTH", encode_msg(&ClientMsg::Auth { mac }).unwrap()),
         (
             "C_HELLO",
-            encode_msg(&ClientMsg::Hello { version: 4 }).unwrap(),
+            encode_msg(&ClientMsg::Hello { version: 5 }).unwrap(),
         ),
         (
             "C_MOVE",
@@ -74,6 +76,8 @@ fn main() {
             })
             .unwrap(),
         ),
+        ("C_RESYNC", encode_msg(&ClientMsg::ResyncText).unwrap()),
+        ("C_QUALITY", encode_msg(&ClientMsg::QualityTile).unwrap()),
     ];
     for (name, body) in msgs {
         println!("\"{name}\": \"{}\"", hex(body));

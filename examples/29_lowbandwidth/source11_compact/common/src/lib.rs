@@ -1,4 +1,4 @@
-//! `lbw-common` — Protokoll v4 für `source11_compact`.
+//! `lbw-common` — Protokoll v5 für `source11_compact`.
 //!
 //! Klartext **innerhalb** des SSH-Tunnels (Verschlüsselung = SSH, s.
 //! Plan §2.1). Framing: `[u32LE len][bincode-Body]`, `MAX_MSG` schützt

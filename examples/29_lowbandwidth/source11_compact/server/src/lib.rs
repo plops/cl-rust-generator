@@ -31,6 +31,9 @@ pub mod textids;
 #[path = "09_stabilize.rs"]
 pub mod stabilize;
 
+#[path = "10_trace.rs"]
+pub mod trace;
+
 #[path = "07_session.rs"]
 pub mod session;
 

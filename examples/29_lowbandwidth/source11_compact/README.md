@@ -1,4 +1,4 @@
-# source11_compact — minimale, SSH-getunnelte Neuauflage (Protokoll v4)
+# source11_compact — minimale, SSH-getunnelte Neuauflage (Protokoll v5)
 
 Ferner Desktop über SSH: Linux- und Android-Clients bauen den Tunnel
 selbst (Jump-Host-Kette für Server hinter CGNAT), der Server bindet nur
@@ -8,7 +8,7 @@ OCR-Flackern schluckt der Stabilisator. Plan und Tasks:
 
 ## Struktur
 
-- `common/` — Protokoll v4 (Framing, `NewText`/`MoveText`/`RemoveText`
+- `common/` — Protokoll v5 (Framing, `NewText`/`MoveText`/`RemoveText`
   mit content-verankerten IDs, Challenge/Auth mit Nonce + Token-MAC).
 - `tunnel/` — wiederverwendbare SSH-Kette (`russh`, `direct-tcpip`,
   verschachtelte Sessions, TOFU-Pins pro Hop, Retry-Politik).
@@ -38,7 +38,13 @@ Server (hinter CGNAT: Reverse-Tunnel zu tinyeu, s. [DEPLOY.md](DEPLOY.md)):
 
 ```sh
 ./target/release/lbw-server --token "$(cat ~/.lbw_token)" --budget 6000
+# Optional: --tile-scale 2|4 (kleinere Kacheln, Client skaliert hoch),
+# --hq-quantizer 180 (Qualität der F3-Einzelkachel).
 ```
+
+Im Linux-Client: **F2** fordert alle Texte neu an (kaputter Bildschirm),
+**F3** genau eine hochwertige Vollbild-Kachel zum Orientieren (kann bei
+6 kB/s Sekunden dauern, danach wieder Normalbetrieb).
 
 Desktop-Client durch die Kette tinyeu → hpz6o:
 
@@ -53,11 +59,22 @@ Android: Felder pro Hop (Host, Port, User, Key), Ziel-sshd aus
 Jump-Sicht, LBW-Port, Token — alles Profile in der App, IPs/Ports
 frei konfigurierbar. Details: [WALKTHROUGH.md](WALKTHROUGH.md).
 
+## Fehlersuche: Ablaufverfolgung
+
+Bleibt alter Text stehen oder kommt neuer nicht an: Server mit
+`--trace spur.log` starten, Problem reproduzieren, Log lesen. Pro Frame
+stehen OCR-Befund (`text …`) und Sende-Entscheidung (`delta …`)
+nebeneinander — OCR-Zeile ohne `NewText` zeigt auf den Stabilisator,
+fehlende OCR-Zeile auf Detektor/Erkennung, `NewText` ohne Wirkung auf
+Draht/Client. Ohne `--trace` ist die Verfolgung vollständig aus
+(kein Overhead, keine Datei). Details im Modulkopf
+(`server/src/10_trace.rs`).
+
 ## Plan-Aspekte: übernommen vs. gestrichen
 
 | Aspekt aus Review/Plan | Stand |
 |---|---|
-| Kein Volltext pro Frame (Scroll via `MoveText`/IDs) | drin (v4, T3b-Soak-Test) |
+| Kein Volltext pro Frame (Scroll via `MoveText`/IDs) | drin (v5, T3b-Soak-Test) |
 | SSH-Tunnel baut der Client selbst (Linux + Android) | drin (`tunnel/`, russh) |
 | Jump-Host-Kette (CGNAT: tinyeu → hpz6o) | drin, E2E-geprüft |
 | localhost-Klartext + Nonce/Auth für Wireshark | drin (`--tap`, Dissector) |

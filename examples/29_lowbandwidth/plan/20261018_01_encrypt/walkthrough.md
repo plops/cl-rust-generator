@@ -121,7 +121,7 @@ Drei Details, die man sonst erst in der Praxis lernt:
   (0,5 s → 5 s) und eben die Timeouts. Der Android-Client übersteht so
   HOME-Reconnect und kurze Netzabbrüche ohne Neu-Login.
 
-## 4. Das Protokoll v4: Text ist eine Liste von IDs
+## 4. Das Protokoll v5: Text ist eine Liste von IDs
 
 Auf dem Draht liegt ein simples Framing: `[u32-LE-Länge][bincode-Body]`.
 Zuerst beweist der Client die Berechtigung: Der Server schickt eine
@@ -139,7 +139,9 @@ Frame wiederholt.** Jede erkannte Zeile bekommt eine sessionsweite ID
 | `NewText` | ID, Box, Farben, String | ~30–60 B |
 | `MoveText` | Nur ID + neue Box (Scroll!) | ~8 B |
 | `RemoveText` | ID | ~8 B |
-| `Tile` | AV1-Box (Restbild) | 0,5–200 kB |
+| `Tile` | AV1-Box + Fußabdruck (kann kleiner kodiert sein) | 0,5–200 kB |
+| `ResyncText` (C→S, F2) | Alle Texte erneut (Server-Stand) | ~5 B |
+| `QualityTile` (C→S, F3) | Genau eine HQ-Vollbild-Kachel | ~5 B |
 
 Ein Browser-Scroll ist damit fast gratis: Dieselben Zeilen wandern —
 der Client bewegt 47 bekannte IDs per `MoveText` (live gemessen, §7),
@@ -367,7 +369,7 @@ flowchart LR
 
 So sieht man, was wirklich auf dem Draht lag — z. B. die Messung in §7:
 `Text`-Meldungen zählen, `Tile`-Meldungen datieren. `wireshark/check.sh`
-verifiziert den Dissector gegen ein Sample-pcap (14 Varianten plus
+verifiziert den Dissector gegen ein Sample-pcap (16 Varianten plus
 Baum-Nachweis). Bau und Start: `wireshark/CMakeLists.txt` bzw. die
 Kurzanleitung in `source11_compact/wireshark/README.md`,
 Deploy (tinyeu/hpz6o, systemd-Reverse-Tunnel) in
@@ -381,7 +383,7 @@ Jede Behauptung oben hat einen ausführbaren Nachweis:
 cargo test --workspace          # 100 Rust-Tests (Protokoll, Stabilisator,
 cargo fmt --check               #   Tunnel gegen echte sshd, Loopbacks)
 cargo clippy --workspace --all-targets -- -D warnings
-./wireshark/check.sh            # Dissector: 14 Varianten + Baum
+./wireshark/check.sh            # Dissector: 16 Varianten + Baum
 ./scripts/smoke_e2e.sh          # Desktop-Kette Jump→Ziel, Tap-Dissektion
 bash android/scripts/emulator_e2e.sh   # echte App im Emulator (9 Checks)
 ```
@@ -444,7 +446,7 @@ ist älter, und die Top-Level-`README.md` fasst die Linie so zusammen
 | `source8_transpiled` | Transpiler-Eingabe, um `source7` per `cl-rust-generator` zu erzeugen — kein Produkt, sondern Werkzeugschritt | historisch |
 | `source9_gpu` | 1280×720 statt 640×640, GPU-Hybrid (DBNet-Detektor per CUDA-EP auf der GPU, Erkenner auf CPU), eine AV1-Box pro Frame, Protokoll v2 | lauffähig |
 | `source10_instrumentation` | Wie source9, plus Protokoll v3 (stabile Text-IDs, Delta statt Resend) und komplette Instrumentierung: `--record` schreibt `.lbwlog`, `lbw-logstat` wertet offline aus, `lbw-replay` spielt headless nach | **aktuell beste Implementierung** |
-| `source11_compact` | Protokoll v4, Auth (Nonce + Token-MAC), Clients bauen den SSH-Tunnel selbst (`tunnel/`-Crate, Jump-Kette, Android) — aber: Latenz real schlechter als source10 | lauffähig, nicht ablösend |
+| `source11_compact` | Protokoll v5, Auth (Nonce + Token-MAC), Clients bauen den SSH-Tunnel selbst (`tunnel/`-Crate, Jump-Kette, Android) — aber: Latenz real schlechter als source10 | lauffähig, nicht ablösend |
 
 Die Konstanten über alle Generationen: X11-Grab (kein Wayland),
 PP-OCRv6-Modelle (`PP-OCRv6_small_det.onnx` /
@@ -548,7 +550,7 @@ worse". Der Diff erklärt, warum das kein Widerspruch ist:
   Verschachtelung jedes Pakets. Das ist der Preis für
   „kein Hand-Tunnel, auch hinter CGNAT, auch auf Android" —
   bezahlt wird er in Verbindungsaufbau und Paketweg, nicht im
-  Protokoll (v4-`MoveText` macht Scrollen in beiden Welten fast
+  Protokoll (v5-`MoveText` macht Scrollen in beiden Welten fast
   gratis, §4).
 - **Wieder die Messbarkeit.** Source10s `--record` + `lbw-logstat`
   liefert Durchsatz, Gaps und Input→Photon-Latenz aus echten
@@ -570,7 +572,7 @@ einen Rechner hinter CGNAT muss, kommt an source11 nicht vorbei.
 |---|---|
 | Beste Implementierung heute (Latenz, Messbarkeit) | `source10_instrumentation` — so steht es in der Top-`README.md`, und §13/§14 zeigen warum |
 | Einzige mit Android-Client und Selbst-Tunnel | `source11_compact` |
-| Einzige mit Auth am Server-Port | `source11_compact` (v4, Nonce + Token-MAC); source9/10: bewusst kein Auth, Tunnel ist Handarbeit |
+| Einzige mit Auth am Server-Port | `source11_compact` (v5, Nonce + Token-MAC); source9/10: bewusst kein Auth, Tunnel ist Handarbeit |
 | Kleinste verständliche Referenz | `source7_mvp` (640×640, 10×10-Raster) |
 | Erkennungs-Flackern/Geistertext behoben | nur `source11_compact` (Stabilisator, §6) |
 | Läufe offline analysierbar/replaybar | nur `source10_instrumentation` (`.lbwlog`, `lbw-logstat`, `lbw-replay`) |

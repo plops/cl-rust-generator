@@ -117,7 +117,7 @@ fn hud(s: &Scene, m: &Metrics) -> String {
         .map(|v| format!("{v:.0} ms"))
         .unwrap_or_else(|| "–".into());
     format!(
-        "{link} | {} Texte | {} Kacheln ({} B) | ↓{} B ↑{} B | In→Text {it} In→Kachel {ik} | F1 HUD",
+        "{link} | {} Texte | {} Kacheln ({} B) | ↓{} B ↑{} B | In→Text {it} In→Kachel {ik} | F1 HUD F2 Text neu F3 gutes Bild",
         s.texts.len(),
         s.tiles,
         s.tile_bytes,
@@ -196,6 +196,15 @@ fn send_input(net: &Net, last_mouse: &mut (u16, u16), show_hud: &mut bool) {
     }
     if is_key_pressed(KeyCode::F1) {
         *show_hud = !*show_hud;
+    }
+    // F2: Texte neu vom Server anfordern (kaputter Bildschirm). F3: genau
+    // eine hochwertige Vollbild-Kachel zum Orientieren (kann Sekunden
+    // dauern, danach wieder Normalbetrieb).
+    if is_key_pressed(KeyCode::F2) {
+        net.send(ClientMsg::ResyncText);
+    }
+    if is_key_pressed(KeyCode::F3) {
+        net.send(ClientMsg::QualityTile);
     }
 }
 

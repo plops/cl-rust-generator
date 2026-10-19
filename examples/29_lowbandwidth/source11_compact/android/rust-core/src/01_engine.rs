@@ -308,8 +308,10 @@ async fn connect_once(
             ServerMsg::RemoveText(id) => {
                 let _ = ev.send(Event::RemoveText(id));
             }
-            ServerMsg::Tile { x, y, data } => match dec.decode(&data) {
+            ServerMsg::Tile { x, y, w, h, data } => match dec.decode(&data) {
                 Ok(rgba) => {
+                    // Wie Desktop: kleiner kodiert → auf Fußabdruck hoch.
+                    let rgba = lbw_client::av1::upscale_rgba(rgba, w as usize, h as usize);
                     let _ = ev.send(Event::Tile {
                         x,
                         y,
