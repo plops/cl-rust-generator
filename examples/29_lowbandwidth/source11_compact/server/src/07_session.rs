@@ -263,6 +263,8 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
     // erste Frame (ClearText + Vollbestand), statt gegen Altlasten zu
     // differenzieren.
     let mut key_first = false;
+    // Scroll-Tracking für Kachel-Settle (Flanke für die Trace-Notiz).
+    let mut was_scrolling = false;
     let mut frames: u64 = 0;
     let result = loop {
         if input.is_finished() {
@@ -417,25 +419,38 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
             });
             let _ = kick_tx.send(());
             tiles = 1;
-        } else if let Some(r) = dirty
-            && !tile_thread.is_finished()
-        {
-            let rgb = crop_rgb(&masked, r);
-            let (rgb, ew, eh) = scale_rgb(rgb, u32::from(r.w), u32::from(r.h), cfg.tile_scale);
-            *tile_slot
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(TileJob {
-                x: r.x,
-                y: r.y,
-                fw: r.w,
-                fh: r.h,
-                rgb,
-                ew: ew as usize,
-                eh: eh as usize,
-                quantizer: cfg.quantizer,
-            });
-            let _ = kick_tx.send(());
-            tiles = 1;
+        } else {
+            // Scroll-Settle: Während das Bild fährt (uniformer Text-Shift),
+            // keine Zwischen-Kacheln — sie verstopfen nur den 6-kB/s-Pacer,
+            // sind beim Eintreffen längst veraltet und verzögern das scharfe
+            // Endbild. Positionen laufen als MoveText weiter; `prev` folgt
+            // jedem Frame, nach Stillstand also wieder echte (kleine) Deltas.
+            let scrolling = stabilizer.scrolling();
+            if scrolling != was_scrolling {
+                trace.note(if scrolling { "scroll" } else { "settle" });
+                was_scrolling = scrolling;
+            }
+            if let Some(r) = dirty
+                && !scrolling
+                && !tile_thread.is_finished()
+            {
+                let rgb = crop_rgb(&masked, r);
+                let (rgb, ew, eh) = scale_rgb(rgb, u32::from(r.w), u32::from(r.h), cfg.tile_scale);
+                *tile_slot
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(TileJob {
+                    x: r.x,
+                    y: r.y,
+                    fw: r.w,
+                    fh: r.h,
+                    rgb,
+                    ew: ew as usize,
+                    eh: eh as usize,
+                    quantizer: cfg.quantizer,
+                });
+                let _ = kick_tx.send(());
+                tiles = 1;
+            }
         }
         if cfg.verbose {
             let (det_ms, rec_ms) = ocr.last_ms();

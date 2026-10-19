@@ -100,8 +100,10 @@ pub const MASK_PAD: u16 = 6;
 /// Erkennung und Fransensäume bleiben als AV1-Reste stehen.
 #[must_use]
 pub fn pad_rect(r: Rect, pad: u16, w: u32, h: u32) -> Rect {
-    let x0 = u32::from(r.x).saturating_sub(u32::from(pad));
-    let y0 = u32::from(r.y).saturating_sub(u32::from(pad));
+    // Auch ganz außerhalb liegende Boxen (Detektor-Artefakte) klemmen —
+    // sonst unterläuft `x1 - x0` und reißt die Session ab.
+    let x0 = u32::from(r.x).saturating_sub(u32::from(pad)).min(w);
+    let y0 = u32::from(r.y).saturating_sub(u32::from(pad)).min(h);
     let x1 = (u32::from(r.x) + u32::from(r.w) + u32::from(pad)).min(w);
     let y1 = (u32::from(r.y) + u32::from(r.h) + u32::from(pad)).min(h);
     Rect::new(x0 as u16, y0 as u16, (x1 - x0) as u16, (y1 - y0) as u16)
@@ -197,6 +199,15 @@ mod tests {
         assert_eq!(
             pad_rect(Rect::new(120, 120, 8, 8), 4, 128, 128),
             Rect::new(116, 116, 12, 12)
+        );
+        // Ganz außerhalb: leeres Rechteck statt Underflow-Panik.
+        assert_eq!(
+            pad_rect(Rect::new(200, 50, 10, 10), 6, 128, 128),
+            Rect::new(128, 44, 0, 22)
+        );
+        assert_eq!(
+            pad_rect(Rect::new(50, 200, 10, 10), 6, 128, 128),
+            Rect::new(44, 128, 22, 0)
         );
     }
 

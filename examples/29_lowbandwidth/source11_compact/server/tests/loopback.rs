@@ -502,6 +502,177 @@ fn quality_keyframe_rebuilds_texts_without_stale_state() {
     assert_eq!(stale, 0, "Keyframe darf keinen Alt-Text neu senden");
 }
 
+/// Skript-OCR: liefert pro Frame den nächsten Eintrag (Texte + Boxen),
+/// danach den letzten im Dauerlauf. Scroll + Dirty kommen aus EINER Quelle
+/// (atomar): Die wandernde Maske macht jeden Frame dirty, der uniforme
+/// Shift meldet Scroll — ganz ohne Wall-Clock-Steuerung vom Test-Thread.
+struct ScriptOcr(std::sync::Mutex<Vec<(Vec<lbw_common::TextItem>, Vec<lbw_common::Rect>)>>);
+
+impl ScriptOcr {
+    fn new(script: Vec<(Vec<lbw_common::TextItem>, Vec<lbw_common::Rect>)>) -> Self {
+        Self(std::sync::Mutex::new(script))
+    }
+}
+
+/// Skript-Quelle: ein Bild pro Grab, danach das letzte im Dauerlauf.
+/// Zusammen mit `ScriptOcr` (eigener Zähler, gleiche Länge) laufen Bild und
+/// Befund frame-synchron — der Test-Thread greift nie dazwischen.
+#[derive(Clone)]
+struct ScriptSource(std::sync::Arc<std::sync::Mutex<Vec<image::RgbImage>>>);
+
+impl ScriptSource {
+    fn new(images: Vec<image::RgbImage>) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(images)))
+    }
+
+    /// Ab jetzt dauerhaft `img` liefern (Szenenwechsel nach Stillstand).
+    fn set(&self, img: image::RgbImage) {
+        let mut v = self.0.lock().unwrap();
+        v.clear();
+        v.push(img);
+    }
+}
+
+impl lbw_server::capture::FrameSource for ScriptSource {
+    fn grab(&mut self) -> Result<image::RgbImage, String> {
+        let mut v = self.0.lock().unwrap();
+        if v.len() > 1 {
+            Ok(v.remove(0))
+        } else {
+            Ok(v[0].clone())
+        }
+    }
+}
+
+impl lbw_server::session::Recognize for ScriptOcr {
+    fn text(&mut self, img: &image::RgbImage) -> Result<Vec<lbw_common::TextItem>, String> {
+        self.text_full(img, usize::MAX, &[]).map(|(t, _)| t)
+    }
+
+    fn text_full(
+        &mut self,
+        _img: &image::RgbImage,
+        _max_new: usize,
+        _hint: &[lbw_common::Rect],
+    ) -> Result<(Vec<lbw_common::TextItem>, Vec<lbw_common::Rect>), String> {
+        let mut s = self.0.lock().unwrap();
+        if s.len() > 1 {
+            Ok(s.remove(0))
+        } else {
+            Ok(s[0].clone())
+        }
+    }
+}
+
+#[test]
+fn scroll_holds_tiles_until_settle() {
+    // Gleichmäßiger Scroll (+20 px/Frame, 3 Zeilen) bei wanderndem
+    // Masken-Dirty: kein einziger Tile während des Scrolls (Settle!),
+    // danach läuft der Bildwechsel (Vollbild nach Szenenwechsel) normal.
+    use clap::Parser;
+    let cfg =
+        lbw_server::config::Config::try_parse_from(["lbw-server", "--budget", "200000"]).unwrap();
+    let row = |y: u16, text: &str| lbw_common::TextItem {
+        id: 0,
+        rect: lbw_common::Rect::new(8, y, 100, 16),
+        fg: [10; 3],
+        bg: [250; 3],
+        text: text.into(),
+    };
+    let frame_texts = |y0: u16| {
+        let ts = vec![row(y0, "eins"), row(y0 + 32, "zwei"), row(y0 + 64, "drei")];
+        let seen = ts.iter().map(|t| t.rect).collect();
+        (ts, seen)
+    };
+    let mut script = vec![frame_texts(8); 3];
+    for i in 1..=8 {
+        script.push(frame_texts(8 + i * 20));
+    }
+    script.extend(vec![frame_texts(168); 6]);
+    // Bildskript im Gleichschritt: statisch, dann jeden Scroll-Frame
+    // alternierend (Roh-Dirty jeden Frame), dann statisch. Auf flachem
+    // Bild trüge die wandernde Maske allein kein Dirty — der Test wäre
+    // hohl (besteht mit wie ohne Settle).
+    let shade = |v: u8| solid(128, 128, [v; 3]);
+    let mut images = vec![shade(40); 3];
+    for i in 0..8 {
+        images.push(shade(if i % 2 == 0 { 41 } else { 40 }));
+    }
+    images.push(shade(41));
+    let feed = ScriptSource::new(images);
+    let src_feed = feed.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut src = src_feed;
+        let mut ocr = ScriptOcr::new(script);
+        serve_client(
+            stream,
+            &cfg,
+            &mut src,
+            &mut ocr,
+            Some(200),
+            TOKEN,
+            None::<Injector>,
+        )
+        .unwrap();
+    });
+
+    let mut s = TcpStream::connect(addr).unwrap();
+    let mut fr = FrameReader::new();
+    assert!(matches!(
+        handshake(&mut s, &mut fr, TOKEN),
+        ServerMsg::Hello
+    ));
+
+    // Erstbild: genau ein Vollbild-Tile.
+    let mut full = 0;
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| {
+            if matches!(m, ServerMsg::Tile { w: 128, h: 128, .. }) {
+                full += 1;
+                return true;
+            }
+            false
+        },
+    );
+    assert_eq!(full, 1);
+
+    // Scroll-Fenster: Der wandernde Masken-Dirty würde ohne Settle jeden
+    // Frame ein Tile auslösen (großes Budget → sofort sichtbar). Stattdessen:
+    // Stille auf dem Kachelkanal, Moves holen nach Stillstand auf.
+    let mut moves = 0;
+    let mut tiles = 0;
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_millis(2500),
+        &mut |m| {
+            match m {
+                ServerMsg::MoveText { .. } => moves += 1,
+                ServerMsg::Tile { .. } => tiles += 1,
+                _ => {}
+            }
+            false
+        },
+    );
+    assert!(moves >= 3, "Scroll-Positionen kommen an ({moves})");
+    assert_eq!(tiles, 0, "Scroll hält Kacheln zurück");
+
+    // Bildwechsel nach Stillstand: Vollbild kommt ganz normal.
+    feed.set(solid(128, 128, [200; 3]));
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| matches!(m, ServerMsg::Tile { w: 128, h: 128, .. }),
+    );
+}
+
 #[test]
 fn big_move_resets_full_frame() {
     let shared = SharedSource::new(solid(128, 128, [0; 3]));

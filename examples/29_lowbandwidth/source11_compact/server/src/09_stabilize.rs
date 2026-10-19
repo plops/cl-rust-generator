@@ -26,6 +26,13 @@ use lbw_common::{Rect, ServerMsg, TextItem};
 const REMOVE_AFTER: Duration = Duration::from_millis(700);
 /// Mindest-Ähnlichkeit für ein ID-Match (Text trägt die Identität).
 const MATCH_SIM: f32 = 0.8;
+/// Scroll-Freeze: so viele Zeilen müssen denselben Shift teilen …
+const SCROLL_MIN_LINES: usize = 3;
+/// … von mindestens einer Zeilenhöhe, damit Tipp-Getrippel und Jitter nie
+/// als Scroll gelten (Move-Totband: 6 px, Zeilenhöhe: ~16+ px).
+const SCROLL_MIN_SHIFT: f32 = 16.0;
+/// Toleranz beim Shift-Vergleich (OCR-Jitter ±wenige Pixel).
+const SCROLL_TOL: f32 = 3.0;
 /// Darunter gilt eine Zeile als verschwunden — außer die Box sitzt noch
 /// (Tippen ändert kurzen Text stark, aber nicht die Position).
 const KEEP_SIM: f32 = 0.5;
@@ -155,6 +162,8 @@ fn still_there(sent: &TextItem, seen: &[Rect]) -> bool {
 pub struct Stabilizer {
     lines: HashMap<u64, Line>,
     next_id: u64,
+    scrolling: bool,
+    was_scrolling: bool,
 }
 
 impl Stabilizer {
@@ -163,7 +172,16 @@ impl Stabilizer {
         Self {
             lines: HashMap::new(),
             next_id: 1,
+            scrolling: false,
+            was_scrolling: false,
         }
+    }
+
+    /// Läuft gerade ein Scroll (uniformer Shift im letzten Schritt)? Die
+    /// Session hält dann Kacheln zurück, bis das Bild steht.
+    #[must_use]
+    pub fn scrolling(&self) -> bool {
+        self.scrolling
     }
 
     /// Verarbeitet einen OCR-Frame, liefert das sendefertige Delta.
@@ -212,6 +230,44 @@ impl Stabilizer {
             }
         }
 
+        // Scroll-Freeze: Teilen sich genug Zeilen denselben großen Shift,
+        // fährt das Bild — Inhalt ist dann nicht lesbar, also fließen nur
+        // Positionen (Move) und Entfernungen; alle News (Inhalts-Updates wie
+        // neue IDs) warten auf Stillstand und kommen dann genau einmal.
+        // Das streicht OCR-Wackel-Resends fahrender Zeilen und
+        // Kanten-Fragmente, ohne Latenz im lesbaren Betrieb zu kosten.
+        let mut votes: Vec<(f32, f32)> = Vec::new();
+        for (i, id) in matched
+            .iter()
+            .filter_map(|(i, id)| (*id).map(|id| (*i, id)))
+        {
+            if let Some(line) = self.lines.get(&id) {
+                let n = &cur[i].1;
+                if similarity(&n.text, &norm_text(&line.sent.text)) >= MATCH_SIM {
+                    let (cx, cy) = center(n.rect);
+                    let pn = norm(&line.sent);
+                    let (px, py) = center(pn.rect);
+                    votes.push((cx - px, cy - py));
+                }
+            }
+        }
+        let mut scrolling = false;
+        // Jede Stimme zählt sich selbst mit (Abstand 0 <= Toleranz).
+        for v in &votes {
+            if v.0.abs().max(v.1.abs()) < SCROLL_MIN_SHIFT {
+                continue;
+            }
+            let supporters = votes
+                .iter()
+                .filter(|u| (u.0 - v.0).abs() <= SCROLL_TOL && (u.1 - v.1).abs() <= SCROLL_TOL)
+                .count();
+            if supporters >= SCROLL_MIN_LINES {
+                scrolling = true;
+                break;
+            }
+        }
+        self.scrolling = scrolling;
+
         let mut out = Vec::new();
         if first {
             out.push(ServerMsg::ClearText);
@@ -244,22 +300,30 @@ impl Stabilizer {
                             Some((p, r)) if norm(p) == n => *r + 1,
                             _ => 0,
                         };
+                        // Scroll-Freeze: Inhalt (NewText) wartet auf Stillstand,
+                        // Position (MoveText) läuft weiter; pending sammelt,
+                        // der Settle-Flusch unten sendet genau einmal nach.
                         if repeats >= 1 {
-                            line.pending = None;
                             if !line.live {
                                 // Erstbestätigung einer neuen Zeile: Inhalt
                                 // geht erstmals raus (kein Move für eine dem
                                 // Client unbekannte ID).
-                                t.id = id;
-                                out.push(ServerMsg::NewText(t.clone()));
-                                line.sent = t;
-                                line.live = true;
+                                if scrolling {
+                                    line.pending = Some((t, repeats));
+                                } else {
+                                    line.pending = None;
+                                    t.id = id;
+                                    out.push(ServerMsg::NewText(t.clone()));
+                                    line.sent = t;
+                                    line.live = true;
+                                }
                             } else if norm_text(&n.text) == norm_text(&pn.text)
                                 && n.fg == pn.fg
                                 && n.bg == pn.bg
                             {
                                 // Nur Box neu (Totband schon via Raster +
                                 // Mindestwanderung prüfen).
+                                line.pending = None;
                                 let (cx, cy) = center(n.rect);
                                 let (px, py) = center(pn.rect);
                                 let dw =
@@ -269,7 +333,10 @@ impl Stabilizer {
                                     out.push(ServerMsg::MoveText { id, rect: t.rect });
                                     line.sent = t;
                                 }
+                            } else if scrolling {
+                                line.pending = Some((t, repeats));
                             } else {
+                                line.pending = None;
                                 t.id = id;
                                 out.push(ServerMsg::NewText(t.clone()));
                                 line.sent = t;
@@ -289,7 +356,7 @@ impl Stabilizer {
                             Some((p, r)) if norm(p) == n => *r + 1,
                             _ => 0,
                         };
-                        if h >= 2 {
+                        if h >= 2 && !scrolling {
                             line.pending = None;
                             out.push(ServerMsg::NewText(t.clone()));
                             line.sent = t;
@@ -331,6 +398,27 @@ impl Stabilizer {
                 }
             }
         }
+        // Settle-Flusch: Was der Scroll-Freeze angehalten hat, kommt beim
+        // ersten stehenden Frame genau einmal nach (neueste Fassung, nur
+        // für Zeilen, die jetzt auch wirklich da sind — Reste fahrender
+        // Fragmente laufen in den normalen Weg-Timer).
+        if !scrolling && self.was_scrolling {
+            for (id, line) in self.lines.iter_mut() {
+                if !seen.get(id).is_some_and(|s| *s) {
+                    continue;
+                }
+                if let Some((t, _)) = line.pending.take()
+                    && norm(&t) != norm(&line.sent)
+                {
+                    let mut t = t;
+                    t.id = *id;
+                    out.push(ServerMsg::NewText(t.clone()));
+                    line.sent = t;
+                    line.live = true;
+                }
+            }
+        }
+        self.was_scrolling = scrolling;
         // Verschwundene erst nach REMOVE_AFTER löschen — außer die Box ist
         // noch detektiert (Still-da: Erkennung hängt im Budget hinterher).
         // Ausnahme: Anderslautender Inhalt belegt die alte Box deutlich —
@@ -624,6 +712,113 @@ mod tests {
         }
         assert_eq!(news, 2, "neuer Tab-Inhalt muss ankommen");
         assert_eq!(removes, 2, "alter Tab-Inhalt muss gehen");
+    }
+
+    #[test]
+    fn scroll_freezes_content_but_moves_flow() {
+        // Vier Zeilen fahren gemeinsam (−63 px): Positionen laufen als Move
+        // (sobald stabil), der wackelnde Inhalt wartet; Stillstand flusht
+        // genau einmal. Moves brauchen wie Inhalte einen stabilen
+        // Folgeframe — deshalb ist der erste Scroll-Frame still.
+        let mut s = Stabilizer::new();
+        let t = t0();
+        let base = vec![
+            item(10, 200, "eins"),
+            item(10, 220, "zwei"),
+            item(10, 240, "drei"),
+            item(10, 260, "vier"),
+        ];
+        let first = step_texts(&mut s, base, &[], true, t);
+        assert_eq!(first.len(), 5); // ClearText + 4 News
+        assert!(!s.scrolling());
+
+        let scrolled = vec![
+            item(10, 137, "eins"),
+            item(10, 157, "zwei"),
+            item(10, 177, "drei"),
+            item(10, 197, "vier?"),
+        ];
+        let d = step_texts(&mut s, scrolled.clone(), &[], false, t);
+        assert!(s.scrolling(), "uniformer Shift muss Scroll melden");
+        assert_eq!(d, vec![], "erste Sichtung: noch alles pending");
+
+        // Stabile Position: drei Moves, Inhalt weiter eingefroren.
+        let d = step_texts(&mut s, scrolled.clone(), &[], false, t);
+        assert!(s.scrolling());
+        assert_eq!(
+            d.iter()
+                .filter(|m| matches!(m, ServerMsg::MoveText { .. }))
+                .count(),
+            3,
+            "stabile Zeilen ziehen als Move mit, {d:?}"
+        );
+        assert!(
+            d.iter().all(|m| !matches!(m, ServerMsg::NewText(_))),
+            "Inhalt wartet auf Stillstand, {d:?}"
+        );
+
+        // Stillstand mit frischem Wackeln: genau ein Flusch mit Fassung.
+        let settled: Vec<TextItem> = scrolled
+            .iter()
+            .map(|it| {
+                let mut n = it.clone();
+                if n.text == "vier?" {
+                    n.text = "vier?!".into();
+                }
+                n
+            })
+            .collect();
+        let d = step_texts(&mut s, settled.clone(), &[], false, t);
+        assert!(!s.scrolling());
+        let news: Vec<&str> = d
+            .iter()
+            .filter_map(|m| match m {
+                ServerMsg::NewText(t) => Some(t.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(news, vec!["vier?!"], "genau einmal nachreichen, {d:?}");
+        // … danach wieder Stille.
+        let d = step_texts(&mut s, settled, &[], false, t);
+        assert_eq!(d, vec![]);
+    }
+
+    #[test]
+    fn small_uniform_shift_is_no_scroll() {
+        // Drei Zeilen, gemeinsam nur −8 px (unter der Zeilenhöhe): kein
+        // Freeze — Inhalts-Update bestätigt normal im Folgeframe.
+        let mut s = Stabilizer::new();
+        let t = t0();
+        step_texts(
+            &mut s,
+            vec![
+                item(10, 100, "alpha"),
+                item(10, 120, "beta"),
+                item(10, 140, "gamma"),
+            ],
+            &[],
+            true,
+            t,
+        );
+        let moved = vec![
+            item(10, 92, "alphax"),
+            item(10, 112, "betax"),
+            item(10, 132, "gammax"),
+        ];
+        let d = step_texts(&mut s, moved.clone(), &[], false, t);
+        assert!(!s.scrolling(), "8 px sind Tippen, kein Scroll");
+        assert!(
+            d.iter().all(|m| !matches!(m, ServerMsg::NewText(_))),
+            "erste Sichtung noch still"
+        );
+        let d = step_texts(&mut s, moved, &[], false, t);
+        assert_eq!(
+            d.iter()
+                .filter(|m| matches!(m, ServerMsg::NewText(_)))
+                .count(),
+            3,
+            "Folgeframe bestätigt normal, {d:?}"
+        );
     }
 
     #[test]
