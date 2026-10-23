@@ -99,17 +99,32 @@ kennt keinen einzigen Key-Parameter).
   `kein raum aktiv` — **SMOKE OK**.
 - `cargo fmt --check` und `cargo clippy --all-targets -- -D warnings`: grün.
 
-### 1.5 HIL-Nachweis je Modus (ehrlicher Stand)
+### 1.5 HIL-Nachweis (echter Durchlauf vom 23.10., Modus `zh-to-de`)
 
-Der HIL mit echten Geräten (Linux + Android/iPhone, Gemini-Key) wurde
-**nicht** durchgeführt: `/workspace/src/api_key.txt` existiert in diesem
-Container nicht und es standen keine mobilen Geräte bereit. Stattdessen
-belegt `tests/ws_relay.rs` den Transport über echte (localhost-)
-WebSockets. Zum Nachholen pro Modus (`de-to-zh`, `zh-to-de`, `en-to-zh`,
-`zh-to-en`): Server mit `cargo run --release` starten, Seite ggf. per
-HTTPS-Tunnel öffnen (Mikrofon-Pflicht, siehe README), zwei Tabs mit
-gleichem Raum und Gegen-Modi verbinden, sprechen, Partnerwiedergabe ohne
-Selbst-Echo protokollieren.
+Durchgeführt mit Headless-Chrome (Fake-Mikro aus
+`chinese/十萬個為什麼…Mandarin….webm`, 45 s Predigt-Audio), Key nur zur
+Laufzeit aus `api_key.txt` gelesen (nie geloggt, nie committet), und einem
+stummen Zuhörer-Peer B im gleichen Raum `hil-zh-de-1`:
+
+| Messpunkt | Ergebnis |
+|---|---|
+| Seitenstatus nach Start | `Live! Einfach drauflos sprechen...` |
+| Peer B: erstes Audio nach | ca. 4 s |
+| Peer B gesamt | 8 Frames, 96.000 Bytes PCM 24 kHz |
+| `/api/rooms` währenddessen | `{"hil-zh-de-1":2}` (Sprecher + Zuhörer) |
+| Key in Browser-Logs | nein |
+| Seitenfehler | keine (nur harmlose Warnungen: Passwortfeld ohne Form, ScriptProcessor-Deprecation) |
+
+**HIL PASS.** Direkt-Sonde zusätzlich: 4 s Chinesisch an das Modell →
+über 2 MB deutsches Antwort-Audio am Stück (Transport Ende-zu-Ende
+bewiesen; dass es inhaltlich Deutsch ist, folgt aus Modell + Anweisung,
+nicht aus angehörter Prüfung).
+
+Offen bleibt der Zwei-Geräte-HIL mit echten Handys (Android/iPhone) für
+die restlichen drei Modi (`de-to-zh`, `en-to-zh`, `zh-to-en`): Server mit
+`cargo run --release` starten, Seite ggf. per HTTPS-Tunnel öffnen
+(Mikrofon-Pflicht, siehe README), zwei Tabs/Geräte mit gleichem Raum und
+Gegen-Modi verbinden, Partnerwiedergabe ohne Selbst-Echo protokollieren.
 
 ## 2. Architektur-Entscheidungen, die Tests erzwungen haben
 
@@ -135,6 +150,15 @@ Selbst-Echo protokollieren.
    `tower-http` in den Test-Build; das ausgelieferte Binary enthält davon
    nichts (nur axum, tokio, tower-http, tracing, futures-util,
    serde/serde_json — siehe `deps.md`).
+6. **v1alpha → v1beta + neues Modell (Browser-HIL erzwang es).** Der erste
+   echte Browser-Lauf scheiterte mit Gemini-Close `1008`: das
+   `v1alpha`-Modell `gemini-2.0-flash-exp` existiert nicht mehr („not
+   found … for API version v1alpha"). Die Modellliste (`GET /v1beta/models`)
+   zeigte nur noch Live-fähige Modelle; nach Matrix-Test antwortete allein
+   `gemini-3.5-live-translate-preview` sofort mit Audio (die
+   `native-audio`-Modelle schwiegen auf 8 s Chinesisch). Frontend nutzt
+   seither `v1beta` + `gemini-3.5-live-translate-preview` — exakt diese
+   Kombination ist per Direkt-Sonde und Browser-HIL belegt.
 
 ## 3. Learnings und mögliche Erweiterungen
 
@@ -166,6 +190,8 @@ hat Rust/Node bereits, siehe Referenz-Dockerfile in prompt.txt):
 | `curl` | `smoke.sh`-Healthchecks | dauerhaft (sowieso Standard) |
 | `chromium` oder `firefox` + `xvfb` | HIL mit zwei Tabs auf `:0`/Headless | nur Test-Image |
 | `cloudflared` (oder `ngrok`) | HTTPS-Tunnel für Handy-Mikrofontests | nur Test-Doku, kein Image-Zwang |
+| `ffmpeg` | chinesisches `.webm`-Audio zu Fake-Mikro-`.wav` wandeln (HIL) | nur Test-Image (verifiziert: 8.0.1) |
+| Chrome for Testing + `libnss3 libnspr4 …` | Headless-Browser-HIL ohne Snap | nur Test-Image (verifiziert: 156.0.8078.47) |
 
 Laufzeit des Relays selbst: keine Systempakete außer libc (reines
 Rust-Binary, `cargo run --release`).

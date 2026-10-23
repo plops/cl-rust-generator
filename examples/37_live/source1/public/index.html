@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<link rel="icon" href="data:,">
 <title>Live AI Voice Translator</title>
 <style>
 :root{--bg:#0f172a;--card:#1e293b;--accent:#3b82f6;--ok:#22c55e;--danger:#ef4444;--text:#f8fafc;--dim:#94a3b8;--border:#334155}
@@ -75,7 +76,7 @@ roomWs.onmessage=e=>{if(e.data instanceof ArrayBuffer)playChunk(new Int16Array(e
 roomWs.onerror=()=>status("Relay-Verbindung fehlgeschlagen.");}
 function connectGemini(key,mode){
 status("Verbinde direkt zu Google Gemini...");
-geminiWs=new WebSocket(`wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${key}`);
+geminiWs=new WebSocket(`wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${key}`);
 geminiWs.onopen=()=>{status("Gemini verbunden. Konfiguriere Dolmetscher...");sendSetup(mode);startMic();};
 geminiWs.onmessage=async ev=>{
 try{const txt=ev.data instanceof Blob?await ev.data.text():ev.data;
@@ -90,7 +91,7 @@ geminiWs.onclose=e=>{console.warn("Gemini zu:",e.code);status("Gemini getrennt."
 geminiWs.onerror=()=>status("Gemini-Fehler. API-Key prüfen!");}
 function sendSetup(mode){
 const [instruction,voiceName]=INSTRUCTIONS[mode]||INSTRUCTIONS["de-to-zh"];
-geminiWs.send(JSON.stringify({setup:{model:"models/gemini-2.0-flash-exp",
+geminiWs.send(JSON.stringify({setup:{model:"models/gemini-3.5-live-translate-preview",
 generationConfig:{responseModalities:["AUDIO"],speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName}}}},
 systemInstruction:{parts:[{text:instruction}]}}}));}
 async function startMic(){
