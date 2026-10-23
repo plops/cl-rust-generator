@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Live AI Voice Translator</title>
+<style>
+:root{--bg:#0f172a;--card:#1e293b;--accent:#3b82f6;--ok:#22c55e;--danger:#ef4444;--text:#f8fafc;--dim:#94a3b8;--border:#334155}
+*{box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;padding:20px;background:var(--bg);color:var(--text);display:flex;justify-content:center;align-items:center;min-height:100vh}
+.container{background:var(--card);border:1px solid var(--border);border-radius:16px;width:100%;max-width:440px;padding:24px;display:flex;flex-direction:column;gap:18px}
+h2{margin:0;font-size:1.4rem;text-align:center}.sub{font-size:.85rem;color:var(--dim);text-align:center;margin-top:-10px}
+.field-group{display:flex;flex-direction:column;gap:6px}
+label{font-size:.8rem;font-weight:600;color:var(--dim);text-transform:uppercase}
+input,select{width:100%;padding:12px;background:#0f172a;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.95rem;outline:none}
+input:focus,select:focus{border-color:var(--accent)}
+.btn-row{display:flex;gap:10px}
+button{flex:1;padding:14px;border:none;border-radius:8px;font-size:1rem;font-weight:bold;cursor:pointer;background:var(--accent);color:#fff}
+button:disabled{background:var(--border);color:var(--dim);cursor:not-allowed}
+button.stop{background:var(--danger)}
+.status-box{padding:12px;background:#0f172a;border:1px solid var(--border);border-radius:8px;font-size:.85rem;text-align:center;color:var(--dim);min-height:42px;display:flex;align-items:center;justify-content:center}
+.visualizer{display:flex;justify-content:center;align-items:center;gap:6px;height:30px}
+.bar{width:6px;height:10px;background:var(--border);border-radius:3px;transition:height .1s ease}
+.active-speak .bar{background:var(--ok)}
+</style>
+</head>
+<body>
+<div class="container">
+<h2>AI Simultan-Dolmetscher</h2>
+<div class="sub">Gemini Live API (Edge Direct) + Rust-Relay</div>
+<div class="field-group"><label for="apiKey">Gemini API Key (bleibt lokal)</label><input type="password" id="apiKey" placeholder="AIzaSy..." autocomplete="off"></div>
+<div class="field-group"><label for="roomName">Raum Name (beide Nutzer gleich)</label><input type="text" id="roomName" value="transl-room-1"></div>
+<div class="field-group"><label for="langPair">Sprachkonfiguration</label>
+<select id="langPair">
+<option value="de-to-zh">Ich spreche Deutsch → Partner hört Chinesisch</option>
+<option value="zh-to-de">Ich spreche Chinesisch → Partner hört Deutsch</option>
+<option value="en-to-zh">Ich spreche Englisch → Partner hört Chinesisch</option>
+<option value="zh-to-en">Ich spreche Chinesisch → Partner hört Englisch</option>
+</select></div>
+<div class="visualizer" id="visualizer"><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div></div>
+<div class="status-box" id="status">Bereit. Bitte verbinden.</div>
+<div class="btn-row"><button id="connectBtn">Starten</button><button id="disconnectBtn" class="stop" disabled>Trennen</button></div>
+</div>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const apiKeyInput=$("apiKey"),roomInput=$("roomName"),langSelect=$("langPair"),
+connectBtn=$("connectBtn"),disconnectBtn=$("disconnectBtn"),statusDiv=$("status"),visualizer=$("visualizer");
+let audioCtx=null,micStream=null,micProcessor=null,geminiWs=null,roomWs=null,nextAudioStartTime=0;
+const SR_IN=16000,SR_OUT=24000;
+const INSTRUCTIONS={
+"de-to-zh":["You are an ultra-low latency simultaneous speech-to-speech interpreter. Listen to the German audio. Instantly translate and speak it in Chinese (Mandarin). CRITICAL: Produce ONLY the direct translation audio. Do NOT talk back, converse, explain, or add comments.","Aoede"],
+"zh-to-de":["You are an ultra-low latency simultaneous speech-to-speech interpreter. Listen to the Chinese audio. Instantly translate and speak it in German. CRITICAL: Produce ONLY the direct translation audio. Do NOT talk back, converse, explain, or add comments.","Puck"],
+"en-to-zh":["Simultaneous interpreter English to Mandarin Chinese. Output ONLY translated speech.","Aoede"],
+"zh-to-en":["Simultaneous interpreter Mandarin Chinese to English. Output ONLY translated speech.","Puck"]};
+window.addEventListener("DOMContentLoaded",()=>{
+const k=localStorage.getItem("gemini_live_key");if(k)apiKeyInput.value=k;
+const r=localStorage.getItem("gemini_live_room");if(r)roomInput.value=r;});
+connectBtn.addEventListener("click",async()=>{
+const key=apiKeyInput.value.trim(),room=roomInput.value.trim();
+if(!key)return alert("Bitte API-Key eingeben!");
+if(!room)return alert("Bitte Raumnamen angeben!");
+localStorage.setItem("gemini_live_key",key);localStorage.setItem("gemini_live_room",room);
+setUI(true);status("Initialisiere Audio-Engine...");
+try{audioCtx=new (window.AudioContext||window.webkitAudioContext)({latencyHint:"interactive"});
+await audioCtx.resume();nextAudioStartTime=audioCtx.currentTime;
+connectRelay(room);connectGemini(key,langSelect.value);}
+catch(e){status("Fehler: "+e.message);cleanup();}});
+disconnectBtn.addEventListener("click",cleanup);
+function connectRelay(room){
+const proto=location.protocol==="https:"?"wss:":"ws:";
+roomWs=new WebSocket(`${proto}//${location.host}/ws?room=${encodeURIComponent(room)}`);
+roomWs.binaryType="arraybuffer";
+roomWs.onmessage=e=>{if(e.data instanceof ArrayBuffer)playChunk(new Int16Array(e.data));};
+roomWs.onerror=()=>status("Relay-Verbindung fehlgeschlagen.");}
+function connectGemini(key,mode){
+status("Verbinde direkt zu Google Gemini...");
+geminiWs=new WebSocket(`wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${key}`);
+geminiWs.onopen=()=>{status("Gemini verbunden. Konfiguriere Dolmetscher...");sendSetup(mode);startMic();};
+geminiWs.onmessage=async ev=>{
+try{const txt=ev.data instanceof Blob?await ev.data.text():ev.data;
+const data=JSON.parse(txt),parts=data.serverContent?.modelTurn?.parts;
+if(!parts)return;
+for(const p of parts){if(p.inlineData?.data){
+const bin=atob(p.inlineData.data),buf=new Uint8Array(bin.length);
+for(let i=0;i<bin.length;i++)buf[i]=bin.charCodeAt(i);
+if(roomWs?.readyState===WebSocket.OPEN)roomWs.send(buf.buffer);}}} // kein lokales Echo!
+catch(e){console.error("Gemini-Parse:",e);}};
+geminiWs.onclose=e=>{console.warn("Gemini zu:",e.code);status("Gemini getrennt.");cleanup();};
+geminiWs.onerror=()=>status("Gemini-Fehler. API-Key prüfen!");}
+function sendSetup(mode){
+const [instruction,voiceName]=INSTRUCTIONS[mode]||INSTRUCTIONS["de-to-zh"];
+geminiWs.send(JSON.stringify({setup:{model:"models/gemini-2.0-flash-exp",
+generationConfig:{responseModalities:["AUDIO"],speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName}}}},
+systemInstruction:{parts:[{text:instruction}]}}}));}
+async function startMic(){
+try{micStream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+const src=audioCtx.createMediaStreamSource(micStream);
+micProcessor=audioCtx.createScriptProcessor(2048,1,1);
+src.connect(micProcessor);micProcessor.connect(audioCtx.destination);
+micProcessor.onaudioprocess=e=>{
+if(!geminiWs||geminiWs.readyState!==WebSocket.OPEN)return;
+const f32=e.inputBuffer.getChannelData(0);viz(f32);
+const pcm=downsample(f32,audioCtx.sampleRate);
+geminiWs.send(JSON.stringify({realtimeInput:{mediaChunks:[{mimeType:"audio/pcm;rate=16000",data:b64(pcm.buffer)}]}}));};
+status("Live! Einfach drauflos sprechen...");}
+catch(e){status("Mikrofon-Fehler: "+e.message);cleanup();}}
+function downsample(buf,from){
+if(from===SR_IN)return f2i16(buf,buf.length);
+const ratio=from/SR_IN,n=Math.round(buf.length/ratio),out=new Int16Array(n);
+for(let i=0;i<n;i++){const o=i*ratio,l=Math.floor(o),r=Math.min(l+1,buf.length-1),w=o-l;
+const s=Math.max(-1,Math.min(1,buf[l]*(1-w)+buf[r]*w));out[i]=s<0?s*0x8000:s*0x7FFF;}
+return out;}
+function f2i16(buf,n){const o=new Int16Array(n);for(let i=0;i<n;i++){const s=Math.max(-1,Math.min(1,buf[i]));o[i]=s<0?s*0x8000:s*0x7FFF;}return o;}
+function playChunk(pcm16){
+if(!audioCtx)return;
+const f32=new Float32Array(pcm16.length);
+for(let i=0;i<pcm16.length;i++)f32[i]=pcm16[i]/32768;
+const ab=audioCtx.createBuffer(1,f32.length,SR_OUT);ab.getChannelData(0).set(f32);
+const node=audioCtx.createBufferSource();node.buffer=ab;node.connect(audioCtx.destination);
+const now=audioCtx.currentTime;
+if(nextAudioStartTime<now)nextAudioStartTime=now+0.02;
+node.start(nextAudioStartTime);nextAudioStartTime+=ab.duration;}
+function b64(buffer){let s="";const b=new Uint8Array(buffer);for(let i=0;i<b.length;i++)s+=String.fromCharCode(b[i]);return btoa(s);}
+function viz(d){let s=0;for(let i=0;i<d.length;i+=16)s+=Math.abs(d[i]);const rms=s/(d.length/16),bars=visualizer.children,on=rms>0.02;
+visualizer.classList.toggle("active-speak",on);
+for(let i=0;i<bars.length;i++)bars[i].style.height=`${on?Math.min(28,Math.max(6,rms*150*(i+1))):6}px`;}
+function status(t){statusDiv.innerText=t;}
+function setUI(c){connectBtn.disabled=c;disconnectBtn.disabled=!c;apiKeyInput.disabled=c;roomInput.disabled=c;langSelect.disabled=c;}
+function cleanup(){setUI(false);status("Getrennt.");visualizer.classList.remove("active-speak");
+if(micProcessor){micProcessor.disconnect();micProcessor=null;}
+if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null;}
+if(geminiWs){geminiWs.onclose=null;geminiWs.close();geminiWs=null;}
+if(roomWs){roomWs.close();roomWs=null;}
+if(audioCtx&&audioCtx.state!=="closed"){audioCtx.close();audioCtx=null;}}
+</script>
+</body>
+</html>
