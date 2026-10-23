@@ -126,6 +126,30 @@ die restlichen drei Modi (`de-to-zh`, `en-to-zh`, `zh-to-en`): Server mit
 (Mikrofon-Pflicht, siehe README), zwei Tabs/Geräte mit gleichem Raum und
 Gegen-Modi verbinden, Partnerwiedergabe ohne Selbst-Echo protokollieren.
 
+### 1.6 Bidirektionaler Inhalts-Nachweis (Google-TTS/STT-Ersatz, 23.10.)
+
+Wunsch war Google Cloud TTS + STT. Befund: beide REST-APIs antworten
+`403 disabled` für dieses Projekt (`texttospeech.googleapis.com` und
+`speech.googleapis.com` müssen erst in der Cloud-Console aktiviert
+werden — ohne Console-Zugriff nicht machbar). Ersatz aus demselben Haus:
+**Gemini-TTS** (`gemini-2.5-flash-preview-tts`, 200er mit Audio) für
+Referenzsätze und **Gemini-STT** (`gemini-2.5-flash` mit Audio-Eingabe,
+Referenzen exakt transkribiert) als Prüfer. Verfahren: TTS-Referenz →
+Live-`translate-preview` → Relay-Zuhörer + Capture → STT-Transkript.
+
+| Richtung | Referenz (TTS) | Live-Ausgabe (STT) | Relay |
+|---|---|---|---|
+| de→zh | „Guten Morgen. Heute ist ein schöner Tag." | „早上好，今天是个好日子。" (korrekt, vollständig) | 51–234 Frames angekommen |
+| zh→de | „早上好，今天天气很好。" (3×) | „Guten Morgen, das Wetter ist heute sehr schön." (korrekt) | 49–65 Frames angekommen |
+
+**BIDIREKTIONAL PASS auf Inhaltsebene.** Zwei Learnings: (1) STT nur mit
+sauberem Audio füttern — 12 s Capture mit 10 s trailing Stille liefert
+Fragmente („早上", „Guten Mor"); erste energiereiche Sekunden oder
+Stille-Trimm verwenden. (2) Kurze 3-s-Clips sind stochastisch (einmal
+Halluzination „你是中國人嗎", einmal Abbruch); längere Äußerungen sind
+stabil — zum Testen eignen sich die echten Predigt-Aufnahmen aus
+`chinese/` besser als synthetische Minisätze.
+
 ## 2. Architektur-Entscheidungen, die Tests erzwungen haben
 
 1. **Von Pfad-Raum zu Query-Raum (`/ws/:room` → `/ws?room=`).**
