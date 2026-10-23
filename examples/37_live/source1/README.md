@@ -31,6 +31,32 @@ Im WLAN (`http://192.168.x.y:3000`) blockieren Chrome/Safari das Mikrofon —
 dann einen Tunnel davorlegen, z. B. `npx ngrok http 3000` oder
 Cloudflare-Tunnel, und die `https://…`-URL auf beiden Geräten öffnen.
 
+## Hinter Reverse-Proxy (z. B. Nginx unter `/chat/`)
+
+Wichtig: Slash am Ende von `proxy_pass` (streift `/chat` ab) plus
+WebSocket-Header, sonst 404/keine Daten:
+
+```nginx
+location = /chat { return 301 /chat/; }
+location /chat/ {
+    proxy_pass http://127.0.0.1:8081/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_connect_timeout 7d;
+    proxy_send_timeout 7d;
+    proxy_read_timeout 7d;
+}
+```
+
+Das Frontend bildet den WS-Pfad relativ zur Seite (`/ws` an Root,
+`/chat/ws` unter Subpfad) — verifiziert mit Nginx: Seite 200,
+`/healthz` ok, Binärframe kommt beim Peer an.
+
 ## TUI-light (Terminal-Status, nur `std`)
 
 ```bash

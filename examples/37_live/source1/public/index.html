@@ -70,7 +70,9 @@ catch(e){status("Fehler: "+e.message);cleanup();}});
 disconnectBtn.addEventListener("click",cleanup);
 function connectRelay(room){
 const proto=location.protocol==="https:"?"wss:":"ws:";
-roomWs=new WebSocket(`${proto}//${location.host}/ws?room=${encodeURIComponent(room)}`);
+// Basis = Verzeichnis der Seite ("" an Root, "/chat" unter Subpfad).
+const base=location.pathname.replace(/\/[^/]*$/,"");
+roomWs=new WebSocket(`${proto}//${location.host}${base}/ws?room=${encodeURIComponent(room)}`);
 roomWs.binaryType="arraybuffer";
 roomWs.onmessage=e=>{if(e.data instanceof ArrayBuffer)playChunk(new Int16Array(e.data));};
 roomWs.onerror=()=>status("Relay-Verbindung fehlgeschlagen.");}
