@@ -41,4 +41,5 @@ cargo run --release -- --watch http://127.0.0.1:3000   # alle 2 s
 `src/01_config.rs` CLI + 4 Sprachmodi · `src/02_state.rs` Raumbuch ·
 `src/03_relay.rs` WS-Broadcast · `src/04_serve.rs` Router · `main.rs`/`lib.rs`
 nur Verdrahtung · `public/index.html` Frontend · `tests/` Host-Tests ·
-`scripts/smoke.sh` Smoke-Test.
+`scripts/smoke.sh` Smoke-Test · `scripts/hil-*.sh` Browser-/Inhalts-HIL
+(siehe `docs/browser-tests.md`).

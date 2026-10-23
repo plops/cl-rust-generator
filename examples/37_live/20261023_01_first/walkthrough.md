@@ -146,8 +146,9 @@ Live-`translate-preview` → Relay-Zuhörer + Capture → STT-Transkript.
 sauberem Audio füttern — 12 s Capture mit 10 s trailing Stille liefert
 Fragmente („早上", „Guten Mor"); erste energiereiche Sekunden oder
 Stille-Trimm verwenden. (2) Kurze 3-s-Clips sind stochastisch (einmal
-Halluzination „你是中國人嗎", einmal Abbruch); längere Äußerungen sind
-stabil — zum Testen eignen sich die echten Predigt-Aufnahmen aus
+Halluzination „你是中國人嗎", zweimal Fragment-Abbruch); `hil-content.sh`
+wiederholt deshalb beide Referenzen 3× (~9 s) und ist damit stabil —
+zum manuellen Testen eignen sich die echten Predigt-Aufnahmen aus
 `chinese/` besser als synthetische Minisätze.
 
 ## 2. Architektur-Entscheidungen, die Tests erzwungen haben
