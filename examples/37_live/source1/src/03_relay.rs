@@ -45,6 +45,7 @@ async fn peer_loop(sock: WebSocket, rooms: Arc<Rooms>, room: String) {
     let id = NEXT_PEER.fetch_add(1, Ordering::Relaxed);
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(crate::state::PEER_BUFFER);
     if !rooms.join(&room, id, tx).await {
+        tracing::warn!(room = %room, peer = id, "abgewiesen (raum voll)");
         let mut sock = sock;
         let _ = sock
             .send(Message::Text(format!("raum voll: {room}").into()))
@@ -66,10 +67,18 @@ async fn peer_loop(sock: WebSocket, rooms: Arc<Rooms>, room: String) {
     while let Some(msg) = recv.next().await {
         match msg {
             Ok(Message::Binary(b)) => {
-                rooms.broadcast(&room, id, b.to_vec()).await;
+                let n = rooms.broadcast(&room, id, b.to_vec()).await;
+                tracing::debug!(room = %room, peer = id, bytes = b.len(), beliefert = n, "frame verteilt");
             }
             Ok(Message::Text(_)) => {}
-            Ok(Message::Close(_)) | Err(_) => break,
+            Ok(Message::Close(_)) => {
+                tracing::debug!(room = %room, peer = id, "client schliesst");
+                break;
+            }
+            Err(e) => {
+                tracing::debug!(room = %room, peer = id, fehler = %e, "lesefehler");
+                break;
+            }
             _ => {}
         }
     }

@@ -10,6 +10,8 @@ hier, sondern direkt zwischen Browser und Gemini-Live-API.
 ```bash
 cd source1
 cargo run --release -- --listen 0.0.0.0:3000 --dir public
+# mit ausfuehrlichen Logs (Client-Ein/Austritt, verteilte Frames):
+cargo run --release -- --listen 0.0.0.0:3000 --dir public --verbose
 ```
 
 Browser öffnen: `http://localhost:3000`

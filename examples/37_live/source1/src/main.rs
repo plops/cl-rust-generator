@@ -21,6 +21,22 @@ async fn main() {
             std::process::exit(2);
         }
     };
+    // Eigene Ziele ausfuehrlich (mit --verbose), Fremd-Crates immer ruhig.
+    // EnvFilter versteht zusaetzlich RUST_LOG (z. B. RUST_LOG=debug).
+    let dirs = if cfg.verbose {
+        "warn,live_relay=debug"
+    } else {
+        "warn"
+    };
+    let filter = tracing_subscriber::EnvFilter::new(dirs);
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+    tracing_subscriber::fmt()
+        .with_target(false)
+        // fmt deckelt default auf INFO; TRACE ueberlaesst die Wahl dem Filter.
+        .with_max_level(tracing::Level::TRACE)
+        .finish()
+        .with(filter)
+        .init();
     match action {
         Action::Serve => serve(cfg).await,
         Action::Check { base } => check(&base, None),

@@ -10,6 +10,7 @@ neben axum, kein TUI-Framework (nur `std`).
 | `tokio` | `tokio-rs/tokio` | 1 | Runtime `full`, `Mutex`, `mpsc`-Kanäle |
 | `tower-http` | `tower-rs/tower-http` | 0.7 | `ServeDir` für `public/index.html` |
 | `tracing` | `tokio-rs/tracing` | 0.1 | Beitritt/Austritt-Logs (nie Audio/Key) |
+| `tracing-subscriber` | `tokio-rs/tracing` | 0.3 (`fmt`) | Log-Ausgabe, per `--verbose` DEBUG sonst WARN |
 | `futures-util` | `rust-lang/futures-rs` | 0.3 | `split`/`next` am WebSocket |
 | `serde` / `serde_json` | `serde-rs/serde` / `serde-rs/json` | 1 | Query-Parse, `/api/*`-JSON |
 

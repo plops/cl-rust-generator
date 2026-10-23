@@ -62,6 +62,8 @@ pub struct Config {
     pub dir: String,
     /// Max. Peers pro Raum (Lastgrenze gegen langsame Verbraucher).
     pub max_peers_per_room: usize,
+    /// Ausfuehrliche Logs (Client-Ein/Austritt, verteilte Frames).
+    pub verbose: bool,
 }
 
 impl Default for Config {
@@ -70,6 +72,7 @@ impl Default for Config {
             listen: "0.0.0.0:3000".parse().expect("feste Adresse"),
             dir: "public".to_owned(),
             max_peers_per_room: 8,
+            verbose: false,
         }
     }
 }
@@ -105,6 +108,7 @@ impl Config {
                     let base = args.get(i).ok_or("--watch braucht URL")?.clone();
                     action = Action::Watch { base };
                 }
+                "--verbose" | "-v" => cfg.verbose = true,
                 "-h" | "--help" => return Err(Self::usage()),
                 other => return Err(format!("unbekannt: {other}\n{}", Self::usage())),
             }
@@ -114,7 +118,7 @@ impl Config {
     }
 
     fn usage() -> String {
-        "live-relay [--listen ADDR] [--dir PFAD] [--check URL | --watch URL]".to_owned()
+        "live-relay [--listen ADDR] [--dir PFAD] [--verbose] [--check URL | --watch URL]".to_owned()
     }
 }
 
@@ -124,4 +128,40 @@ pub enum Action {
     Serve,
     Check { base: String },
     Watch { base: String },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn verbose_ist_default_aus() {
+        let (cfg, _) = Config::from_args(&args(&["live-relay"])).unwrap();
+        assert!(!cfg.verbose);
+    }
+
+    #[test]
+    fn verbose_lang_und_kurz_schalten_ein() {
+        for flag in ["--verbose", "-v"] {
+            let (cfg, _) = Config::from_args(&args(&["live-relay", flag])).unwrap();
+            assert!(cfg.verbose, "{flag} muss verbose setzen");
+        }
+    }
+
+    #[test]
+    fn verbose_bleibt_mit_listen_kombinierbar() {
+        let (cfg, _) = Config::from_args(&args(&[
+            "live-relay",
+            "--verbose",
+            "--listen",
+            "127.0.0.1:4000",
+        ]))
+        .unwrap();
+        assert!(cfg.verbose);
+        assert_eq!(cfg.listen.port(), 4000);
+    }
 }
