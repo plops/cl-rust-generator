@@ -1,0 +1,80 @@
+ NVIDIA / OpenShell
+
+OpenShell is the safe, private runtime for autonomous AI agents.
+Rust 19,695 1,947 Built by @drew @johntmyers @pimlock @miyoungc @elezar 10,495 stars this month
+pbakaus / impeccable
+
+The design language that makes your AI harness better at design.
+Rust 86,802 5,180 Built by @pbakaus @claude @github-actions @abdulwahabone @cursoragent 15,700 stars this month
+longbridge / gpui-kit
+
+Rust GUI components for building fantastic cross-platform desktop application by using GPUI.
+Rust 18,601 1,144 Built by @huacnlee @madcodelife @claude @codex @ylinwind 3,951 stars this month
+t8y2 / dbx
+
+25 MB lightweight cross-platform database client for 100+ databases, including MySQL, PostgreSQL, SQLite, Redis, MongoDB, DuckDB, SQL Server, and Dameng. Built-in AI, MCP Server, CLI, desktop and Docker. | 轻量级跨平台数据库管理工具，支持 MySQL、PostgreSQL、SQLite、Redis、MongoDB、达梦等 100+ 数据库，提供桌面端、Docker、CLI、内置 AI 助手和 MCP。
+Rust 27,706 2,480 Built by @t8y2 @zipg @eryajf @github-actions @lxk955 7,192 stars this month
+trycua / cua
+
+Scale computer-use 2.0 with open-source drivers, cross-OS sandboxes, and benchmarks for training, evaluation, and data generation.
+Rust 30,906 2,256 Built by @f-trycua @claude @ddupont808 @github-actions @r33drichards 4,802 stars this month
+bevyengine / bevy
+
+A refreshingly simple data-driven game engine built in Rust
+Rust 49,257 4,971 Built by @cart @alice-i-cecile @mockersf @ickshonpe @atlv24 1,025 stars this month
+lexmount / moli
+
+Best headless browser for AI agents. Lite, Fast, High-Compatibility. Built in Rust
+Rust 20,557 553 Built by @ldm0 @lanyue-llk @BibekPathak @SpringCorel @athul-22 18,706 stars this month
+xerj-org / xerj
+
+Local-first search engine and MCP server for AI agents. One Rust binary indexes code, docs, logs, JSONL/CSV and PDFs for BM25 full-text, vector and hybrid search, code search without grep, agent memory and RAG. Elasticsearch-compatible API; Corpus Hub serves hundreds of reference memory corpora.
+Rust 15,402 1,102 Built by @xerj-org @claude @cursoragent @buger @Vinz2168 13,449 stars this month
+microsoft / mxc
+
+Policy-driven, layered isolation and containment
+Rust 2,987 163 Built by @Copilot @MGudgin @SohamDas2021 @bbonaby @theelliotm 1,634 stars this month
+trymirai / uzu
+
+A high-performance inference engine for AI models
+Rust 2,572 148 Built by @uuuvn @eugenebokhan @CC-Yeh @agolokoz @alexxale 761 stars this month
+hydra-db / hydradb
+
+HydraDB - fast graph database on object storage
+Rust 13,067 5,398 Built by @vixhal-baraiya @abhishekt-hydra @SohamRatnaparkhi @vyomgoyal @adityamishra-hydradb 7,568 stars this month
+Pumpkin-MC / Pumpkin
+
+Empowering everyone to host fast and efficient Minecraft servers
+Rust 12,625 955 Built by @Snowiiii @kralverde @Bryntet @lukas0008 @RoosterBooster007 1,338 stars this month
+xingkongliang / skills-manager
+
+A lightweight desktop app to manage, sync, and organize AI agent skills across 50+ coding tools — Claude Code, Codex, Cursor, Copilot, Gemini CLI, and more.
+Rust 6,811 550 Built by @xingkongliang @claude @enshulv @whereissam @ZhuYichuan 1,882 stars this month
+timhartmann7 / omnyssh
+
+Fast, open-source SSH client and server manager for macOS, Windows and Linux. Desktop GUI and terminal TUI with a live metrics dashboard, tabbed terminal, SFTP file manager, port forwarding, one-click SSH keys and snippets. Built in Rust.
+Rust 1,237 69 Built by @timhartmann7 @claude @PowerAppsDarren @sshawn9 @vsnote 502 stars this month
+HakanSeven12 / OpenCADStudio
+
+A CAD application built with Rust — 2D/3D drawing, DWG/DXF support, and GPU-accelerated rendering
+Rust 3,518 415 Built by @HakanSeven12 @claude @ramox81 @KarimJerbi @gianlucafiore 1,259 stars this month
+pydantic / monty
+
+A secure Python sandbox, written in Rust, for code written by AI.
+Rust 8,774 473 Built by @samuelcolvin @claude @davidhewitt @rewitt94 @petyosi 530 stars this month
+clash-verge-rev / clash-verge-rev
+
+A modern GUI client based on Tauri, designed to run in Windows, macOS and Linux for tailored proxy experience
+Rust 153,721 11,033 Built by @Tunglies @zzzgydi @wonfen @MystiPanda @renovate 7,299 stars this month
+emilk / egui
+
+egui: an easy-to-use immediate mode GUI in Rust that runs on both web and native
+Rust 31,738 2,247 Built by @emilk @lucasmerlin @claude @Wumpf @rustbasic 1,101 stars this month
+akitaonrails / ai-memory
+
+Solution for long term memory for agent coding CLIs and to facilitate handoff between different agent vendors
+Rust 13,361 945 Built by @akitaonrails @claude @viniciusdsandrade @rudycelekli @djalmajr 5,008 stars this month
+zerx-lab / FluxDown
+
+Rust 驱动的多协议下载管理器，支持 HTTP/FTP/BitTorrent 磁力链接及 HLS/DASH 流媒体，智能多线程加速与浏览器无缝集成。精美界面，极致性能，永久免费，零广告。
+Rust 4,985 293 Built by @zerx-lab @MIt-gancm @ZerxLabBot @yashodhan-krita @claude 
