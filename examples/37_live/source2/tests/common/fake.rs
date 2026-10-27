@@ -1,15 +1,21 @@
 //! Gemeinsamer Fake-Gemini (von `tests/common/mod.rs` und vom Beispiel
 //! `examples/fake_gemini.rs` genutzt — ein einziger Protokoll-Ort).
 //!
-//! Verhalten: erwartet die erste `setup`-Nachricht, merkt sich den
+//! Translate-Setup: erwartet die erste `setup`-Nachricht, merkt sich den
 //! `targetLanguageCode` und antwortet mit `{"setupComplete":{}}`. Auf
-//! `realtimeInput` schickt der Fake einen `modelTurn` mit 100 ms Sinus-PCM24
-//! (4800 Bytes) plus `outputTranscription` `"hallo:<target>"` — so koennen
-//! Tests das AUTOMATISCH gewaehlte Ziel (= Partner-Sprache) pruefen. Dabei
-//! wird hoechstens so viel Audio-Zeit erzeugt, wie an Eingangs-Audio
-//! angekommen ist (Echtzeit-Drossel). So bleibt der Opus-Downlink im
-//! Sparmodus realistisch (~12 statt ~28 kbit/s). Der erste Chunk loest immer
-//! eine Antwort aus, damit Einzel-Chunk-Tests greifen.
+//! `realtimeInput`-Audio schickt der Fake einen `modelTurn` mit 100 ms
+//! Sinus-PCM24 (4800 Bytes) plus `outputTranscription` `"hallo:<target>"` —
+//! so koennen Tests das AUTOMATISCH gewaehlte Ziel (= Partner-Sprache)
+//! pruefen. Dabei wird hoechstens so viel Audio-Zeit erzeugt, wie an
+//! Eingangs-Audio angekommen ist (Echtzeit-Drossel). Der erste Chunk loest
+//! immer eine Antwort aus, damit Einzel-Chunk-Tests greifen.
+//!
+//! Live-Setup (`speechConfig` vorhanden, `gemini-3.8-live`): Der Fake PRUEFT,
+//! dass der Server-VAD abgeschaltet ist (`realtimeInputConfig`
+//! `automaticActivityDetection.disabled` + `NO_INTERRUPTION`), und antwortet
+//! NICHT je Audio-Chunk, sondern auf jedes `activityEnd` (eigene
+//! Segmentierung) mit Audio + `hallo:live:<voiceName>`. So testen die
+//! Integrationstests die Client-Segmentierung.
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use futures_util::{SinkExt, StreamExt};
@@ -105,6 +111,10 @@ pub async fn handle_conn(stream: tokio::net::TcpStream) {
     let mut guthaben_ms: i64 = RESPONSE_MS;
     // Zuletzt vereinbarte Transkriptions-Markierung (aus dem Setup).
     let mut label = String::new();
+    // Ist das Setup das Live-Modell (disabled-VAD, eigene Segmentierung)?
+    // Dann antwortet der Fake auf jedes `activityEnd` mit einer Antwort, NICHT
+    // auf jeden Audio-Chunk (so testet er die Client-Segmentierung).
+    let mut live = false;
     while let Some(Ok(msg)) = rx.next().await {
         let txt = match msg {
             Message::Text(t) => t.to_string(),
@@ -119,13 +129,31 @@ pub async fn handle_conn(stream: tokio::net::TcpStream) {
             continue;
         };
         if v.get("setup").is_some() {
-            label = match parse_setup(&v) {
+            let setup = parse_setup(&v);
+            live = matches!(setup, Setup::Live(_));
+            // Live-Setup MUSS den Server-VAD abschalten (eigene Segmentierung).
+            if live {
+                let ric = &v["setup"]["realtimeInputConfig"];
+                assert_eq!(
+                    ric["automaticActivityDetection"]["disabled"], true,
+                    "Live-Setup erwartet disabled-VAD"
+                );
+                assert_eq!(ric["activityHandling"], "NO_INTERRUPTION");
+            }
+            label = match setup {
                 Setup::Translate(t) => format!("hallo:{t}"),
                 Setup::Live(voice) => format!("hallo:live:{voice}"),
             };
             let _ = sink
                 .send(Message::Text(r#"{"setupComplete":{}}"#.into()))
                 .await;
+        } else if live {
+            // Live: auf jedes activityEnd mit Audio + Label antworten.
+            if v["realtimeInput"].get("activityEnd").is_some() {
+                let _ = sink.send(Message::Text(antwort_json(&label).into())).await;
+            }
+            // activityStart und Audio-Chunks werden nur mitgelesen (keine
+            // eigene Antwort — die kommt erst am Segmentende).
         } else if v.get("realtimeInput").is_some() {
             guthaben_ms += input_ms(&v);
             // Nur antworten, wenn genug Eingangs-Audio da ist (Echtzeit-Drossel).

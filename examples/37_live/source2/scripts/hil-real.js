@@ -44,29 +44,39 @@ const hasCjk = (s) => /[\u4e00-\u9fff]/.test(s || "");
 // Lateinische Buchstaben + mindestens ein Wort mit >=3 Buchstaben?
 const hasLatinWord = (s) => /[A-Za-zÄÖÜäöüß]{3,}/.test(s || "");
 
-// Grundfrequenz F0 schaetzen: Autokorrelation je 40-ms-Frame, Median ueber
-// stimmhafte Frames (genug Energie + klares Maximum). `sr` = Abtastrate.
-// Suchbereich 70-400 Hz deckt maennliche (85-155) und weibliche (165-255)
-// Sprechstimmen ab. Rueckgabe in Hz oder null (keine stimmhaften Frames).
+// Grundfrequenz F0 schaetzen: normierte Kreuzkorrelation (NCCF) je
+// 40-ms-Frame, Median ueber stimmhafte Frames. Normierung ist Pflicht: die
+// rohe Autokorrelation bevorzugt kurze Lags (mehr Ueberlappung) und schaetzt
+// F0 dadurch zu hoch (Charon kam so auf 166 statt ~110 Hz).
+// Suchbereich 70-400 Hz: maennlich ~85-155, weiblich ~165-255 Hz.
 function estimateF0(samples, sr) {
   if (!samples || samples.length < sr * 0.1) return null;
-  const frame = Math.round(sr * 0.04); // 40 ms
-  const minLag = Math.floor(sr / 400), maxLag = Math.floor(sr / 70);
+  const frame = Math.round(sr * 0.04); // 40 ms Analysefenster
+  const minLag = Math.floor(sr / 400), maxLag = Math.ceil(sr / 70);
   const f0s = [];
-  for (let start = 0; start + frame <= samples.length; start += frame) {
-    const seg = samples.subarray ? samples.subarray(start, start + frame) : samples.slice(start, start + frame);
-    let energy = 0;
-    for (let i = 0; i < seg.length; i++) energy += seg[i] * seg[i];
-    if (energy / seg.length < 1e-4) continue; // zu leise → nicht stimmhaft
-    let bestLag = -1, best = 0;
-    const r0 = energy;
-    for (let lag = minLag; lag <= maxLag && lag < seg.length; lag++) {
-      let acc = 0;
-      for (let i = 0; i + lag < seg.length; i++) acc += seg[i] * seg[i + lag];
-      if (acc > best) { best = acc; bestLag = lag; }
+  for (let start = 0; start + frame + maxLag <= samples.length; start += frame) {
+    let e0 = 0;
+    for (let i = 0; i < frame; i++) e0 += samples[start + i] * samples[start + i];
+    if (e0 / frame < 1e-4) continue; // zu leise → nicht stimmhaft
+    const nccf = new Float32Array(maxLag + 1);
+    for (let lag = minLag; lag <= maxLag; lag++) {
+      let acc = 0, e1 = 0;
+      for (let i = 0; i < frame; i++) {
+        const y = samples[start + i + lag];
+        acc += samples[start + i] * y; e1 += y * y;
+      }
+      nccf[lag] = acc / Math.sqrt(e0 * e1 + 1e-12);
     }
-    // Klares Maximum (> 0,3 * Energie) als Stimmhaftigkeits-Kriterium.
-    if (bestLag > 0 && best > 0.3 * r0) f0s.push(sr / bestLag);
+    let peak = 0;
+    for (let lag = minLag; lag <= maxLag; lag++) peak = Math.max(peak, nccf[lag]);
+    if (peak < 0.5) continue; // kein klarer Grundton
+    // Kleinster Lag nahe dem Maximum → vermeidet Oktavfehler nach unten.
+    for (let lag = minLag + 1; lag < maxLag; lag++) {
+      if (nccf[lag] >= 0.9 * peak && nccf[lag] >= nccf[lag - 1] && nccf[lag] >= nccf[lag + 1]) {
+        f0s.push(sr / lag);
+        break;
+      }
+    }
   }
   if (!f0s.length) return null;
   f0s.sort((a, b) => a - b);
@@ -104,11 +114,13 @@ async function setupPage(browser, { transport, speak, key }) {
   await page.addInitScript(() => {
     window.__partnerPcm = [];
     window.__partnerRate = 24000;
+    window.__partnerSamples = 0; // kumuliert (ungedeckelt) → Audio-Sekunden
     const hook = () => {
       if (typeof GaplessQueue === "undefined" || GaplessQueue.__hooked) return;
       const orig = GaplessQueue.prototype.pushFloat;
       GaplessQueue.prototype.pushFloat = function (f32, rate) {
         window.__partnerRate = rate;
+        window.__partnerSamples += f32.length; // Gesamt-Audio-Dauer messen
         // Nur begrenzt sammeln (max ~6 s bei 24 kHz), um Speicher zu schonen.
         if (window.__partnerPcm.length < 24000 * 6) {
           for (let i = 0; i < f32.length; i++) window.__partnerPcm.push(f32[i]);
@@ -144,6 +156,10 @@ async function setupPage(browser, { transport, speak, key }) {
 
 const stats = (page) => page.evaluate(() => window.__stats);
 const firstDown = (page) => page.evaluate(() => window.__firstDown || 0);
+// Gesamt-Partner-Audio in Sekunden (ueber alle dekodierten Samples, beide
+// Pfade enden in GaplessQueue.pushFloat → funktioniert fuer PCM und Opus).
+const audioSecs = (page) =>
+  page.evaluate(() => (window.__partnerSamples || 0) / (window.__partnerRate || 24000));
 const statusText = (page) => page.textContent("#status");
 const peerText = (page) => page.textContent("#peerInfo");
 
@@ -203,6 +219,8 @@ async function pollRooms() {
   const peerA = await peerText(a), peerB = await peerText(b);
   const fdA = await firstDown(a), fdB = await firstDown(b);
   const subsA = await readSubs(a), subsB = await readSubs(b);
+  // Gesamt-Partner-Audio in Sekunden je Richtung (A hört B, B hört A).
+  const audioA = await audioSecs(a), audioB = await audioSecs(b);
 
   // F0 des Partner-Audios: B empfaengt A (zh, Default-Stimme Kore, weiblich).
   // A empfaengt B (de, Default-Stimme Charon, maennlich).
@@ -225,6 +243,7 @@ async function pollRooms() {
   console.log("--- MESSWERTE ---");
   console.log(`A (Opus): up=${sa.up}B down=${sa.down}B opusUp=${sa.opusUp}B opusDown=${sa.opusDown}B texts=${sa.texts} → ${aKbit} kbit/s`);
   console.log(`B (PCM) : up=${sb.up}B down=${sb.down}B pcmDown=${sb.pcmDown}B texts=${sb.texts} → ${bKbit} kbit/s`);
+  console.log(`Partner-Audio-Sekunden: A hört B = ${audioA.toFixed(1)}s, B hört A = ${audioB.toFixed(1)}s (in ${SECONDS}s)`);
   console.log(`erstes Partner-Audio: A nach ${fdA ? Math.round(fdA) : "—"} ms, B nach ${fdB ? Math.round(fdB) : "—"} ms (ab Verbindung)`);
   console.log(`F0 Partner-Audio: B hört A = ${f0B ? Math.round(f0B) : "—"} Hz (erw. weiblich/Kore >165), A hört B = ${f0A ? Math.round(f0A) : "—"} Hz (erw. männlich/Charon)`);
   console.log(`/api/rooms (Mitte): ${roomsSnap}`);
@@ -237,20 +256,33 @@ async function pollRooms() {
 
   const aSeesCjk = partnerA.some((s) => hasCjk(s.text));
   const bSeesLatin = partnerB.some((s) => hasLatinWord(s.text));
+  // Verbotener Platzhalter-Untertitel: „pending"/„translation" in eckigen
+  // oder runden Klammern (z. B. „(German translation pending)"). Betrifft
+  // ALLE Untertitel beider Seiten.
+  const alleSubs = [...subsA, ...subsB];
+  const badSub = alleSubs
+    .map((s) => s.text)
+    .find((t) => /[([][^)\]]*(pending|translation)[^)\]]*[)\]]/i.test(t));
 
   const checks = {
     "A live": statusA.includes("Live"),
     "B live": statusB.includes("Live"),
     "A opusDown>0": sa.opusDown > 0,
     "B pcmDown>0": sb.pcmDown > 0,
+    "A hört >=5 s Audio (B→A)": audioA >= 5,
+    "B hört >=5 s Audio (A→B)": audioB >= 5,
+    "erstes Audio A < 10 s": fdA > 0 && fdA < 10_000,
+    "erstes Audio B < 10 s": fdB > 0 && fdB < 10_000,
     "A sieht chin. Partner-Untertitel": aSeesCjk,
     "B sieht dt. Partner-Untertitel": bSeesLatin,
     "A sieht Partner Deutsch": peerA.includes("Deutsch"),
     "B sieht Partner Chinesisch": peerB.includes("Chinesisch"),
     "B hört weibliche Stimme (Kore, F0>165)": f0B !== null && f0B > 165,
+    "kein Platzhalter-Untertitel (pending/translation in Klammern)": !badSub,
     "A kbit/s < 40": aKbit < 40,
     "keine pageerror": errs.length === 0,
   };
+  if (badSub) console.log(`!! Platzhalter-Untertitel gefunden: ${JSON.stringify(badSub)}`);
   console.log("--- CHECKS ---");
   let pass = true;
   for (const [k, v] of Object.entries(checks)) {
@@ -266,3 +298,4 @@ async function pollRooms() {
   console.error("ABBRUCH:", e.stack || e.message);
   process.exit(2);
 });
+

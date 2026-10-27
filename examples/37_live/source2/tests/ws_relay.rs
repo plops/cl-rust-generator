@@ -254,12 +254,13 @@ async fn zh_hans_opus_default_voice_nutzt_live_kore() {
     }
     assert!(sah_setup, "B bekommt Setup im partner-Event");
 
-    // A schickt Audio → B bekommt Untertitel `hallo:live:Kore` (A spricht mit Kore).
-    let pkt = test_opus_paket();
-    a.send(Message::Binary(pkt.into())).await.unwrap();
+    // A schickt ~4 s Audio → eigene Segmentierung schneidet (spaetestens bei
+    // MAX_SEGMENT_MS=3 s) → Fake sieht >= 1 activityEnd und antwortet mit
+    // `hallo:live:Kore` (A spricht mit Kore). Partner B bekommt Audio.
+    sende_opus_audio(&mut a, 4.0).await;
     let mut saw = false;
-    for _ in 0..8 {
-        let t = naechster_text(&mut b, 2000).await;
+    for _ in 0..40 {
+        let t = naechster_text(&mut b, 3000).await;
         let v: serde_json::Value = serde_json::from_str(&t).unwrap();
         if v["type"] == "text" && v["who"] == "partner" {
             assert_eq!(v["text"], "hallo:live:Kore", "Live mit Stimme Kore");
@@ -305,10 +306,11 @@ async fn opus_auto_translate_und_live_fallback() {
     // A-Default-Stimme fuer en ist auto → Fallback-Stimme Zephyr.
     let mut c = connect(&base, "room=auto&transport=pcm&lang=cy").await;
     let _ = warte_auf_typ(&mut a, "ready", 6, 2000).await;
-    a.send(Message::Binary(pkt.into())).await.unwrap();
+    // Live braucht eigene Segmentierung: ~4 s Audio → >= 1 activityEnd.
+    sende_opus_audio(&mut a, 4.0).await;
     let mut saw_live = false;
-    for _ in 0..8 {
-        let t = naechster_text(&mut c, 2000).await;
+    for _ in 0..40 {
+        let t = naechster_text(&mut c, 3000).await;
         let v: serde_json::Value = serde_json::from_str(&t).unwrap();
         if v["type"] == "text" && v["who"] == "partner" {
             assert_eq!(
@@ -466,6 +468,32 @@ async fn api_languages_und_rooms() {
     assert!(rooms.contains("\"voice\""), "voice-feld im json");
     // Kein target-Feld mehr.
     assert!(!rooms.contains("\"target\""), "kein target mehr im json");
+}
+
+/// `secs` Sekunden lautes Sprachsignal als 60-ms-Opus-Pakete (16 kHz) an einen
+/// Opus-Peer schicken. Lautes Signal (Amplitude 8000) sorgt dafuer, dass der
+/// Segmentierer spaetestens bei `MAX_SEGMENT_MS` (3 s) schneidet; so sieht der
+/// Fake-Gemini mindestens ein `activityEnd` und antwortet. Je Paket ein Binary,
+/// mit kurzer Pause, damit das Relay die Chunks einzeln dekodiert.
+async fn sende_opus_audio(ws: &mut Ws, secs: f32) {
+    let mut enc = OpusEncoder::new(16_000, 1, Application::Voip).unwrap();
+    enc.bitrate_bps = 12_000;
+    enc.max_bandwidth = Bandwidth::Wideband;
+    enc.signal_type = Some(Signal::Voice);
+    let pakete = (secs * 1000.0 / 60.0).ceil() as usize; // 60 ms je Paket
+    let mut phase = 0.0f32;
+    for _ in 0..pakete {
+        let mut pcm = [0i16; 960]; // 60 ms @ 16 kHz
+        for s in pcm.iter_mut() {
+            phase += 300.0 / 16_000.0;
+            *s = ((2.0 * std::f32::consts::PI * phase).sin() * 8000.0) as i16;
+        }
+        let mut out = vec![0u8; 1500];
+        let n = enc.encode_s16(&pcm, 960, &mut out).unwrap();
+        out.truncate(n);
+        ws.send(Message::Binary(out.into())).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
 }
 
 /// Ein 60-ms-Opus-Paket (16 kHz, SILK) wie vom Browser-Encoder.

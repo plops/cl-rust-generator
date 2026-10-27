@@ -206,10 +206,16 @@ pub(crate) async fn run_opus(
                         state.rooms.broadcast(room, id, Out::Pcm24(pcm24)).await;
                     }
                     Some(Event::InText(t)) => {
-                        send_subtitle(&state.rooms, room, id, "in", &t).await;
+                        // Artefakte (`<no speech>`, `{pause}`, Platzhalter)
+                        // filtern; leere Untertitel nicht senden.
+                        if let Some(sauber) = crate::segment::clean_subtitle(&t) {
+                            send_subtitle(&state.rooms, room, id, "in", &sauber).await;
+                        }
                     }
                     Some(Event::OutText(t)) => {
-                        send_subtitle(&state.rooms, room, id, "out", &t).await;
+                        if let Some(sauber) = crate::segment::clean_subtitle(&t) {
+                            send_subtitle(&state.rooms, room, id, "out", &sauber).await;
+                        }
                     }
                     Some(Event::Closed(grund)) => {
                         tracing::debug!(room = %room, peer = id, %grund, "gemini geschlossen");
@@ -304,10 +310,11 @@ async fn apply_partner(
             // Alte Sitzung (falls vorhanden) verwerfen.
             active.take();
             // Modell + Setup aus eigener Sprache+Stimme und Partner-Sprache.
-            let setup = match gemini::setup_for(own_lang, &p.lang, own_voice) {
+            let (setup, segmentieren) = match gemini::setup_for(own_lang, &p.lang, own_voice) {
                 Ok((model, json)) => {
                     tracing::info!(room = %room, peer = id, ziel = %p.lang, ?model, "modell gewaehlt");
-                    json
+                    // Nur das Live-Modell braucht eigene Segmentierung.
+                    (json, model == crate::voices::Model::Live)
                 }
                 Err(e) => {
                     tracing::warn!(room = %room, peer = id, fehler = %e, "kein modell fuer sprachpaar");
@@ -325,7 +332,8 @@ async fn apply_partner(
                     return;
                 }
             };
-            match gemini::connect(&state.gemini_url, key, &setup, ev_tx.clone()).await {
+            match gemini::connect(&state.gemini_url, key, &setup, segmentieren, ev_tx.clone()).await
+            {
                 Ok(session) => {
                     tracing::info!(room = %room, peer = id, ziel = %p.lang, "gemini-sitzung gestartet");
                     *active = Some(ActiveSession {

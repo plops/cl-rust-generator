@@ -131,6 +131,16 @@ fn partner_json(
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&setup) {
                         root["setup"] = v["setup"].clone();
                     }
+                    // Nur das Live-Modell braucht eigene Segmentierung; der
+                    // Server diktiert die Parameter (keine Modellentscheidung
+                    // im JS). Translate bleibt ohne `segment`-Feld.
+                    if model == Model::Live {
+                        root["segment"] = serde_json::json!({
+                            "min_ms": crate::segment::MIN_SEGMENT_MS,
+                            "max_ms": crate::segment::MAX_SEGMENT_MS,
+                            "quiet_rms": crate::segment::QUIET_RMS_I16 / 32768.0,
+                        });
+                    }
                 }
             }
             Err(e) => {
@@ -373,6 +383,13 @@ mod tests {
             v["setup"]["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"],
             "Charon"
         );
+        // Live → Segmentierungs-Parameter fuer den Browser.
+        assert_eq!(v["segment"]["min_ms"], crate::segment::MIN_SEGMENT_MS);
+        assert_eq!(v["segment"]["max_ms"], crate::segment::MAX_SEGMENT_MS);
+        assert!(
+            (v["segment"]["quiet_rms"].as_f64().unwrap() - 0.01).abs() < 0.001,
+            "quiet_rms ~0,01"
+        );
 
         // Opus-Peer bekommt `model`, aber KEIN Setup (Server haelt die Sitzung).
         let opus = partner_json(
@@ -395,5 +412,20 @@ mod tests {
         assert_eq!(v["type"], "partner");
         assert!(v["partner"].is_null());
         assert!(v["model"].is_null());
+
+        // Translate-PCM-Peer (de→en, auto): KEIN segment-Feld (nur Live hat es).
+        let tr = partner_json(
+            "de",
+            "auto",
+            Transport::Pcm,
+            &Some(PeerInfo {
+                lang: "en".to_owned(),
+                transport: Transport::Pcm,
+                voice: "auto".to_owned(),
+            }),
+        );
+        let v: serde_json::Value = serde_json::from_str(&tr).unwrap();
+        assert_eq!(v["model"], "translate");
+        assert!(v["segment"].is_null(), "translate hat kein segment");
     }
 }

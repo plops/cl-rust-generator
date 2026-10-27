@@ -63,15 +63,21 @@ pub fn live_instruction(lang: &str, partner_lang: &str) -> String {
     let dst_en = crate::languages::english_name(partner_lang);
     if lang.eq_ignore_ascii_case(partner_lang) {
         format!(
-            "You are a simultaneous interpreter. Repeat everything the user \
-             says verbatim in {dst_en} and speak ONLY that. Never answer, \
-             never comment."
+            "You are a simultaneous interpreter. The user speaks {src_en}. \
+                 Repeat everything the user says verbatim in {dst_en} and speak \
+                 ONLY that. Never answer, never comment, never ask questions. \
+                 Never say or write placeholder text such as 'translation \
+                 pending', 'no speech' or similar. If you hear only silence or \
+                 noise, stay silent and output nothing."
         )
     } else {
         format!(
-            "You are a simultaneous interpreter. Translate everything the user \
-             says from {src_en} into {dst_en} and speak ONLY the translation. \
-             Never answer, never comment."
+            "You are a simultaneous interpreter. The user speaks {src_en}. \
+                 Translate everything the user says from {src_en} into {dst_en} \
+                 and speak ONLY the {dst_en} translation. Never answer, never \
+                 comment, never ask questions. Never say or write placeholder \
+                 text such as 'translation pending', 'no speech' or similar. If \
+                 you hear only silence or noise, stay silent and output nothing."
         )
     }
 }
@@ -81,6 +87,12 @@ pub fn live_instruction(lang: &str, partner_lang: &str) -> String {
 /// Die Stimme steht in `generationConfig.speechConfig`, die Dolmetsch-Rolle in
 /// `systemInstruction`. Transkription liegt — wie beim Translate-Modell — auf
 /// `setup`-Ebene. KEIN `translationConfig`, KEIN `thinkingLevel`.
+///
+/// WICHTIG (Spike `vad_probe.py`): Der Server-VAD uebersetzt bei durchgehender
+/// Sprache ohne Pause GAR NICHTS. Darum schalten wir ihn ab
+/// (`realtimeInputConfig.automaticActivityDetection.disabled = true`,
+/// `activityHandling = "NO_INTERRUPTION"`) und segmentieren selbst (siehe
+/// `05b_segment.rs`): der Client schickt `activityStart`/`activityEnd`.
 pub fn live_setup_json(lang: &str, partner_lang: &str, voice: &str) -> String {
     let v = serde_json::json!({
         "setup": {
@@ -94,11 +106,25 @@ pub fn live_setup_json(lang: &str, partner_lang: &str, voice: &str) -> String {
             "systemInstruction": {
                 "parts": [{ "text": live_instruction(lang, partner_lang) }]
             },
+            "realtimeInputConfig": {
+                "automaticActivityDetection": { "disabled": true },
+                "activityHandling": "NO_INTERRUPTION"
+            },
             "inputAudioTranscription": {},
             "outputAudioTranscription": {}
         }
     });
     v.to_string()
+}
+
+/// Steuer-JSON `{"realtimeInput":{"activityStart":{}}}` (Segmentbeginn).
+pub fn activity_start_json() -> String {
+    serde_json::json!({ "realtimeInput": { "activityStart": {} } }).to_string()
+}
+
+/// Steuer-JSON `{"realtimeInput":{"activityEnd":{}}}` (Segmentende).
+pub fn activity_end_json() -> String {
+    serde_json::json!({ "realtimeInput": { "activityEnd": {} } }).to_string()
 }
 
 /// Modell und Setup-JSON aus Sprachpaar und Stimmenwunsch bestimmen.
@@ -213,10 +239,17 @@ pub struct Session {
 /// `Session::tx` werden als `realtimeInput` verschickt; Server-Antworten
 /// landen als `Event` im `events`-Kanal. Bei Close/Fehler kommt genau ein
 /// `Event::Closed(grund)` (ohne Key).
+///
+/// `segment`: Nur fuer das Live-Modell `true`. Dann segmentiert der Sende-Task
+/// den Audio-Strom selbst (siehe `05b_segment.rs`) und schickt vor/nach den
+/// Audio-Chunks `activityStart`/`activityEnd`; beim Schliessen ein letztes
+/// `activityEnd`. Fuer das Translate-Modell `false` (unveraendertes Verhalten,
+/// keine Steuernachrichten).
 pub async fn connect(
     url: &str,
     key: &str,
     setup: &str,
+    segment: bool,
     events: mpsc::Sender<Event>,
 ) -> Result<Session, String> {
     // Query anhaengen; ein fehlender Pfad (z. B. "ws://host:port") wuerde
@@ -242,17 +275,52 @@ pub async fn connect(
     let (url_owned, key_owned) = (url.to_owned(), key.to_owned());
 
     // Sende-Task: PCM aus rx -> audio_json. Endet, wenn tx gedroppt wird.
+    // Bei `segment` werden vor/nach den Audio-Chunks Steuernachrichten
+    // (`activityStart`/`activityEnd`) gemaess `Segmenter` eingestreut.
     tokio::spawn(async move {
-        while let Some(pcm) = rx.recv().await {
-            if sink
+        let mut seg = segment.then(crate::segment::Segmenter::new);
+        'senden: while let Some(pcm) = rx.recv().await {
+            // Mit Segmentierung: Steuernachrichten um das Audio herum senden.
+            if let Some(s) = seg.as_mut() {
+                let samples = crate::codec::le_to_i16_public(&pcm);
+                let ctrl = s.push(&samples);
+                if ctrl.start
+                    && sink
+                        .send(Message::Text(activity_start_json().into()))
+                        .await
+                        .is_err()
+                {
+                    break 'senden;
+                }
+                if sink
+                    .send(Message::Text(audio_json(&pcm).into()))
+                    .await
+                    .is_err()
+                {
+                    break 'senden;
+                }
+                if ctrl.end
+                    && sink
+                        .send(Message::Text(activity_end_json().into()))
+                        .await
+                        .is_err()
+                {
+                    break 'senden;
+                }
+            } else if sink
                 .send(Message::Text(audio_json(&pcm).into()))
                 .await
                 .is_err()
             {
-                break;
+                break 'senden;
             }
         }
-        // tx gedroppt oder Fehler: Verbindung sauber schliessen.
+        // tx gedroppt oder Fehler: offenes Segment schliessen, dann Verbindung.
+        if let Some(s) = seg.as_mut()
+            && s.finish().end
+        {
+            let _ = sink.send(Message::Text(activity_end_json().into())).await;
+        }
         let _ = sink.close().await;
     });
 
@@ -371,7 +439,7 @@ mod tests {
             .unwrap();
         assert!(instr.contains("German"), "quelle genannt");
         assert!(instr.contains("Simplified Chinese"), "ziel genannt");
-        assert!(instr.contains("ONLY the translation"));
+        assert!(instr.contains("ONLY the Simplified Chinese translation"));
         // Transkription auf setup-Ebene, nicht in generationConfig.
         assert!(setup["inputAudioTranscription"].is_object());
         assert!(setup["outputAudioTranscription"].is_object());
@@ -416,6 +484,36 @@ mod tests {
         assert_eq!(m, Model::Live);
         // Kein gemeinsames Modell → Fehler.
         assert!(setup_for("jv", "cy", crate::voices::AUTO).is_err());
+    }
+
+    #[test]
+    fn live_setup_hat_disabled_vad_und_no_interruption() {
+        let v: serde_json::Value =
+            serde_json::from_str(&live_setup_json("zh-Hans", "de", "Charon")).unwrap();
+        let ric = &v["setup"]["realtimeInputConfig"];
+        assert_eq!(ric["automaticActivityDetection"]["disabled"], true);
+        assert_eq!(ric["activityHandling"], "NO_INTERRUPTION");
+        // Translate-Setup hat KEIN realtimeInputConfig.
+        let t: serde_json::Value =
+            serde_json::from_str(&translate_setup_json("de", false)).unwrap();
+        assert!(t["setup"]["realtimeInputConfig"].is_null());
+    }
+
+    #[test]
+    fn live_instruction_nennt_sprachen_und_verbietet_platzhalter() {
+        let i = live_instruction("zh-Hans", "de");
+        assert!(i.contains("Simplified Chinese"), "quelle genannt");
+        assert!(i.contains("German"), "ziel genannt");
+        assert!(i.contains("translation pending"), "platzhalter verboten");
+        assert!(i.contains("silence"), "stille → nichts");
+    }
+
+    #[test]
+    fn activity_control_json() {
+        let s: serde_json::Value = serde_json::from_str(&activity_start_json()).unwrap();
+        assert!(s["realtimeInput"]["activityStart"].is_object());
+        let e: serde_json::Value = serde_json::from_str(&activity_end_json()).unwrap();
+        assert!(e["realtimeInput"]["activityEnd"].is_object());
     }
 
     #[test]

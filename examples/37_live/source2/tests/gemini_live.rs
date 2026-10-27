@@ -19,7 +19,7 @@ async fn live_setup_complete() {
 
     let (etx, mut erx) = mpsc::channel::<Event>(32);
     let setup = live_silk::gemini::translate_setup_json("zh-Hans", false);
-    let _session = live_silk::gemini::connect(GEMINI_URL, &key, &setup, etx)
+    let _session = live_silk::gemini::connect(GEMINI_URL, &key, &setup, false, etx)
         .await
         .expect("connect gegen echtes gemini");
 

@@ -128,6 +128,13 @@ pub fn i16_to_le(samples: &[i16]) -> Vec<u8> {
     out
 }
 
+/// PCM16-LE-Bytes → i16-Samples (oeffentliche Variante von `le_to_i16`; ein
+/// evtl. ungerades Restbyte wird ignoriert). Vom Gemini-Segmentierer genutzt,
+/// der die RMS je 100-ms-Block braucht.
+pub fn le_to_i16_public(bytes: &[u8]) -> Vec<i16> {
+    le_to_i16(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -34,6 +34,8 @@ let transportMode = "pcm";        // aktueller Transport dieser Sitzung
 let partner = null;               // {lang, transport, voice} oder null
 let partnerSetup = null;          // fertiges Gemini-Setup aus dem partner-Event (PCM)
 let partnerModel = null;          // "translate" | "live" (fuer Hinweistext)
+let partnerSegment = null;        // {min_ms,max_ms,quiet_rms} nur bei Live, sonst null
+let segmenter = null;             // laufende Segmentierung (nur Live)
 let langNames = {};               // code → Anzeigename (aus /api/languages)
 let defaultVoiceMap = {};         // code → Stimmenname (feste Default-Stimmen)
 let autoMarker = "auto";          // Marker fuer „Automatisch"
@@ -191,6 +193,64 @@ function relayUrl(transport) {
   return `${proto}//${location.host}${base}/ws?${p}`;
 }
 
+// ---- Eigene Segmentierung fuer das Live-Modell -------------------------
+// Dieselbe Regel wie der Server (05b_segment.rs): Segment beginnt mit
+// activityStart; endet am ersten leisen 100-ms-Block (RMS unter Schwelle)
+// nach min_ms, spaetestens nach max_ms; dann sofort activityEnd+activityStart.
+// Ob ueberhaupt segmentiert wird, entscheidet NUR der Server (segment-Feld im
+// partner-Event) — keine eigene Modellwahl im Browser. send(kind) schickt eine
+// Steuernachricht ("activityStart"/"activityEnd") an Gemini.
+class PcmSegmenter {
+  constructor(params, send) {
+    this.minMs = params.min_ms;
+    this.maxMs = params.max_ms;
+    this.quiet = params.quiet_rms; // normiert [-1,1]
+    this.send = send;
+    this.open = false;
+    this.msInSegment = 0;
+    this.rest = [];                // Int16-Rest (< ein 100-ms-Block)
+    this.blockSamples = 1600;      // 100 ms @ 16 kHz
+  }
+  // Int16-16-kHz-Block verarbeiten; sendet Steuernachrichten nach Bedarf.
+  // Reihenfolge am Netz: activityStart → Audio → activityEnd. Ein Schnitt
+  // schliesst das aktuelle Segment (activityEnd nach diesem Chunk); das
+  // Folgesegment oeffnet der naechste push (activityStart davor).
+  push(int16) {
+    if (!this.open) { this.send("activityStart"); this.open = true; }
+    const buf = this.rest.concat(Array.from(int16));
+    let i = 0;
+    while (i + this.blockSamples <= buf.length) {
+      const block = buf.slice(i, i + this.blockSamples);
+      i += this.blockSamples;
+      this.msInSegment += 100;
+      const leise = rmsNorm(block) < this.quiet;
+      const langGenug = this.msInSegment >= this.minMs;
+      const zuLang = this.msInSegment >= this.maxMs;
+      if ((leise && langGenug) || zuLang) {
+        this.send("activityEnd");
+        this.open = false;
+        this.msInSegment = 0;
+        this.rest = buf.slice(i); // Rest gehoert zum Folgesegment
+        return;
+      }
+    }
+    this.rest = buf.slice(i);
+  }
+  // Beim Schliessen: offenes Segment mit activityEnd beenden.
+  finish() {
+    if (this.open) { this.send("activityEnd"); this.open = false; }
+    this.msInSegment = 0; this.rest = [];
+  }
+}
+
+// Normierter RMS (Int16 → [-1,1]) eines Blocks.
+function rmsNorm(block) {
+  if (!block.length) return 0;
+  let sum = 0;
+  for (const s of block) { const v = s / 32768; sum += v * v; }
+  return Math.sqrt(sum / block.length);
+}
+
 // ---- Start / Stop -------------------------------------------------------
 el.connect.addEventListener("click", start);
 el.disconnect.addEventListener("click", cleanup);
@@ -203,6 +263,7 @@ async function start() {
   partner = null;
   partnerSetup = null;
   partnerModel = null;
+  partnerSegment = null;
   renderPartner();
   setUI(true);
   setStatus("Initialisiere Audio…");
@@ -244,6 +305,14 @@ function openGemini() {
   geminiWs = new WebSocket(`${GEMINI_BASE}?key=${key}`);
   geminiWs.onopen = () => {
     geminiWs.send(JSON.stringify({ setup: partnerSetup }));
+    // Nur das Live-Modell segmentiert selbst (Server sagt es via segment-Feld).
+    segmenter = partnerSegment
+      ? new PcmSegmenter(partnerSegment, (kind) => {
+          if (geminiWs?.readyState === WebSocket.OPEN) {
+            geminiWs.send(JSON.stringify({ realtimeInput: { [kind]: {} } }));
+          }
+        })
+      : null;
   };
   geminiWs.onmessage = async (ev) => {
     const txt = ev.data instanceof Blob ? await ev.data.text() : ev.data;
@@ -267,14 +336,33 @@ function openGemini() {
 }
 
 function closeGemini() {
+  // Offenes Segment sauber mit activityEnd beenden, bevor die Verbindung schliesst.
+  if (segmenter) { try { segmenter.finish(); } catch {} segmenter = null; }
   if (geminiWs) { geminiWs.onclose = null; try { geminiWs.close(); } catch {} geminiWs = null; }
+}
+
+// Untertitel-Artefakte filtern (gleiche Regel wie der Server,
+// 05b_segment.rs): `<...>`/`{...}`-Tokens und „translation pending" raus,
+// Mehrfach-Leerzeichen zusammen, getrimmt. Leer → "" (nicht senden).
+function cleanSubtitle(text) {
+  let out = "", eckig = 0, geschweift = 0;
+  for (const c of text) {
+    if (c === "<") eckig++;
+    else if (c === ">") eckig = Math.max(0, eckig - 1);
+    else if (c === "{") geschweift++;
+    else if (c === "}") geschweift = Math.max(0, geschweift - 1);
+    else if (eckig === 0 && geschweift === 0) out += c;
+  }
+  return out.replace(/translation pending/g, "").split(/\s+/).filter(Boolean).join(" ");
 }
 
 // Transkript lokal zeigen und als Text an den Relay (fuer den Partner).
 function subAndSend(dir, text) {
-  addSub("me", dir, text);
+  const sauber = cleanSubtitle(text);
+  if (!sauber) return;             // leere/artefaktige Untertitel nicht senden
+  addSub("me", dir, sauber);
   if (roomWs?.readyState === WebSocket.OPEN) {
-    roomWs.send(JSON.stringify({ type: "text", dir, text }));
+    roomWs.send(JSON.stringify({ type: "text", dir, text: sauber }));
   }
 }
 
@@ -298,6 +386,8 @@ async function startMic(opus) {
     if (opus) {
       if (upOpus) upOpus.pushInt16(int16);
     } else if (geminiWs?.readyState === WebSocket.OPEN) {
+      // Live-Modell: erst segmentieren (activityStart/End), dann Audio senden.
+      if (segmenter) segmenter.push(int16);
       // Nur senden, wenn eine Gemini-Sitzung offen ist (Partner bekannt).
       const b64 = bufToB64(int16.buffer);
       const msg = JSON.stringify({ realtimeInput: { audio: { mimeType: "audio/pcm;rate=16000", data: b64 } } });
@@ -345,6 +435,7 @@ function onPartner(m, transport) {
   partner = m.partner || null;
   partnerModel = partner ? (m.model || null) : null;
   partnerSetup = partner ? (m.setup || null) : null;
+  partnerSegment = partner ? (m.segment || null) : null;
   renderPartner();
   renderVoiceHint();
   if (transport === "pcm") {
@@ -394,6 +485,7 @@ function cleanup() {
   partner = null;
   partnerSetup = null;
   partnerModel = null;
+  partnerSegment = null;
   renderPartner();
   renderVoiceHint();
   if (proc) { proc.disconnect(); proc.onaudioprocess = null; proc = null; }

@@ -24,7 +24,7 @@ async fn fake_liefert_ready_audio_und_outtext() {
 
     // Translate-Setup (AUTO) fuer de→zh-Hans.
     let setup = live_silk::gemini::translate_setup_json("zh-Hans", false);
-    let session = connect(&url, "testkey", &setup, etx)
+    let session = connect(&url, "testkey", &setup, false, etx)
         .await
         .expect("connect gegen fake");
 
