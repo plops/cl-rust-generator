@@ -22,7 +22,9 @@ async fn fake_liefert_ready_audio_und_outtext() {
     let url = common::spawn_fake_gemini().await;
     let (etx, mut erx) = mpsc::channel::<Event>(32);
 
-    let session = connect(&url, "testkey", "zh-Hans", false, etx)
+    // Translate-Setup (AUTO) fuer de→zh-Hans.
+    let setup = live_silk::gemini::translate_setup_json("zh-Hans", false);
+    let session = connect(&url, "testkey", &setup, etx)
         .await
         .expect("connect gegen fake");
 

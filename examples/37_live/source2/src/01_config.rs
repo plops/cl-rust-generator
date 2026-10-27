@@ -12,7 +12,11 @@ pub const MAX_PEERS: usize = 2;
 pub const GEMINI_URL: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 
 /// Uebersetzungsmodell (per Browser-HIL in source1 belegt).
-pub const GEMINI_MODEL: &str = "models/gemini-3.5-live-translate-preview";
+pub const GEMINI_TRANSLATE_MODEL: &str = "models/gemini-3.5-live-translate-preview";
+
+/// Konversationsmodell `gemini-3.8-live` fuer feste Stimmen (Dolmetsch-
+/// Systemanweisung). Spike-belegt (`spike/voice_probe_live.py`).
+pub const GEMINI_LIVE_MODEL: &str = "models/gemini-3.8-live";
 
 /// Wie ein Peer Audio austauscht.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]

@@ -30,6 +30,10 @@ pub struct PeerInfo {
     pub lang: String,
     /// Transportart dieses Peers (PCM oder Opus-Sparmodus).
     pub transport: Transport,
+    /// Gewaehlte Sprecherstimme: `auto` (eigene Stimme nachbilden) oder ein
+    /// Prebuilt-Stimmenname (z. B. `Kore`). Bestimmt zusammen mit beiden
+    /// Sprachen das Gemini-Modell (siehe `voices::choose`).
+    pub voice: String,
 }
 
 /// Was an einen Peer geht. Audio ist intern IMMER PCM 24 kHz;
@@ -185,6 +189,7 @@ mod tests {
         PeerInfo {
             lang: lang.to_owned(),
             transport,
+            voice: "auto".to_owned(),
         }
     }
 

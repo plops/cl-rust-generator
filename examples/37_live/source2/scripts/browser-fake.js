@@ -46,6 +46,10 @@ async function statusText(page) {
 async function peerText(page) {
   return page.textContent("#peerInfo");
 }
+// Untertitel-Texte, die diese Seite als „Partner" sieht.
+async function partnerSubs(page) {
+  return page.$$eval("#subs li.partner", (lis) => lis.map((li) => li.textContent));
+}
 
 (async () => {
   const browser = await chromium.launch({
@@ -68,6 +72,11 @@ async function peerText(page) {
   const ui = { opusDefault: await fresh.isChecked("#trOpus"), keyHiddenOpus: !(await fresh.isVisible("#apiKey")) };
   await fresh.check("#trPcm");
   ui.keyVisiblePcm = await fresh.isVisible("#apiKey");
+  // Default-Stimme folgt der Sprache: zh-Hans → Kore, de → Charon.
+  await fresh.selectOption("#langSpeak", "zh-Hans");
+  ui.voiceZh = await fresh.inputValue("#voiceSelect");
+  await fresh.selectOption("#langSpeak", "de");
+  ui.voiceDe = await fresh.inputValue("#voiceSelect");
   await fresh.close();
   console.log("ui:", JSON.stringify(ui));
 
@@ -86,6 +95,7 @@ async function peerText(page) {
   const sa = await stats(a), sb = await stats(b);
   const statusA = await statusText(a), statusB = await statusText(b);
   const peerA = await peerText(a), peerB = await peerText(b);
+  const subsA = await partnerSubs(a), subsB = await partnerSubs(b);
   await a.screenshot({ path: path.join(OUT, "fake-A-opus.png") });
   await b.screenshot({ path: path.join(OUT, "fake-B-pcm.png") });
 
@@ -97,8 +107,15 @@ async function peerText(page) {
   console.log(`B (PCM) : up=${sb.up}B down=${sb.down}B pcmDown=${sb.pcmDown}B texts=${sb.texts} → ${bKbit} kbit/s`);
   console.log(`statusA=${JSON.stringify(statusA)} statusB=${JSON.stringify(statusB)}`);
   console.log(`peerA=${JSON.stringify(peerA)} peerB=${JSON.stringify(peerB)}`);
+  console.log(`A Partner-Untertitel: ${JSON.stringify(subsA.slice(0, 3))}`);
+  console.log(`B Partner-Untertitel: ${JSON.stringify(subsB.slice(0, 3))}`);
   const errs = [...a.__errs, ...b.__errs];
   console.log("seitenfehler:", errs.length ? errs.slice(0, 6) : "keine");
+
+  // A (zh-Hans, Default Kore) spricht mit Kore → B sieht hallo:live:Kore.
+  // B (de, Default Charon) spricht mit Charon → A sieht hallo:live:Charon.
+  const bSeesKore = subsB.some((t) => t.includes("hallo:live:Kore"));
+  const aSeesCharon = subsA.some((t) => t.includes("hallo:live:Charon"));
 
   const checks = {
     "A live": statusA.includes("Live"),
@@ -111,6 +128,10 @@ async function peerText(page) {
     "A kbit<40": aKbit < 40,
     "A sieht Partner Deutsch": peerA.includes("Deutsch"),
     "B sieht Partner Chinesisch": peerB.includes("Chinesisch"),
+    "B sieht hallo:live:Kore": bSeesKore,
+    "A sieht hallo:live:Charon": aSeesCharon,
+    "Voice-Select zh-Hans = Kore": ui.voiceZh === "Kore",
+    "Voice-Select de = Charon": ui.voiceDe === "Charon",
     "Sparmodus ist Default": ui.opusDefault,
     "Key-Feld im Sparmodus versteckt": ui.keyHiddenOpus,
     "Key-Feld im Normalmodus sichtbar": ui.keyVisiblePcm,

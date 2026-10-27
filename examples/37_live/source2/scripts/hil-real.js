@@ -44,6 +44,35 @@ const hasCjk = (s) => /[\u4e00-\u9fff]/.test(s || "");
 // Lateinische Buchstaben + mindestens ein Wort mit >=3 Buchstaben?
 const hasLatinWord = (s) => /[A-Za-zÄÖÜäöüß]{3,}/.test(s || "");
 
+// Grundfrequenz F0 schaetzen: Autokorrelation je 40-ms-Frame, Median ueber
+// stimmhafte Frames (genug Energie + klares Maximum). `sr` = Abtastrate.
+// Suchbereich 70-400 Hz deckt maennliche (85-155) und weibliche (165-255)
+// Sprechstimmen ab. Rueckgabe in Hz oder null (keine stimmhaften Frames).
+function estimateF0(samples, sr) {
+  if (!samples || samples.length < sr * 0.1) return null;
+  const frame = Math.round(sr * 0.04); // 40 ms
+  const minLag = Math.floor(sr / 400), maxLag = Math.floor(sr / 70);
+  const f0s = [];
+  for (let start = 0; start + frame <= samples.length; start += frame) {
+    const seg = samples.subarray ? samples.subarray(start, start + frame) : samples.slice(start, start + frame);
+    let energy = 0;
+    for (let i = 0; i < seg.length; i++) energy += seg[i] * seg[i];
+    if (energy / seg.length < 1e-4) continue; // zu leise → nicht stimmhaft
+    let bestLag = -1, best = 0;
+    const r0 = energy;
+    for (let lag = minLag; lag <= maxLag && lag < seg.length; lag++) {
+      let acc = 0;
+      for (let i = 0; i + lag < seg.length; i++) acc += seg[i] * seg[i + lag];
+      if (acc > best) { best = acc; bestLag = lag; }
+    }
+    // Klares Maximum (> 0,3 * Energie) als Stimmhaftigkeits-Kriterium.
+    if (bestLag > 0 && best > 0.3 * r0) f0s.push(sr / bestLag);
+  }
+  if (!f0s.length) return null;
+  f0s.sort((a, b) => a - b);
+  return f0s[Math.floor(f0s.length / 2)]; // Median
+}
+
 // Eine Chrome-Instanz mit genau EINEM Fake-Mikro starten.
 function launch(wav) {
   return chromium.launch({
@@ -69,6 +98,27 @@ async function setupPage(browser, { transport, speak, key }) {
   page.on("console", (m) => {
     const t = m.text();
     if (m.type() === "error") errs.push("[console] " + t);
+  });
+  // VOR dem Laden: Partner-Audio (24 kHz) mitschneiden. Beide Pfade (PCM und
+  // Opus) enden in GaplessQueue.pushFloat — dort greifen wir ab.
+  await page.addInitScript(() => {
+    window.__partnerPcm = [];
+    window.__partnerRate = 24000;
+    const hook = () => {
+      if (typeof GaplessQueue === "undefined" || GaplessQueue.__hooked) return;
+      const orig = GaplessQueue.prototype.pushFloat;
+      GaplessQueue.prototype.pushFloat = function (f32, rate) {
+        window.__partnerRate = rate;
+        // Nur begrenzt sammeln (max ~6 s bei 24 kHz), um Speicher zu schonen.
+        if (window.__partnerPcm.length < 24000 * 6) {
+          for (let i = 0; i < f32.length; i++) window.__partnerPcm.push(f32[i]);
+        }
+        return orig.call(this, f32, rate);
+      };
+      GaplessQueue.__hooked = true;
+    };
+    const iv = setInterval(hook, 30);
+    setTimeout(() => clearInterval(iv), 8000);
   });
   await page.goto(BASE, { waitUntil: "networkidle" });
   await page.fill("#roomName", ROOM);
@@ -153,6 +203,14 @@ async function pollRooms() {
   const peerA = await peerText(a), peerB = await peerText(b);
   const fdA = await firstDown(a), fdB = await firstDown(b);
   const subsA = await readSubs(a), subsB = await readSubs(b);
+
+  // F0 des Partner-Audios: B empfaengt A (zh, Default-Stimme Kore, weiblich).
+  // A empfaengt B (de, Default-Stimme Charon, maennlich).
+  const pcmB = await b.evaluate(() => ({ s: window.__partnerPcm || [], r: window.__partnerRate || 24000 }));
+  const pcmA = await a.evaluate(() => ({ s: window.__partnerPcm || [], r: window.__partnerRate || 24000 }));
+  const f0B = estimateF0(Float32Array.from(pcmB.s), pcmB.r); // A→B: Kore (weiblich)
+  const f0A = estimateF0(Float32Array.from(pcmA.s), pcmA.r); // B→A: Charon (maennlich)
+
   await a.screenshot({ path: path.join(OUT, "real-A-opus.png") });
   await b.screenshot({ path: path.join(OUT, "real-B-pcm.png") });
 
@@ -168,6 +226,7 @@ async function pollRooms() {
   console.log(`A (Opus): up=${sa.up}B down=${sa.down}B opusUp=${sa.opusUp}B opusDown=${sa.opusDown}B texts=${sa.texts} → ${aKbit} kbit/s`);
   console.log(`B (PCM) : up=${sb.up}B down=${sb.down}B pcmDown=${sb.pcmDown}B texts=${sb.texts} → ${bKbit} kbit/s`);
   console.log(`erstes Partner-Audio: A nach ${fdA ? Math.round(fdA) : "—"} ms, B nach ${fdB ? Math.round(fdB) : "—"} ms (ab Verbindung)`);
+  console.log(`F0 Partner-Audio: B hört A = ${f0B ? Math.round(f0B) : "—"} Hz (erw. weiblich/Kore >165), A hört B = ${f0A ? Math.round(f0A) : "—"} Hz (erw. männlich/Charon)`);
   console.log(`/api/rooms (Mitte): ${roomsSnap}`);
   console.log(`A Partner-Untertitel (erw. Chinesisch): ${JSON.stringify(short(partnerA))}`);
   console.log(`B Partner-Untertitel (erw. Deutsch)   : ${JSON.stringify(short(partnerB))}`);
@@ -188,6 +247,7 @@ async function pollRooms() {
     "B sieht dt. Partner-Untertitel": bSeesLatin,
     "A sieht Partner Deutsch": peerA.includes("Deutsch"),
     "B sieht Partner Chinesisch": peerB.includes("Chinesisch"),
+    "B hört weibliche Stimme (Kore, F0>165)": f0B !== null && f0B > 165,
     "A kbit/s < 40": aKbit < 40,
     "keine pageerror": errs.length === 0,
   };

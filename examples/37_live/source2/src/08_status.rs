@@ -57,7 +57,7 @@ pub fn format_rooms(rooms: &[(String, Vec<PeerInfo>)]) -> String {
                     Transport::Pcm => "pcm",
                     Transport::Opus => "opus",
                 };
-                format!("{} {}", p.lang, t)
+                format!("{} {} {}", p.lang, t, p.voice)
             })
             .collect();
         out.push_str(&format!(
@@ -93,6 +93,8 @@ fn parse_rooms(body: &str) -> Result<RoomList, String> {
 struct PeerInfoParsed {
     lang: String,
     transport: Transport,
+    #[serde(default)]
+    voice: String,
 }
 
 impl PeerInfoParsed {
@@ -100,6 +102,7 @@ impl PeerInfoParsed {
         PeerInfo {
             lang: self.lang,
             transport: self.transport,
+            voice: self.voice,
         }
     }
 }
@@ -124,6 +127,7 @@ mod tests {
         PeerInfo {
             lang: lang.to_owned(),
             transport,
+            voice: "auto".to_owned(),
         }
     }
 
@@ -146,17 +150,18 @@ mod tests {
         let idx_a0 = out.find("raum a0").unwrap();
         let idx_r1 = out.find("raum r1").unwrap();
         assert!(idx_a0 < idx_r1);
-        assert!(out.contains("raum r1: 2 peers [zh-Hans opus, de pcm]"));
-        assert!(out.contains("raum a0: 1 peers [en pcm]"));
+        assert!(out.contains("raum r1: 2 peers [zh-Hans opus auto, de pcm auto]"));
+        assert!(out.contains("raum a0: 1 peers [en pcm auto]"));
     }
 
     #[test]
     fn parse_rooms_liest_listen() {
-        let body = r#"{"r1":[{"lang":"de","transport":"opus"}]}"#;
+        let body = r#"{"r1":[{"lang":"de","transport":"opus","voice":"Charon"}]}"#;
         let rooms = parse_rooms(body).unwrap();
         assert_eq!(rooms.len(), 1);
         assert_eq!(rooms[0].0, "r1");
         assert_eq!(rooms[0].1[0].transport, Transport::Opus);
+        assert_eq!(rooms[0].1[0].voice, "Charon");
     }
 
     #[test]

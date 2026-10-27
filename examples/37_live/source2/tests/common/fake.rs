@@ -32,14 +32,36 @@ pub fn sinus_pcm24() -> Vec<u8> {
     out
 }
 
-/// `targetLanguageCode` aus einer `setup`-Nachricht herausziehen.
-fn setup_target(v: &serde_json::Value) -> Option<String> {
-    v.get("setup")
-        .and_then(|s| s.get("generationConfig"))
-        .and_then(|g| g.get("translationConfig"))
-        .and_then(|t| t.get("targetLanguageCode"))
-        .and_then(|c| c.as_str())
-        .map(str::to_owned)
+/// Was die `setup`-Nachricht verlangt: entweder Translate (Ziel-Sprachcode)
+/// oder Live (feste Stimme). Daraus baut der Fake die passende Transkription:
+/// Translate → `hallo:<target>`, Live → `hallo:live:<voiceName>`.
+enum Setup {
+    Translate(String),
+    Live(String),
+}
+
+/// `setup`-Nachricht auswerten: Live, wenn `speechConfig` vorhanden ist (das
+/// Live-Modell), sonst Translate (`targetLanguageCode`).
+fn parse_setup(v: &serde_json::Value) -> Setup {
+    let setup = v.get("setup");
+    let gcfg = setup.and_then(|s| s.get("generationConfig"));
+    if let Some(voice) = gcfg
+        .and_then(|g| g.get("speechConfig"))
+        .and_then(|s| s.get("voiceConfig"))
+        .and_then(|vc| vc.get("prebuiltVoiceConfig"))
+        .and_then(|p| p.get("voiceName"))
+        .and_then(|n| n.as_str())
+    {
+        Setup::Live(voice.to_owned())
+    } else {
+        let target = gcfg
+            .and_then(|g| g.get("translationConfig"))
+            .and_then(|t| t.get("targetLanguageCode"))
+            .and_then(|c| c.as_str())
+            .unwrap_or_default()
+            .to_owned();
+        Setup::Translate(target)
+    }
 }
 
 /// Eingangs-Audio-Dauer (ms) aus einer `realtimeInput`-Nachricht schaetzen:
@@ -57,14 +79,16 @@ fn input_ms(v: &serde_json::Value) -> i64 {
     (bytes as i64 / 2) * 1000 / 16_000
 }
 
-/// Eine Antwortnachricht: modelTurn (Audio) + outputTranscription
-/// `"hallo:<target>"` (das Ziel macht das automatisch gewaehlte Ziel pruefbar).
-pub fn antwort_json(target: &str) -> String {
+/// Eine Antwortnachricht: modelTurn (Audio) + outputTranscription.
+/// `label` ist die vom Setup abgeleitete Markierung
+/// (`hallo:<target>` bzw. `hallo:live:<voiceName>`) — so kann der Test
+/// pruefen, welches Modell/welche Stimme gewaehlt wurde.
+pub fn antwort_json(label: &str) -> String {
     let data = STANDARD.encode(sinus_pcm24());
     serde_json::json!({
         "serverContent": {
             "modelTurn": { "parts": [{ "inlineData": { "data": data } }] },
-            "outputTranscription": { "text": format!("hallo:{target}") }
+            "outputTranscription": { "text": label }
         }
     })
     .to_string()
@@ -79,8 +103,8 @@ pub async fn handle_conn(stream: tokio::net::TcpStream) {
     // Konto: empfangene minus bereits beantwortete Audio-Zeit (ms). Startet
     // bei RESPONSE_MS, damit der erste Chunk sofort eine Antwort ausloest.
     let mut guthaben_ms: i64 = RESPONSE_MS;
-    // Zuletzt vereinbartes Ziel (fuer outputTranscription).
-    let mut target = String::new();
+    // Zuletzt vereinbarte Transkriptions-Markierung (aus dem Setup).
+    let mut label = String::new();
     while let Some(Ok(msg)) = rx.next().await {
         let txt = match msg {
             Message::Text(t) => t.to_string(),
@@ -95,7 +119,10 @@ pub async fn handle_conn(stream: tokio::net::TcpStream) {
             continue;
         };
         if v.get("setup").is_some() {
-            target = setup_target(&v).unwrap_or_default();
+            label = match parse_setup(&v) {
+                Setup::Translate(t) => format!("hallo:{t}"),
+                Setup::Live(voice) => format!("hallo:live:{voice}"),
+            };
             let _ = sink
                 .send(Message::Text(r#"{"setupComplete":{}}"#.into()))
                 .await;
@@ -104,7 +131,7 @@ pub async fn handle_conn(stream: tokio::net::TcpStream) {
             // Nur antworten, wenn genug Eingangs-Audio da ist (Echtzeit-Drossel).
             if guthaben_ms >= RESPONSE_MS {
                 guthaben_ms -= RESPONSE_MS;
-                let _ = sink.send(Message::Text(antwort_json(&target).into())).await;
+                let _ = sink.send(Message::Text(antwort_json(&label).into())).await;
             }
         }
     }

@@ -213,20 +213,76 @@ async fn opus_allein_bekommt_waiting_kein_ready() {
 }
 
 #[tokio::test]
-async fn opus_auto_ziel_folgt_partnersprache() {
+async fn zh_hans_opus_default_voice_nutzt_live_kore() {
+    // zh-Hans-Opus-Peer OHNE voice → Default Kore → feste Stimme → Live-Modell
+    // (de ↔ zh-Hans sind beide live). Fake spiegelt die Stimme:
+    // `hallo:live:Kore`. Der PCM-Partner (de, Default Charon) bekommt im
+    // partner-Event model=live + Setup mit voiceName Charon.
     let (base, _) = spawn_server(Some("test")).await;
-    // A: Opus, spricht zh-Hans. Erst allein (waiting).
-    let mut a = connect(&base, "room=auto&transport=opus&lang=zh-Hans").await;
+    let mut a = connect(&base, "room=v1&transport=opus&lang=zh-Hans").await;
     a.send(Message::Text(r#"{"type":"hello"}"#.into()))
         .await
         .unwrap();
     let _ = warte_auf_typ(&mut a, "waiting", 4, 1500).await;
 
-    // B tritt bei (pcm, lang=de). A: Ziel automatisch = de → ready.
-    let mut b = connect(&base, "room=auto&transport=pcm&lang=de").await;
+    let mut b = connect(&base, "room=v1&transport=pcm&lang=de").await;
     let _ = warte_auf_typ(&mut a, "ready", 6, 2000).await;
 
-    // A schickt Audio → B bekommt Untertitel vom Fake mit ":de".
+    // B (PCM) sieht den Partner A: model=live, Setup mit eigener Stimme Charon.
+    let mut sah_setup = false;
+    for _ in 0..6 {
+        let t = naechster_text(&mut b, 1500).await;
+        let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+        if v["type"] == "partner" && !v["partner"].is_null() {
+            assert_eq!(v["model"], "live", "B→Gemini via Live-Modell");
+            assert!(
+                v["setup"]["model"]
+                    .as_str()
+                    .unwrap()
+                    .contains("gemini-3.8-live"),
+                "Setup fuer gemini-3.8-live"
+            );
+            assert_eq!(
+                v["setup"]["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]
+                    ["voiceName"],
+                "Charon",
+                "B spricht mit eigener Stimme Charon"
+            );
+            sah_setup = true;
+            break;
+        }
+    }
+    assert!(sah_setup, "B bekommt Setup im partner-Event");
+
+    // A schickt Audio → B bekommt Untertitel `hallo:live:Kore` (A spricht mit Kore).
+    let pkt = test_opus_paket();
+    a.send(Message::Binary(pkt.into())).await.unwrap();
+    let mut saw = false;
+    for _ in 0..8 {
+        let t = naechster_text(&mut b, 2000).await;
+        let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+        if v["type"] == "text" && v["who"] == "partner" {
+            assert_eq!(v["text"], "hallo:live:Kore", "Live mit Stimme Kore");
+            saw = true;
+            break;
+        }
+    }
+    assert!(saw, "untertitel hallo:live:Kore erwartet");
+}
+
+#[tokio::test]
+async fn opus_auto_translate_und_live_fallback() {
+    let (base, _) = spawn_server(Some("test")).await;
+    // A: Opus, spricht en mit voice=auto (en-Default ist auto).
+    let mut a = connect(&base, "room=auto&transport=opus&lang=en&voice=auto").await;
+    a.send(Message::Text(r#"{"type":"hello"}"#.into()))
+        .await
+        .unwrap();
+    let _ = warte_auf_typ(&mut a, "waiting", 4, 1500).await;
+
+    // B: pcm, lang=de. auto + beide translate → Translate, Ziel = de.
+    let mut b = connect(&base, "room=auto&transport=pcm&lang=de").await;
+    let _ = warte_auf_typ(&mut a, "ready", 6, 2000).await;
     let pkt = test_opus_paket();
     a.send(Message::Binary(pkt.clone().into())).await.unwrap();
     let mut saw_de = false;
@@ -234,32 +290,67 @@ async fn opus_auto_ziel_folgt_partnersprache() {
         let t = naechster_text(&mut b, 2000).await;
         let v: serde_json::Value = serde_json::from_str(&t).unwrap();
         if v["type"] == "text" && v["who"] == "partner" {
-            assert_eq!(v["text"], "hallo:de", "auto-ziel = Partner-lang de");
+            assert_eq!(v["text"], "hallo:de", "auto + beide translate → Translate");
             saw_de = true;
             break;
         }
     }
-    assert!(saw_de, "untertitel mit :de erwartet");
+    assert!(saw_de, "untertitel hallo:de erwartet");
 
     // B verlaesst → A bekommt wieder waiting.
     drop(b);
     let _ = warte_auf_typ(&mut a, "waiting", 6, 2000).await;
 
-    // Neuer Partner C mit lang=ja → A wieder ready, Ziel :ja.
-    let mut c = connect(&base, "room=auto&transport=pcm&lang=ja").await;
+    // Neuer Partner C mit lang=cy (nur-Live): auto → Live-Fallback.
+    // A-Default-Stimme fuer en ist auto → Fallback-Stimme Zephyr.
+    let mut c = connect(&base, "room=auto&transport=pcm&lang=cy").await;
     let _ = warte_auf_typ(&mut a, "ready", 6, 2000).await;
     a.send(Message::Binary(pkt.into())).await.unwrap();
-    let mut saw_ja = false;
+    let mut saw_live = false;
     for _ in 0..8 {
         let t = naechster_text(&mut c, 2000).await;
         let v: serde_json::Value = serde_json::from_str(&t).unwrap();
         if v["type"] == "text" && v["who"] == "partner" {
-            assert_eq!(v["text"], "hallo:ja", "neues auto-ziel = ja");
-            saw_ja = true;
+            assert_eq!(
+                v["text"], "hallo:live:Zephyr",
+                "auto + nur-Live-Sprache → Live-Fallback mit Zephyr"
+            );
+            saw_live = true;
             break;
         }
     }
-    assert!(saw_ja, "untertitel mit :ja nach Partnerwechsel erwartet");
+    assert!(saw_live, "Live-Fallback hallo:live:Zephyr erwartet");
+}
+
+#[tokio::test]
+async fn opus_feste_stimme_translate_fallback_bei_nur_translate_sprache() {
+    // A: Opus, voice=Kore, spricht de. Partner spricht jv (nur-Translate).
+    // Feste Stimme + Live unmoeglich → Translate-Fallback (Stimme ignoriert).
+    let (base, _) = spawn_server(Some("test")).await;
+    let mut a = connect(&base, "room=fb&transport=opus&lang=de&voice=Kore").await;
+    a.send(Message::Text(r#"{"type":"hello"}"#.into()))
+        .await
+        .unwrap();
+    let _ = warte_auf_typ(&mut a, "waiting", 4, 1500).await;
+
+    let mut b = connect(&base, "room=fb&transport=pcm&lang=jv").await;
+    let _ = warte_auf_typ(&mut a, "ready", 6, 2000).await;
+    let pkt = test_opus_paket();
+    a.send(Message::Binary(pkt.into())).await.unwrap();
+    let mut saw = false;
+    for _ in 0..8 {
+        let t = naechster_text(&mut b, 2000).await;
+        let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+        if v["type"] == "text" && v["who"] == "partner" {
+            assert_eq!(
+                v["text"], "hallo:jv",
+                "feste Stimme + jv → Translate-Fallback"
+            );
+            saw = true;
+            break;
+        }
+    }
+    assert!(saw, "Translate-Fallback hallo:jv erwartet");
 }
 
 #[tokio::test]
@@ -320,7 +411,35 @@ async fn api_languages_und_rooms() {
     let v: serde_json::Value = serde_json::from_str(&langs).unwrap();
     assert_eq!(v["default_lang"], "de");
     assert_eq!(v["default_target"], "zh-Hans");
-    assert_eq!(v["languages"].as_array().unwrap().len(), 78, "78 sprachen");
+    assert_eq!(
+        v["languages"].as_array().unwrap().len(),
+        101,
+        "101 sprachen"
+    );
+    // Flags je Sprache vorhanden.
+    let de = v["languages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["code"] == "de")
+        .unwrap();
+    assert_eq!(de["en"], "German");
+    assert_eq!(de["translate"], true);
+    assert_eq!(de["live"], true);
+    // 30 Stimmen mit Geschlecht.
+    assert_eq!(v["voices"].as_array().unwrap().len(), 30, "30 stimmen");
+    assert!(
+        v["voices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x["name"] == "Kore" && x["gender"] == "female"),
+        "Kore ist weiblich"
+    );
+    // Default-Stimmen-Regel: zh-Hans → Kore, de → Charon.
+    assert_eq!(v["default_voice"]["zh-Hans"], "Kore");
+    assert_eq!(v["default_voice"]["de"], "Charon");
+    assert_eq!(v["auto"], "auto");
 
     // Ohne Server-Key meldet /api/config false (Sparmodus nicht moeglich).
     let cfg = http_get(&addr, "/api/config").await;
@@ -344,6 +463,7 @@ async fn api_languages_und_rooms() {
     assert!(rooms.contains("\"opus\""), "transport opus im json");
     assert!(rooms.contains("\"pcm\""), "transport pcm im json");
     assert!(rooms.contains("rA"), "raumname im json");
+    assert!(rooms.contains("\"voice\""), "voice-feld im json");
     // Kein target-Feld mehr.
     assert!(!rooms.contains("\"target\""), "kein target mehr im json");
 }

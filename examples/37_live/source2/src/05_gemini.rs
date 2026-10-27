@@ -19,7 +19,9 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 /// Kanalpuffer fuer ausgehende PCM-Chunks bzw. eingehende Events.
 const CHAN: usize = 64;
 
-/// Setup-JSON fuer eine neue Sitzung.
+use crate::voices::{self, Model};
+
+/// Setup-JSON fuer das UEBERSETZUNGSMODELL (`gemini-3.5-live-translate`).
 ///
 /// `target` ist der Ziel-Sprachcode (z. B. `zh-Hans`). WICHTIG:
 /// `inputAudioTranscription`/`outputAudioTranscription` liegen auf
@@ -29,15 +31,16 @@ const CHAN: usize = 64;
 /// gesetzt. Das ist noetig, wenn eigene Sprache == Partner-Sprache (Ziel ==
 /// Quelle): sonst schwiege Gemini (nichts zu uebersetzen). Mit `echo` spricht
 /// Gemini das Gesagte in derselben Sprache nach. Bei `false` entfaellt das
-/// Feld ganz.
-pub fn setup_json(target: &str, echo: bool) -> String {
+/// Feld ganz. Dieses Modell bildet die Stimme des Sprechers nach (Voice
+/// Replication); es hat KEIN `speechConfig`.
+pub fn translate_setup_json(target: &str, echo: bool) -> String {
     let mut translation = serde_json::json!({ "targetLanguageCode": target });
     if echo {
         translation["echoTargetLanguage"] = serde_json::Value::Bool(true);
     }
     let v = serde_json::json!({
         "setup": {
-            "model": crate::config::GEMINI_MODEL,
+            "model": crate::config::GEMINI_TRANSLATE_MODEL,
             "generationConfig": {
                 "responseModalities": ["AUDIO"],
                 "translationConfig": translation
@@ -47,6 +50,77 @@ pub fn setup_json(target: &str, echo: bool) -> String {
         }
     });
     v.to_string()
+}
+
+/// Dolmetsch-Systemanweisung fuer das Live-Modell mit englischen Sprachnamen.
+///
+/// Gleiche Sprache (Quelle == Ziel) → „repeat verbatim in <lang>", sonst
+/// Uebersetzung von `src_en` nach `dst_en`. Spike-belegt
+/// (`spike/voice_probe_live.py`): das Modell befolgt die Anweisung und spricht
+/// NUR die Uebersetzung.
+pub fn live_instruction(lang: &str, partner_lang: &str) -> String {
+    let src_en = crate::languages::english_name(lang);
+    let dst_en = crate::languages::english_name(partner_lang);
+    if lang.eq_ignore_ascii_case(partner_lang) {
+        format!(
+            "You are a simultaneous interpreter. Repeat everything the user \
+             says verbatim in {dst_en} and speak ONLY that. Never answer, \
+             never comment."
+        )
+    } else {
+        format!(
+            "You are a simultaneous interpreter. Translate everything the user \
+             says from {src_en} into {dst_en} and speak ONLY the translation. \
+             Never answer, never comment."
+        )
+    }
+}
+
+/// Setup-JSON fuer das KONVERSATIONSMODELL `gemini-3.8-live` mit fester Stimme.
+///
+/// Die Stimme steht in `generationConfig.speechConfig`, die Dolmetsch-Rolle in
+/// `systemInstruction`. Transkription liegt — wie beim Translate-Modell — auf
+/// `setup`-Ebene. KEIN `translationConfig`, KEIN `thinkingLevel`.
+pub fn live_setup_json(lang: &str, partner_lang: &str, voice: &str) -> String {
+    let v = serde_json::json!({
+        "setup": {
+            "model": crate::config::GEMINI_LIVE_MODEL,
+            "generationConfig": {
+                "responseModalities": ["AUDIO"],
+                "speechConfig": {
+                    "voiceConfig": { "prebuiltVoiceConfig": { "voiceName": voice } }
+                }
+            },
+            "systemInstruction": {
+                "parts": [{ "text": live_instruction(lang, partner_lang) }]
+            },
+            "inputAudioTranscription": {},
+            "outputAudioTranscription": {}
+        }
+    });
+    v.to_string()
+}
+
+/// Modell und Setup-JSON aus Sprachpaar und Stimmenwunsch bestimmen.
+///
+/// Nutzt `voices::choose`: `AUTO`/unbekannt + beide `translate` → Translate
+/// (mit `echo`, wenn Quelle == Ziel); feste Stimme + beide `live` → Live;
+/// sonst Fallback wie in `voices::choose` beschrieben. `Err`, wenn keins der
+/// Modelle beide Sprachen abdeckt.
+pub fn setup_for(lang: &str, partner_lang: &str, voice: &str) -> Result<(Model, String), String> {
+    let (model, chosen_voice) = voices::choose(lang, partner_lang, voice)?;
+    let json = match model {
+        Model::Translate => {
+            let echo = lang.eq_ignore_ascii_case(partner_lang);
+            translate_setup_json(partner_lang, echo)
+        }
+        Model::Live => {
+            // choose() liefert bei Live immer eine Stimme.
+            let v = chosen_voice.unwrap_or(voices::FALLBACK_VOICE);
+            live_setup_json(lang, partner_lang, v)
+        }
+    };
+    Ok((model, json))
 }
 
 /// Audio-JSON fuer einen PCM16LE-16-kHz-Chunk (`realtimeInput.audio`).
@@ -130,8 +204,11 @@ pub struct Session {
     pub tx: mpsc::Sender<Vec<u8>>,
 }
 
-/// Verbindet zu `{url}?key={key}`, sendet das Setup und startet die Tasks.
+/// Verbindet zu `{url}?key={key}`, sendet das fertige `setup`-JSON und startet
+/// die Tasks.
 ///
+/// `setup` wird in `setup_for` (bzw. `translate_setup_json`/`live_setup_json`)
+/// gebaut, damit Relay und Browser DIESELBE Quelle der Wahrheit nutzen.
 /// Fehlermeldungen enthalten weder Key noch URL. Audio-Chunks aus
 /// `Session::tx` werden als `realtimeInput` verschickt; Server-Antworten
 /// landen als `Event` im `events`-Kanal. Bei Close/Fehler kommt genau ein
@@ -139,8 +216,7 @@ pub struct Session {
 pub async fn connect(
     url: &str,
     key: &str,
-    target: &str,
-    echo: bool,
+    setup: &str,
     events: mpsc::Sender<Event>,
 ) -> Result<Session, String> {
     // Query anhaengen; ein fehlender Pfad (z. B. "ws://host:port") wuerde
@@ -156,7 +232,7 @@ pub async fn connect(
         .map_err(|e| sanitize(&e.to_string(), url, key))?;
     let (mut sink, mut stream) = ws.split();
 
-    sink.send(Message::Text(setup_json(target, echo).into()))
+    sink.send(Message::Text(setup.to_owned().into()))
         .await
         .map_err(|e| sanitize(&e.to_string(), url, key))?;
 
@@ -239,10 +315,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn setup_json_transkription_auf_setup_ebene() {
-        let v: serde_json::Value = serde_json::from_str(&setup_json("zh-Hans", false)).unwrap();
+    fn translate_setup_transkription_auf_setup_ebene() {
+        let v: serde_json::Value =
+            serde_json::from_str(&translate_setup_json("zh-Hans", false)).unwrap();
         let setup = &v["setup"];
-        assert_eq!(setup["model"], crate::config::GEMINI_MODEL);
+        assert_eq!(setup["model"], crate::config::GEMINI_TRANSLATE_MODEL);
         assert_eq!(
             setup["generationConfig"]["translationConfig"]["targetLanguageCode"],
             "zh-Hans"
@@ -250,6 +327,8 @@ mod tests {
         assert_eq!(setup["generationConfig"]["responseModalities"][0], "AUDIO");
         // Ohne echo kein echoTargetLanguage-Feld.
         assert!(setup["generationConfig"]["translationConfig"]["echoTargetLanguage"].is_null());
+        // Translate-Modell hat KEIN speechConfig.
+        assert!(setup["generationConfig"]["speechConfig"].is_null());
         // Transkription auf setup-Ebene ...
         assert!(setup["inputAudioTranscription"].is_object());
         assert!(setup["outputAudioTranscription"].is_object());
@@ -259,10 +338,10 @@ mod tests {
     }
 
     #[test]
-    fn setup_json_echo_bei_gleicher_sprache() {
+    fn translate_setup_echo_bei_gleicher_sprache() {
         // Gleiche Sprache wie der Partner (Ziel == Quelle): echo setzt
         // echoTargetLanguage = true, damit Gemini nachspricht statt schweigt.
-        let v: serde_json::Value = serde_json::from_str(&setup_json("de", true)).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&translate_setup_json("de", true)).unwrap();
         assert_eq!(
             v["setup"]["generationConfig"]["translationConfig"]["echoTargetLanguage"],
             true
@@ -271,6 +350,72 @@ mod tests {
             v["setup"]["generationConfig"]["translationConfig"]["targetLanguageCode"],
             "de"
         );
+    }
+
+    #[test]
+    fn live_setup_struktur_mit_stimme_und_anweisung() {
+        let v: serde_json::Value =
+            serde_json::from_str(&live_setup_json("de", "zh-Hans", "Kore")).unwrap();
+        let setup = &v["setup"];
+        assert_eq!(setup["model"], crate::config::GEMINI_LIVE_MODEL);
+        assert_eq!(setup["generationConfig"]["responseModalities"][0], "AUDIO");
+        // Feste Stimme in speechConfig, KEIN translationConfig.
+        assert_eq!(
+            setup["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"],
+            "Kore"
+        );
+        assert!(setup["generationConfig"]["translationConfig"].is_null());
+        // Systemanweisung nennt Quelle (German) und Ziel (Simplified Chinese).
+        let instr = setup["systemInstruction"]["parts"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(instr.contains("German"), "quelle genannt");
+        assert!(instr.contains("Simplified Chinese"), "ziel genannt");
+        assert!(instr.contains("ONLY the translation"));
+        // Transkription auf setup-Ebene, nicht in generationConfig.
+        assert!(setup["inputAudioTranscription"].is_object());
+        assert!(setup["outputAudioTranscription"].is_object());
+        assert!(setup["generationConfig"]["inputAudioTranscription"].is_null());
+    }
+
+    #[test]
+    fn live_setup_gleiche_sprache_ist_verbatim() {
+        let v: serde_json::Value =
+            serde_json::from_str(&live_setup_json("de", "de", "Charon")).unwrap();
+        let instr = v["setup"]["systemInstruction"]["parts"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(instr.contains("verbatim"), "gleiche sprache → verbatim");
+        assert!(instr.contains("German"));
+    }
+
+    #[test]
+    fn setup_for_waehlt_modell_und_json() {
+        use crate::voices::Model;
+        // AUTO + beide translate → Translate-JSON.
+        let (m, j) = setup_for("de", "en", crate::voices::AUTO).unwrap();
+        assert_eq!(m, Model::Translate);
+        let v: serde_json::Value = serde_json::from_str(&j).unwrap();
+        assert_eq!(v["setup"]["model"], crate::config::GEMINI_TRANSLATE_MODEL);
+
+        // Feste Stimme + beide live → Live-JSON mit dieser Stimme.
+        let (m, j) = setup_for("de", "en", "Charon").unwrap();
+        assert_eq!(m, Model::Live);
+        let v: serde_json::Value = serde_json::from_str(&j).unwrap();
+        assert_eq!(v["setup"]["model"], crate::config::GEMINI_LIVE_MODEL);
+        assert_eq!(
+            v["setup"]["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"],
+            "Charon"
+        );
+
+        // Feste Stimme, aber Partner nur-translate (jv) → Translate-Fallback.
+        let (m, _) = setup_for("de", "jv", "Kore").unwrap();
+        assert_eq!(m, Model::Translate);
+        // AUTO, aber Partner nur-live (cy) → Live-Fallback.
+        let (m, _) = setup_for("de", "cy", crate::voices::AUTO).unwrap();
+        assert_eq!(m, Model::Live);
+        // Kein gemeinsames Modell → Fehler.
+        assert!(setup_for("jv", "cy", crate::voices::AUTO).is_err());
     }
 
     #[test]
