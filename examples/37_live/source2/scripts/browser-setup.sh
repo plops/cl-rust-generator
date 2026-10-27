@@ -42,7 +42,8 @@ fi
 if [ ! -d node_modules/playwright-core ] || [ ! -d node_modules/ws ]; then
   echo "-- installiere playwright-core + ws ..."
   [ -f package.json ] || npm init -y >/dev/null 2>&1
-  npm i --no-audit --no-fund playwright-core ws 2>&1 | tail -1
+  # Versionen fest wie in plan/20261027_01_silk/tools/package.json
+  npm i --no-audit --no-fund playwright-core@1.64.1 ws@8.22.0 2>&1 | tail -1
 else
   echo "-- npm-treiber vorhanden"
 fi

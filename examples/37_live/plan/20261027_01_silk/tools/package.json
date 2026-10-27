@@ -1,0 +1,9 @@
+{
+  "name": "live-hil",
+  "private": true,
+  "description": "Browser-Test-Treiber fuer 37_live/source2 (wird nach $HIL_DIR kopiert)",
+  "dependencies": {
+    "playwright-core": "1.64.1",
+    "ws": "8.22.0"
+  }
+}

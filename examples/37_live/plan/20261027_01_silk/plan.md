@@ -23,7 +23,7 @@ Summe ≈ 725 kbit/s hoch, ≈ 900 kbit/s runter — auf Edge/3G unbrauchbar.
 Im Sparmodus hält **der Server** die Gemini-Sitzung; der Browser schickt
 nur Opus-SILK hoch und bekommt nur Opus-SILK runter:
 
-Spike `/tmp/spike` (opus-pure 0.2.2, Voip, 12 kbit/s, `max_bandwidth =
+Spike `plan/20261027_01_silk/spike/` (opus-pure 0.2.2, Voip, 12 kbit/s, `max_bandwidth =
 Wideband`, 60-ms-Frames): 3 s Signal → 4013 Bytes = **10,7 kbit/s**,
 50/50 Pakete `SilkOnly`, Encode+Decode 3 s in **20 ms** CPU. Eingang
 24 kHz wird direkt akzeptiert, Decoder liefert direkt 16 kHz → **kein
@@ -108,7 +108,7 @@ ausgeliefert (eine Quelle der Wahrheit, kein Duplikat im JS).
 | `source1/tests/ws_relay.rs` | Muster für WS-Integrationstests (Port 0) |
 | `../36_opus/source1/deps.md` | opus-pure API-Muster, SILK-Erzwingung |
 | `~/.cargo/registry/src/*/opus-pure-0.2.2/src/encoder.rs` | Felder `bitrate_bps`, `max_bandwidth`, `signal_type`, `use_inband_fec`, `packet_loss_perc`, `use_dtx` |
-| `/tmp/spike/src/main.rs`, `/tmp/spike/probe.py`, `/tmp/spike/examples/ws.rs` | funktionierende Spikes (Opus, Gemini-Setup, rustls) |
+| `plan/20261027_01_silk/spike/` (`src/main.rs`, `probe.py`, `examples/ws.rs`, siehe `README.md` dort) | funktionierende Spikes (Opus, Gemini-Setup, rustls) |
 
 ## 4. Abhängigkeiten (alle per `cargo add` = neueste) mit Usage
 

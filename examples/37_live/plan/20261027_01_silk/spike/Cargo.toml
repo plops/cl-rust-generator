@@ -1,0 +1,11 @@
+[package]
+name = "spike"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+futures-util = "0.3.34"
+opus-pure = "0.2.2"
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
+tokio = { version = "1.54.1", features = ["full"] }
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
