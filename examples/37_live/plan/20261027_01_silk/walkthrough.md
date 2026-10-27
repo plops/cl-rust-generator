@@ -116,7 +116,8 @@ nicht auf dem Handy.
 
 Der Browser öffnet `/ws?room=R&transport=opus&lang=zh-Hans&voice=Kore`. Neben
 der eigenen Sprache geht jetzt auch die **eigene Sprecherstimme** mit (`auto`
-oder ein Prebuilt-Name; fehlt sie, gilt die Default-Stimme). Die Zielsprache
+oder ein Prebuilt-Name; fehlt sie, gilt `auto`, siehe 2.15). Das Beispiel
+zeigt den experimentellen Pfad mit fester Stimme. Die Zielsprache
 ergibt sich automatisch aus der Sprache des Partners (Nutzer-Feedback, siehe
 2.11). Darum **startet die Gemini-Sitzung erst, wenn ein Partner im Raum ist**:
 vorher sendet der Server `{"type":"waiting"}` und (noch) kein `ready`.
@@ -213,10 +214,11 @@ entfällt.
 - Auswahl **„Ich spreche"** mit allen **101 Sprachen** aus `/api/languages`
   (eine Quelle der Wahrheit im Rust-Code) sowie **„Meine Stimme (so hört mich
   der Partner)"**: „Automatisch – eigene Stimme nachbilden" plus Optgroups
-  Weiblich/Männlich mit den 30 Prebuilt-Stimmen. Ein Sprachwechsel zieht die
-  Default-Stimme nach (zh → Kore, de → Charon, sonst Automatisch), solange der
-  Nutzer die Stimme nicht selbst geändert hat; die Wahl bleibt in
-  `localStorage`. Die Zielsprache wählt niemand — sie folgt automatisch dem
+  „Feste Stimme · weiblich/männlich (experimentell)" mit den 30
+  Prebuilt-Stimmen. Default ist für alle „Automatisch" (2.15); eine selbst
+  gewählte Stimme bleibt in `localStorage`. Sprachen, die nur eines der
+  Modelle kann, sind mit `*` (nur Live, orange) bzw. `**` (nur Übersetzung,
+  violett) markiert, mit Legende und passendem Hinweis. Die Zielsprache wählt niemand — sie folgt automatisch dem
   Partner (siehe 2.11). Das „Partner hört"-Select und der Tausch-Knopf sind
   entfallen.
 - Partner-Anzeige: „Partner spricht: &lt;Name&gt; · &lt;Normal|Sparmodus&gt;"
@@ -242,9 +244,9 @@ entfällt.
 | Ebene | Was | Ergebnis |
 |---|---|---|
 | Unit (45) | CLI, Sprachtabelle (101 eindeutig, 78 translate, 99 live, jv/su nur translate, 23 nur live, Sortierung, Defaults, englische Namen), Stimmen (30, Default-Regeln, `choose` für alle Fälle inkl. Fallbacks/Fehler), Codec, Raumbuch (Limit 2, kein Echo, Partner-Watch), Setup-JSON beider Modelle (`setup_for`, Transkription auf setup-Ebene, Live ohne `translationConfig`, Translate ohne `speechConfig`), Parser, Key-Bereinigung, `partner`-JSON (model+setup), Untertitel, Status-Format | grün |
-| Integration (9 + 1 ignoriert) | `ws_relay.rs`: PCM↔PCM ohne Echo, Raum voll (bleibt 2), `partner`-Event-Inhalt beide Seiten, Opus allein → `waiting`, zh-Hans-Opus-Default-Stimme → `hallo:live:Kore` + PCM-Partner-Setup (Charon), Auto-Ziel Translate `hallo:de` + Live-Fallback `hallo:live:Zephyr` (cy), feste Stimme + jv → Translate-Fallback `hallo:jv`, PCM→Opus (SilkOnly, < 1/10 Bytes), `/api/languages` = 101 + 30 Stimmen; `gemini_fake.rs`; `gemini_live.rs` (manuell `--ignored`) | grün |
+| Integration (9 + 1 ignoriert) | `ws_relay.rs`: PCM↔PCM ohne Echo, Raum voll (bleibt 2), `partner`-Event-Inhalt beide Seiten, Opus allein → `waiting`, feste Stimme Kore → `hallo:live:Kore` + PCM-Partner-Setup (Charon), Auto-Ziel Translate `hallo:de` + Live-Fallback `hallo:live:Zephyr` (cy), feste Stimme + jv → Translate-Fallback `hallo:jv`, PCM→Opus (SilkOnly, < 1/10 Bytes), `/api/languages` = 101 + 30 Stimmen; `gemini_fake.rs`; `gemini_live.rs` (manuell `--ignored`) | grün |
 | Smoke | `scripts/smoke.sh`: Build, `/healthz`, 101 Codes, Transport-Auswahl, `app.js` 200, `--check` | `SMOKE OK` |
-| Browser automatisch | `scripts/browser-fake.sh`: Headless-Chrome, Tab A Opus (zh, Kore), Tab B PCM (de, Charon), Fake-Gemini, 20 s; prüft Untertitel `hallo:live:Kore`/`hallo:live:Charon` und Voice-Default-Regel | `BROWSER-FAKE PASS` |
+| Browser automatisch | `scripts/browser-fake.sh`: Headless-Chrome, Tab A Opus (zh, feste Stimme Kore), Tab B PCM (de, Automatisch), Fake-Gemini, 20 s; prüft Untertitel `hallo:live:Kore`/`hallo:zh-Hans`, Default `auto`, Sprachmarkierung `*`/`**` samt Farbe und Hinweisen | `BROWSER-FAKE PASS` |
 | HIL echt | `scripts/hil-real.sh`: zwei Chrome-Prozesse, echtes Gemini, ~50 s | `HIL-REAL PASS` |
 
 Messwerte `browser-fake` (20 s, Fake-Gemini liefert Audio in Echtzeit, neuer
@@ -530,6 +532,54 @@ systematisch zu hoch (Charon 166 statt ~110 Hz). Auf **normierte
 Kreuzkorrelation (NCCF)** umgestellt: Synth-Test 100–250 Hz exakt, Charon-TTS
 109 Hz, HIL Kore 185–224 Hz / Charon 99–129 Hz. Lehre: bei
 Autokorrelations-F0 immer über die Fenster­energie normieren.
+
+### 2.15 „Automatisch" als Default, markierte Sprachen (Nutzer-Entscheidung)
+
+Nach 2.14 blieb das Live-Modell in einer Richtung unzuverlässig. Gleicher
+Aufbau (zh → de, Kore, Sparmodus), vier echte Läufe: 0 s, 3,4 s, 0 s und
+20,5 s übersetztes Audio, erstes Audio nach 5–25 s. Ein Proxy-Mitschnitt
+zeigte, warum: Der Server schließt brav alle ~1,5 s ein Segment
+(`activityEnd`), aber das Modell antwortet nur auf das erste und schweigt
+danach. Einmal sprach es sogar seine eigenen Überlegungen aus („The user
+wants me to translate …"). Das Übersetzungsmodell zeigte nichts davon.
+
+Entscheidung des Nutzers (Option 1): **„Automatisch" ist für alle der
+Default**, feste Stimmen bleiben als „experimentell" wählbar. Damit die
+Sprachauswahl ehrlich bleibt, markiert das Select, welche Sprachen nur eines
+der beiden Modelle kann:
+
+```mermaid
+flowchart LR
+    L[Sprache gewählt] --> Q{in welchen Modellen?}
+    Q -->|beide, 76| N["Deutsch (de)"]
+    Q -->|nur Live, 23| S["Walisisch (cy) * — orange"]
+    Q -->|nur Übersetzung, 2| D["Javanisch (jv) ** — violett"]
+    S --> H1[Hinweis: feste Ersatzstimme, experimentell]
+    D --> H2[Hinweis: feste Stimme nicht möglich]
+```
+
+Warum Zeichen *und* Farbe: iOS-Safari färbt `<option>` nicht, das Zeichen
+trägt die Information also allein, die Farbe hilft auf dem Desktop. Das
+geschlossene Select übernimmt die Farbe der gewählten Option per Klasse.
+`browser-fake` prüft das automatisch: `cy` endet auf ` *` und ist
+`rgb(245, 158, 11)`, `jv` endet auf ` **` und ist `rgb(167, 139, 250)`, `de` ist
+unmarkiert, beide Hinweistexte erscheinen, Default-Stimme ist `auto`. Im selben
+Lauf nutzt A bewusst Kore (Live-Pfad) und B Automatisch (Übersetzungspfad):
+PASS.
+
+Echter HIL mit dem neuen Default und sauberen Aufnahmen (Predigt-Ausschnitt
+statt Cartoon mit Musik, 34-s-TTS-Monolog statt 6 s Sprache), 50 s:
+
+| Messpunkt | A (Sparmodus, zh) | B (Normal, de) |
+|---|---|---|
+| hört Partner-Audio | **47,3 s** | **47,0 s** |
+| erstes Partner-Audio | 4,6 s | 4,4 s |
+| Rate gesamt | **17 kbit/s** | 1080 kbit/s |
+| Partner-Untertitel | „早上好。" „我叫马丁，" | „Ah, weil" „wer viel Weisheit" |
+
+Zum Vergleich mit dem Live-Modell in derselben Konstellation: 10,8 s bzw. 0 s.
+F0 ist jetzt nur noch informativ (161 Hz bzw. 150 Hz), weil „Automatisch" die
+Stimme des jeweiligen Sprechers nachbildet.
 
 ## 3. Learnings und mögliche Erweiterungen
 

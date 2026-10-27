@@ -56,17 +56,25 @@ das Gemini-Modell (eine Quelle der Wahrheit: `voices::choose` → `setup_for`):
 | Wahl | Bedingung | Modell | Verhalten |
 |---|---|---|---|
 | **Automatisch** | beide Sprachen `translate` | `gemini-3.5-live-translate-preview` | bildet die eigene Stimme nach (Voice Replication), **fortlaufend/schnell** |
-| **Feste Stimme** | beide Sprachen `live` | `gemini-3.8-live` + Dolmetsch-Anweisung | spricht in der **gewählten Stimme**, antwortet nach kurzer Sprechpause |
+| **Feste Stimme** (experimentell) | beide Sprachen `live` | `gemini-3.8-live` + Dolmetsch-Anweisung | spricht in der **gewählten Stimme**, antwortet nach Pausen; im HIL unzuverlässig (Sätze fallen weg, 5–25 s Latenz) |
 
 Fallbacks: „Automatisch", aber eine Sprache ist nur-Live (z. B. Walisisch) →
 Live-Modell mit Ersatzstimme; feste Stimme, aber eine Sprache ist
 nur-Translate (`jv`/`su`) → Translate-Modell (Stimme ignoriert); kein
 gemeinsames Modell → Fehler.
 
-**Default-Stimmen:** Chinesisch (`zh-Hans`, `zh-Hant`) → weiblich **Kore**,
-Deutsch (`de`) → männlich **Charon**, alle anderen → **Automatisch**. Im
-Frontend zieht ein Sprachwechsel die Default-Stimme nach, solange der Nutzer
-die Stimme nicht selbst geändert hat (Auswahl bleibt in `localStorage`).
+**Default-Stimme:** für alle Sprachen **Automatisch** (Nutzer-Entscheidung nach
+dem HIL). Nur wenn „Automatisch" wegen einer nur-Live-Sprache aufs Live-Modell
+ausweichen muss, nimmt der Server bevorzugt Kore für Chinesisch bzw. Charon für
+Deutsch. Eine selbst gewählte Stimme bleibt in `localStorage`.
+
+**Sprachmarkierung im Select „Ich spreche":** `*` (orange) = nur im
+Live-Modell, also nur mit fester Stimme (23 Sprachen, z. B. Walisisch `cy`);
+`**` (violett) = nur im Übersetzungsmodell, also nur mit „Automatisch"
+(Javanisch `jv`, Sundanesisch `su`); ohne Zeichen = beide (76). Das Zeichen
+steht immer im Text, weil iOS-Safari `<option>`-Farben ignoriert; eine Legende
+steht unter dem Select. Passt Sprache und Stimmenwahl nicht zusammen, erklärt
+der Hinweis unter „Meine Stimme", welches Modell stattdessen genutzt wird.
 
 **Sprachmengen** (`/api/languages`, Flags `translate`/`live` je Sprache):
 Übersetzungsmodell **78**, Live-Modell **99**, Vereinigung **101**. `jv`
