@@ -6,6 +6,8 @@
 pub mod codec;
 #[path = "01_config.rs"]
 pub mod config;
+#[path = "05_gemini.rs"]
+pub mod gemini;
 #[path = "02_languages.rs"]
 pub mod languages;
 #[path = "04_state.rs"]
