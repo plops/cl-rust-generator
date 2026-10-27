@@ -10,5 +10,9 @@ pub mod config;
 pub mod gemini;
 #[path = "02_languages.rs"]
 pub mod languages;
+#[path = "06_relay.rs"]
+pub mod relay;
+#[path = "07_serve.rs"]
+pub mod serve;
 #[path = "04_state.rs"]
 pub mod state;

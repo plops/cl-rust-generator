@@ -120,6 +120,17 @@ impl Rooms {
         }
     }
 
+    /// Nachricht an genau einen Peer (`to`) zustellen. `true`, wenn der Peer
+    /// existiert und die Nachricht angenommen wurde. Fuer direkte Antworten
+    /// (`ready`, eigener Untertitel, Fehler) an einen einzelnen Peer.
+    pub async fn send_to(&self, room: &str, to: u64, out: Out) -> bool {
+        let g = self.inner.lock().await;
+        g.get(room)
+            .and_then(|peers| peers.get(&to))
+            .map(|peer| peer.tx.try_send(out).is_ok())
+            .unwrap_or(false)
+    }
+
     /// Peer-Infos eines Raums (fuer `peers`-Events).
     pub async fn infos(&self, room: &str) -> Vec<PeerInfo> {
         let g = self.inner.lock().await;
