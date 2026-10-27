@@ -55,6 +55,10 @@ Laufzeit ~20 s. Chrome-Flags: `--use-fake-device-for-media-stream`,
 - A gesamt (up+down) **< 40 kbit/s**.
 - A sieht **„Partner spricht: Deutsch"**, B sieht **„Chinesisch"**
   (automatische Zielsprache = Partner-Sprache).
+- Voice-Select folgt der Sprache: zh-Hans → **Kore**, de → **Charon**.
+- A (zh-Hans, Kore) → B sieht Untertitel **`hallo:live:Kore`**; B (de, Charon)
+  → A sieht **`hallo:live:Charon`** (beide über das Live-Modell `gemini-3.8-live`;
+  der Fake spiegelt die Stimme als `hallo:live:<voiceName>`).
 - keine `pageerror`.
 
 Screenshots landen in `$HIL_OUT` (`fake-A-opus.png`, `fake-B-pcm.png`).
@@ -84,12 +88,14 @@ auftaucht.
 Weil der Fake-Mikro-Stream **pro Browser-Prozess** gilt, startet `hil-real.js`
 **zwei separate** Chrome-Instanzen:
 
-- **A — Sparmodus (Opus):** `mic-zh.wav` (Mandarin), `lang=zh-Hans`, kein
-  Key-Feld (Sparmodus) → der **Server**-Key spricht mit Gemini. Ziel folgt automatisch dem
-  Partner (= de).
-- **B — Normal (PCM):** `mic-de.wav` (deutsche TTS-Referenz), `lang=de`, Key
-  **im Feld** → B verbindet **direkt** mit Gemini. Ziel folgt dem Partner
-  (= zh-Hans).
+- **A — Sparmodus (Opus):** `mic-zh.wav` (Mandarin), `lang=zh-Hans`, Stimme
+  per Default **Kore** (weiblich) → Live-Modell `gemini-3.8-live`; kein
+  Key-Feld (Sparmodus) → der **Server**-Key spricht mit Gemini. Ziel folgt
+  automatisch dem Partner (= de).
+- **B — Normal (PCM):** `mic-de.wav` (deutsche TTS-Referenz), `lang=de`, Stimme
+  per Default **Charon** (männlich) → Live-Modell; Key **im Feld** → B
+  verbindet **direkt** mit Gemini mit dem fertigen Setup aus dem
+  `partner`-Event. Ziel folgt dem Partner (= zh-Hans).
 
 Die deutsche Referenz `mic-de.wav` wird **einmalig** per Gemini-TTS
 (`gemini-2.5-flash-preview-tts`) erzeugt: „Guten Morgen! Heute ist ein schöner
@@ -107,27 +113,36 @@ scripts/hil-real.sh        # echtes Gemini, ~50 s Laufzeit
 - **B** sieht Partner-Untertitel mit **deutschem** Text (lateinische Wörter).
 - **A** zeigt „Partner spricht: Deutsch", **B** „Chinesisch" (automatische
   Zielsprache = Partner-Sprache).
+- **B hört eine weibliche Stimme (Kore):** F0 des Partner-Audios bei B **> 165 Hz**
+  (Grundfrequenz per Autokorrelation, Median über stimmhafte 40-ms-Frames).
 - frische Seite: Sparmodus vorausgewählt, Key-Feld nur nach Wahl von
   „Normal" sichtbar (`browser-fake`);
 - A gesamt (up+down) **< 40 kbit/s**; keine `pageerror`; Key in keinem Log.
 
 ### Beispiel-Messwerte (ein echter Lauf, 50 s, Key maskiert `AIza…msBM`)
 
+Beide Default-Stimmen aktiv → beide Seiten über das Live-Modell
+`gemini-3.8-live` (zh-Hans → Kore, de → Charon).
+
 | Tab | up | down | opusDown | pcmDown | Untertitel | kbit/s |
 |---|---|---|---|---|---|---|
-| A (Opus) | 70 329 B | 29 077 B | 29 077 B | — | 86 | **16** |
-| B (PCM)  | 4 491 284 B | 2 232 000 B | — | 2 232 000 B | 86 | 1 076 |
+| A (Opus) | 70 100 B | 5 241 B | 5 241 B | — | 13 | **12** |
+| B (PCM)  | 2 407 126 B | 344 162 B | — | 344 162 B | 13 | 440 |
 
-Erstes Partner-Audio: A nach ~4,7 s, B nach ~4,7 s. `/api/rooms` während des
-Laufs zeigt beide Peers im selben Raum ohne `target`-Feld:
-`[{"lang":"de","transport":"pcm"},{"lang":"zh-Hans","transport":"opus"}]`.
+**Grundfrequenz F0** des empfangenen Partner-Audios (Autokorrelation,
+Median über stimmhafte Frames): B hört A = **216 Hz** (weiblich, Stimme Kore,
+> 165 Hz ✓); A hört B = **166 Hz** (männlich, Stimme Charon). Die gewählte
+Stimme wird also hörbar befolgt.
 
-Beispiel-Untertitel (gekürzt):
+**Latenz (Zeit bis erstes Partner-Audio):** B nach **~3,6 s**, A nach
+**~18,8 s**. Das Live-Modell antwortet erst nach einer Sprechpause (statt
+fortlaufend wie das Translate-Modell), darum liegt A (hört die chinesische
+Eingabe von B über Charon) spürbar höher. Übersetzung inhaltlich korrekt:
+`A sieht` `[in] Guten Morgen, heute ist ein schöner Tag.` · `[out] 早上好，今天是个美好的日子。你怎么样？`.
 
-- **A sieht Partner (B, de→zh):** `[in] Guten Morgen. Heute` · `[out] 早上好。` ·
-  `[in] ist ein schöner` · `[out] 今天是个好` · `[in] Tag. Wie geht es`
-- **B sieht Partner (A, zh→de):** `[out] Nein, nein, nein, nein,` · `[out] nein. Nein.`
+`/api/rooms` während des Laufs zeigt beide Peers inkl. Stimme und ohne
+`target`-Feld:
+`[{"lang":"zh-Hans","transport":"opus","voice":"Kore"},{"lang":"de","transport":"pcm","voice":"Charon"}]`.
 
-Der Sparmodus liegt im echten Lauf bei **~16 kbit/s** gegenüber ~**1 076 kbit/s**
-im Normalmodus — Faktor ~67 weniger Netzdaten. Screenshots: `real-A-opus.png`,
-`real-B-pcm.png` in `$HIL_OUT`.
+Der Sparmodus liegt im echten Lauf bei **~12 kbit/s** gegenüber ~**440 kbit/s**
+im Normalmodus. Screenshots: `real-A-opus.png`, `real-B-pcm.png` in `$HIL_OUT`.

@@ -48,6 +48,18 @@ alle noch einmal zum Nachschlagen.
 - **DTX/FEC:** Opus-Optionen für Sprechpausen (Discontinuous
   Transmission) bzw. Fehlerkorrektur bei Paketverlust (Forward Error
   Correction) — als Erweiterung vorgemerkt.
+- **F0 (Grundfrequenz):** die tiefste Schwingung einer Stimme, in Hertz;
+  grob das, was man als Tonhöhe hört. Männliche Sprechstimmen liegen etwa
+  bei 85–155 Hz, weibliche bei 165–255 Hz. Wir schätzen F0 per
+  Autokorrelation (Selbstähnlichkeit des Signals bei verschiedenen
+  Verzögerungen) und nehmen den Median über die stimmhaften Frames — so
+  prüft der HIL, ob die gewählte Stimme hörbar befolgt wird.
+- **Voice Replication (Stimmnachbildung):** das Übersetzungsmodell gibt die
+  Übersetzung in einer Stimme aus, die der des Sprechers ähnelt, statt in
+  einer fest wählbaren — nützlich für „klingt wie ich", aber eine feste
+  Stimme lässt sich dort nicht erzwingen.
+- **Prebuilt-Stimme:** eine der 30 von Gemini vorgefertigten Stimmen (z. B.
+  Kore, Charon); nur das Konversationsmodell `gemini-3.8-live` befolgt sie.
 
 ## 1. Was exakt implementiert wurde
 
@@ -102,11 +114,12 @@ nicht auf dem Handy.
 
 ### 1.3 Ablauf einer Verbindung (Protokoll)
 
-Der Browser öffnet `/ws?room=R&transport=opus&lang=zh-Hans`. **Nur die eigene
-Sprache** wird mitgeschickt — die Zielsprache ergibt sich automatisch aus der
-Sprache des Partners (Nutzer-Feedback, siehe 2.11). Darum **startet die
-Gemini-Sitzung erst, wenn ein Partner im Raum ist**: vorher sendet der Server
-`{"type":"waiting"}` und (noch) kein `ready`.
+Der Browser öffnet `/ws?room=R&transport=opus&lang=zh-Hans&voice=Kore`. Neben
+der eigenen Sprache geht jetzt auch die **eigene Sprecherstimme** mit (`auto`
+oder ein Prebuilt-Name; fehlt sie, gilt die Default-Stimme). Die Zielsprache
+ergibt sich automatisch aus der Sprache des Partners (Nutzer-Feedback, siehe
+2.11). Darum **startet die Gemini-Sitzung erst, wenn ein Partner im Raum ist**:
+vorher sendet der Server `{"type":"waiting"}` und (noch) kein `ready`.
 
 ```mermaid
 sequenceDiagram
@@ -114,14 +127,16 @@ sequenceDiagram
     participant S as live-silk
     participant G as Gemini
     participant B as Browser B (pcm)
-    A->>S: WS /ws?room=R&transport=opus&lang=zh-Hans
+    A->>S: WS /ws?room=R&transport=opus&lang=zh-Hans&voice=Kore
     A->>S: {"type":"hello"}  (kein Key: Server-Key)
     S-->>A: {"type":"partner","partner":null}
     S-->>A: {"type":"waiting"}  (noch kein ready!)
     Note over A,S: A wartet — allein keine Übersetzung
-    B->>S: WS /ws?room=R&transport=pcm&lang=de
-    S-->>A: {"type":"partner","partner":{lang:"de",transport:"pcm"}}
-    S->>G: setup (targetLanguageCode = de = Partner-lang)
+    B->>S: WS /ws?room=R&transport=pcm&lang=de&voice=Charon
+    S-->>A: partner{lang:de,voice:Charon} + model (via setup_for)
+    S-->>B: partner{lang:zh-Hans,voice:Kore} + model + setup{…}
+    Note over S,G: setup_for(A.lang, B.lang, A.voice):<br/>Kore+beide live → gemini-3.8-live
+    S->>G: setup (Live, Stimme Kore, Dolmetsch-Anweisung)
     G-->>S: setupComplete
     S-->>A: {"type":"ready"} → Status „Live!"
     loop alle 60 ms
@@ -130,6 +145,7 @@ sequenceDiagram
     end
     G-->>S: Audio PCM 24 kHz + Transkripte
     S->>B: Binär PCM 24 kHz + {"type":"text","who":"partner",...}
+    B->>G: setup aus partner-Event + Bs PCM (direkt zu Gemini)
     B->>S: Binär PCM 24 kHz (Bs Übersetzung ins Chinesische)
     S->>A: Binär: SILK-Pakete (pro Peer kodiert)
 ```
@@ -141,10 +157,16 @@ Weitere Regeln:
   jeweiligen Partner. Der Opus-Peer wartet in einer `select`-Schleife auf
   Partner-Wechsel und baut die Gemini-Sitzung passend auf (Ziel =
   Partner-Sprache), ab oder neu. Im PCM-Modus macht der Browser dasselbe mit
-  seiner eigenen Gemini-Verbindung.
+  seiner eigenen Gemini-Verbindung — mit dem **fertigen Setup aus dem
+  `partner`-Event** (eine Quelle der Wahrheit, siehe 2.13).
+- **Modell und Stimme:** `voices::choose` + `gemini::setup_for` wählen je Peer
+  Übersetzungs- oder Live-Modell und bauen das passende Setup (siehe 2.13).
+  Das Relay legt PCM-Peers das Setup ins `partner`-Event; Opus-Peers bekommen
+  nur `model` zur Anzeige.
 - **Gleiche Sprache:** sprechen beide dieselbe Sprache (Ziel == Quelle), setzt
-  der Server `translationConfig.echoTargetLanguage = true` — sonst schwiege
-  Gemini (nichts zu übersetzen); so spricht es das Gesagte nach.
+  der Server beim Translate-Modell `translationConfig.echoTargetLanguage = true`
+  — sonst schwiege Gemini; beim Live-Modell lautet die Anweisung dann „repeat
+  verbatim".
 - **Key:** Im Sparmodus (Default) nutzt der Server nur seinen eigenen Key
   (`--key-file`); das Frontend zeigt dort kein Key-Feld und schickt keinen
   Key. Das Protokoll erlaubt noch ein optionales `"key"` in `hello` (nie in
@@ -165,14 +187,16 @@ Deklarationen und Verdrahtung.
 
 | Datei | Zeilen | Inhalt |
 |---|---|---|
-| `01_config.rs` | 185 | CLI (`--listen --dir --key-file --gemini-url --verbose --check --watch`), `Transport {Pcm, Opus}`, `MAX_PEERS = 2` |
-| `02_languages.rs` | 153 | 78 Sprachen (BCP-47 + deutscher Name), Defaults `de` / `zh-Hans` |
+| `01_config.rs` | 189 | CLI, `Transport {Pcm, Opus}`, `MAX_PEERS = 2`, Modelle `GEMINI_TRANSLATE_MODEL`/`GEMINI_LIVE_MODEL` |
+| `02_languages.rs` | 321 | 101 Sprachen (Code, deutscher + englischer Name, Flags `translate`/`live`), Defaults `de` / `zh-Hans` |
+| `02b_voices.rs` | 275 | 30 Prebuilt-Stimmen (+ Geschlecht), `default_voice`, `Model {Translate, Live}`, Entscheidung `choose` |
 | `03_codec.rs` | 228 | `DownlinkEncoder` (PCM 24 kHz → SILK, 60 ms, 12 kbit/s) und `UplinkDecoder` (Opus → PCM 16 kHz) |
-| `04_state.rs` | 278 | Raumbuch mit Peer-Infos (`lang`, `transport`), Partner-Watch je Peer (`watch::Sender<Option<PeerInfo>>`), `broadcast` ohne Echo, `send_to` |
-| `05_gemini.rs` | 328 | Gemini-Live-Client: `setup_json(target, echo)` (echoTargetLanguage), Audio-JSON, Parser, Sitzung mit Sende-/Empfangs-Task |
-| `06_relay.rs` | 583 | `/ws`-Handler: PCM-Pfad, Opus-Pfad (partner-gesteuerte Sitzung: `waiting`/`ready`), Untertitel, persönliche `partner`-Events |
-| `07_serve.rs` | 38 | Router: `/`, `/ws`, `/healthz`, `/api/rooms`, `/api/languages` |
-| `08_status.rs` | 166 | TUI-light `--check/--watch`, z. B. `raum r1: 2 peers [zh-Hans opus, de pcm]` |
+| `04_state.rs` | 283 | Raumbuch mit Peer-Infos (`lang`, `transport`, `voice`), Partner-Watch je Peer, `broadcast` ohne Echo, `send_to` |
+| `05_gemini.rs` | 473 | Gemini-Client: `translate_setup_json`/`live_setup_json`/`setup_for`, Audio-JSON, Parser, Sitzung mit Sende-/Empfangs-Task |
+| `06_relay.rs` | 399 | `/ws`-Handler, PCM-Pfad, persönliche `partner`-Events mit `model`+`setup` |
+| `06b_relay_opus.rs` | 383 | Opus-Pfad (partner-gesteuerte Server-Gemini-Sitzung: `waiting`/`ready`, Untertitel) |
+| `07_serve.rs` | 61 | Router: `/`, `/ws`, `/healthz`, `/api/rooms`, `/api/languages` (Sprachen, Stimmen, Default-Stimmen), `/api/config` |
+| `08_status.rs` | 171 | TUI-light `--check/--watch`, z. B. `raum r1: 2 peers [zh-Hans opus Kore, de pcm Charon]` |
 
 Ein Beispiel für „kein Resampler nötig": Opus darf mit 24 kHz kodieren
 und beim Dekodieren direkt 16 kHz ausgeben. Gemini liefert 24 kHz → der
@@ -186,16 +210,23 @@ entfällt.
   Untertitel), `01_audio.js` (Resampling auf 16 kHz, lückenlose
   Wiedergabe-Warteschlange), `02_opus.js` (WebCodecs-Encoder/Decoder),
   `app.js` (Ablauf, Statistik).
-- Auswahl **nur „Ich spreche"** mit allen 78 Sprachen aus `/api/languages`
-  (eine Quelle der Wahrheit im Rust-Code). Die Zielsprache wählt niemand mehr
-  — sie folgt automatisch dem Partner (siehe 2.11). Das „Partner hört"-Select
-  und der Tausch-Knopf sind entfallen.
+- Auswahl **„Ich spreche"** mit allen **101 Sprachen** aus `/api/languages`
+  (eine Quelle der Wahrheit im Rust-Code) sowie **„Meine Stimme (so hört mich
+  der Partner)"**: „Automatisch – eigene Stimme nachbilden" plus Optgroups
+  Weiblich/Männlich mit den 30 Prebuilt-Stimmen. Ein Sprachwechsel zieht die
+  Default-Stimme nach (zh → Kore, de → Charon, sonst Automatisch), solange der
+  Nutzer die Stimme nicht selbst geändert hat; die Wahl bleibt in
+  `localStorage`. Die Zielsprache wählt niemand — sie folgt automatisch dem
+  Partner (siehe 2.11). Das „Partner hört"-Select und der Tausch-Knopf sind
+  entfallen.
 - Partner-Anzeige: „Partner spricht: &lt;Name&gt; · &lt;Normal|Sparmodus&gt;"
   bzw. „Warte auf Partner…". Im PCM-Modus baut der Browser seine
-  Gemini-Verbindung erst mit Partner auf (Ziel = Partner-lang,
-  `echoTargetLanguage` bei gleicher Sprache) und wieder ab, wenn der Partner
-  geht (das Mikro läuft weiter, sendet dann aber nichts). Im Opus-Modus folgt
-  der Status `waiting`/`ready` vom Server.
+  Gemini-Verbindung erst mit Partner auf — und zwar mit dem **fertigen Setup
+  aus dem `partner`-Event** (keine Setup-Logik im JS) — und wieder ab, wenn
+  der Partner geht (das Mikro läuft weiter, sendet dann aber nichts). Im
+  Opus-Modus folgt der Status `waiting`/`ready` vom Server. Ein Hinweistext
+  zeigt das Modell aus dem `partner`-Event: „Übersetzung fortlaufend, eigene
+  Stimme" (Translate) bzw. „gewählte Stimme, spricht nach kurzer Pause" (Live).
 - Transport-Wahl **„Sparmodus (Opus SILK, ~12 kbit/s)" als Default** und
   „Normal (PCM, viel Daten)". Das API-Key-Feld erscheint **nur im
   Normalmodus**. Fehlt WebCodecs (`AudioEncoder.isConfigSupported`) oder
@@ -203,17 +234,17 @@ entfällt.
   deaktiviert und der Normalmodus vorausgewählt (siehe 2.12).
 - kbit/s-Anzeige hoch/runter, Gesamtzähler in `window.__stats` (für die
   automatischen Tests).
-- Normalmodus nutzt jetzt `translationConfig` statt einer
-  Systemanweisung (siehe 2.2).
+- Normalmodus nutzt das fertig gebaute Setup (Translate oder Live) aus dem
+  `partner`-Event (siehe 2.13).
 
 ### 1.6 Tests und Nachweise (echte Zahlen)
 
 | Ebene | Was | Ergebnis |
 |---|---|---|
-| Unit (30) | CLI, Sprachtabelle, Codec (SilkOnly, Bitrate, Stückelung 1000/333/7 Bytes, Roundtrip, kaputtes Paket), Raumbuch (Limit 2, kein Echo, Partner-Watch bei Join/Leave), Setup-JSON (echoTargetLanguage), Parser, Key-Bereinigung, `partner`-JSON, Untertitel-Umschreibung, Status-Format | grün |
-| Integration (7 + 1 ignoriert) | `ws_relay.rs`: PCM↔PCM ohne Echo, Raum voll (bleibt 2), `partner`-Event-Inhalt beide Seiten, Opus allein → `waiting` (kein `ready`), Auto-Ziel folgt Partner (`:de` → leave → `waiting` → neuer Partner `:ja`), PCM→Opus (alle Pakete SilkOnly, < 1/10 der PCM-Bytes), `/api/languages` = 78 ohne `target`; `gemini_fake.rs`; `gemini_live.rs` (echtes `setupComplete`, manuell mit `--ignored`) | grün |
-| Smoke | `scripts/smoke.sh`: Build, `/healthz`, 78 Codes, Transport-Auswahl, `app.js` 200, `--check` | `SMOKE OK` |
-| Browser automatisch | `scripts/browser-fake.sh`: Headless-Chrome, Tab A Opus, Tab B PCM, Fake-Gemini, 20 s; prüft auch Partner-Anzeige | `BROWSER-FAKE PASS` |
+| Unit (45) | CLI, Sprachtabelle (101 eindeutig, 78 translate, 99 live, jv/su nur translate, 23 nur live, Sortierung, Defaults, englische Namen), Stimmen (30, Default-Regeln, `choose` für alle Fälle inkl. Fallbacks/Fehler), Codec, Raumbuch (Limit 2, kein Echo, Partner-Watch), Setup-JSON beider Modelle (`setup_for`, Transkription auf setup-Ebene, Live ohne `translationConfig`, Translate ohne `speechConfig`), Parser, Key-Bereinigung, `partner`-JSON (model+setup), Untertitel, Status-Format | grün |
+| Integration (9 + 1 ignoriert) | `ws_relay.rs`: PCM↔PCM ohne Echo, Raum voll (bleibt 2), `partner`-Event-Inhalt beide Seiten, Opus allein → `waiting`, zh-Hans-Opus-Default-Stimme → `hallo:live:Kore` + PCM-Partner-Setup (Charon), Auto-Ziel Translate `hallo:de` + Live-Fallback `hallo:live:Zephyr` (cy), feste Stimme + jv → Translate-Fallback `hallo:jv`, PCM→Opus (SilkOnly, < 1/10 Bytes), `/api/languages` = 101 + 30 Stimmen; `gemini_fake.rs`; `gemini_live.rs` (manuell `--ignored`) | grün |
+| Smoke | `scripts/smoke.sh`: Build, `/healthz`, 101 Codes, Transport-Auswahl, `app.js` 200, `--check` | `SMOKE OK` |
+| Browser automatisch | `scripts/browser-fake.sh`: Headless-Chrome, Tab A Opus (zh, Kore), Tab B PCM (de, Charon), Fake-Gemini, 20 s; prüft Untertitel `hallo:live:Kore`/`hallo:live:Charon` und Voice-Default-Regel | `BROWSER-FAKE PASS` |
 | HIL echt | `scripts/hil-real.sh`: zwei Chrome-Prozesse, echtes Gemini, ~50 s | `HIL-REAL PASS` |
 
 Messwerte `browser-fake` (20 s, Fake-Gemini liefert Audio in Echtzeit, neuer
@@ -344,6 +375,75 @@ Morgen" eindeutig.
     versteckt das Feld wirklich. `browser-fake` prüft auf einer frischen
     Seite: Sparmodus ist Default, Key-Feld versteckt, nach Klick auf
     „Normal" sichtbar (alle drei `ok`, PASS mit 24 kbit/s für A).
+
+### 2.13 Stimmenwahl mit zwei Modellen (Option 3)
+
+Nach der Stimmen-Messung (Tabelle in Abschnitt 3) entschied wol pumba:
+**jeder Nutzer wählt seine eigene Sprecherstimme** — die Stimme, mit der der
+Partner die Übersetzung hört. „Automatisch – eigene Stimme nachbilden" nutzt
+das **Übersetzungsmodell** `gemini-3.5-live-translate-preview` (Voice
+Replication, fortlaufend). Eine **feste Stimme** nutzt das Konversationsmodell
+`gemini-3.8-live` mit einer Dolmetsch-Systemanweisung (befolgt die Stimme,
+spricht aber erst nach einer Sprechpause). **Beide** Modelle bekommen die
+korrekte Sprachauswahl.
+
+**Zwei Sprachmengen, eine Tabelle.** `02_languages.rs` trägt jetzt je Sprache
+`translate` und `live`: Übersetzungsmodell **78**, Live-Modell **99**,
+Vereinigung **101**. `jv` (Javanisch) und `su` (Sundanesisch) können nur
+`translate`; 23 Sprachen (Assamesisch, Bosnisch, Cebuano, Walisisch,
+Färöisch, Westfriesisch, Irisch, Kurdisch, Kirgisisch, Maori, Maltesisch,
+Oromo, Oriya, Paschtu, Quechua, Rätoromanisch, Somali, Sesotho, Tadschikisch,
+Turkmenisch, Setswana, Wolof, Yoruba) nur `live`. Jede Sprache hat zusätzlich
+ein Feld `en` (englischer Name) für die Live-Systemanweisung.
+
+**Eine Quelle der Wahrheit: `choose()` → `setup_for()`.** Das neue Modul
+`02b_voices.rs` kennt die 30 Prebuilt-Stimmen (mit Geschlecht), die
+Default-Stimmen (zh-* → Kore, de → Charon, sonst `auto`) und die
+Modell-Entscheidung:
+
+```mermaid
+flowchart TD
+  A[choose(lang, partner_lang, voice)] --> B{Stimme == auto<br/>oder unbekannt?}
+  B -- ja --> C{beide Sprachen<br/>translate?}
+  C -- ja --> D[Translate-Modell<br/>Voice Replication]
+  C -- nein --> E{beide Sprachen<br/>live?}
+  E -- ja --> F[Live-Modell<br/>Fallback-Stimme]
+  E -- nein --> G[Fehler: kein<br/>gemeinsames Modell]
+  B -- "nein (feste Stimme)" --> H{beide Sprachen<br/>live?}
+  H -- ja --> I[Live-Modell<br/>gewählte Stimme]
+  H -- nein --> J{beide Sprachen<br/>translate?}
+  J -- ja --> K[Translate-Modell<br/>Stimme ignoriert]
+  J -- nein --> G
+```
+
+`gemini::setup_for` baut daraus das fertige `setup`-JSON: Translate wie bisher
+(`translationConfig.targetLanguageCode`, `echoTargetLanguage` bei gleicher
+Sprache, Transkription auf setup-Ebene, **kein** `speechConfig`); Live mit
+`speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName`, einer
+`systemInstruction` mit **englischen** Quell-/Ziel-Namen („Translate … from
+German into Simplified Chinese and speak ONLY the translation") bzw. „repeat
+verbatim" bei gleicher Sprache, **ohne** `translationConfig`, **ohne**
+`thinkingLevel`. Das Relay rechnet das Setup je Peer aus und legt es dem
+PCM-Peer ins persönliche `partner`-Event (`"setup":{…}`, `"model":"translate|live"`);
+der Browser schickt es nur noch unverändert an Gemini — keine Duplikat-Logik
+im JS. Opus-Peers bekommen `model` nur zur Anzeige, der Server hält ihre
+Sitzung selbst.
+
+**Echter HIL (50 s, Key maskiert `AIza…msBM`, Default-Stimmen aktiv → beide
+über `gemini-3.8-live`).** A (Opus, zh-Hans, **Kore**) kam auf **12 kbit/s**,
+B (PCM, de, **Charon**) auf **440 kbit/s**. Die gewählte Stimme wird hörbar
+befolgt: die am Partner-Audio per Autokorrelation (Median über stimmhafte
+40-ms-Frames) geschätzte **Grundfrequenz F0** lag bei B (hört A/Kore) bei
+**216 Hz** (weiblich, > 165 Hz) und bei A (hört B/Charon) bei **166 Hz**
+(männlich). Das Live-Modell antwortet erst nach einer Sprechpause — erstes
+Partner-Audio bei B nach **~3,6 s**, bei A nach **~18,8 s**. Übersetzung
+inhaltlich korrekt (`[out] 早上好，今天是个美好的日子。你怎么样？`). `/api/rooms`
+zeigt Stimme mit:
+`[{"lang":"zh-Hans","transport":"opus","voice":"Kore"},{"lang":"de","transport":"pcm","voice":"Charon"}]`.
+Die hohe Live-Latenz bei A ist bekannt (der Spike maß ~6 s erstes Audio bei
+kurzer Eingabe); eine Drossel über `realtimeInputConfig.automaticActivityDetection`
+wurde erwogen, aber nicht gesetzt, weil kein belegter Vorteil vorlag und der
+Lauf grün war.
 
 ## 3. Learnings und mögliche Erweiterungen
 
