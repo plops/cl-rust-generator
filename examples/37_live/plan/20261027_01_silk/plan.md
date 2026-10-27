@@ -88,7 +88,7 @@ pro Peer Opus-kodiert), entscheidet allein der jeweilige Peer.
 
 ### Sprachen
 
-86 Codes aus der offiziellen Tabelle (ai.google.dev …/live-translate,
+78 Sprachen aus der offiziellen Tabelle (ai.google.dev …/live-translate,
 „Supported languages"), Defaults `de` (ich spreche) und `zh-Hans`
 (Partner hört). Gemini erkennt die Quellsprache selbst; konfiguriert
 wird nur `translationConfig.targetLanguageCode`. Tabelle lebt in
@@ -170,7 +170,7 @@ deaktiviert mit Hinweis.
 
 ## 6. Tests
 
-- Unit: Sprachen (86, Defaults, eindeutig), Setup-JSON (Ebene der
+- Unit: Sprachen (78, Defaults, eindeutig), Setup-JSON (Ebene der
   Transkription!), Codec (Roundtrip, SILK-only, Bitrate < 16 kbit/s,
   60-ms-Framing aus beliebigen PCM-Stückelungen), Raum (max 2,
   Broadcast ohne Echo, Peer-Infos), Query-Parsing.

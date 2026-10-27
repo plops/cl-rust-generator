@@ -12,9 +12,9 @@ Arbeitsordner `examples/37_live/source2` (Crate `live-silk`, Edition
   `deps.md`, `.gitignore` (`target/`).
 - `src/01_config.rs`: CLI `--listen --dir --key-file --gemini-url
   --verbose --check --watch`, `MAX_PEERS = 2`, `Transport {Pcm, Opus}`.
-- `src/02_languages.rs`: 86 Sprachen (`code`, `name`), `DEFAULT_LANG
+- `src/02_languages.rs`: 78 Sprachen (`code`, `name`), `DEFAULT_LANG
   = "de"`, `DEFAULT_TARGET = "zh-Hans"`, `find`.
-- Tests: CLI-Parse, 86 Einträge, eindeutig, Defaults enthalten.
+- Tests: CLI-Parse, 78 Einträge, eindeutig, Defaults enthalten.
 - Commit `feat(37_live): geruest, cli und sprachtabelle fuer source2`.
 
 ## T2 — Opus-SILK-Codec
