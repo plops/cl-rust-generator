@@ -115,7 +115,7 @@ sequenceDiagram
     participant G as Gemini
     participant B as Browser B (pcm)
     A->>S: WS /ws?room=R&transport=opus&lang=zh-Hans
-    A->>S: {"type":"hello","key":""}  (leer = Server-Key)
+    A->>S: {"type":"hello"}  (kein Key: Server-Key)
     S-->>A: {"type":"partner","partner":null}
     S-->>A: {"type":"waiting"}  (noch kein ready!)
     Note over A,S: A wartet — allein keine Übersetzung
@@ -145,9 +145,10 @@ Weitere Regeln:
 - **Gleiche Sprache:** sprechen beide dieselbe Sprache (Ziel == Quelle), setzt
   der Server `translationConfig.echoTargetLanguage = true` — sonst schwiege
   Gemini (nichts zu übersetzen); so spricht es das Gesagte nach.
-- **Key:** nie in der URL (URLs landen in Proxy-Logs), sondern in der
-  ersten Textnachricht `hello`. Fehlt er, nimmt der Server seinen eigenen
-  (`--key-file`). Weder Server noch Tests loggen ihn; Fehlertexte werden
+- **Key:** Im Sparmodus (Default) nutzt der Server nur seinen eigenen Key
+  (`--key-file`); das Frontend zeigt dort kein Key-Feld und schickt keinen
+  Key. Das Protokoll erlaubt noch ein optionales `"key"` in `hello` (nie in
+  der URL, denn URLs landen in Proxy-Logs), das Frontend nutzt es nicht. Weder Server noch Tests loggen ihn; Fehlertexte werden
   durch `sanitize()` vom Key bereinigt. Im Normalmodus verlässt der Key
   den Browser nie Richtung Server.
 - **Raum voll:** der dritte Client bekommt `{"type":"error","msg":"raum voll"}`
@@ -195,9 +196,11 @@ entfällt.
   `echoTargetLanguage` bei gleicher Sprache) und wieder ab, wenn der Partner
   geht (das Mikro läuft weiter, sendet dann aber nichts). Im Opus-Modus folgt
   der Status `waiting`/`ready` vom Server.
-- Transport-Wahl „Normal (PCM, viel Daten)" / „Sparmodus (Opus SILK,
-  ~12 kbit/s)". Fehlt WebCodecs (`AudioEncoder.isConfigSupported`), wird
-  der Sparmodus mit Hinweis deaktiviert.
+- Transport-Wahl **„Sparmodus (Opus SILK, ~12 kbit/s)" als Default** und
+  „Normal (PCM, viel Daten)". Das API-Key-Feld erscheint **nur im
+  Normalmodus**. Fehlt WebCodecs (`AudioEncoder.isConfigSupported`) oder
+  meldet `/api/config` keinen Server-Key, wird der Sparmodus mit Hinweis
+  deaktiviert und der Normalmodus vorausgewählt (siehe 2.12).
 - kbit/s-Anzeige hoch/runter, Gesamtzähler in `window.__stats` (für die
   automatischen Tests).
 - Normalmodus nutzt jetzt `translationConfig` statt einer
@@ -326,8 +329,42 @@ Morgen" eindeutig.
     gewählte** Ziel prüfen: Opus allein → `waiting`; PCM-Partner `lang=de` →
     `ready` + Untertitel `hallo:de`; Partner verlässt → `waiting`; neuer
     Partner `lang=ja` → wieder `ready` + `hallo:ja`.
+12. **Sparmodus als Default, Key nur im Normalmodus (Nutzer-Feedback).**
+    Wer das Programm auf dem Handy öffnet, soll ohne Nachdenken den
+    sparsamen Weg bekommen und keinen Key eintippen müssen. Darum ist
+    „Sparmodus" vorausgewählt, und das Key-Feld (`hidden`) erscheint erst,
+    wenn jemand „Normal" wählt — nur dort spricht der Browser selbst mit
+    Gemini. Konsequenz: Der Sparmodus hängt jetzt vom Server-Key ab. Damit
+    niemand in einen Fehler läuft, meldet der neue Endpunkt `/api/config`
+    nur `{"server_key":true|false}` (nie den Key; ein Integrationstest prüft,
+    dass der Key-Text nicht in der Antwort steht). Ohne Server-Key graut das
+    Frontend den Sparmodus aus („Nicht verfuegbar: der Server hat keinen
+    API-Key.") und wählt „Normal". Fallstrick dabei: `.field{display:flex}`
+    überstimmt das `hidden`-Attribut; erst `[hidden]{display:none!important}`
+    versteckt das Feld wirklich. `browser-fake` prüft auf einer frischen
+    Seite: Sparmodus ist Default, Key-Feld versteckt, nach Klick auf
+    „Normal" sichtbar (alle drei `ok`, PASS mit 24 kbit/s für A).
 
 ## 3. Learnings und mögliche Erweiterungen
+
+Messung zur **Stimmenwahl** (Spike `spike/voice_probe.py`,
+`spike/voice_probe_live.py`; Geschlecht per Grundfrequenz F0 — Männer
+etwa 85–155 Hz, Frauen 165–255 Hz — und per Gemini-Urteil):
+
+| Modell | Eingang | gewünschte Stimme | Ergebnis |
+|---|---|---|---|
+| `gemini-3.5-live-translate-preview` | Mann (Charon) | Kore, Aoede (Frauen) | 4/4 Läufe **männlich** — Wunsch ignoriert |
+| `gemini-3.5-live-translate-preview` | Frau (Kore) | Kore/Aoede/Puck/Charon | 4/8 weiblich, 4/8 männlich — **uneinheitlich**, selbst Kore einmal männlich |
+| `gemini-3.5-live-translate-preview` | Mann / Frau | keine | 2/2 bzw. 2/2 wie der **Eingang** (Voice Replication) |
+| `gemini-3.8-live` + Dolmetsch-Anweisung | Mann (113 Hz) | Kore | **220 Hz, weiblich**, „早上好，今天是个美好的一天。你怎么样？" |
+| `gemini-3.8-live` + Dolmetsch-Anweisung | Mann | Charon | 104 Hz, männlich |
+
+Das Übersetzungsmodell akzeptiert `speechConfig` zwar ohne Fehler, bildet
+aber die **Stimme des Sprechers nach** (Voice Replication) — eine feste
+Stimme lässt sich dort nicht wählen. Das Konversationsmodell
+`gemini-3.8-live` befolgt die Stimme, übersetzt aber per Anweisung und
+antwortet erst nach einer Sprechpause (erstes Audio nach ~6 s statt
+fortlaufend).
 
 Learnings:
 

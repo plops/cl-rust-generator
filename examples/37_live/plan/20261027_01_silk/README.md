@@ -15,3 +15,13 @@ Nicht im Repo (zu groß bzw. reproduzierbar per
 `source2/scripts/browser-setup.sh` nach `/tmp/live-hil`): Chrome for
 Testing 156.0.8078.47 (~403 MB), `node_modules` (~14 MB), Fake-Mikro-WAVs
 (aus `chinese/…webm` bzw. per Gemini-TTS erzeugt), Screenshots und Logs.
+
+Stimmen-Spikes (2026-10-27):
+
+| Datei | Was sie zeigt | Aufruf |
+|---|---|---|
+| `spike/voice_probe.py` | Translate-Modell mit `speechConfig`: Stimme wird akzeptiert, aber die Ausgabe folgt der Stimme des Sprechers (F0 + Gemini-Urteil) | `uv run --with websockets --with numpy python voice_probe.py Charon` (bzw. `Kore`) |
+| `spike/voice_probe_live.py` | `gemini-3.8-live` + Dolmetsch-Anweisung: gewählte Stimme wird befolgt | `uv run --with websockets --with numpy python voice_probe_live.py Charon` oder mit Roh-PCM-Datei `x.raw` (spart TTS-Kontingent) |
+
+Achtung: Die TTS-Referenz verbraucht Free-Tier-Kontingent (429 nach ~10
+Aufrufen); mit einer `.raw`-Datei (PCM 24 kHz) als Argument entfällt TTS.
