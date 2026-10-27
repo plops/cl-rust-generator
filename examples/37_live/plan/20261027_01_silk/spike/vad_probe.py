@@ -5,12 +5,23 @@ import asyncio, json, base64, time, sys, subprocess
 import websockets
 from voice_probe import URL, f0
 
-INSTR = ("You are a simultaneous interpreter. The user speaks Mandarin Chinese. "
+import os
+INSTR_SIMPLE = ("You are a simultaneous interpreter. The user speaks Mandarin Chinese. "
          "Translate everything the user says into German and speak ONLY the German translation. "
          "Never answer, never comment, never ask questions.")
+# Wie src/05_gemini.rs live_instruction("zh-Hans","de") (Stand 2026-10-27)
+INSTR_SERVER = ("You are a simultaneous interpreter. The user speaks Simplified Chinese. "
+         "Translate everything the user says from Simplified Chinese into German "
+         "and speak ONLY the German translation. Never answer, never "
+         "comment, never ask questions. Never say or write placeholder "
+         "text such as 'translation pending', 'no speech' or similar. If "
+         "you hear only silence or noise, stay silent and output nothing.")
+INSTR = INSTR_SERVER if os.environ.get("INSTR") == "server" else INSTR_SIMPLE
+VOICE = os.environ.get("VOICE", "Charon")
+WAV = os.environ.get("WAV", "/tmp/live-hil/mic-zh.wav")
 SECS = 30
 SEG = float(sys.argv.pop(1)) if len(sys.argv) > 2 and sys.argv[1].replace(".", "").isdigit() else 3.0
-pcm16 = subprocess.run(["ffmpeg", "-v", "error", "-i", "/tmp/live-hil/mic-zh.wav", "-t", str(SECS),
+pcm16 = subprocess.run(["ffmpeg", "-v", "error", "-i", WAV, "-t", str(SECS),
                         "-ac", "1", "-ar", "16000", "-f", "s16le", "-"], capture_output=True, check=True).stdout
 
 VARIANTS = {
@@ -26,9 +37,10 @@ VARIANTS = {
 async def run(name, ric):
     setup = {"model": "models/gemini-3.8-live",
              "generationConfig": {"responseModalities": ["AUDIO"],
-                                  "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Charon"}}}},
+                                  "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": VOICE}}}},
              "systemInstruction": {"parts": [{"text": INSTR}]},
              "outputAudioTranscription": {}}
+    if os.environ.get("INTRANS"): setup["inputAudioTranscription"] = {}
     if ric == "translate":
         setup = {"model": "models/gemini-3.5-live-translate-preview",
                  "generationConfig": {"responseModalities": ["AUDIO"], "translationConfig": {"targetLanguageCode": "de"}},
