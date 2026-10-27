@@ -21,7 +21,7 @@ const OUT = process.env.HIL_OUT || "/tmp/live-hil";
 // die UI; fuer PASS reicht der Mittelwert ueber die Messdauer).
 function kbit(bytes, secs) { return Math.round((bytes * 8) / secs / 1000); }
 
-async function setupPage(browser, { transport, speak, key, gemini }) {
+async function setupPage(browser, { transport, speak, key, gemini, voice }) {
   const url = gemini ? `${BASE}/?gemini=${encodeURIComponent(gemini)}` : BASE;
   const page = await browser.newPage();
   const errs = [];
@@ -30,6 +30,7 @@ async function setupPage(browser, { transport, speak, key, gemini }) {
   await page.goto(url, { waitUntil: "networkidle" });
   await page.fill("#roomName", ROOM);
   await page.selectOption("#langSpeak", speak);
+  if (voice) await page.selectOption("#voiceSelect", voice);
   await page.check(transport === "opus" ? "#trOpus" : "#trPcm");
   // Key-Feld gibt es nur im Normalmodus.
   if (transport === "pcm") await page.fill("#apiKey", key);
@@ -72,15 +73,28 @@ async function partnerSubs(page) {
   const ui = { opusDefault: await fresh.isChecked("#trOpus"), keyHiddenOpus: !(await fresh.isVisible("#apiKey")) };
   await fresh.check("#trPcm");
   ui.keyVisiblePcm = await fresh.isVisible("#apiKey");
-  // Default-Stimme folgt der Sprache: zh-Hans → Kore, de → Charon.
+  // Default-Stimme ist fuer alle „Automatisch" (feste Stimmen experimentell).
   await fresh.selectOption("#langSpeak", "zh-Hans");
   ui.voiceZh = await fresh.inputValue("#voiceSelect");
   await fresh.selectOption("#langSpeak", "de");
   ui.voiceDe = await fresh.inputValue("#voiceSelect");
+  // Sprachmarkierung: * nur Live-Modell, ** nur Uebersetzungsmodell.
+  const optText = (c) => fresh.$eval(`#langSpeak option[value="${c}"]`, (o) => [o.textContent, o.className, getComputedStyle(o).color]);
+  ui.optDe = await optText("de"); ui.optCy = await optText("cy"); ui.optJv = await optText("jv");
+  await fresh.selectOption("#langSpeak", "cy");
+  ui.selCy = await fresh.$eval("#langSpeak", (s) => [s.className, getComputedStyle(s).color]);
+  ui.hintCy = await fresh.textContent("#voiceHint");
+  await fresh.selectOption("#voiceSelect", "Kore");
+  await fresh.selectOption("#langSpeak", "jv");
+  ui.hintJvKore = await fresh.textContent("#voiceHint");
+  ui.legend = await fresh.textContent("#langLegend");
+  await fresh.screenshot({ path: path.join(OUT, "fake-sprachmarkierung.png") });
   await fresh.close();
   console.log("ui:", JSON.stringify(ui));
 
-  const a = await setupPage(browser, { transport: "opus", speak: "zh-Hans", key: "", gemini: null });
+  // A waehlt die feste Stimme Kore (Live-Modell), B bleibt bei Automatisch
+  // (Uebersetzungsmodell) — so laufen beide Modellpfade im selben Raum.
+  const a = await setupPage(browser, { transport: "opus", speak: "zh-Hans", key: "", gemini: null, voice: "Kore" });
   const b = await setupPage(browser, { transport: "pcm", speak: "de", key: "dummy-key", gemini: FAKE });
 
   await a.click("#connectBtn");
@@ -112,10 +126,10 @@ async function partnerSubs(page) {
   const errs = [...a.__errs, ...b.__errs];
   console.log("seitenfehler:", errs.length ? errs.slice(0, 6) : "keine");
 
-  // A (zh-Hans, Default Kore) spricht mit Kore → B sieht hallo:live:Kore.
-  // B (de, Default Charon) spricht mit Charon → A sieht hallo:live:Charon.
+  // A (zh-Hans, feste Stimme Kore) → Live-Modell → B sieht hallo:live:Kore.
+  // B (de, Automatisch) → Uebersetzungsmodell, Ziel zh-Hans → A sieht hallo:zh-Hans.
   const bSeesKore = subsB.some((t) => t.includes("hallo:live:Kore"));
-  const aSeesCharon = subsA.some((t) => t.includes("hallo:live:Charon"));
+  const aSeesTranslate = subsA.some((t) => t.includes("hallo:zh-Hans"));
 
   const checks = {
     "A live": statusA.includes("Live"),
@@ -129,9 +143,16 @@ async function partnerSubs(page) {
     "A sieht Partner Deutsch": peerA.includes("Deutsch"),
     "B sieht Partner Chinesisch": peerB.includes("Chinesisch"),
     "B sieht hallo:live:Kore": bSeesKore,
-    "A sieht hallo:live:Charon": aSeesCharon,
-    "Voice-Select zh-Hans = Kore": ui.voiceZh === "Kore",
-    "Voice-Select de = Charon": ui.voiceDe === "Charon",
+    "A sieht hallo:zh-Hans (Uebersetzungsmodell)": aSeesTranslate,
+    "Voice-Default zh-Hans = auto": ui.voiceZh === "auto",
+    "Voice-Default de = auto": ui.voiceDe === "auto",
+    "de ohne Markierung": !ui.optDe[0].includes("*") && ui.optDe[1] === "",
+    "cy mit * und Farbe (nur Live)": ui.optCy[0].endsWith(" *") && ui.optCy[1] === "only-live",
+    "jv mit ** und Farbe (nur Uebersetzung)": ui.optJv[0].endsWith(" **") && ui.optJv[1] === "only-translate",
+    "Select eingefaerbt bei cy": ui.selCy[0].includes("only-live") && ui.selCy[1] !== ui.optDe[2],
+    "Hinweis cy + Automatisch": ui.hintCy.includes("nur im Live-Modell"),
+    "Hinweis jv + Kore": ui.hintJvKore.includes("nur im Übersetzungsmodell"),
+    "Legende sichtbar": ui.legend.includes("*") && ui.legend.includes("**"),
     "Sparmodus ist Default": ui.opusDefault,
     "Key-Feld im Sparmodus versteckt": ui.keyHiddenOpus,
     "Key-Feld im Normalmodus sichtbar": ui.keyVisiblePcm,

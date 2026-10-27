@@ -213,19 +213,19 @@ async fn opus_allein_bekommt_waiting_kein_ready() {
 }
 
 #[tokio::test]
-async fn zh_hans_opus_default_voice_nutzt_live_kore() {
-    // zh-Hans-Opus-Peer OHNE voice → Default Kore → feste Stimme → Live-Modell
+async fn feste_stimmen_nutzen_live_modell() {
+    // zh-Hans-Opus-Peer mit voice=Kore → feste Stimme → Live-Modell
     // (de ↔ zh-Hans sind beide live). Fake spiegelt die Stimme:
-    // `hallo:live:Kore`. Der PCM-Partner (de, Default Charon) bekommt im
+    // `hallo:live:Kore`. Der PCM-Partner (de, voice=Charon) bekommt im
     // partner-Event model=live + Setup mit voiceName Charon.
     let (base, _) = spawn_server(Some("test")).await;
-    let mut a = connect(&base, "room=v1&transport=opus&lang=zh-Hans").await;
+    let mut a = connect(&base, "room=v1&transport=opus&lang=zh-Hans&voice=Kore").await;
     a.send(Message::Text(r#"{"type":"hello"}"#.into()))
         .await
         .unwrap();
     let _ = warte_auf_typ(&mut a, "waiting", 4, 1500).await;
 
-    let mut b = connect(&base, "room=v1&transport=pcm&lang=de").await;
+    let mut b = connect(&base, "room=v1&transport=pcm&lang=de&voice=Charon").await;
     let _ = warte_auf_typ(&mut a, "ready", 6, 2000).await;
 
     // B (PCM) sieht den Partner A: model=live, Setup mit eigener Stimme Charon.
@@ -438,9 +438,10 @@ async fn api_languages_und_rooms() {
             .any(|x| x["name"] == "Kore" && x["gender"] == "female"),
         "Kore ist weiblich"
     );
-    // Default-Stimmen-Regel: zh-Hans → Kore, de → Charon.
-    assert_eq!(v["default_voice"]["zh-Hans"], "Kore");
-    assert_eq!(v["default_voice"]["de"], "Charon");
+    // Default-Stimme ist fuer alle Automatisch (feste Stimmen experimentell).
+    // (die Map listet nur Sprachen mit fester Default-Stimme → jetzt leer).
+    assert!(v["default_voice"].get("zh-Hans").is_none());
+    assert!(v["default_voice"].get("de").is_none());
     assert_eq!(v["auto"], "auto");
 
     // Ohne Server-Key meldet /api/config false (Sparmodus nicht moeglich).

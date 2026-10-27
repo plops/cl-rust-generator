@@ -222,12 +222,12 @@ async function pollRooms() {
   // Gesamt-Partner-Audio in Sekunden je Richtung (A hört B, B hört A).
   const audioA = await audioSecs(a), audioB = await audioSecs(b);
 
-  // F0 des Partner-Audios: B empfaengt A (zh, Default-Stimme Kore, weiblich).
-  // A empfaengt B (de, Default-Stimme Charon, maennlich).
+  // F0 des Partner-Audios (informativ): Default „Automatisch" bildet die
+  // Stimme des jeweiligen Sprechers nach.
   const pcmB = await b.evaluate(() => ({ s: window.__partnerPcm || [], r: window.__partnerRate || 24000 }));
   const pcmA = await a.evaluate(() => ({ s: window.__partnerPcm || [], r: window.__partnerRate || 24000 }));
-  const f0B = estimateF0(Float32Array.from(pcmB.s), pcmB.r); // A→B: Kore (weiblich)
-  const f0A = estimateF0(Float32Array.from(pcmA.s), pcmA.r); // B→A: Charon (maennlich)
+  const f0B = estimateF0(Float32Array.from(pcmB.s), pcmB.r); // A→B
+  const f0A = estimateF0(Float32Array.from(pcmA.s), pcmA.r); // B→A
 
   await a.screenshot({ path: path.join(OUT, "real-A-opus.png") });
   await b.screenshot({ path: path.join(OUT, "real-B-pcm.png") });
@@ -245,7 +245,7 @@ async function pollRooms() {
   console.log(`B (PCM) : up=${sb.up}B down=${sb.down}B pcmDown=${sb.pcmDown}B texts=${sb.texts} → ${bKbit} kbit/s`);
   console.log(`Partner-Audio-Sekunden: A hört B = ${audioA.toFixed(1)}s, B hört A = ${audioB.toFixed(1)}s (in ${SECONDS}s)`);
   console.log(`erstes Partner-Audio: A nach ${fdA ? Math.round(fdA) : "—"} ms, B nach ${fdB ? Math.round(fdB) : "—"} ms (ab Verbindung)`);
-  console.log(`F0 Partner-Audio: B hört A = ${f0B ? Math.round(f0B) : "—"} Hz (erw. weiblich/Kore >165), A hört B = ${f0A ? Math.round(f0A) : "—"} Hz (erw. männlich/Charon)`);
+  console.log(`F0 Partner-Audio: B hört A = ${f0B ? Math.round(f0B) : "—"} Hz (Automatisch: Stimme von A), A hört B = ${f0A ? Math.round(f0A) : "—"} Hz (Automatisch: Stimme von B)`);
   console.log(`/api/rooms (Mitte): ${roomsSnap}`);
   console.log(`A Partner-Untertitel (erw. Chinesisch): ${JSON.stringify(short(partnerA))}`);
   console.log(`B Partner-Untertitel (erw. Deutsch)   : ${JSON.stringify(short(partnerB))}`);
@@ -277,7 +277,8 @@ async function pollRooms() {
     "B sieht dt. Partner-Untertitel": bSeesLatin,
     "A sieht Partner Deutsch": peerA.includes("Deutsch"),
     "B sieht Partner Chinesisch": peerB.includes("Chinesisch"),
-    "B hört weibliche Stimme (Kore, F0>165)": f0B !== null && f0B > 165,
+    // F0 nur informativ: mit „Automatisch" (Default) bildet Gemini die
+    // Stimme des Sprechers nach, das Geschlecht haengt also vom Fixture ab.
     "kein Platzhalter-Untertitel (pending/translation in Klammern)": !badSub,
     "A kbit/s < 40": aKbit < 40,
     "keine pageerror": errs.length === 0,

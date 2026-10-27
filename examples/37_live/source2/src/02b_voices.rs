@@ -94,10 +94,20 @@ pub fn find(name: &str) -> Option<Voice> {
         .find(|v| v.name.eq_ignore_ascii_case(name))
 }
 
-/// Default-Stimme fuer eine Sprache:
-/// Chinesisch (`zh-*`) → `Kore` (weiblich), Deutsch (`de`) → `Charon`
-/// (maennlich), sonst `AUTO`.
-pub fn default_voice(lang: &str) -> &'static str {
+/// Default-Stimme fuer eine Sprache: immer `AUTO` (Uebersetzungsmodell).
+///
+/// Nutzer-Entscheidung nach dem HIL (2026-10-27): feste Stimmen laufen ueber
+/// `gemini-3.8-live` und sind dort unzuverlaessig (Saetze fallen weg,
+/// Latenz 5–25 s), daher ist „Automatisch" fuer alle der Default; feste
+/// Stimmen bleiben als experimentelle Option waehlbar.
+pub fn default_voice(_lang: &str) -> &'static str {
+    AUTO
+}
+
+/// Bevorzugte feste Stimme, falls das Live-Modell ohnehin noetig ist
+/// (AUTO, aber eine Sprache nur live): Chinesisch (`zh-*`) → `Kore`
+/// (weiblich), Deutsch (`de`) → `Charon` (maennlich), sonst `AUTO`.
+pub fn preferred_fixed_voice(lang: &str) -> &'static str {
     let l = lang.to_ascii_lowercase();
     if l.starts_with("zh") {
         "Kore"
@@ -169,10 +179,10 @@ pub fn choose(
     }
 }
 
-/// Stimme fuer den AUTO→Live-Fallback: die Default-Stimme der eigenen Sprache,
-/// falls sie eine feste (nicht-`AUTO`) ist, sonst `FALLBACK_VOICE`.
+/// Stimme fuer den AUTO→Live-Fallback: die bevorzugte feste Stimme der
+/// eigenen Sprache, sonst `FALLBACK_VOICE`.
 fn fallback_voice(lang: &str) -> &'static str {
-    let dv = default_voice(lang);
+    let dv = preferred_fixed_voice(lang);
     if dv == AUTO { FALLBACK_VOICE } else { dv }
 }
 
@@ -194,12 +204,16 @@ mod tests {
 
     #[test]
     fn default_voice_regeln() {
-        assert_eq!(default_voice("zh-Hans"), "Kore");
-        assert_eq!(default_voice("zh-Hant"), "Kore");
-        assert_eq!(default_voice("ZH-HANS"), "Kore");
-        assert_eq!(default_voice("de"), "Charon");
-        assert_eq!(default_voice("en"), AUTO);
-        assert_eq!(default_voice("fr"), AUTO);
+        // Default ist fuer alle Sprachen Automatisch (Uebersetzungsmodell).
+        for l in ["zh-Hans", "zh-Hant", "de", "en", "cy"] {
+            assert_eq!(default_voice(l), AUTO, "{l}");
+        }
+        // Bevorzugte feste Stimme nur fuer den Live-Fallback.
+        assert_eq!(preferred_fixed_voice("zh-Hans"), "Kore");
+        assert_eq!(preferred_fixed_voice("zh-Hant"), "Kore");
+        assert_eq!(preferred_fixed_voice("ZH-HANS"), "Kore");
+        assert_eq!(preferred_fixed_voice("de"), "Charon");
+        assert_eq!(preferred_fixed_voice("en"), AUTO);
     }
 
     #[test]

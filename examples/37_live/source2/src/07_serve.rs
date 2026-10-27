@@ -36,8 +36,8 @@ async fn api_rooms(State(state): State<AppState>) -> Json<Value> {
 /// die 30 Prebuilt-Stimmen und die Default-Stimme je Sprache (als Regel-Abbild:
 /// `{code: voiceName|auto}` nur fuer Sprachen mit fester Default-Stimme).
 async fn api_languages() -> Json<Value> {
-    // Nur Sprachen mit fester Default-Stimme (zh-* → Kore, de → Charon)
-    // auflisten; alles andere ist `auto` (Browser-Default).
+    // Nur Sprachen mit fester Default-Stimme auflisten; alles andere ist
+    // `auto` (Browser-Default). Seit „Automatisch fuer alle" leer.
     let mut default_voice = serde_json::Map::new();
     for l in LANGUAGES.iter() {
         let dv = voices::default_voice(l.code);

@@ -34,6 +34,9 @@ button:disabled{background:var(--border);color:var(--dim);cursor:not-allowed}
 button.stop{background:var(--danger)}
 .status{padding:12px;background:#0f172a;border:1px solid var(--border);border-radius:8px;font-size:.9rem;text-align:center;color:var(--dim);min-height:44px;display:flex;align-items:center;justify-content:center}
 .status.live{color:var(--ok);border-color:var(--ok)}
+/* Sprachen, die nur eines der beiden Modelle kann (zusaetzlich * / **) */
+option.only-live,select.only-live,.mark-live{color:#f59e0b}
+option.only-translate,select.only-translate,.mark-translate{color:#a78bfa}
 .meta{display:flex;justify-content:space-between;font-size:.8rem;color:var(--dim)}
 .meta b{color:var(--text)}
 #subs{list-style:none;margin:0;padding:0;max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
@@ -57,6 +60,7 @@ button.stop{background:var(--danger)}
 <label for="langSpeak">Ich spreche</label>
 <select id="langSpeak"></select>
 <span class="hint">Die Zielsprache ergibt sich automatisch aus der Sprache deines Partners.</span>
+<span class="hint" id="langLegend"><span class="mark-live">*</span> nur mit fester Stimme (Live-Modell, experimentell) · <span class="mark-translate">**</span> nur mit „Automatisch" (Übersetzungsmodell)</span>
 </div>
 
 <div class="field">

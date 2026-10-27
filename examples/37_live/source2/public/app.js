@@ -40,6 +40,21 @@ let langNames = {};               // code → Anzeigename (aus /api/languages)
 let defaultVoiceMap = {};         // code → Stimmenname (feste Default-Stimmen)
 let autoMarker = "auto";          // Marker fuer „Automatisch"
 let voiceTouched = false;         // hat der Nutzer die Stimme selbst gewaehlt?
+const langAvail = {};             // code → "both" | "live" | "translate"
+const AVAIL_MARK = { both: "", live: " *", translate: " **" };
+
+// In welchen Modellen gibt es die Sprache? (Flags aus /api/languages)
+function avail(l) {
+  if (l.translate && l.live) return "both";
+  return l.live ? "live" : "translate";
+}
+
+// Geschlossenes Select einfaerben (Klasse am <select>, nicht nur an <option>).
+function markSpeak() {
+  const a = langAvail[el.speak.value] || "both";
+  el.speak.classList.toggle("only-live", a === "live");
+  el.speak.classList.toggle("only-translate", a === "translate");
+}
 
 // ---- Sprachen + Stimmen laden -----------------------------------------
 async function loadLanguages() {
@@ -50,11 +65,18 @@ async function loadLanguages() {
   langNames = {};
   for (const l of j.languages) {
     langNames[l.code] = l.name;
+    langAvail[l.code] = avail(l);
     const o = document.createElement("option");
-    o.value = l.code; o.textContent = `${l.name} (${l.code})`;
+    o.value = l.code;
+    // Markierung: „*" nur Live-Modell (feste Stimme), „**" nur
+    // Uebersetzungsmodell (Automatisch). Farbe zusaetzlich per Klasse
+    // (iOS-Safari faerbt <option> nicht, daher immer auch das Zeichen).
+    o.textContent = `${l.name} (${l.code})${AVAIL_MARK[langAvail[l.code]]}`;
+    if (langAvail[l.code] !== "both") o.className = `only-${langAvail[l.code]}`;
     el.speak.appendChild(o);
   }
   el.speak.value = j.default_lang;
+  markSpeak();
 
   // Stimmen-Select: „Automatisch" + Optgroups Weiblich/Maennlich.
   autoMarker = j.auto || "auto";
@@ -62,10 +84,11 @@ async function loadLanguages() {
   el.voice.innerHTML = "";
   const auto = document.createElement("option");
   auto.value = autoMarker;
-  auto.textContent = "Automatisch – eigene Stimme nachbilden";
+  auto.textContent = "Automatisch – eigene Stimme nachbilden (empfohlen)";
   el.voice.appendChild(auto);
   const groups = { female: document.createElement("optgroup"), male: document.createElement("optgroup") };
-  groups.female.label = "Weiblich"; groups.male.label = "Männlich";
+  groups.female.label = "Feste Stimme · weiblich (experimentell)";
+  groups.male.label = "Feste Stimme · männlich (experimentell)";
   for (const v of (j.voices || [])) {
     const o = document.createElement("option");
     o.value = v.name; o.textContent = v.name;
@@ -93,7 +116,15 @@ function applyDefaultVoice() {
 
 // Hinweistext zum Modell: ohne Partner generisch, sonst aus dem partner-Event.
 function renderVoiceHint() {
-  if (partnerModel === "translate") {
+  const a = langAvail[el.speak.value] || "both";
+  const auto = el.voice.value === autoMarker;
+  if (a === "live" && auto) {
+    el.voiceHint.textContent =
+      "Deine Sprache (*) gibt es nur im Live-Modell: es wird automatisch eine feste Stimme genutzt (experimentell, spricht nach Pausen).";
+  } else if (a === "translate" && !auto) {
+    el.voiceHint.textContent =
+      "Deine Sprache (**) gibt es nur im Übersetzungsmodell: feste Stimme nicht möglich, deine eigene Stimme wird nachgebildet.";
+  } else if (partnerModel === "translate") {
     el.voiceHint.textContent = "Übersetzung fortlaufend, eigene Stimme.";
   } else if (partnerModel === "live") {
     el.voiceHint.textContent = "Gewählte Stimme, spricht nach kurzer Pause.";
@@ -106,11 +137,14 @@ function renderVoiceHint() {
 // Sprachwechsel: Default-Stimme nachziehen (wenn Nutzer nichts gewaehlt hat).
 el.speak.addEventListener("change", () => {
   if (!voiceTouched) applyDefaultVoice();
+  markSpeak();
+  renderVoiceHint();
 });
 // Nutzer waehlt Stimme selbst: merken + speichern.
 el.voice.addEventListener("change", () => {
   voiceTouched = true;
   localStorage.setItem("live_silk_voice", el.voice.value);
+  renderVoiceHint();
 });
 
 // ---- WebCodecs-Verfuegbarkeit pruefen ----------------------------------
