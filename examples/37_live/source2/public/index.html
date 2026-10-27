@@ -1,1 +1,101 @@
-<!DOCTYPE html><title>live-silk</title>
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:,">
+<title>live-silk — AI Simultan-Dolmetscher</title>
+<style>
+:root{--bg:#0f172a;--card:#1e293b;--accent:#3b82f6;--ok:#22c55e;--danger:#ef4444;--text:#f8fafc;--dim:#94a3b8;--border:#334155}
+*{box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;padding:16px;background:var(--bg);color:var(--text);display:flex;justify-content:center}
+.container{background:var(--card);border:1px solid var(--border);border-radius:16px;width:100%;max-width:480px;padding:22px;display:flex;flex-direction:column;gap:16px}
+h1{margin:0;font-size:1.3rem;text-align:center}
+.sub{font-size:.82rem;color:var(--dim);text-align:center;margin-top:-8px}
+.field{display:flex;flex-direction:column;gap:6px}
+label{font-size:.78rem;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.03em}
+input,select{width:100%;padding:11px;background:#0f172a;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.95rem;outline:none}
+input:focus,select:focus{border-color:var(--accent)}
+.hint{font-size:.75rem;color:var(--dim)}
+.langrow{display:flex;gap:8px;align-items:flex-end}
+.langrow .field{flex:1}
+#swap{flex:0 0 auto;width:44px;padding:11px;background:#0f172a;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:1.1rem;cursor:pointer}
+.radios{display:flex;flex-direction:column;gap:8px}
+.radio{display:flex;gap:8px;align-items:flex-start;padding:10px;background:#0f172a;border:1px solid var(--border);border-radius:8px;cursor:pointer}
+.radio input{width:auto;margin-top:2px}
+.radio span{font-size:.9rem}
+.radio small{display:block;color:var(--dim);font-size:.75rem}
+.radio.disabled{opacity:.5;cursor:not-allowed}
+.btn-row{display:flex;gap:10px}
+button{flex:1;padding:14px;border:none;border-radius:8px;font-size:1rem;font-weight:bold;cursor:pointer;background:var(--accent);color:#fff}
+button:disabled{background:var(--border);color:var(--dim);cursor:not-allowed}
+button.stop{background:var(--danger)}
+.status{padding:12px;background:#0f172a;border:1px solid var(--border);border-radius:8px;font-size:.9rem;text-align:center;color:var(--dim);min-height:44px;display:flex;align-items:center;justify-content:center}
+.status.live{color:var(--ok);border-color:var(--ok)}
+.meta{display:flex;justify-content:space-between;font-size:.8rem;color:var(--dim)}
+.meta b{color:var(--text)}
+#subs{list-style:none;margin:0;padding:0;max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+#subs li{padding:8px 10px;border-radius:8px;font-size:.9rem;background:#0f172a;border:1px solid var(--border)}
+#subs li.me{border-left:3px solid var(--accent)}
+#subs li.partner{border-left:3px solid var(--ok)}
+#subs .who{font-size:.7rem;color:var(--dim);text-transform:uppercase}
+</style>
+</head>
+<body>
+<main class="container">
+<h1>AI Simultan-Dolmetscher</h1>
+<p class="sub">Gemini Live · Normal (PCM) oder Sparmodus (Opus SILK)</p>
+
+<div class="field">
+<label for="apiKey">Gemini API-Key</label>
+<input type="password" id="apiKey" placeholder="AIzaSy…" autocomplete="off">
+<span class="hint" id="keyHint">Bleibt im Normalmodus lokal. Im Sparmodus geht der Key an den Server — leer lassen, wenn der Server einen Key hat.</span>
+</div>
+
+<div class="field">
+<label for="roomName">Raum (beide Nutzer gleich)</label>
+<input type="text" id="roomName" value="raum-1">
+</div>
+
+<div class="langrow">
+<div class="field">
+<label for="langSpeak">Ich spreche</label>
+<select id="langSpeak"></select>
+</div>
+<button type="button" id="swap" aria-label="Sprachen tauschen" title="Sprachen tauschen">⇄</button>
+<div class="field">
+<label for="langHear">Partner hört</label>
+<select id="langHear"></select>
+</div>
+</div>
+
+<fieldset class="radios" style="border:0;margin:0;padding:0">
+<legend class="label" style="font-size:.78rem;font-weight:600;color:var(--dim);text-transform:uppercase">Transport</legend>
+<label class="radio" for="trPcm">
+<input type="radio" name="transport" id="trPcm" value="pcm" checked>
+<span>Normal (PCM, viel Daten)<small>Browser spricht direkt mit Gemini, ~725/900 kbit/s.</small></span>
+</label>
+<label class="radio" for="trOpus" id="trOpusLabel">
+<input type="radio" name="transport" id="trOpus" value="opus">
+<span>Sparmodus (Opus SILK, ~12 kbit/s)<small id="opusHint">Server hält die Gemini-Sitzung, nur Opus über das Netz.</small></span>
+</label>
+</fieldset>
+
+<div class="btn-row">
+<button id="connectBtn">Starten</button>
+<button id="disconnectBtn" class="stop" disabled>Trennen</button>
+</div>
+
+<div class="status" id="status" role="status" aria-live="polite">Bereit. Bitte verbinden.</div>
+
+<div class="meta">
+<span>Partner: <b id="peerInfo">—</b></span>
+<span>↑ <b id="kbUp">0</b> · ↓ <b id="kbDown">0</b> kbit/s</span>
+</div>
+
+<ul id="subs" aria-live="polite" aria-label="Untertitel"></ul>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

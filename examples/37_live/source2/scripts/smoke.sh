@@ -31,4 +31,12 @@ CHECK="$(./target/release/live-silk --check "http://127.0.0.1:$PORT")"
 echo "-- --check: $CHECK"
 echo "$CHECK" | grep -q "kein raum aktiv" || { echo "check meldet keinen leeren zustand"; exit 1; }
 
+# Frontend: Seite enthaelt die Transport-Auswahl, app.js wird ausgeliefert.
+INDEX="$(curl -s "http://127.0.0.1:$PORT/")"
+echo "$INDEX" | grep -q 'name="transport"' || { echo "transport-auswahl fehlt in /"; exit 1; }
+echo "-- / enthaelt transport-auswahl"
+APPJS="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/app.js")"
+echo "-- /app.js: HTTP $APPJS"
+[ "$APPJS" = "200" ] || { echo "app.js wird nicht ausgeliefert"; exit 1; }
+
 echo "SMOKE OK"
