@@ -1,0 +1,327 @@
+# Walkthrough — Dolmetscher mit Opus-SILK-Sparmodus (37_live/source2)
+
+Stand: 2026-10-27. Auftrag von wol pumba: ein Programm wie `source1`
+(Live-Dolmetscher im Browser), bei dem jeder Nutzer **beim Verbinden**
+wählen kann, ob sein eigenes Audio und das ankommende Audio als stark
+komprimierter **Opus-SILK-Strom** laufen — für langsame Mobilverbindungen.
+Dazu: alle Sprachen des Google-Live-Modells wählbar (Default Deutsch ↔
+Chinesisch), höchstens zwei Clients pro Raum.
+
+Ergebnis in einem Satz: Ein Handy im Sparmodus braucht im echten Test
+**16 kbit/s** statt **1082 kbit/s** — rund 70-mal weniger Daten — und
+hört und liest trotzdem die Übersetzung seines Partners.
+
+## Glossar
+
+Abkürzungen werden im Text beim ersten Auftreten ausgeschrieben; hier
+alle noch einmal zum Nachschlagen.
+
+- **PCM (Pulse-Code-Modulation):** unkomprimiertes Roh-Audio, hier
+  16 Bit mono. Gemini will 16 kHz hinein und liefert 24 kHz heraus.
+- **Opus:** moderner, freier Audio-Codec (Codec = Kodierer/Dekodierer,
+  der Audio auf wenige Bytes eindampft und wieder herstellt). Opus hat
+  drei Betriebsarten: SILK, CELT und Hybrid.
+- **SILK:** der Sprach-Teil von Opus (ursprünglich von Skype). Er
+  beschreibt die Stimme über ein Modell des Sprechtrakts statt über das
+  Spektrum und kommt deshalb mit ~6–20 kbit/s aus. Wird gewählt, wenn die
+  Bandbreite höchstens „Wideband" (8 kHz Tonumfang) ist.
+- **CELT:** der Musik-/Breitband-Teil von Opus — hier bewusst *nicht*
+  genutzt.
+- **kbit/s:** Kilobit pro Sekunde, das Maß für die Datenrate.
+- **WS (WebSocket):** dauerhafte Zwei-Wege-Verbindung zwischen Browser
+  und Server; **wss** = verschlüsselt über TLS.
+- **TLS (Transport Layer Security):** Verschlüsselungsschicht von
+  https/wss.
+- **WebCodecs:** Browser-Schnittstelle (`AudioEncoder`/`AudioDecoder`),
+  mit der JavaScript direkt auf die eingebauten Codecs zugreift — kein
+  Zusatz-Paket nötig.
+- **BCP-47:** Standard für Sprachcodes, z. B. `de`, `zh-Hans`
+  (Chinesisch vereinfacht), `pt-BR`.
+- **HIL (Hardware-in-the-Loop):** Test mit echter Umgebung (echter
+  Browser, echtes Gemini) statt Simulation.
+- **Fake-Gemini:** kleiner Test-Server, der sich wie Gemini verhält,
+  aber nur Sinustöne und den Text „hallo" zurückgibt — deterministisch,
+  kostenlos, ohne Netz.
+- **TUI (Text-User-Interface):** Statusanzeige im Terminal.
+- **Spike:** kurzes Wegwerf-Experiment, das eine riskante Annahme prüft,
+  bevor man darauf baut.
+- **DTX/FEC:** Opus-Optionen für Sprechpausen (Discontinuous
+  Transmission) bzw. Fehlerkorrektur bei Paketverlust (Forward Error
+  Correction) — als Erweiterung vorgemerkt.
+
+## 1. Was exakt implementiert wurde
+
+### 1.1 Das Problem in Zahlen
+
+In `source1` spricht jeder Browser selbst mit Gemini. Das ist bequem,
+aber teuer, denn alles läuft als PCM — und zu Gemini sogar als
+Base64-Text (Base64 macht aus 3 Bytes 4 Zeichen, also +33 %):
+
+| Strecke | Rate (gerechnet) |
+|---|---|
+| Mikro → Gemini, PCM 16 kHz in Base64 | ≈ 341 kbit/s |
+| Gemini → Browser, eigene Übersetzung 24 kHz in Base64 | ≈ 512 kbit/s |
+| Browser → Relay, eigene Übersetzung weiterreichen | 384 kbit/s |
+| Relay → Browser, Übersetzung des Partners | 384 kbit/s |
+
+Gemessen im echten HIL: Der PCM-Browser kam auf **1082 kbit/s** (hoch +
+runter). Eine mobile Edge- oder schwache 3G-Verbindung schafft das nicht.
+
+### 1.2 Die Idee: Im Sparmodus hält der Server die Gemini-Sitzung
+
+```mermaid
+flowchart LR
+    subgraph A["Browser A — Sparmodus (Handy)"]
+        MA[Mikro] --> EA[WebCodecs<br/>AudioEncoder Opus<br/>16 kHz, 60 ms]
+        DA[WebCodecs<br/>AudioDecoder] --> SA[Lautsprecher]
+    end
+    subgraph S["Rust-Server live-silk"]
+        UD[Uplink-Decoder<br/>Opus → PCM 16 kHz] --> GC[Gemini-Client<br/>wss + rustls]
+        GC -->|PCM 24 kHz| R[Raum<br/>max. 2 Peers]
+        R --> DE[Downlink-Encoder je Peer<br/>PCM 24 kHz → SILK 12 kbit/s]
+    end
+    subgraph B["Browser B — Normalmodus (WLAN)"]
+        MB[Mikro] -->|wss direkt| G2[Gemini]
+        G2 -->|PCM 24 kHz| B2[an Relay]
+        RB[Partner-PCM] --> SB[Lautsprecher]
+    end
+    EA -->|~11 kbit/s| UD
+    DE -->|~5–12 kbit/s| DA
+    GC <-->|PCM, Base64| G1[Gemini]
+    B2 -->|PCM 24 kHz| R
+    R -->|PCM 24 kHz| RB
+```
+
+Der Kern-Trick: **Im Raum fließt intern immer PCM 24 kHz
+„Übersetzungs-Audio".** Woher es kommt (vom Browser im Normalmodus oder
+vom Server-eigenen Gemini im Sparmodus) und wie es ausgeliefert wird
+(roh oder pro Peer Opus-kodiert), entscheidet allein der jeweilige Peer.
+Dadurch sind gemischte Paare (A spart, B nicht) ohne Sonderfälle möglich.
+Die teuren PCM-Strecken zu Gemini liegen im Sparmodus im Rechenzentrum,
+nicht auf dem Handy.
+
+### 1.3 Ablauf einer Verbindung (Protokoll)
+
+Der Browser öffnet `/ws?room=R&transport=opus&lang=zh-Hans&target=de`.
+
+```mermaid
+sequenceDiagram
+    participant A as Browser A (opus)
+    participant S as live-silk
+    participant G as Gemini
+    participant B as Browser B (pcm)
+    A->>S: WS /ws?room=R&transport=opus&target=de
+    S-->>A: {"type":"peers",...}
+    A->>S: {"type":"hello","key":""}  (leer = Server-Key)
+    S->>G: setup (translationConfig.targetLanguageCode=de)
+    G-->>S: setupComplete
+    S-->>A: {"type":"ready"} → Status „Live!"
+    loop alle 60 ms
+        A->>S: Binär: Opus-Paket (~85 Bytes)
+        S->>G: realtimeInput (PCM 16 kHz, Base64)
+    end
+    G-->>S: Audio PCM 24 kHz + Transkripte
+    S->>B: Binär PCM 24 kHz + {"type":"text","who":"partner",...}
+    B->>S: Binär PCM 24 kHz (Bs Übersetzung ins Chinesische)
+    S->>A: Binär: SILK-Pakete (pro Peer kodiert)
+```
+
+Weitere Regeln:
+
+- **Key:** nie in der URL (URLs landen in Proxy-Logs), sondern in der
+  ersten Textnachricht `hello`. Fehlt er, nimmt der Server seinen eigenen
+  (`--key-file`). Weder Server noch Tests loggen ihn; Fehlertexte werden
+  durch `sanitize()` vom Key bereinigt. Im Normalmodus verlässt der Key
+  den Browser nie Richtung Server.
+- **Raum voll:** der dritte Client bekommt `{"type":"error","msg":"raum voll"}`
+  und wird geschlossen.
+- **Untertitel:** Gemini liefert Transkripte von Eingabe und Übersetzung.
+  Im Sparmodus reicht sie der Server weiter, im Normalmodus schickt der
+  Browser sie als Text an den Relay. Sie kosten fast nichts und helfen,
+  wenn auf dem Handy Audio stockt.
+
+### 1.4 Der Server (`source2/src/`)
+
+Dateien nach Datenfluss nummeriert; `lib.rs`/`main.rs` enthalten nur
+Deklarationen und Verdrahtung.
+
+| Datei | Zeilen | Inhalt |
+|---|---|---|
+| `01_config.rs` | 185 | CLI (`--listen --dir --key-file --gemini-url --verbose --check --watch`), `Transport {Pcm, Opus}`, `MAX_PEERS = 2` |
+| `02_languages.rs` | 153 | 78 Sprachen (BCP-47 + deutscher Name), Defaults `de` / `zh-Hans` |
+| `03_codec.rs` | 228 | `DownlinkEncoder` (PCM 24 kHz → SILK, 60 ms, 12 kbit/s) und `UplinkDecoder` (Opus → PCM 16 kHz) |
+| `04_state.rs` | 209 | Raumbuch mit Peer-Infos, `broadcast` ohne Echo, `send_to`, `send_all` |
+| `05_gemini.rs` | 300 | Gemini-Live-Client: Setup-JSON, Audio-JSON, Parser, Sitzung mit Sende-/Empfangs-Task |
+| `06_relay.rs` | 447 | `/ws`-Handler: PCM-Pfad, Opus-Pfad (hello → Gemini → Raum), Untertitel, `peers`-Events |
+| `07_serve.rs` | 38 | Router: `/`, `/ws`, `/healthz`, `/api/rooms`, `/api/languages` |
+| `08_status.rs` | 172 | TUI-light `--check/--watch`, z. B. `raum r1: 2 peers [zh-Hans->de opus, de->zh-Hans pcm]` |
+
+Ein Beispiel für „kein Resampler nötig": Opus darf mit 24 kHz kodieren
+und beim Dekodieren direkt 16 kHz ausgeben. Gemini liefert 24 kHz → der
+Encoder nimmt es 1:1; der Browser schickt Opus → der Decoder gibt genau
+die 16 kHz aus, die Gemini will. Eine ganze Abhängigkeit (Resampling)
+entfällt.
+
+### 1.5 Das Frontend (`source2/public/`)
+
+- `index.html` (Markup, CSS, `label for`, `aria-live` für Status und
+  Untertitel), `01_audio.js` (Resampling auf 16 kHz, lückenlose
+  Wiedergabe-Warteschlange), `02_opus.js` (WebCodecs-Encoder/Decoder),
+  `app.js` (Ablauf, Statistik).
+- Auswahl „Ich spreche" / „Partner hört" mit allen 78 Sprachen aus
+  `/api/languages` (eine Quelle der Wahrheit im Rust-Code), Tausch-Knopf.
+- Transport-Wahl „Normal (PCM, viel Daten)" / „Sparmodus (Opus SILK,
+  ~12 kbit/s)". Fehlt WebCodecs (`AudioEncoder.isConfigSupported`), wird
+  der Sparmodus mit Hinweis deaktiviert.
+- kbit/s-Anzeige hoch/runter, Gesamtzähler in `window.__stats` (für die
+  automatischen Tests).
+- Normalmodus nutzt jetzt `translationConfig` statt einer
+  Systemanweisung (siehe 2.2).
+
+### 1.6 Tests und Nachweise (echte Zahlen)
+
+| Ebene | Was | Ergebnis |
+|---|---|---|
+| Unit (27) | CLI, Sprachtabelle, Codec (SilkOnly, Bitrate, Stückelung 1000/333/7 Bytes, Roundtrip, kaputtes Paket), Raumbuch (Limit 2, kein Echo), Setup-JSON, Parser, Key-Bereinigung, Untertitel-Umschreibung, Status-Format | grün |
+| Integration (7 + 1 ignoriert) | `ws_relay.rs`: PCM↔PCM ohne Echo, Raum voll, `peers`-Event, Opus→Fake-Gemini→PCM-Partner, PCM→Opus-Partner (alle Pakete SilkOnly, < 1/10 der PCM-Bytes), `/api/languages` = 78; `gemini_fake.rs`; `gemini_live.rs` (echtes `setupComplete`, manuell mit `--ignored`) | grün |
+| Smoke | `scripts/smoke.sh`: Build, `/healthz`, 78 Codes, Transport-Auswahl, `app.js` 200, `--check` | `SMOKE OK` |
+| Browser automatisch | `scripts/browser-fake.sh`: Headless-Chrome, Tab A Opus, Tab B PCM, Fake-Gemini, 20 s | `BROWSER-FAKE PASS` |
+| HIL echt | `scripts/hil-real.sh`: zwei Chrome-Prozesse, echtes Gemini, ~50 s | `HIL-REAL PASS` |
+
+Messwerte `browser-fake` (20 s, Fake-Gemini liefert Audio in Echtzeit):
+
+| Peer | hoch | runter | gesamt |
+|---|---|---|---|
+| A Sparmodus | 29 004 B | 30 151 B | **24 kbit/s** |
+| B Normal | 1 841 990 B | 969 600 B | **1125 kbit/s** |
+
+Messwerte `hil-real` (echtes Gemini, A spricht Mandarin aus
+`chinese/十萬個為什麼…webm`, B spricht eine per Gemini-TTS erzeugte
+deutsche Referenz):
+
+| Messpunkt | A (Sparmodus, zh→de) | B (Normal, de→zh) |
+|---|---|---|
+| Bytes hoch | 70 561 | 4 493 181 |
+| Bytes runter | 28 389 (Opus) | 2 268 000 (PCM) |
+| Rate gesamt | **16 kbit/s** | **1082 kbit/s** |
+| erstes Partner-Audio | ≈ 4,8 s | ≈ 4,1 s |
+| Partner-Untertitel | „早上好。" / „今天是个好…" | „Nein, nein, nein, nein," |
+
+Der Downlink von A ist kleiner als 12 kbit/s, weil B nicht ununterbrochen
+spricht — in Pausen liefert Gemini kein Audio, also gibt es auch nichts
+zu kodieren. Ehrliche Einschränkung: Die deutschen Untertitel bei B
+(„Nein, nein …") sind eine plausible Übersetzung des Kinderprogramms,
+inhaltlich wurde sie nur per Stichprobe, nicht Satz für Satz geprüft.
+Dass Deutsch → Chinesisch inhaltlich stimmt, belegt „早上好" für „Guten
+Morgen" eindeutig.
+
+## 2. Architektur-Entscheidungen, die Tests und Spikes erzwungen haben
+
+1. **Transkription gehört auf `setup`-Ebene.** Die offizielle
+   Live-Translate-Doku zeigt `inputAudioTranscription` innerhalb von
+   `generationConfig`. Die echte Sonde antwortete mit Close
+   `1007 Unknown name "inputAudioTranscription" at 'setup.generation_config'`.
+   Richtig ist:
+
+   ```json
+   {"setup":{"model":"models/gemini-3.5-live-translate-preview",
+     "generationConfig":{"responseModalities":["AUDIO"],
+       "translationConfig":{"targetLanguageCode":"zh-Hans"}},
+     "inputAudioTranscription":{},"outputAudioTranscription":{}}}
+   ```
+
+   Ein Unit-Test schützt genau diese Ebene vor Rückfällen.
+2. **`translationConfig` statt Systemanweisung.** `source1` beschwor
+   Gemini per Prompt („ONLY the translation"). Das Translate-Modell hat
+   dafür ein eigenes Feld; die Quellsprache erkennt es selbst. Dadurch
+   genügt eine Zielsprache — und 78 Sprachen kosten keine 78×77
+   Prompt-Varianten mehr.
+3. **rustls braucht genau einen Crypto-Provider.** DeepWiki behauptete,
+   mit `rustls-tls-webpki-roots` sei nichts weiter nötig. Der Spike
+   panickte: „Could not automatically determine the process-level
+   CryptoProvider". Lösung: `rustls` mit `default-features = false`,
+   nur `ring`. Lehre: KI-Antworten über Bibliotheken immer per Spike
+   gegenprüfen.
+4. **60-ms- statt 20-ms-Frames.** Jedes WebSocket-Paket kostet über TCP
+   und TLS grob 70 Bytes Verwaltungsdaten. Bei 20 ms wären das 50 Pakete/s
+   × 70 B ≈ 28 kbit/s — mehr als das Audio selbst. Bei 60 ms sind es
+   ≈ 9 kbit/s. Preis: 40 ms mehr Latenz, gegenüber ~4 s Gemini-Latenz
+   vernachlässigbar.
+5. **Kein Resampler.** Spike: 24-kHz-Eingang + `max_bandwidth = Wideband`
+   ergibt 50/50 Pakete `SilkOnly` bei 10,7 kbit/s, Encode+Decode von 3 s
+   Audio in 20 ms CPU; der Decoder gibt direkt 16 kHz aus.
+6. **Fake-Gemini mit Echtzeit-Drossel.** Der erste Fake antwortete auf
+   jeden Eingangs-Block mit 100 ms Audio. Weil der Browser alle 60 ms
+   sendet, entstand mehr Audio als Echtzeit → A-Downlink ~28 kbit/s, der
+   Browser-Test lag knapp an der 40-kbit/s-Grenze. Der Fake liefert jetzt
+   nie mehr Audio als Eingangszeit vergangen ist — so realistisch wie
+   Gemini.
+7. **Script-Reihenfolge im Frontend.** Dynamisches Nachladen von
+   `02_opus.js` führte im Browser-Test zu `opusSupported is not defined`.
+   Jetzt werden `01_audio.js` und `02_opus.js` statisch vor `app.js`
+   geladen.
+8. **Zwei Chrome-Prozesse im echten HIL.** Das Fake-Mikrofon
+   (`--use-file-for-fake-audio-capture`) gilt pro Browser-Prozess; zwei
+   Tabs würden dieselbe Datei „hören". Für Chinesisch bei A und Deutsch
+   bei B braucht es zwei Instanzen.
+9. **Sichtbare Transport-Auswahl.** Auf dem HIL-Screenshot waren
+   während der Sitzung beide Optionen grau und nicht unterscheidbar;
+   die gewählte Option ist jetzt per `:has(input:checked)` umrandet.
+10. **`Rooms::send_to`.** Antworten nur an einen Peer (`ready`, Fehler,
+    eigene Untertitel) laufen über dasselbe Raumbuch statt über einen
+    zweiten Kanal je Peer — eine Sende-Stelle, eine Reihenfolge.
+
+## 3. Learnings und mögliche Erweiterungen
+
+Learnings:
+
+- **Daten wandern dorthin, wo Bandbreite billig ist.** Die eigentliche
+  Ersparnis kommt weniger vom Codec als von der Verlagerung der
+  Gemini-Sitzung auf den Server: Das Handy schickt nur noch
+  ~85-Byte-Pakete.
+- **Ein interner Einheitsformat-Bus vereinfacht alles.** Weil der Raum
+  nur PCM 24 kHz kennt, sind PCM↔PCM, Opus↔PCM und Opus↔Opus derselbe
+  Code; die Kodierung passiert erst am Rand, im Sende-Task jedes Peers.
+- **WebCodecs ist reif genug.** `AudioData` im Format `s16`, Opus mit
+  `frameDuration: 60000` und Decoder mit `sampleRate: 24000` liefen in
+  Chrome for Testing 156 ohne Anpassung.
+- **Doku ≠ API.** Zweimal (Transkriptions-Ebene, rustls-Provider) waren
+  Dokumentation bzw. DeepWiki falsch; kurze Spikes vor dem Plan haben
+  beide Fehler gefunden, bevor Code darauf baute.
+- **Fake + echt ergänzen sich.** Der Fake-Test ist schnell und
+  reproduzierbar (Bandbreiten-Grenzen prüfbar), der echte HIL beweist den
+  Inhalt (Chinesisch kommt als Deutsch an).
+
+Mögliche Erweiterungen:
+
+- **Ephemeral Tokens:** Server erzeugt Kurzzeit-Token statt Key im
+  Browser (Doku: `v1beta/auth_tokens`), dann muss kein Nutzer seinen Key
+  hergeben.
+- **Auto-Zielsprache:** Bei zwei Peers kennt der Server beide Sprachen —
+  „Partner hört" könnte automatisch aus der Sprache des Partners folgen.
+- **Robustheit im Funkloch:** Opus-FEC (`use_inband_fec`,
+  `packet_loss_perc`) und DTX in Pausen; Wiederaufnahme der
+  Gemini-Sitzung über `sessionResumptionUpdate`-Handles; automatisches
+  Reconnect des WebSockets.
+- **Adaptive Bitrate:** 8 kbit/s bei sehr schlechter Verbindung, 16–20
+  kbit/s bei gutem Netz, gesteuert über gemessene Laufzeiten.
+- **Fallback ohne WebCodecs:** Opus als WebAssembly für alte Browser
+  (ältere iPhones).
+- **Zwei-Geräte-HIL mit echten Handys** (Android/iPhone über
+  HTTPS-Tunnel) und Messung über gedrosseltes Netz (`tc netem`).
+- **Produktion:** TLS, Rate-Limit und Kostenbremse für den Server-Key im
+  Reverse-Proxy (z. B. Caddy/Nginx, siehe `source1/README.md`).
+
+## 4. Neue Programme/Pakete für das Dockerfile
+
+| Paket | Wofür | Aufnahme |
+|---|---|---|
+| `ffmpeg` | Fake-Mikro-WAVs aus `.webm`/TTS erzeugen (Browser-Tests) | dauerhaft (in dieser Sitzung per apt installiert, fehlte nach Container-Neustart) |
+| `unzip` | Chrome for Testing entpacken | dauerhaft |
+| `libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64 libpango-1.0-0 libcairo2 libatspi2.0-0` | Headless-Chrome starten | Test-Image (in `scripts/browser-setup.sh` nachinstalliert) |
+| Chrome for Testing (Stable, 156) | Browser-Tests mit WebCodecs | Test-Image oder weiter per `browser-setup.sh` nach `/tmp/live-hil` |
+| npm `playwright-core`, `ws` | Browser steuern, Test-WS-Clients | Test-Image (sonst per Skript) |
+| `uv` + Python `websockets` | Gemini-Sonden (Spike) | bereits vorhanden (`uv run --with websockets`) |
+
+Laufzeit des Servers selbst: nur das Rust-Binary, keine Systempakete
+(TLS über rustls/ring, Opus in reinem Rust).
