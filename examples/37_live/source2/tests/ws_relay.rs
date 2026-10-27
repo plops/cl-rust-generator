@@ -322,6 +322,14 @@ async fn api_languages_und_rooms() {
     assert_eq!(v["default_target"], "zh-Hans");
     assert_eq!(v["languages"].as_array().unwrap().len(), 78, "78 sprachen");
 
+    // Ohne Server-Key meldet /api/config false (Sparmodus nicht moeglich).
+    let cfg = http_get(&addr, "/api/config").await;
+    assert_eq!(cfg.trim(), r#"{"server_key":false}"#);
+    let (_, addr_k) = spawn_server(Some("geheim")).await;
+    let cfg = http_get(&addr_k, "/api/config").await;
+    assert_eq!(cfg.trim(), r#"{"server_key":true}"#);
+    assert!(!cfg.contains("geheim"), "key darf nie ausgeliefert werden");
+
     // Leeres /api/rooms.
     let empty = http_get(&addr, "/api/rooms").await;
     assert_eq!(empty.trim(), "{}");

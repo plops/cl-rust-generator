@@ -71,10 +71,11 @@ async function setupPage(browser, { transport, speak, key }) {
     if (m.type() === "error") errs.push("[console] " + t);
   });
   await page.goto(BASE, { waitUntil: "networkidle" });
-  await page.fill("#apiKey", key);
   await page.fill("#roomName", ROOM);
   await page.selectOption("#langSpeak", speak);
   await page.check(transport === "opus" ? "#trOpus" : "#trPcm");
+  // Key-Feld gibt es nur im Normalmodus.
+  if (transport === "pcm") await page.fill("#apiKey", key);
   // Zeit bis erstes Partner-Audio (Downlink) ueber __stats beobachten.
   await page.evaluate(() => {
     window.__firstDown = 0;

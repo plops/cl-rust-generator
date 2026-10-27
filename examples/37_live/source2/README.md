@@ -10,37 +10,41 @@ Deutsch ↔ Chinesisch, höchstens **2 Clients pro Raum**.
 
 ```bash
 cd source2
-cargo run --release -- --listen 0.0.0.0:3000 --dir public
-# optionaler Server-Key (dann brauchen Sparmodus-Nutzer keinen eigenen):
+# Sparmodus (Default im Frontend) braucht einen Server-Key:
 cargo run --release -- --listen 0.0.0.0:3000 --dir public --key-file api_key.txt
+# ohne Server-Key: nur Normalmodus (Nutzer tragen ihren eigenen Key ein)
+cargo run --release -- --listen 0.0.0.0:3000 --dir public
 # ausfuehrliche Logs (nie Audio, nie Key):
 cargo run --release -- --listen 0.0.0.0:3000 --dir public --verbose
 ```
 
 Browser öffnen: `http://localhost:3000`
 Produktion hinter Nginx (`/silk/`, systemd, Key/Kosten): [`INSTALL.md`](INSTALL.md).
-Status: `/healthz`, Räume: `/api/rooms`, Sprachen: `/api/languages`.
+Status: `/healthz`, Räume: `/api/rooms`, Sprachen: `/api/languages`,
+Server-Key vorhanden: `/api/config` (`{"server_key":true|false}`, nie der Key).
 
 ## Modi
 
 | Modus | Netz je Nutzer | Wie |
 |---|---|---|
 | **Normal (PCM)** | ~725 kbit/s ↑ / ~900 kbit/s ↓ | Browser spricht selbst mit Gemini (eigener Key nötig); PCM24 über den Relay. |
-| **Sparmodus (Opus SILK)** | **~12 kbit/s** je Richtung | Browser schickt/empfängt nur Opus; der **Server** hält die Gemini-Sitzung. |
+| **Sparmodus (Opus SILK)** — Default | **~12 kbit/s** je Richtung | Browser schickt/empfängt nur Opus; der **Server** hält die Gemini-Sitzung mit seinem Key. |
 
 Im Frontend: „Ich spreche" (eigene Sprache aus `/api/languages`),
 Transport-Auswahl, Status, Partner-Anzeige, Untertitel, kbit/s-Anzeige
 hoch/runter. **Die Zielsprache wird nicht mehr gewählt** — sie ist automatisch
 die Sprache des Partners im Raum (Nutzer-Feedback: „das weiß der Partner am
 besten"). Gemini erkennt die Quellsprache selbst. Fehlt **WebCodecs** (alte
-Browser), ist der Sparmodus deaktiviert mit Hinweis.
+Browser) oder hat der Server keinen Key, ist der Sparmodus deaktiviert (mit
+Hinweis) und der Normalmodus vorausgewählt.
 
 ## Key-Hinweis
 
-- **Normalmodus:** der Gemini-API-Key bleibt lokal (geht nie an den Server).
-- **Sparmodus:** der Key geht **an den Server** (er spricht mit Gemini). Mit
-  `--key-file` am Server kann das Feld leer bleiben. Der Key wird nie geloggt
-  und aus keiner Fehlermeldung durchgereicht.
+- **Sparmodus (Default):** kein Key-Feld; der Server nutzt seinen Key
+  (`--key-file`). Der Browser sendet keinen Key.
+- **Normalmodus:** erst bei Auswahl erscheint das Key-Feld; der Key bleibt
+  lokal (`localStorage`) und geht nur direkt an Gemini, nie an den Server.
+- Der Server-Key wird nie geloggt und aus keiner Fehlermeldung durchgereicht.
 
 ## Protokoll (`/ws?room=&transport=pcm|opus&lang=`)
 
@@ -51,7 +55,8 @@ Sprache des Partners.
 - **pcm:** Binär rein = eigene Übersetzung PCM24 → Partner; Binär raus =
   Partner-PCM24; Untertitel als `{"type":"text","dir":"in|out","text":…}`. Der
   Browser verbindet Gemini erst, wenn ein Partner da ist (Ziel = Partner-lang).
-- **opus:** erst `{"type":"hello","key":…}` (Key optional → Server-Key), dann
+- **opus:** erst `{"type":"hello"}` (das Protokoll erlaubt weiterhin ein
+  optionales `"key"`, das Frontend schickt keins → Server-Key), dann
   Opus-Pakete (16 kHz mono, 60 ms) hoch; runter Opus-Pakete (SILK, 24-kHz-
   Encoder, Browser-Decoder mit `sampleRate: 24000`). Die Server-Gemini-Sitzung
   startet erst mit Partner; ohne Partner kommt `waiting` statt `ready`.

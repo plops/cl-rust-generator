@@ -28,10 +28,11 @@ async function setupPage(browser, { transport, speak, key, gemini }) {
   page.on("pageerror", (e) => errs.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") errs.push("[console] " + m.text()); });
   await page.goto(url, { waitUntil: "networkidle" });
-  await page.fill("#apiKey", key);
   await page.fill("#roomName", ROOM);
   await page.selectOption("#langSpeak", speak);
   await page.check(transport === "opus" ? "#trOpus" : "#trPcm");
+  // Key-Feld gibt es nur im Normalmodus.
+  if (transport === "pcm") await page.fill("#apiKey", key);
   page.__errs = errs;
   return page;
 }
@@ -60,6 +61,16 @@ async function peerText(page) {
   });
 
   // Tab A zuerst, Tab B danach (B ist PCM-Partner, spricht selbst mit Fake).
+  // Frische Seite: Sparmodus ist Default, Key-Feld nur im Normalmodus sichtbar.
+  const fresh = await browser.newPage();
+  await fresh.goto(BASE, { waitUntil: "networkidle" });
+  await fresh.waitForTimeout(300); // checkOpus (/api/config) abwarten
+  const ui = { opusDefault: await fresh.isChecked("#trOpus"), keyHiddenOpus: !(await fresh.isVisible("#apiKey")) };
+  await fresh.check("#trPcm");
+  ui.keyVisiblePcm = await fresh.isVisible("#apiKey");
+  await fresh.close();
+  console.log("ui:", JSON.stringify(ui));
+
   const a = await setupPage(browser, { transport: "opus", speak: "zh-Hans", key: "", gemini: null });
   const b = await setupPage(browser, { transport: "pcm", speak: "de", key: "dummy-key", gemini: FAKE });
 
@@ -100,6 +111,9 @@ async function peerText(page) {
     "A kbit<40": aKbit < 40,
     "A sieht Partner Deutsch": peerA.includes("Deutsch"),
     "B sieht Partner Chinesisch": peerB.includes("Chinesisch"),
+    "Sparmodus ist Default": ui.opusDefault,
+    "Key-Feld im Sparmodus versteckt": ui.keyHiddenOpus,
+    "Key-Feld im Normalmodus sichtbar": ui.keyVisiblePcm,
     "keine pageerror": errs.length === 0,
   };
   console.log("--- CHECKS ---");

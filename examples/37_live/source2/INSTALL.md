@@ -47,9 +47,9 @@ Wants=network-online.target
 User=kiel
 WorkingDirectory=/home/kiel/stage/cl-rust-generator/examples/37_live/source2
 ExecStart=/home/kiel/stage/cl-rust-generator/examples/37_live/source2/target/release/live-silk \
-    --listen 127.0.0.1:8082 --dir public
-# optional, siehe Abschnitt 4 (Kosten!):
-#   --key-file /home/kiel/.config/live-silk/api_key.txt
+    --listen 127.0.0.1:8082 --dir public \
+    --key-file /home/kiel/.config/live-silk/api_key.txt
+# ohne --key-file gibt es nur den Normalmodus (siehe Abschnitt 4, Kosten!)
 Restart=on-failure
 
 [Install]
@@ -118,15 +118,15 @@ stoppen). Der Rest des Blocks ist identisch.
 
 - **Normalmodus (PCM):** Jeder Nutzer trägt seinen eigenen Gemini-Key im
   Browser ein. Der Key geht nie an den Server.
-- **Sparmodus (Opus):** Der Server spricht mit Gemini. Ohne `--key-file`
-  schickt der Browser den Key des Nutzers in der ersten WebSocket-Nachricht
-  an den Server. Er steht nicht in der URL und damit auch nicht im
-  Nginx-Access-Log, wird nicht geloggt und nicht gespeichert.
-- **Mit `--key-file`** braucht im Sparmodus niemand einen eigenen Key. Dann
-  kann aber **jeder**, der `/silk/` erreicht, auf deine Kosten übersetzen.
-  Empfehlung für einen öffentlichen Server: **ohne `--key-file`** betreiben.
-  Alternativ den Zugang beschränken, z. B. mit Nginx-`allow`/`deny` oder
-  einem schwer erratbaren Pfad. Mit `auth_basic` auf iPhone/Safari vorher
+- **Sparmodus (Opus, Default im Frontend):** Der Server spricht mit Gemini,
+  und zwar **nur mit seinem eigenen Key** (`--key-file`). Der Browser zeigt
+  im Sparmodus kein Key-Feld und sendet keinen Key. Ohne `--key-file` meldet
+  `/api/config` `{"server_key":false}`; das Frontend graut den Sparmodus dann
+  aus und wählt den Normalmodus vor.
+- **Kosten:** Mit `--key-file` kann **jeder**, der `/silk/` erreicht, auf
+  deine Kosten übersetzen. Deshalb den Zugang beschränken, z. B. mit
+  Nginx-`allow`/`deny` oder einem schwer erratbaren Pfad, und im
+  Google-Projekt ein Budget-Limit setzen. Mit `auth_basic` auf iPhone/Safari vorher
   testen; dass Safari die Zugangsdaten an WebSockets weitergibt, ist hier
   nicht verifiziert. Falls doch ein Key-File: `chmod 600`, Besitzer = Dienst-User.
 - Ein Raum nimmt höchstens 2 Nutzer auf. Der dritte bekommt „raum voll".

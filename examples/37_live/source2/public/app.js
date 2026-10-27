@@ -15,7 +15,7 @@ const el = {
   connect: $("connectBtn"), disconnect: $("disconnectBtn"),
   status: $("status"), peer: $("peerInfo"), kbUp: $("kbUp"), kbDown: $("kbDown"),
   subs: $("subs"), trPcm: $("trPcm"), trOpus: $("trOpus"), trOpusLabel: $("trOpusLabel"),
-  opusHint: $("opusHint"),
+  opusHint: $("opusHint"), keyField: $("keyField"),
 };
 
 // Gemini-Basis-URL; per ?gemini=ws://… nur fuer Tests ueberschreibbar.
@@ -51,13 +51,28 @@ async function loadLanguages() {
 
 // ---- WebCodecs-Verfuegbarkeit pruefen ----------------------------------
 async function checkOpus() {
-  const ok = await opusSupported();
-  if (!ok) {
+  // Sparmodus braucht WebCodecs im Browser UND einen Key auf dem Server.
+  let serverKey = false;
+  try {
+    const base = location.pathname.replace(/\/[^/]*$/, "");
+    serverKey = (await (await fetch(`${base}/api/config`)).json()).server_key === true;
+  } catch { /* Server alt/unerreichbar: wie ohne Key behandeln */ }
+  const webcodecs = await opusSupported();
+  if (!webcodecs || !serverKey) {
     el.trOpus.disabled = true;
     el.trOpusLabel.classList.add("disabled");
-    el.opusHint.textContent = "In diesem Browser nicht verfuegbar (WebCodecs fehlt).";
+    el.trPcm.checked = true;
+    el.opusHint.textContent = !webcodecs
+      ? "In diesem Browser nicht verfuegbar (WebCodecs fehlt)."
+      : "Nicht verfuegbar: der Server hat keinen API-Key.";
   }
+  syncKeyField();
 }
+
+// API-Key-Feld nur im Normalmodus zeigen (im Sparmodus nutzt der Server seinen Key).
+function syncKeyField() { el.keyField.hidden = !el.trPcm.checked; }
+el.trPcm.addEventListener("change", syncKeyField);
+el.trOpus.addEventListener("change", syncKeyField);
 
 // ---- Statistik ----------------------------------------------------------
 function countUp(n) { window.__stats.up += n; win.up.push([performance.now(), n]); }
@@ -242,7 +257,7 @@ function connectRelay(transport) {
   roomWs.binaryType = "arraybuffer";
   roomWs.onopen = () => {
     if (transport === "opus") {
-      roomWs.send(JSON.stringify({ type: "hello", key: el.key.value.trim() }));
+      roomWs.send(JSON.stringify({ type: "hello" })); // Sparmodus: Server-Key, kein Key vom Browser
       upOpus = new OpusUplink((buf) => {
         roomWs.send(buf); countUp(buf.byteLength); window.__stats.opusUp += buf.byteLength;
       }, () => {});

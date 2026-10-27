@@ -8,6 +8,7 @@
 <style>
 :root{--bg:#0f172a;--card:#1e293b;--accent:#3b82f6;--ok:#22c55e;--danger:#ef4444;--text:#f8fafc;--dim:#94a3b8;--border:#334155}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;padding:16px;background:var(--bg);color:var(--text);display:flex;justify-content:center}
 .container{background:var(--card);border:1px solid var(--border);border-radius:16px;width:100%;max-width:480px;padding:22px;display:flex;flex-direction:column;gap:16px}
 h1{margin:0;font-size:1.3rem;text-align:center}
@@ -48,12 +49,6 @@ button.stop{background:var(--danger)}
 <p class="sub">Gemini Live · Normal (PCM) oder Sparmodus (Opus SILK)</p>
 
 <div class="field">
-<label for="apiKey">Gemini API-Key</label>
-<input type="password" id="apiKey" placeholder="AIzaSy…" autocomplete="off">
-<span class="hint" id="keyHint">Bleibt im Normalmodus lokal. Im Sparmodus geht der Key an den Server — leer lassen, wenn der Server einen Key hat.</span>
-</div>
-
-<div class="field">
 <label for="roomName">Raum (beide Nutzer gleich)</label>
 <input type="text" id="roomName" value="raum-1">
 </div>
@@ -66,15 +61,21 @@ button.stop{background:var(--danger)}
 
 <fieldset class="radios" style="border:0;margin:0;padding:0">
 <legend class="label" style="font-size:.78rem;font-weight:600;color:var(--dim);text-transform:uppercase">Transport</legend>
-<label class="radio" for="trPcm">
-<input type="radio" name="transport" id="trPcm" value="pcm" checked>
-<span>Normal (PCM, viel Daten)<small>Browser spricht direkt mit Gemini, ~725/900 kbit/s.</small></span>
-</label>
 <label class="radio" for="trOpus" id="trOpusLabel">
-<input type="radio" name="transport" id="trOpus" value="opus">
+<input type="radio" name="transport" id="trOpus" value="opus" checked>
 <span>Sparmodus (Opus SILK, ~12 kbit/s)<small id="opusHint">Server hält die Gemini-Sitzung, nur Opus über das Netz.</small></span>
 </label>
+<label class="radio" for="trPcm">
+<input type="radio" name="transport" id="trPcm" value="pcm">
+<span>Normal (PCM, viel Daten)<small>Browser spricht direkt mit Gemini, ~725/900 kbit/s.</small></span>
+</label>
 </fieldset>
+
+<div class="field" id="keyField" hidden>
+<label for="apiKey">Gemini API-Key</label>
+<input type="password" id="apiKey" placeholder="AIzaSy…" autocomplete="off">
+<span class="hint" id="keyHint">Nur im Normalmodus nötig: der Browser spricht dann selbst mit Gemini, der Key bleibt lokal.</span>
+</div>
 
 <div class="btn-row">
 <button id="connectBtn">Starten</button>

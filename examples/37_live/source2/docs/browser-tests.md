@@ -34,7 +34,7 @@ Startet `fake_gemini` (cargo-Beispiel) auf `:8900` und `live-silk` auf `:3311`
 mit `--gemini-url ws://127.0.0.1:8900` und einer **Dummy**-Key-Datei. Dann
 `scripts/browser-fake.js` (Playwright): zwei Tabs im selben Raum —
 
-- **Tab A — Sparmodus (Opus):** `lang=zh-Hans`, Key leer (→ Server-Key). Die
+- **Tab A — Sparmodus (Opus, Default):** `lang=zh-Hans`, kein Key-Feld (→ Server-Key). Die
   Zielsprache folgt automatisch dem Partner (= de). Mikro → WebCodecs-Opus
   hoch; Partner-Übersetzung als Opus runter → WebCodecs-Decoder → Lautsprecher.
 - **Tab B — Normal (PCM):** `?gemini=ws://127.0.0.1:8900`, Dummy-Key,
@@ -84,8 +84,8 @@ auftaucht.
 Weil der Fake-Mikro-Stream **pro Browser-Prozess** gilt, startet `hil-real.js`
 **zwei separate** Chrome-Instanzen:
 
-- **A — Sparmodus (Opus):** `mic-zh.wav` (Mandarin), `lang=zh-Hans`, Key-Feld
-  **leer** → der **Server**-Key spricht mit Gemini. Ziel folgt automatisch dem
+- **A — Sparmodus (Opus):** `mic-zh.wav` (Mandarin), `lang=zh-Hans`, kein
+  Key-Feld (Sparmodus) → der **Server**-Key spricht mit Gemini. Ziel folgt automatisch dem
   Partner (= de).
 - **B — Normal (PCM):** `mic-de.wav` (deutsche TTS-Referenz), `lang=de`, Key
   **im Feld** → B verbindet **direkt** mit Gemini. Ziel folgt dem Partner
@@ -107,6 +107,8 @@ scripts/hil-real.sh        # echtes Gemini, ~50 s Laufzeit
 - **B** sieht Partner-Untertitel mit **deutschem** Text (lateinische Wörter).
 - **A** zeigt „Partner spricht: Deutsch", **B** „Chinesisch" (automatische
   Zielsprache = Partner-Sprache).
+- frische Seite: Sparmodus vorausgewählt, Key-Feld nur nach Wahl von
+  „Normal" sichtbar (`browser-fake`);
 - A gesamt (up+down) **< 40 kbit/s**; keine `pageerror`; Key in keinem Log.
 
 ### Beispiel-Messwerte (ein echter Lauf, 50 s, Key maskiert `AIza…msBM`)
