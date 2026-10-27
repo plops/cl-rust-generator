@@ -28,10 +28,12 @@ Status: `/healthz`, Räume: `/api/rooms`, Sprachen: `/api/languages`.
 | **Normal (PCM)** | ~725 kbit/s ↑ / ~900 kbit/s ↓ | Browser spricht selbst mit Gemini (eigener Key nötig); PCM24 über den Relay. |
 | **Sparmodus (Opus SILK)** | **~12 kbit/s** je Richtung | Browser schickt/empfängt nur Opus; der **Server** hält die Gemini-Sitzung. |
 
-Im Frontend: „Ich spreche" / „Partner hört" (Sprachen aus `/api/languages`,
-Tausch-Knopf), Transport-Auswahl, Status, Partner-Anzeige, Untertitel,
-kbit/s-Anzeige hoch/runter. Fehlt **WebCodecs** (alte Browser), ist der
-Sparmodus deaktiviert mit Hinweis.
+Im Frontend: „Ich spreche" (eigene Sprache aus `/api/languages`),
+Transport-Auswahl, Status, Partner-Anzeige, Untertitel, kbit/s-Anzeige
+hoch/runter. **Die Zielsprache wird nicht mehr gewählt** — sie ist automatisch
+die Sprache des Partners im Raum (Nutzer-Feedback: „das weiß der Partner am
+besten"). Gemini erkennt die Quellsprache selbst. Fehlt **WebCodecs** (alte
+Browser), ist der Sparmodus deaktiviert mit Hinweis.
 
 ## Key-Hinweis
 
@@ -40,14 +42,24 @@ Sparmodus deaktiviert mit Hinweis.
   `--key-file` am Server kann das Feld leer bleiben. Der Key wird nie geloggt
   und aus keiner Fehlermeldung durchgereicht.
 
-## Protokoll (`/ws?room=&transport=pcm|opus&lang=&target=`)
+## Protokoll (`/ws?room=&transport=pcm|opus&lang=`)
+
+Nur noch `room`, `transport`, `lang` (eigene Sprache). Ein evtl.
+mitgeschicktes `target` wird ignoriert — die Zielsprache ist automatisch die
+Sprache des Partners.
 
 - **pcm:** Binär rein = eigene Übersetzung PCM24 → Partner; Binär raus =
-  Partner-PCM24; Untertitel als `{"type":"text","dir":"in|out","text":…}`.
+  Partner-PCM24; Untertitel als `{"type":"text","dir":"in|out","text":…}`. Der
+  Browser verbindet Gemini erst, wenn ein Partner da ist (Ziel = Partner-lang).
 - **opus:** erst `{"type":"hello","key":…}` (Key optional → Server-Key), dann
   Opus-Pakete (16 kHz mono, 60 ms) hoch; runter Opus-Pakete (SILK, 24-kHz-
-  Encoder, Browser-Decoder mit `sampleRate: 24000`).
-- Server → Client: `ready`, `peers`, `error`, `text{who,dir,text}`.
+  Encoder, Browser-Decoder mit `sampleRate: 24000`). Die Server-Gemini-Sitzung
+  startet erst mit Partner; ohne Partner kommt `waiting` statt `ready`.
+- Server → Client: persönliches `{"type":"partner","partner":{lang,transport}}`
+  bzw. `partner:null` bei Join/Leave; dazu `ready`, `waiting`, `error`,
+  `text{who,dir,text}`.
+- Gleiche Sprache wie der Partner: `translationConfig.echoTargetLanguage=true`,
+  damit Gemini das Gesagte nachspricht statt zu schweigen.
 
 ## Tests
 

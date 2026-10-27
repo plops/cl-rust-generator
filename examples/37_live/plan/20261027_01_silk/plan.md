@@ -69,7 +69,14 @@ Kernidee: Der Raum transportiert intern immer **PCM 24 kHz
 Server-Gemini im Opus-Modus) und wie es ausgeliefert wird (PCM roh oder
 pro Peer Opus-kodiert), entscheidet allein der jeweilige Peer.
 
-### Protokoll `/ws?room=R&transport=pcm|opus&lang=de&target=zh-Hans`
+### Protokoll `/ws?room=R&transport=pcm|opus&lang=de`
+
+> **Geändert nach Nutzer-Feedback (2026-10-27):** Die Zielsprache wird nicht
+> mehr gewählt (kein `target` mehr). Jeder Nutzer wählt nur die eigene Sprache
+> (`lang`); das Ziel ist automatisch die Sprache des Partners im Raum. Der
+> Server schickt jedem Peer ein persönliches `partner`-Event; die
+> Gemini-Sitzung (bzw. im PCM-Modus die Browser-Gemini-Verbindung) startet
+> erst mit einem Partner (sonst `waiting`).
 
 - `transport=pcm` (Default): wie source1; Binär rein = eigene
   Übersetzung PCM24 → an Partner; Binär raus = Partner-PCM24.
@@ -78,12 +85,14 @@ pro Peer Opus-kodiert), entscheidet allein der jeweilige Peer.
   mit `sampleRate: 24000`). Erste Textnachricht `{"type":"hello",
   "key":"…"}` (Key optional, sonst `--key-file` des Servers). Key nie
   in der URL, nie im Log.
-- Server → Client Text-JSON: `{"type":"ready"}`, `{"type":"peers",
-  "peers":[{"lang","target","transport"}]}`,
+- Server → Client Text-JSON: `{"type":"partner","partner":{lang,transport}}`
+  bzw. `partner:null`, `{"type":"ready"}`, `{"type":"waiting"}`,
   `{"type":"error","msg"}`, `{"type":"text","who":"me|partner",
   "dir":"in|out","text"}` (Untertitel aus Gemini-Transkripten,
   Opus-Modus; PCM-Clients schicken ihre Transkripte als Text an den
   Relay, der sie an den Partner weiterreicht).
+- Gleiche Sprache wie der Partner → `translationConfig.echoTargetLanguage=true`
+  (Gemini spricht nach statt zu schweigen).
 - 3. Client im Raum → `{"type":"error","msg":"raum voll"}` + Close.
 
 ### Sprachen
@@ -163,10 +172,10 @@ deaktiviert mit Hinweis.
 - ✔ **Fake-Gemini** (`--gemini-url`) für deterministische Tests ohne
   Netz/Kosten.
 - Später: Ephemeral Tokens (Server mintet Kurzzeit-Token statt Key im
-  Browser), Opus-FEC/`packet_loss_perc` bei Paketverlust, Auto-Target
-  (Zielsprache = Sprache des Partners), Reconnect mit
+  Browser), Opus-FEC/`packet_loss_perc` bei Paketverlust, Reconnect mit
   `sessionResumptionUpdate`-Handle, WASM-Opus-Fallback für Browser ohne
-  WebCodecs, TLS/Rate-Limit im Reverse-Proxy.
+  WebCodecs, TLS/Rate-Limit im Reverse-Proxy. (Auto-Zielsprache ist nach
+  Nutzer-Feedback bereits umgesetzt, siehe Protokoll.)
 
 ## 6. Tests
 

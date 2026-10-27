@@ -102,7 +102,11 @@ nicht auf dem Handy.
 
 ### 1.3 Ablauf einer Verbindung (Protokoll)
 
-Der Browser öffnet `/ws?room=R&transport=opus&lang=zh-Hans&target=de`.
+Der Browser öffnet `/ws?room=R&transport=opus&lang=zh-Hans`. **Nur die eigene
+Sprache** wird mitgeschickt — die Zielsprache ergibt sich automatisch aus der
+Sprache des Partners (Nutzer-Feedback, siehe 2.11). Darum **startet die
+Gemini-Sitzung erst, wenn ein Partner im Raum ist**: vorher sendet der Server
+`{"type":"waiting"}` und (noch) kein `ready`.
 
 ```mermaid
 sequenceDiagram
@@ -110,10 +114,14 @@ sequenceDiagram
     participant S as live-silk
     participant G as Gemini
     participant B as Browser B (pcm)
-    A->>S: WS /ws?room=R&transport=opus&target=de
-    S-->>A: {"type":"peers",...}
+    A->>S: WS /ws?room=R&transport=opus&lang=zh-Hans
     A->>S: {"type":"hello","key":""}  (leer = Server-Key)
-    S->>G: setup (translationConfig.targetLanguageCode=de)
+    S-->>A: {"type":"partner","partner":null}
+    S-->>A: {"type":"waiting"}  (noch kein ready!)
+    Note over A,S: A wartet — allein keine Übersetzung
+    B->>S: WS /ws?room=R&transport=pcm&lang=de
+    S-->>A: {"type":"partner","partner":{lang:"de",transport:"pcm"}}
+    S->>G: setup (targetLanguageCode = de = Partner-lang)
     G-->>S: setupComplete
     S-->>A: {"type":"ready"} → Status „Live!"
     loop alle 60 ms
@@ -128,13 +136,22 @@ sequenceDiagram
 
 Weitere Regeln:
 
+- **Zielsprache automatisch:** jeder Peer hält im Raumbuch einen
+  `watch::Sender<Option<PeerInfo>>`; `join`/`leave` setzen allen Peers ihren
+  jeweiligen Partner. Der Opus-Peer wartet in einer `select`-Schleife auf
+  Partner-Wechsel und baut die Gemini-Sitzung passend auf (Ziel =
+  Partner-Sprache), ab oder neu. Im PCM-Modus macht der Browser dasselbe mit
+  seiner eigenen Gemini-Verbindung.
+- **Gleiche Sprache:** sprechen beide dieselbe Sprache (Ziel == Quelle), setzt
+  der Server `translationConfig.echoTargetLanguage = true` — sonst schwiege
+  Gemini (nichts zu übersetzen); so spricht es das Gesagte nach.
 - **Key:** nie in der URL (URLs landen in Proxy-Logs), sondern in der
   ersten Textnachricht `hello`. Fehlt er, nimmt der Server seinen eigenen
   (`--key-file`). Weder Server noch Tests loggen ihn; Fehlertexte werden
   durch `sanitize()` vom Key bereinigt. Im Normalmodus verlässt der Key
   den Browser nie Richtung Server.
 - **Raum voll:** der dritte Client bekommt `{"type":"error","msg":"raum voll"}`
-  und wird geschlossen.
+  und wird geschlossen; der Raum bleibt bei genau zwei Peers.
 - **Untertitel:** Gemini liefert Transkripte von Eingabe und Übersetzung.
   Im Sparmodus reicht sie der Server weiter, im Normalmodus schickt der
   Browser sie als Text an den Relay. Sie kosten fast nichts und helfen,
@@ -150,11 +167,11 @@ Deklarationen und Verdrahtung.
 | `01_config.rs` | 185 | CLI (`--listen --dir --key-file --gemini-url --verbose --check --watch`), `Transport {Pcm, Opus}`, `MAX_PEERS = 2` |
 | `02_languages.rs` | 153 | 78 Sprachen (BCP-47 + deutscher Name), Defaults `de` / `zh-Hans` |
 | `03_codec.rs` | 228 | `DownlinkEncoder` (PCM 24 kHz → SILK, 60 ms, 12 kbit/s) und `UplinkDecoder` (Opus → PCM 16 kHz) |
-| `04_state.rs` | 209 | Raumbuch mit Peer-Infos, `broadcast` ohne Echo, `send_to`, `send_all` |
-| `05_gemini.rs` | 300 | Gemini-Live-Client: Setup-JSON, Audio-JSON, Parser, Sitzung mit Sende-/Empfangs-Task |
-| `06_relay.rs` | 447 | `/ws`-Handler: PCM-Pfad, Opus-Pfad (hello → Gemini → Raum), Untertitel, `peers`-Events |
+| `04_state.rs` | 278 | Raumbuch mit Peer-Infos (`lang`, `transport`), Partner-Watch je Peer (`watch::Sender<Option<PeerInfo>>`), `broadcast` ohne Echo, `send_to` |
+| `05_gemini.rs` | 328 | Gemini-Live-Client: `setup_json(target, echo)` (echoTargetLanguage), Audio-JSON, Parser, Sitzung mit Sende-/Empfangs-Task |
+| `06_relay.rs` | 583 | `/ws`-Handler: PCM-Pfad, Opus-Pfad (partner-gesteuerte Sitzung: `waiting`/`ready`), Untertitel, persönliche `partner`-Events |
 | `07_serve.rs` | 38 | Router: `/`, `/ws`, `/healthz`, `/api/rooms`, `/api/languages` |
-| `08_status.rs` | 172 | TUI-light `--check/--watch`, z. B. `raum r1: 2 peers [zh-Hans->de opus, de->zh-Hans pcm]` |
+| `08_status.rs` | 166 | TUI-light `--check/--watch`, z. B. `raum r1: 2 peers [zh-Hans opus, de pcm]` |
 
 Ein Beispiel für „kein Resampler nötig": Opus darf mit 24 kHz kodieren
 und beim Dekodieren direkt 16 kHz ausgeben. Gemini liefert 24 kHz → der
@@ -168,8 +185,16 @@ entfällt.
   Untertitel), `01_audio.js` (Resampling auf 16 kHz, lückenlose
   Wiedergabe-Warteschlange), `02_opus.js` (WebCodecs-Encoder/Decoder),
   `app.js` (Ablauf, Statistik).
-- Auswahl „Ich spreche" / „Partner hört" mit allen 78 Sprachen aus
-  `/api/languages` (eine Quelle der Wahrheit im Rust-Code), Tausch-Knopf.
+- Auswahl **nur „Ich spreche"** mit allen 78 Sprachen aus `/api/languages`
+  (eine Quelle der Wahrheit im Rust-Code). Die Zielsprache wählt niemand mehr
+  — sie folgt automatisch dem Partner (siehe 2.11). Das „Partner hört"-Select
+  und der Tausch-Knopf sind entfallen.
+- Partner-Anzeige: „Partner spricht: &lt;Name&gt; · &lt;Normal|Sparmodus&gt;"
+  bzw. „Warte auf Partner…". Im PCM-Modus baut der Browser seine
+  Gemini-Verbindung erst mit Partner auf (Ziel = Partner-lang,
+  `echoTargetLanguage` bei gleicher Sprache) und wieder ab, wenn der Partner
+  geht (das Mikro läuft weiter, sendet dann aber nichts). Im Opus-Modus folgt
+  der Status `waiting`/`ready` vom Server.
 - Transport-Wahl „Normal (PCM, viel Daten)" / „Sparmodus (Opus SILK,
   ~12 kbit/s)". Fehlt WebCodecs (`AudioEncoder.isConfigSupported`), wird
   der Sparmodus mit Hinweis deaktiviert.
@@ -182,29 +207,32 @@ entfällt.
 
 | Ebene | Was | Ergebnis |
 |---|---|---|
-| Unit (27) | CLI, Sprachtabelle, Codec (SilkOnly, Bitrate, Stückelung 1000/333/7 Bytes, Roundtrip, kaputtes Paket), Raumbuch (Limit 2, kein Echo), Setup-JSON, Parser, Key-Bereinigung, Untertitel-Umschreibung, Status-Format | grün |
-| Integration (7 + 1 ignoriert) | `ws_relay.rs`: PCM↔PCM ohne Echo, Raum voll, `peers`-Event, Opus→Fake-Gemini→PCM-Partner, PCM→Opus-Partner (alle Pakete SilkOnly, < 1/10 der PCM-Bytes), `/api/languages` = 78; `gemini_fake.rs`; `gemini_live.rs` (echtes `setupComplete`, manuell mit `--ignored`) | grün |
+| Unit (30) | CLI, Sprachtabelle, Codec (SilkOnly, Bitrate, Stückelung 1000/333/7 Bytes, Roundtrip, kaputtes Paket), Raumbuch (Limit 2, kein Echo, Partner-Watch bei Join/Leave), Setup-JSON (echoTargetLanguage), Parser, Key-Bereinigung, `partner`-JSON, Untertitel-Umschreibung, Status-Format | grün |
+| Integration (7 + 1 ignoriert) | `ws_relay.rs`: PCM↔PCM ohne Echo, Raum voll (bleibt 2), `partner`-Event-Inhalt beide Seiten, Opus allein → `waiting` (kein `ready`), Auto-Ziel folgt Partner (`:de` → leave → `waiting` → neuer Partner `:ja`), PCM→Opus (alle Pakete SilkOnly, < 1/10 der PCM-Bytes), `/api/languages` = 78 ohne `target`; `gemini_fake.rs`; `gemini_live.rs` (echtes `setupComplete`, manuell mit `--ignored`) | grün |
 | Smoke | `scripts/smoke.sh`: Build, `/healthz`, 78 Codes, Transport-Auswahl, `app.js` 200, `--check` | `SMOKE OK` |
-| Browser automatisch | `scripts/browser-fake.sh`: Headless-Chrome, Tab A Opus, Tab B PCM, Fake-Gemini, 20 s | `BROWSER-FAKE PASS` |
+| Browser automatisch | `scripts/browser-fake.sh`: Headless-Chrome, Tab A Opus, Tab B PCM, Fake-Gemini, 20 s; prüft auch Partner-Anzeige | `BROWSER-FAKE PASS` |
 | HIL echt | `scripts/hil-real.sh`: zwei Chrome-Prozesse, echtes Gemini, ~50 s | `HIL-REAL PASS` |
 
-Messwerte `browser-fake` (20 s, Fake-Gemini liefert Audio in Echtzeit):
+Messwerte `browser-fake` (20 s, Fake-Gemini liefert Audio in Echtzeit, neuer
+Lauf nach der Auto-Ziel-Umstellung):
 
 | Peer | hoch | runter | gesamt |
 |---|---|---|---|
-| A Sparmodus | 29 004 B | 30 151 B | **24 kbit/s** |
-| B Normal | 1 841 990 B | 969 600 B | **1125 kbit/s** |
+| A Sparmodus | 28 872 B | 30 151 B | **24 kbit/s** |
+| B Normal | 1 841 990 B | 960 000 B | **1121 kbit/s** |
 
-Messwerte `hil-real` (echtes Gemini, A spricht Mandarin aus
-`chinese/十萬個為什麼…webm`, B spricht eine per Gemini-TTS erzeugte
-deutsche Referenz):
+Messwerte `hil-real` (echtes Gemini, neuer Lauf nach der Auto-Ziel-Umstellung;
+A spricht Mandarin aus `chinese/十萬個為什麼…webm`, B spricht eine per
+Gemini-TTS erzeugte deutsche Referenz). Jetzt wählt niemand mehr ein Ziel —
+es folgt automatisch dem Partner:
 
 | Messpunkt | A (Sparmodus, zh→de) | B (Normal, de→zh) |
 |---|---|---|
-| Bytes hoch | 70 561 | 4 493 181 |
-| Bytes runter | 28 389 (Opus) | 2 268 000 (PCM) |
-| Rate gesamt | **16 kbit/s** | **1082 kbit/s** |
-| erstes Partner-Audio | ≈ 4,8 s | ≈ 4,1 s |
+| Bytes hoch | 70 329 | 4 491 284 |
+| Bytes runter | 29 077 (Opus) | 2 232 000 (PCM) |
+| Rate gesamt | **16 kbit/s** | **1076 kbit/s** |
+| erstes Partner-Audio | ≈ 4,7 s | ≈ 4,7 s |
+| Partner-Anzeige | „Partner spricht: Deutsch" | „…: Chinesisch (vereinfacht)" |
 | Partner-Untertitel | „早上好。" / „今天是个好…" | „Nein, nein, nein, nein," |
 
 Der Downlink von A ist kleiner als 12 kbit/s, weil B nicht ununterbrochen
@@ -270,6 +298,34 @@ Morgen" eindeutig.
 10. **`Rooms::send_to`.** Antworten nur an einen Peer (`ready`, Fehler,
     eigene Untertitel) laufen über dasselbe Raumbuch statt über einen
     zweiten Kanal je Peer — eine Sende-Stelle, eine Reihenfolge.
+11. **Zielsprache automatisch (Nutzer-Feedback).** Rückmeldung nach dem
+    ersten HIL: *„Es macht keinen Sinn, dass man die Sprache des Partners
+    auswählen muss — das weiß der Partner am besten."* Stimmt: jeder kennt
+    nur die eigene Sprache sicher. Also wählt jetzt jeder nur noch `lang`
+    („Ich spreche"); das Ziel ist automatisch die Sprache des Partners.
+    Technisch hält das Raumbuch je Peer einen
+    `tokio::sync::watch::Sender<Option<PeerInfo>>`; `join`/`leave`
+    aktualisieren alle Partner-Watches. Der Opus-Peer wartet in einer
+    `select`-Schleife auf Partner-Wechsel: neuer/wechselnder Partner →
+    Gemini-Sitzung mit Ziel = Partner-Sprache (neu) aufbauen, kein Partner →
+    Sitzung beenden und `waiting` senden (**kein `ready` ohne Partner**).
+    Ist eigene Sprache == Partner-Sprache, setzt `setup_json(target, echo)`
+    `echoTargetLanguage = true`, sonst schwiege Gemini. Konsequenz: das alte
+    `peers`-Event wurde durch ein **persönliches** `partner`-Event ersetzt
+    (jeder Peer bekommt genau seinen Partner), `target` fiel aus Query,
+    `PeerInfo` und `/api/rooms` heraus. Nachgewiesen im neuen echten HIL
+    (50 s, Key maskiert `AIza…msBM`): A (Opus, spricht zh-Hans) kam auf
+    **16 kbit/s**, B (PCM, spricht de) auf **1076 kbit/s**;
+    `/api/rooms` zeigte mittendrin
+    `[{"lang":"de","transport":"pcm"},{"lang":"zh-Hans","transport":"opus"}]`
+    (kein `target` mehr). A sah „Partner spricht: Deutsch", B „Chinesisch";
+    A sah chinesische Untertitel (`早上好。`, `今天是个好`), B deutsche
+    (`Nein, nein, nein, nein,`); erstes Partner-Audio nach ~4,7 s. Der
+    Fake-Gemini spiegelt das empfangene Ziel in der Transkription
+    (`hallo:<targetLanguageCode>`), damit Integrationstests das **automatisch
+    gewählte** Ziel prüfen: Opus allein → `waiting`; PCM-Partner `lang=de` →
+    `ready` + Untertitel `hallo:de`; Partner verlässt → `waiting`; neuer
+    Partner `lang=ja` → wieder `ready` + `hallo:ja`.
 
 ## 3. Learnings und mögliche Erweiterungen
 
@@ -297,8 +353,6 @@ Mögliche Erweiterungen:
 - **Ephemeral Tokens:** Server erzeugt Kurzzeit-Token statt Key im
   Browser (Doku: `v1beta/auth_tokens`), dann muss kein Nutzer seinen Key
   hergeben.
-- **Auto-Zielsprache:** Bei zwei Peers kennt der Server beide Sprachen —
-  „Partner hört" könnte automatisch aus der Sprache des Partners folgen.
 - **Robustheit im Funkloch:** Opus-FEC (`use_inband_fec`,
   `packet_loss_perc`) und DTX in Pausen; Wiederaufnahme der
   Gemini-Sitzung über `sessionResumptionUpdate`-Handles; automatisches
