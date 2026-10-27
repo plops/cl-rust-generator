@@ -1,17 +1,7 @@
 // app.js — Steuerung: Sprachen laden, UI, PCM- und Opus-Pfad, Statistik.
-// Laedt 01_audio.js (Resampling, Queue) und 02_opus.js (WebCodecs) per
-// zusaetzlichem <script>-Tag nach, damit index.html nur eine Quelle laedt.
+// Setzt 01_audio.js (Resampling, Queue) und 02_opus.js (WebCodecs) voraus;
+// index.html laedt die drei Dateien in dieser Reihenfolge.
 "use strict";
-
-// Nummerierte Hilfsdateien dynamisch nachladen (Reihenfolge wichtig).
-(function loadHelpers() {
-  for (const f of ["01_audio.js", "02_opus.js"]) {
-    const s = document.createElement("script");
-    s.src = f;
-    s.async = false;
-    document.head.appendChild(s);
-  }
-})();
 
 const $ = (id) => document.getElementById(id);
 const el = {
