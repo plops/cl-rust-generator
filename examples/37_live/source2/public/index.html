@@ -26,6 +26,7 @@ input:focus,select:focus{border-color:var(--accent)}
 .radio span{font-size:.9rem}
 .radio small{display:block;color:var(--dim);font-size:.75rem}
 .radio.disabled{opacity:.5;cursor:not-allowed}
+.radio:has(input:checked){border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
 .btn-row{display:flex;gap:10px}
 button{flex:1;padding:14px;border:none;border-radius:8px;font-size:1rem;font-weight:bold;cursor:pointer;background:var(--accent);color:#fff}
 button:disabled{background:var(--border);color:var(--dim);cursor:not-allowed}
