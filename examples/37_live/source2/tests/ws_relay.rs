@@ -3,13 +3,15 @@
 //! Deckt ab:
 //! (a) PCM<->PCM: Partner bekommt Binary, kein Echo beim Sender.
 //! (b) 3. Client im vollen Raum bekommt `raum voll`.
-//! (c) `peers`-Event mit zwei Eintraegen nach dem zweiten Beitritt.
-//! (d) Opus-Client (hello ohne Key, Server-Key "test") + PCM-Partner:
-//!     A bekommt `ready`, B bekommt PCM24-Binary + Untertitel who=partner.
-//! (e) PCM-Partner schickt 1 s PCM24-Sinus → Opus-Client bekommt dekodierbare
+//! (c) `partner`-Event mit korrektem Inhalt fuer beide Seiten.
+//! (d) Opus-Peer ALLEIN → `waiting`, KEIN `ready`.
+//! (e) Opus + PCM-Partner (lang=de): A bekommt `ready`, Untertitel enthaelt
+//!     `:de` (automatisch gewaehltes Ziel = Partner-Sprache). Partner geht →
+//!     `waiting`; neuer Partner (lang=ja) → wieder `ready` mit `:ja`.
+//! (f) PCM-Partner schickt PCM24 → Opus-Client bekommt dekodierbare
 //!     SILK-Pakete, Summe Bytes < 1/10 der PCM-Bytes.
-//! (f) `/api/languages` listet 78 Sprachen + Defaults; `/api/rooms` zeigt
-//!     Transport.
+//! (g) `/api/languages` listet 78 Sprachen + Defaults; `/api/rooms` zeigt
+//!     Transport; Raum voll bleibt bei genau 2 Peers.
 //!
 //! HTTP ohne reqwest: winziges GET ueber tokio `TcpStream`.
 
@@ -86,6 +88,18 @@ async fn naechste_binary(ws: &mut Ws, ms: u64) -> Vec<u8> {
     }
 }
 
+/// Auf das naechste Text-Event eines bestimmten `type` warten (max `tries`).
+async fn warte_auf_typ(ws: &mut Ws, typ: &str, tries: usize, ms: u64) -> serde_json::Value {
+    for _ in 0..tries {
+        let t = naechster_text(ws, ms).await;
+        let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+        if v["type"] == typ {
+            return v;
+        }
+    }
+    panic!("kein event vom typ {typ} erhalten");
+}
+
 #[tokio::test]
 async fn pcm_partner_bekommt_binary_sender_kein_echo() {
     let (base, _) = spawn_server(None).await;
@@ -99,7 +113,7 @@ async fn pcm_partner_bekommt_binary_sender_kein_echo() {
 
     assert_eq!(naechste_binary(&mut b, 1000).await, vec![1u8, 2, 3]);
 
-    // Kein Echo an den Sender (nur peers-Events als Text erlaubt).
+    // Kein Echo an den Sender.
     let echo = tokio::time::timeout(Duration::from_millis(300), async {
         loop {
             match a.next().await {
@@ -117,102 +131,148 @@ async fn pcm_partner_bekommt_binary_sender_kein_echo() {
 }
 
 #[tokio::test]
-async fn dritter_client_bekommt_raum_voll() {
-    let (base, _) = spawn_server(None).await;
+async fn dritter_client_bekommt_raum_voll_und_raum_bleibt_zwei() {
+    let (base, addr) = spawn_server(None).await;
     let _a = connect(&base, "room=voll&transport=pcm").await;
     let _b = connect(&base, "room=voll&transport=pcm").await;
     tokio::time::sleep(Duration::from_millis(150)).await;
 
     let mut c = connect(&base, "room=voll&transport=pcm").await;
-    let t = naechster_text(&mut c, 1000).await;
-    let v: serde_json::Value = serde_json::from_str(&t).unwrap();
-    assert_eq!(v["type"], "error");
+    let v = warte_auf_typ(&mut c, "error", 3, 1000).await;
     assert_eq!(v["msg"], "raum voll");
+
+    // Raum bleibt bei genau 2 Peers.
+    let rooms = http_get(&addr, "/api/rooms").await;
+    let map: serde_json::Value = serde_json::from_str(rooms.trim()).unwrap();
+    assert_eq!(
+        map["voll"].as_array().unwrap().len(),
+        2,
+        "raum voll bleibt 2"
+    );
 }
 
 #[tokio::test]
-async fn peers_event_mit_zwei_eintraegen() {
+async fn partner_event_inhalt_fuer_beide_seiten() {
     let (base, _) = spawn_server(None).await;
-    let mut a = connect(&base, "room=p&transport=pcm&lang=de&target=zh-Hans").await;
-    let _b = connect(&base, "room=p&transport=pcm&lang=zh-Hans&target=de").await;
+    let mut a = connect(&base, "room=p&transport=pcm&lang=de").await;
 
-    // A bekommt zwei peers-Events (erst 1, nach B-Beitritt 2); wir warten auf
-    // das Event mit zwei Eintraegen.
-    let mut saw_two = false;
-    for _ in 0..4 {
-        let t = naechster_text(&mut a, 1000).await;
-        let v: serde_json::Value = serde_json::from_str(&t).unwrap();
-        if v["type"] == "peers" && v["peers"].as_array().map(|a| a.len()) == Some(2) {
-            saw_two = true;
-            break;
-        }
-    }
-    assert!(saw_two, "peers-event mit zwei eintraegen erwartet");
+    // A allein: erstes partner-Event ist null.
+    let v = warte_auf_typ(&mut a, "partner", 3, 1000).await;
+    assert!(v["partner"].is_null(), "A allein hat keinen Partner");
+
+    // B tritt bei (opus, zh-Hans).
+    let mut b = connect(&base, "room=p&transport=opus&lang=zh-Hans").await;
+
+    // A sieht B als Partner: lang=zh-Hans, transport=opus.
+    let v = warte_auf_typ(&mut a, "partner", 4, 1500).await;
+    assert_eq!(v["partner"]["lang"], "zh-Hans");
+    assert_eq!(v["partner"]["transport"], "opus");
+
+    // B sieht A als Partner: lang=de, transport=pcm.
+    let v = warte_auf_typ(&mut b, "partner", 4, 1500).await;
+    assert_eq!(v["partner"]["lang"], "de");
+    assert_eq!(v["partner"]["transport"], "pcm");
 }
 
 #[tokio::test]
-async fn opus_client_mit_server_key_und_pcm_partner() {
+async fn opus_allein_bekommt_waiting_kein_ready() {
     let (base, _) = spawn_server(Some("test")).await;
-    // B zuerst (PCM-Partner), damit er fuer die Uebersetzung bereitsteht.
-    let mut b = connect(&base, "room=o1&transport=pcm&lang=de&target=zh-Hans").await;
-    let mut a = connect(&base, "room=o1&transport=opus&lang=zh-Hans&target=de").await;
-
-    // A: hello OHNE key → Server nutzt server_key "test".
+    let mut a = connect(&base, "room=o0&transport=opus&lang=zh-Hans").await;
     a.send(Message::Text(r#"{"type":"hello"}"#.into()))
         .await
         .unwrap();
 
-    // A bekommt `ready`.
-    let mut got_ready = false;
-    for _ in 0..5 {
-        let t = naechster_text(&mut a, 2000).await;
+    // Ohne Partner: waiting kommt, ready NICHT.
+    let mut saw_waiting = false;
+    for _ in 0..6 {
+        let t = naechster_text(&mut a, 1500).await;
         let v: serde_json::Value = serde_json::from_str(&t).unwrap();
-        if v["type"] == "ready" {
-            got_ready = true;
+        match v["type"].as_str() {
+            Some("waiting") => saw_waiting = true,
+            Some("ready") => panic!("ohne Partner darf kein ready kommen"),
+            _ => {}
+        }
+        if saw_waiting {
             break;
         }
     }
-    assert!(got_ready, "opus-client bekommt ready");
+    assert!(saw_waiting, "opus allein bekommt waiting");
 
-    // A schickt ein Opus-Paket (echter Encoder, 16 kHz, 60 ms) hoch.
+    // Noch kurz sicherstellen, dass kein ready nachkommt.
+    let kein_ready = tokio::time::timeout(Duration::from_millis(400), async {
+        loop {
+            let t = naechster_text(&mut a, 1000).await;
+            let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+            if v["type"] == "ready" {
+                return true;
+            }
+        }
+    })
+    .await;
+    assert!(kein_ready.is_err(), "kein ready ohne Partner");
+}
+
+#[tokio::test]
+async fn opus_auto_ziel_folgt_partnersprache() {
+    let (base, _) = spawn_server(Some("test")).await;
+    // A: Opus, spricht zh-Hans. Erst allein (waiting).
+    let mut a = connect(&base, "room=auto&transport=opus&lang=zh-Hans").await;
+    a.send(Message::Text(r#"{"type":"hello"}"#.into()))
+        .await
+        .unwrap();
+    let _ = warte_auf_typ(&mut a, "waiting", 4, 1500).await;
+
+    // B tritt bei (pcm, lang=de). A: Ziel automatisch = de → ready.
+    let mut b = connect(&base, "room=auto&transport=pcm&lang=de").await;
+    let _ = warte_auf_typ(&mut a, "ready", 6, 2000).await;
+
+    // A schickt Audio → B bekommt Untertitel vom Fake mit ":de".
     let pkt = test_opus_paket();
-    a.send(Message::Binary(pkt.into())).await.unwrap();
-
-    // B bekommt PCM24-Binary (Fake-Gemini: 4800 Bytes) vom Partner.
-    let bin = naechste_binary(&mut b, 2000).await;
-    assert_eq!(bin.len(), 4800, "100 ms PCM24 vom fake-gemini");
-
-    // B bekommt Untertitel who=partner (Fake liefert outputTranscription).
-    let mut saw_partner_text = false;
-    for _ in 0..6 {
+    a.send(Message::Binary(pkt.clone().into())).await.unwrap();
+    let mut saw_de = false;
+    for _ in 0..8 {
         let t = naechster_text(&mut b, 2000).await;
         let v: serde_json::Value = serde_json::from_str(&t).unwrap();
         if v["type"] == "text" && v["who"] == "partner" {
-            assert_eq!(v["text"], "hallo");
-            saw_partner_text = true;
+            assert_eq!(v["text"], "hallo:de", "auto-ziel = Partner-lang de");
+            saw_de = true;
             break;
         }
     }
-    assert!(saw_partner_text, "partner-untertitel erwartet");
+    assert!(saw_de, "untertitel mit :de erwartet");
+
+    // B verlaesst → A bekommt wieder waiting.
+    drop(b);
+    let _ = warte_auf_typ(&mut a, "waiting", 6, 2000).await;
+
+    // Neuer Partner C mit lang=ja → A wieder ready, Ziel :ja.
+    let mut c = connect(&base, "room=auto&transport=pcm&lang=ja").await;
+    let _ = warte_auf_typ(&mut a, "ready", 6, 2000).await;
+    a.send(Message::Binary(pkt.into())).await.unwrap();
+    let mut saw_ja = false;
+    for _ in 0..8 {
+        let t = naechster_text(&mut c, 2000).await;
+        let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+        if v["type"] == "text" && v["who"] == "partner" {
+            assert_eq!(v["text"], "hallo:ja", "neues auto-ziel = ja");
+            saw_ja = true;
+            break;
+        }
+    }
+    assert!(saw_ja, "untertitel mit :ja nach Partnerwechsel erwartet");
 }
 
 #[tokio::test]
 async fn pcm_zu_opus_liefert_silk_pakete() {
     let (base, _) = spawn_server(Some("test")).await;
-    let mut a = connect(&base, "room=o2&transport=opus&lang=zh-Hans&target=de").await;
-    let mut b = connect(&base, "room=o2&transport=pcm&lang=de&target=zh-Hans").await;
+    let mut a = connect(&base, "room=o2&transport=opus&lang=zh-Hans").await;
+    let mut b = connect(&base, "room=o2&transport=pcm&lang=de").await;
 
-    // A anmelden (hello mit server_key).
+    // A anmelden (hello mit server_key); Partner B ist schon da → ready.
     a.send(Message::Text(r#"{"type":"hello"}"#.into()))
         .await
         .unwrap();
-    // Auf ready warten, damit beide registriert sind.
-    for _ in 0..5 {
-        let t = naechster_text(&mut a, 2000).await;
-        if serde_json::from_str::<serde_json::Value>(&t).unwrap()["type"] == "ready" {
-            break;
-        }
-    }
+    let _ = warte_auf_typ(&mut a, "ready", 6, 2000).await;
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // B schickt 1 s PCM24-Sinus (48000 Bytes) an A.
@@ -224,7 +284,6 @@ async fn pcm_zu_opus_liefert_silk_pakete() {
     let mut dec = OpusDecoder::new(24_000, 1).unwrap();
     let mut gesamt = 0usize;
     let mut pakete = 0usize;
-    // 1 s / 60 ms ≈ 16 Pakete; mit Puffer bis 16 lesen.
     for _ in 0..16 {
         let pkt = match tokio::time::timeout(Duration::from_millis(1500), async {
             loop {
@@ -269,14 +328,16 @@ async fn api_languages_und_rooms() {
 
     // Ein Opus- und ein PCM-Peer → Transport sichtbar.
     let base = format!("ws://{addr}");
-    let _a = connect(&base, "room=rA&transport=opus&lang=de&target=zh-Hans").await;
-    let _b = connect(&base, "room=rA&transport=pcm&lang=zh-Hans&target=de").await;
+    let _a = connect(&base, "room=rA&transport=opus&lang=de").await;
+    let _b = connect(&base, "room=rA&transport=pcm&lang=zh-Hans").await;
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let rooms = http_get(&addr, "/api/rooms").await;
     assert!(rooms.contains("\"opus\""), "transport opus im json");
     assert!(rooms.contains("\"pcm\""), "transport pcm im json");
     assert!(rooms.contains("rA"), "raumname im json");
+    // Kein target-Feld mehr.
+    assert!(!rooms.contains("\"target\""), "kein target mehr im json");
 }
 
 /// Ein 60-ms-Opus-Paket (16 kHz, SILK) wie vom Browser-Encoder.

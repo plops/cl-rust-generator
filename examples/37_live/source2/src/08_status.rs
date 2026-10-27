@@ -2,11 +2,11 @@
 //!
 //! Liest `/healthz` und `/api/rooms` eines laufenden Servers ueber ein
 //! winziges HTTP/1.0-GET (nur `std`, kein HTTP-Client-Crate) und zeigt die
-//! Raeume mit Transport je Peer, z. B.:
-//! `raum r1: 2 peers [de->zh-Hans opus, zh-Hans->de pcm]`.
+//! Raeume mit Sprache und Transport je Peer, z. B.:
+//! `raum r1: 2 peers [zh-Hans opus, de pcm]`.
 //!
-//! `/api/rooms` liefert jetzt Listen von Peer-Infos (nicht mehr nur Zahlen);
-//! geparst wird mit `serde_json` (ohnehin Dependency).
+//! `/api/rooms` liefert Listen von Peer-Infos (`{lang, transport}`); geparst
+//! wird mit `serde_json` (ohnehin Dependency).
 
 use std::io::{Read, Write};
 use std::time::Duration;
@@ -57,7 +57,7 @@ pub fn format_rooms(rooms: &[(String, Vec<PeerInfo>)]) -> String {
                     Transport::Pcm => "pcm",
                     Transport::Opus => "opus",
                 };
-                format!("{}->{} {}", p.lang, p.target, t)
+                format!("{} {}", p.lang, t)
             })
             .collect();
         out.push_str(&format!(
@@ -92,7 +92,6 @@ fn parse_rooms(body: &str) -> Result<RoomList, String> {
 #[derive(serde::Deserialize)]
 struct PeerInfoParsed {
     lang: String,
-    target: String,
     transport: Transport,
 }
 
@@ -100,7 +99,6 @@ impl PeerInfoParsed {
     fn into_info(self) -> PeerInfo {
         PeerInfo {
             lang: self.lang,
-            target: self.target,
             transport: self.transport,
         }
     }
@@ -122,10 +120,9 @@ fn http_get(base: &str, path: &str) -> std::io::Result<String> {
 mod tests {
     use super::*;
 
-    fn info(lang: &str, target: &str, transport: Transport) -> PeerInfo {
+    fn info(lang: &str, transport: Transport) -> PeerInfo {
         PeerInfo {
             lang: lang.to_owned(),
-            target: target.to_owned(),
             transport,
         }
     }
@@ -136,29 +133,26 @@ mod tests {
     }
 
     #[test]
-    fn format_zeigt_transport_sortiert() {
+    fn format_zeigt_sprache_und_transport_sortiert() {
         let rooms = vec![
             (
                 "r1".to_owned(),
-                vec![
-                    info("de", "zh-Hans", Transport::Opus),
-                    info("zh-Hans", "de", Transport::Pcm),
-                ],
+                vec![info("zh-Hans", Transport::Opus), info("de", Transport::Pcm)],
             ),
-            ("a0".to_owned(), vec![info("en", "de", Transport::Pcm)]),
+            ("a0".to_owned(), vec![info("en", Transport::Pcm)]),
         ];
         let out = format_rooms(&rooms);
         // Raeume alphabetisch: a0 vor r1.
         let idx_a0 = out.find("raum a0").unwrap();
         let idx_r1 = out.find("raum r1").unwrap();
         assert!(idx_a0 < idx_r1);
-        assert!(out.contains("raum r1: 2 peers [de->zh-Hans opus, zh-Hans->de pcm]"));
-        assert!(out.contains("raum a0: 1 peers [en->de pcm]"));
+        assert!(out.contains("raum r1: 2 peers [zh-Hans opus, de pcm]"));
+        assert!(out.contains("raum a0: 1 peers [en pcm]"));
     }
 
     #[test]
     fn parse_rooms_liest_listen() {
-        let body = r#"{"r1":[{"lang":"de","target":"zh-Hans","transport":"opus"}]}"#;
+        let body = r#"{"r1":[{"lang":"de","transport":"opus"}]}"#;
         let rooms = parse_rooms(body).unwrap();
         assert_eq!(rooms.len(), 1);
         assert_eq!(rooms[0].0, "r1");

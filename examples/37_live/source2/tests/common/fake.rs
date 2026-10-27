@@ -1,13 +1,15 @@
 //! Gemeinsamer Fake-Gemini (von `tests/common/mod.rs` und vom Beispiel
 //! `examples/fake_gemini.rs` genutzt — ein einziger Protokoll-Ort).
 //!
-//! Verhalten: erwartet die erste `setup`-Nachricht, antwortet mit
-//! `{"setupComplete":{}}`. Auf `realtimeInput` schickt der Fake einen
-//! `modelTurn` mit 100 ms Sinus-PCM24 (4800 Bytes) plus
-//! `outputTranscription` "hallo" — aber hoechstens so viel Audio-Zeit, wie
-//! an Eingangs-Audio angekommen ist (Echtzeit-Drossel). So bleibt der
-//! Opus-Downlink im Sparmodus realistisch (~12 statt ~28 kbit/s). Der erste
-//! Chunk loest immer eine Antwort aus, damit Einzel-Chunk-Tests greifen.
+//! Verhalten: erwartet die erste `setup`-Nachricht, merkt sich den
+//! `targetLanguageCode` und antwortet mit `{"setupComplete":{}}`. Auf
+//! `realtimeInput` schickt der Fake einen `modelTurn` mit 100 ms Sinus-PCM24
+//! (4800 Bytes) plus `outputTranscription` `"hallo:<target>"` — so koennen
+//! Tests das AUTOMATISCH gewaehlte Ziel (= Partner-Sprache) pruefen. Dabei
+//! wird hoechstens so viel Audio-Zeit erzeugt, wie an Eingangs-Audio
+//! angekommen ist (Echtzeit-Drossel). So bleibt der Opus-Downlink im
+//! Sparmodus realistisch (~12 statt ~28 kbit/s). Der erste Chunk loest immer
+//! eine Antwort aus, damit Einzel-Chunk-Tests greifen.
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use futures_util::{SinkExt, StreamExt};
@@ -30,6 +32,16 @@ pub fn sinus_pcm24() -> Vec<u8> {
     out
 }
 
+/// `targetLanguageCode` aus einer `setup`-Nachricht herausziehen.
+fn setup_target(v: &serde_json::Value) -> Option<String> {
+    v.get("setup")
+        .and_then(|s| s.get("generationConfig"))
+        .and_then(|g| g.get("translationConfig"))
+        .and_then(|t| t.get("targetLanguageCode"))
+        .and_then(|c| c.as_str())
+        .map(str::to_owned)
+}
+
 /// Eingangs-Audio-Dauer (ms) aus einer `realtimeInput`-Nachricht schaetzen:
 /// Base64-PCM16-16-kHz → Bytes/2 Samples → *1000/16000 ms.
 fn input_ms(v: &serde_json::Value) -> i64 {
@@ -45,13 +57,14 @@ fn input_ms(v: &serde_json::Value) -> i64 {
     (bytes as i64 / 2) * 1000 / 16_000
 }
 
-/// Eine Antwortnachricht: modelTurn (Audio) + outputTranscription "hallo".
-pub fn antwort_json() -> String {
+/// Eine Antwortnachricht: modelTurn (Audio) + outputTranscription
+/// `"hallo:<target>"` (das Ziel macht das automatisch gewaehlte Ziel pruefbar).
+pub fn antwort_json(target: &str) -> String {
     let data = STANDARD.encode(sinus_pcm24());
     serde_json::json!({
         "serverContent": {
             "modelTurn": { "parts": [{ "inlineData": { "data": data } }] },
-            "outputTranscription": { "text": "hallo" }
+            "outputTranscription": { "text": format!("hallo:{target}") }
         }
     })
     .to_string()
@@ -66,6 +79,8 @@ pub async fn handle_conn(stream: tokio::net::TcpStream) {
     // Konto: empfangene minus bereits beantwortete Audio-Zeit (ms). Startet
     // bei RESPONSE_MS, damit der erste Chunk sofort eine Antwort ausloest.
     let mut guthaben_ms: i64 = RESPONSE_MS;
+    // Zuletzt vereinbartes Ziel (fuer outputTranscription).
+    let mut target = String::new();
     while let Some(Ok(msg)) = rx.next().await {
         let txt = match msg {
             Message::Text(t) => t.to_string(),
@@ -80,6 +95,7 @@ pub async fn handle_conn(stream: tokio::net::TcpStream) {
             continue;
         };
         if v.get("setup").is_some() {
+            target = setup_target(&v).unwrap_or_default();
             let _ = sink
                 .send(Message::Text(r#"{"setupComplete":{}}"#.into()))
                 .await;
@@ -88,7 +104,7 @@ pub async fn handle_conn(stream: tokio::net::TcpStream) {
             // Nur antworten, wenn genug Eingangs-Audio da ist (Echtzeit-Drossel).
             if guthaben_ms >= RESPONSE_MS {
                 guthaben_ms -= RESPONSE_MS;
-                let _ = sink.send(Message::Text(antwort_json().into())).await;
+                let _ = sink.send(Message::Text(antwort_json(&target).into())).await;
             }
         }
     }

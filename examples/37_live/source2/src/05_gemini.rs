@@ -24,13 +24,23 @@ const CHAN: usize = 64;
 /// `target` ist der Ziel-Sprachcode (z. B. `zh-Hans`). WICHTIG:
 /// `inputAudioTranscription`/`outputAudioTranscription` liegen auf
 /// `setup`-Ebene, NICHT in `generationConfig` (sonst Close 1007).
-pub fn setup_json(target: &str) -> String {
+///
+/// `echo`: wenn `true`, wird `translationConfig.echoTargetLanguage = true`
+/// gesetzt. Das ist noetig, wenn eigene Sprache == Partner-Sprache (Ziel ==
+/// Quelle): sonst schwiege Gemini (nichts zu uebersetzen). Mit `echo` spricht
+/// Gemini das Gesagte in derselben Sprache nach. Bei `false` entfaellt das
+/// Feld ganz.
+pub fn setup_json(target: &str, echo: bool) -> String {
+    let mut translation = serde_json::json!({ "targetLanguageCode": target });
+    if echo {
+        translation["echoTargetLanguage"] = serde_json::Value::Bool(true);
+    }
     let v = serde_json::json!({
         "setup": {
             "model": crate::config::GEMINI_MODEL,
             "generationConfig": {
                 "responseModalities": ["AUDIO"],
-                "translationConfig": { "targetLanguageCode": target }
+                "translationConfig": translation
             },
             "inputAudioTranscription": {},
             "outputAudioTranscription": {}
@@ -130,6 +140,7 @@ pub async fn connect(
     url: &str,
     key: &str,
     target: &str,
+    echo: bool,
     events: mpsc::Sender<Event>,
 ) -> Result<Session, String> {
     // Query anhaengen; ein fehlender Pfad (z. B. "ws://host:port") wuerde
@@ -145,7 +156,7 @@ pub async fn connect(
         .map_err(|e| sanitize(&e.to_string(), url, key))?;
     let (mut sink, mut stream) = ws.split();
 
-    sink.send(Message::Text(setup_json(target).into()))
+    sink.send(Message::Text(setup_json(target, echo).into()))
         .await
         .map_err(|e| sanitize(&e.to_string(), url, key))?;
 
@@ -229,7 +240,7 @@ mod tests {
 
     #[test]
     fn setup_json_transkription_auf_setup_ebene() {
-        let v: serde_json::Value = serde_json::from_str(&setup_json("zh-Hans")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&setup_json("zh-Hans", false)).unwrap();
         let setup = &v["setup"];
         assert_eq!(setup["model"], crate::config::GEMINI_MODEL);
         assert_eq!(
@@ -237,12 +248,29 @@ mod tests {
             "zh-Hans"
         );
         assert_eq!(setup["generationConfig"]["responseModalities"][0], "AUDIO");
+        // Ohne echo kein echoTargetLanguage-Feld.
+        assert!(setup["generationConfig"]["translationConfig"]["echoTargetLanguage"].is_null());
         // Transkription auf setup-Ebene ...
         assert!(setup["inputAudioTranscription"].is_object());
         assert!(setup["outputAudioTranscription"].is_object());
         // ... und NICHT in generationConfig (sonst Close 1007).
         assert!(setup["generationConfig"]["inputAudioTranscription"].is_null());
         assert!(setup["generationConfig"]["outputAudioTranscription"].is_null());
+    }
+
+    #[test]
+    fn setup_json_echo_bei_gleicher_sprache() {
+        // Gleiche Sprache wie der Partner (Ziel == Quelle): echo setzt
+        // echoTargetLanguage = true, damit Gemini nachspricht statt schweigt.
+        let v: serde_json::Value = serde_json::from_str(&setup_json("de", true)).unwrap();
+        assert_eq!(
+            v["setup"]["generationConfig"]["translationConfig"]["echoTargetLanguage"],
+            true
+        );
+        assert_eq!(
+            v["setup"]["generationConfig"]["translationConfig"]["targetLanguageCode"],
+            "de"
+        );
     }
 
     #[test]

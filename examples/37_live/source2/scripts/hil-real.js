@@ -2,18 +2,20 @@
 //
 // Der Fake-Mikrofon-Stream (--use-file-for-fake-audio-capture) gilt pro
 // Browser-Prozess, darum zwei eigene chromium.launch():
-//   A = Sparmodus (Opus), spricht Chinesisch (mic-zh.wav), lang zh-Hans →
-//       target de, Key-Feld leer → Server-Key spricht mit Gemini.
-//   B = Normal (PCM), spricht Deutsch (mic-de.wav), lang de → target zh-Hans,
-//       Key im Feld → B verbindet direkt mit dem echten Gemini.
+//   A = Sparmodus (Opus), spricht Chinesisch (mic-zh.wav), lang zh-Hans;
+//       Ziel folgt automatisch dem Partner (= de). Key-Feld leer → Server-Key
+//       spricht mit Gemini.
+//   B = Normal (PCM), spricht Deutsch (mic-de.wav), lang de; Ziel folgt dem
+//       Partner (= zh-Hans). Key im Feld → B verbindet direkt mit Gemini.
 // Gleicher Raum. Laufzeit ~45-60 s.
 //
-// Misst Status, __stats (Bytes/kbit/s), Untertitel je Richtung, Zeit bis
-// erstes Partner-Audio, /api/rooms waehrend des Laufs.
+// Misst Status, Partner-Anzeige, __stats (Bytes/kbit/s), Untertitel je
+// Richtung, Zeit bis erstes Partner-Audio, /api/rooms waehrend des Laufs.
 //
 // PASS: beide Live; A opusDown>0 & B pcmDown>0; B sieht deutschen Partner-
-// Untertitel (lateinische Buchstaben/Woerter), A sieht chinesische Zeichen
-// (/[\u4e00-\u9fff]/); A kbit/s < 40; keine pageerror; Key in KEINEM Log.
+// Untertitel (lateinische Woerter), A sieht chinesische Zeichen
+// (/[\u4e00-\u9fff]/); A sieht „Partner spricht: Deutsch", B „Chinesisch";
+// A kbit/s < 40; keine pageerror; Key in KEINEM Log.
 //
 // Der Key wird NIE ausgegeben — nur maskiert (AIza…abcd). Er kommt aus der
 // Datei und wird nur ins Key-Feld von B getippt sowie als Server-Key genutzt.
@@ -58,7 +60,7 @@ function launch(wav) {
 }
 
 // Eine Seite vorbereiten (Felder fuellen), aber noch nicht verbinden.
-async function setupPage(browser, { transport, speak, hear, key }) {
+async function setupPage(browser, { transport, speak, key }) {
   const page = await browser.newPage();
   const errs = [];
   const subsPartner = []; // Untertitel, die diese Seite als "Partner" sieht.
@@ -72,7 +74,6 @@ async function setupPage(browser, { transport, speak, hear, key }) {
   await page.fill("#apiKey", key);
   await page.fill("#roomName", ROOM);
   await page.selectOption("#langSpeak", speak);
-  await page.selectOption("#langHear", hear);
   await page.check(transport === "opus" ? "#trOpus" : "#trPcm");
   // Zeit bis erstes Partner-Audio (Downlink) ueber __stats beobachten.
   await page.evaluate(() => {
@@ -93,6 +94,7 @@ async function setupPage(browser, { transport, speak, hear, key }) {
 const stats = (page) => page.evaluate(() => window.__stats);
 const firstDown = (page) => page.evaluate(() => window.__firstDown || 0);
 const statusText = (page) => page.textContent("#status");
+const peerText = (page) => page.textContent("#peerInfo");
 
 // Untertitel-Liste aus dem DOM lesen: [{who,dir,text}].
 async function readSubs(page) {
@@ -124,10 +126,11 @@ async function pollRooms() {
   const browserA = await launch(WAV_ZH);
   const browserB = await launch(WAV_DE);
 
-  // A: Opus, zh-Hans → de, Key leer (Server-Key).
-  const a = await setupPage(browserA, { transport: "opus", speak: "zh-Hans", hear: "de", key: "" });
-  // B: PCM, de → zh-Hans, Key im Feld (direkt zu Gemini).
-  const b = await setupPage(browserB, { transport: "pcm", speak: "de", hear: "zh-Hans", key: KEY });
+  // A: Opus, spricht zh-Hans (Ziel folgt automatisch dem Partner), Key leer
+  // → Server-Key spricht mit Gemini.
+  const a = await setupPage(browserA, { transport: "opus", speak: "zh-Hans", key: "" });
+  // B: PCM, spricht de (Ziel = Partner-Sprache), Key im Feld (direkt zu Gemini).
+  const b = await setupPage(browserB, { transport: "pcm", speak: "de", key: KEY });
 
   const t0 = Date.now();
   await a.click("#connectBtn");
@@ -146,6 +149,7 @@ async function pollRooms() {
 
   const sa = await stats(a), sb = await stats(b);
   const statusA = await statusText(a), statusB = await statusText(b);
+  const peerA = await peerText(a), peerB = await peerText(b);
   const fdA = await firstDown(a), fdB = await firstDown(b);
   const subsA = await readSubs(a), subsB = await readSubs(b);
   await a.screenshot({ path: path.join(OUT, "real-A-opus.png") });
@@ -167,6 +171,7 @@ async function pollRooms() {
   console.log(`A Partner-Untertitel (erw. Chinesisch): ${JSON.stringify(short(partnerA))}`);
   console.log(`B Partner-Untertitel (erw. Deutsch)   : ${JSON.stringify(short(partnerB))}`);
   console.log(`statusA=${JSON.stringify(statusA)} statusB=${JSON.stringify(statusB)}`);
+  console.log(`peerA=${JSON.stringify(peerA)} peerB=${JSON.stringify(peerB)}`);
   const errs = [...a.__errs, ...b.__errs];
   console.log("seitenfehler:", errs.length ? errs.slice(0, 6) : "keine");
 
@@ -180,6 +185,8 @@ async function pollRooms() {
     "B pcmDown>0": sb.pcmDown > 0,
     "A sieht chin. Partner-Untertitel": aSeesCjk,
     "B sieht dt. Partner-Untertitel": bSeesLatin,
+    "A sieht Partner Deutsch": peerA.includes("Deutsch"),
+    "B sieht Partner Chinesisch": peerB.includes("Chinesisch"),
     "A kbit/s < 40": aKbit < 40,
     "keine pageerror": errs.length === 0,
   };

@@ -22,7 +22,7 @@ async fn fake_liefert_ready_audio_und_outtext() {
     let url = common::spawn_fake_gemini().await;
     let (etx, mut erx) = mpsc::channel::<Event>(32);
 
-    let session = connect(&url, "testkey", "zh-Hans", etx)
+    let session = connect(&url, "testkey", "zh-Hans", false, etx)
         .await
         .expect("connect gegen fake");
 
@@ -32,7 +32,8 @@ async fn fake_liefert_ready_audio_und_outtext() {
     // Ein PCM16-Chunk (320 Bytes = 10 ms @ 16 kHz) hochschicken.
     session.tx.send(vec![0u8; 320]).await.unwrap();
 
-    // Danach Audio (4800 Bytes PCM24) und OutText "hallo" erwarten.
+    // Danach Audio (4800 Bytes PCM24) und OutText "hallo:zh-Hans" erwarten
+    // (der Fake spiegelt das Ziel, damit das Auto-Ziel pruefbar ist).
     let mut audio_ok = false;
     let mut out_ok = false;
     for _ in 0..4 {
@@ -42,7 +43,7 @@ async fn fake_liefert_ready_audio_und_outtext() {
                 audio_ok = true;
             }
             Event::OutText(t) => {
-                assert_eq!(t, "hallo");
+                assert_eq!(t, "hallo:zh-Hans");
                 out_ok = true;
             }
             _ => {}

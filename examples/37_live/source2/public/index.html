@@ -58,16 +58,10 @@ button.stop{background:var(--danger)}
 <input type="text" id="roomName" value="raum-1">
 </div>
 
-<div class="langrow">
 <div class="field">
 <label for="langSpeak">Ich spreche</label>
 <select id="langSpeak"></select>
-</div>
-<button type="button" id="swap" aria-label="Sprachen tauschen" title="Sprachen tauschen">⇄</button>
-<div class="field">
-<label for="langHear">Partner hört</label>
-<select id="langHear"></select>
-</div>
+<span class="hint">Die Zielsprache ergibt sich automatisch aus der Sprache deines Partners.</span>
 </div>
 
 <fieldset class="radios" style="border:0;margin:0;padding:0">
@@ -90,7 +84,7 @@ button.stop{background:var(--danger)}
 <div class="status" id="status" role="status" aria-live="polite">Bereit. Bitte verbinden.</div>
 
 <div class="meta">
-<span>Partner: <b id="peerInfo">—</b></span>
+<span>Partner: <b id="peerInfo">Warte auf Partner…</b></span>
 <span>↑ <b id="kbUp">0</b> · ↓ <b id="kbDown">0</b> kbit/s</span>
 </div>
 

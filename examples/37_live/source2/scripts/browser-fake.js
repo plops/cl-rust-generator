@@ -1,8 +1,9 @@
 // browser-fake.js — zwei Headless-Chrome-Tabs gegen Fake-Gemini.
-// Tab A: Sparmodus (Opus), lang zh-Hans → target de, Key leer (Server-Key).
-// Tab B: Normal (PCM) mit ?gemini=ws://FAKE, Dummy-Key.
+// Tab A: Sparmodus (Opus), lang zh-Hans (Ziel folgt automatisch dem Partner).
+// Tab B: Normal (PCM) mit ?gemini=ws://FAKE, Dummy-Key, lang de.
 // PASS: beide Live; A opusUp>0 & opusDown>0; B pcmDown>0; Untertitel>0 bei
-// beiden; A kbit/s (up+down) < 40; keine pageerror. Messwerte → stdout.
+// beiden; A kbit/s (up+down) < 40; A sieht „Partner spricht: Deutsch",
+// B sieht „Chinesisch"; keine pageerror. Messwerte → stdout.
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -20,7 +21,7 @@ const OUT = process.env.HIL_OUT || "/tmp/live-hil";
 // die UI; fuer PASS reicht der Mittelwert ueber die Messdauer).
 function kbit(bytes, secs) { return Math.round((bytes * 8) / secs / 1000); }
 
-async function setupPage(browser, { transport, speak, hear, key, gemini }) {
+async function setupPage(browser, { transport, speak, key, gemini }) {
   const url = gemini ? `${BASE}/?gemini=${encodeURIComponent(gemini)}` : BASE;
   const page = await browser.newPage();
   const errs = [];
@@ -30,7 +31,6 @@ async function setupPage(browser, { transport, speak, hear, key, gemini }) {
   await page.fill("#apiKey", key);
   await page.fill("#roomName", ROOM);
   await page.selectOption("#langSpeak", speak);
-  await page.selectOption("#langHear", hear);
   await page.check(transport === "opus" ? "#trOpus" : "#trPcm");
   page.__errs = errs;
   return page;
@@ -41,6 +41,9 @@ async function stats(page) {
 }
 async function statusText(page) {
   return page.textContent("#status");
+}
+async function peerText(page) {
+  return page.textContent("#peerInfo");
 }
 
 (async () => {
@@ -57,8 +60,8 @@ async function statusText(page) {
   });
 
   // Tab A zuerst, Tab B danach (B ist PCM-Partner, spricht selbst mit Fake).
-  const a = await setupPage(browser, { transport: "opus", speak: "zh-Hans", hear: "de", key: "", gemini: null });
-  const b = await setupPage(browser, { transport: "pcm", speak: "de", hear: "zh-Hans", key: "dummy-key", gemini: FAKE });
+  const a = await setupPage(browser, { transport: "opus", speak: "zh-Hans", key: "", gemini: null });
+  const b = await setupPage(browser, { transport: "pcm", speak: "de", key: "dummy-key", gemini: FAKE });
 
   await a.click("#connectBtn");
   await b.click("#connectBtn");
@@ -71,6 +74,7 @@ async function statusText(page) {
 
   const sa = await stats(a), sb = await stats(b);
   const statusA = await statusText(a), statusB = await statusText(b);
+  const peerA = await peerText(a), peerB = await peerText(b);
   await a.screenshot({ path: path.join(OUT, "fake-A-opus.png") });
   await b.screenshot({ path: path.join(OUT, "fake-B-pcm.png") });
 
@@ -81,6 +85,7 @@ async function statusText(page) {
   console.log(`A (Opus): up=${sa.up}B down=${sa.down}B opusUp=${sa.opusUp}B opusDown=${sa.opusDown}B texts=${sa.texts} → ${aKbit} kbit/s`);
   console.log(`B (PCM) : up=${sb.up}B down=${sb.down}B pcmDown=${sb.pcmDown}B texts=${sb.texts} → ${bKbit} kbit/s`);
   console.log(`statusA=${JSON.stringify(statusA)} statusB=${JSON.stringify(statusB)}`);
+  console.log(`peerA=${JSON.stringify(peerA)} peerB=${JSON.stringify(peerB)}`);
   const errs = [...a.__errs, ...b.__errs];
   console.log("seitenfehler:", errs.length ? errs.slice(0, 6) : "keine");
 
@@ -93,6 +98,8 @@ async function statusText(page) {
     "A texts>0": sa.texts > 0,
     "B texts>0": sb.texts > 0,
     "A kbit<40": aKbit < 40,
+    "A sieht Partner Deutsch": peerA.includes("Deutsch"),
+    "B sieht Partner Chinesisch": peerB.includes("Chinesisch"),
     "keine pageerror": errs.length === 0,
   };
   console.log("--- CHECKS ---");

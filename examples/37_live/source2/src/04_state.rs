@@ -3,24 +3,31 @@
 //! Datenfluss: `06_relay` meldet Ein-/Austritt, `07_serve` liest fuer
 //! `/api/rooms`. Leere Raeume werden sofort geloescht.
 //!
+//! Neu (Nutzer-Feedback): Jeder Peer waehlt nur die EIGENE Sprache. Die
+//! Zielsprache seiner Uebersetzung ist automatisch die Sprache des Partners.
+//! Dafuer haelt jeder Peer einen `watch::Sender<Option<PeerInfo>>` mit der
+//! aktuellen Partner-Info; `join`/`leave` aktualisieren die Watches aller
+//! Peers des Raums (max. 2 Peers, also hoechstens ein Partner).
+//!
 //! Intern transportiert der Raum immer PCM 24 kHz (`Out::Pcm24`) oder
 //! Untertitel-Text (`Out::Text`). Ob ein Peer das Audio roh oder
 //! Opus-kodiert bekommt, entscheidet spaeter der Peer-Task selbst.
 
 use crate::config::Transport;
 use std::collections::HashMap;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, watch};
 
 /// Kanalpuffer pro Peer (Nachrichten, nicht Bytes).
 pub const PEER_BUFFER: usize = 256;
 
-/// Oeffentliche Beschreibung eines Peers (fuer `peers`-Events, `/api/rooms`).
+/// Oeffentliche Beschreibung eines Peers (fuer `/api/rooms`, Partner-Info).
+///
+/// Es gibt KEIN `target` mehr: die Zielsprache ergibt sich aus der Sprache
+/// des Partners (siehe Modul-Doku).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PeerInfo {
     /// Sprache, die der Peer spricht (z. B. `de`).
     pub lang: String,
-    /// Zielsprache, die der Peer hoeren will (z. B. `zh-Hans`).
-    pub target: String,
     /// Transportart dieses Peers (PCM oder Opus-Sparmodus).
     pub transport: Transport,
 }
@@ -31,18 +38,23 @@ pub struct PeerInfo {
 pub enum Out {
     /// Audio als PCM 24 kHz, 16 Bit mono, Little-Endian.
     Pcm24(Vec<u8>),
-    /// Text-JSON (z. B. `peers`-Event oder Untertitel).
+    /// Text-JSON (z. B. `partner`-Event oder Untertitel).
     Text(String),
 }
 
 /// Sendekanal zu genau einem Peer.
 pub type PeerTx = mpsc::Sender<Out>;
 
-/// Ein Peer-Eintrag: Sendekanal plus oeffentliche Info.
-#[derive(Debug, Clone)]
+/// Empfaenger fuer die Partner-Info dieses Peers (`None` = kein Partner).
+pub type PartnerRx = watch::Receiver<Option<PeerInfo>>;
+
+/// Ein Peer-Eintrag: Sendekanal, oeffentliche Info und Partner-Watch.
+#[derive(Debug)]
 struct Peer {
     tx: PeerTx,
     info: PeerInfo,
+    /// Sender fuer die Partner-Info DIESES Peers. `leave`/`join` setzen ihn.
+    partner_tx: watch::Sender<Option<PeerInfo>>,
 }
 
 /// Thread-sichere Registry: Raumname → (Peer-Id → Peer).
@@ -61,24 +73,38 @@ impl Rooms {
         }
     }
 
-    /// Peer eintragen. Gibt `false` zurueck, wenn der Raum voll ist.
-    pub async fn join(&self, room: &str, id: u64, tx: PeerTx, info: PeerInfo) -> bool {
+    /// Peer eintragen. Gibt `Some(receiver)` mit der Partner-Watch zurueck,
+    /// oder `None`, wenn der Raum voll ist. Beim Beitritt werden die Watches
+    /// aller Peers des Raums auf den (nun) aktuellen Partner aktualisiert.
+    pub async fn join(&self, room: &str, id: u64, tx: PeerTx, info: PeerInfo) -> Option<PartnerRx> {
         let mut g = self.inner.lock().await;
         let peers = g.entry(room.to_owned()).or_default();
         if peers.len() >= self.max_peers {
-            return false;
+            return None;
         }
-        peers.insert(id, Peer { tx, info });
-        true
+        let (partner_tx, partner_rx) = watch::channel(None);
+        peers.insert(
+            id,
+            Peer {
+                tx,
+                info,
+                partner_tx,
+            },
+        );
+        refresh_partners(peers);
+        Some(partner_rx)
     }
 
-    /// Peer austragen; leere Raeume verschwinden.
+    /// Peer austragen; leere Raeume verschwinden. Die Partner-Watches der
+    /// verbliebenen Peers werden aktualisiert (ihr Partner ist jetzt `None`).
     pub async fn leave(&self, room: &str, id: u64) {
         let mut g = self.inner.lock().await;
         if let Some(peers) = g.get_mut(room) {
             peers.remove(&id);
             if peers.is_empty() {
                 g.remove(room);
+            } else {
+                refresh_partners(peers);
             }
         }
     }
@@ -109,20 +135,9 @@ impl Rooms {
         n
     }
 
-    /// Nachricht an alle Peers im Raum inkl. Sender (fuer `peers`-Events).
-    pub async fn send_all(&self, room: &str, out: Out) {
-        let g = self.inner.lock().await;
-        let Some(peers) = g.get(room) else {
-            return;
-        };
-        for peer in peers.values() {
-            let _ = peer.tx.try_send(out.clone());
-        }
-    }
-
     /// Nachricht an genau einen Peer (`to`) zustellen. `true`, wenn der Peer
     /// existiert und die Nachricht angenommen wurde. Fuer direkte Antworten
-    /// (`ready`, eigener Untertitel, Fehler) an einen einzelnen Peer.
+    /// (`ready`, `waiting`, eigener Untertitel, Fehler) an einen Peer.
     pub async fn send_to(&self, room: &str, to: u64, out: Out) -> bool {
         let g = self.inner.lock().await;
         g.get(room)
@@ -131,7 +146,7 @@ impl Rooms {
             .unwrap_or(false)
     }
 
-    /// Peer-Infos eines Raums (fuer `peers`-Events).
+    /// Peer-Infos eines Raums (fuer Tests/Diagnose).
     pub async fn infos(&self, room: &str) -> Vec<PeerInfo> {
         let g = self.inner.lock().await;
         g.get(room)
@@ -148,6 +163,20 @@ impl Rooms {
     }
 }
 
+/// Jedem Peer des Raums seinen aktuellen Partner in die Watch schreiben.
+/// Bei max. 2 Peers ist der Partner der jeweils ANDERE Peer (oder `None`).
+fn refresh_partners(peers: &HashMap<u64, Peer>) {
+    for (id, peer) in peers.iter() {
+        let partner = peers
+            .iter()
+            .find(|(other_id, _)| *other_id != id)
+            .map(|(_, other)| other.info.clone());
+        // Nur senden, wenn sich etwas geaendert hat (watch dedupliziert via
+        // send_if_modified; hier reicht send, der Receiver sieht den Wert).
+        let _ = peer.partner_tx.send(partner);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,7 +184,6 @@ mod tests {
     fn info(lang: &str, transport: Transport) -> PeerInfo {
         PeerInfo {
             lang: lang.to_owned(),
-            target: "zh-Hans".to_owned(),
             transport,
         }
     }
@@ -167,12 +195,21 @@ mod tests {
     #[tokio::test]
     async fn dritter_peer_bei_max_zwei_abgewiesen() {
         let r = Rooms::new(2);
-        assert!(r.join("a", 1, chan(), info("de", Transport::Pcm)).await);
+        assert!(
+            r.join("a", 1, chan(), info("de", Transport::Pcm))
+                .await
+                .is_some()
+        );
         assert!(
             r.join("a", 2, chan(), info("zh-Hans", Transport::Opus))
                 .await
+                .is_some()
         );
-        assert!(!r.join("a", 3, chan(), info("en", Transport::Pcm)).await);
+        assert!(
+            r.join("a", 3, chan(), info("en", Transport::Pcm))
+                .await
+                .is_none()
+        );
         assert_eq!(r.count("a").await, 2);
     }
 
@@ -197,18 +234,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_all_erreicht_beide_snapshot_mit_transport() {
+    async fn snapshot_mit_transport() {
         let r = Rooms::new(2);
-        let (tx1, mut rx1) = mpsc::channel::<Out>(PEER_BUFFER);
-        let (tx2, mut rx2) = mpsc::channel::<Out>(PEER_BUFFER);
-        r.join("a", 1, tx1, info("de", Transport::Pcm)).await;
-        r.join("a", 2, tx2, info("zh-Hans", Transport::Opus)).await;
-
-        // send_all erreicht beide inkl. Sender.
-        r.send_all("a", Out::Text("{\"type\":\"peers\"}".to_owned()))
+        r.join("a", 1, chan(), info("de", Transport::Pcm)).await;
+        r.join("a", 2, chan(), info("zh-Hans", Transport::Opus))
             .await;
-        assert!(matches!(rx1.try_recv().unwrap(), Out::Text(t) if t.contains("peers")));
-        assert!(matches!(rx2.try_recv().unwrap(), Out::Text(t) if t.contains("peers")));
 
         // Snapshot enthaelt die Transportart je Peer.
         let snap = r.snapshot().await;
@@ -216,5 +246,33 @@ mod tests {
             snap.get("a").unwrap().iter().map(|p| p.transport).collect();
         transports.sort_by_key(|t| matches!(t, Transport::Opus));
         assert_eq!(transports, vec![Transport::Pcm, Transport::Opus]);
+    }
+
+    #[tokio::test]
+    async fn partner_watch_bei_join_und_leave() {
+        let r = Rooms::new(2);
+        // Erster Peer: Partner-Watch startet ohne Partner.
+        let mut rx1 = r
+            .join("a", 1, chan(), info("de", Transport::Pcm))
+            .await
+            .unwrap();
+        assert_eq!(*rx1.borrow_and_update(), None);
+
+        // Zweiter Peer tritt bei: beide sehen jetzt den jeweils anderen.
+        let mut rx2 = r
+            .join("a", 2, chan(), info("zh-Hans", Transport::Opus))
+            .await
+            .unwrap();
+        assert!(rx1.has_changed().unwrap());
+        assert_eq!(
+            *rx1.borrow_and_update(),
+            Some(info("zh-Hans", Transport::Opus))
+        );
+        assert_eq!(*rx2.borrow_and_update(), Some(info("de", Transport::Pcm)));
+
+        // Peer 2 geht: Peer 1 sieht wieder keinen Partner.
+        r.leave("a", 2).await;
+        assert!(rx1.has_changed().unwrap());
+        assert_eq!(*rx1.borrow_and_update(), None);
     }
 }

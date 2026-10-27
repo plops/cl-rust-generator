@@ -1,12 +1,18 @@
 // app.js — Steuerung: Sprachen laden, UI, PCM- und Opus-Pfad, Statistik.
 // Setzt 01_audio.js (Resampling, Queue) und 02_opus.js (WebCodecs) voraus;
 // index.html laedt die drei Dateien in dieser Reihenfolge.
+//
+// Neu (Nutzer-Feedback): Jeder waehlt NUR die eigene Sprache. Die Zielsprache
+// der eigenen Uebersetzung ist automatisch die Sprache des Partners im Raum.
+// Der Server schickt dazu persoenliche `partner`-Events. Im PCM-Modus baut der
+// Browser seine Gemini-Verbindung erst auf, wenn ein Partner bekannt ist, und
+// neu bei jedem Partnerwechsel.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
 const el = {
-  key: $("apiKey"), room: $("roomName"), speak: $("langSpeak"), hear: $("langHear"),
-  swap: $("swap"), connect: $("connectBtn"), disconnect: $("disconnectBtn"),
+  key: $("apiKey"), room: $("roomName"), speak: $("langSpeak"),
+  connect: $("connectBtn"), disconnect: $("disconnectBtn"),
   status: $("status"), peer: $("peerInfo"), kbUp: $("kbUp"), kbDown: $("kbDown"),
   subs: $("subs"), trPcm: $("trPcm"), trOpus: $("trOpus"), trOpusLabel: $("trOpusLabel"),
   opusHint: $("opusHint"),
@@ -23,22 +29,24 @@ window.__stats = { up: 0, down: 0, opusUp: 0, opusDown: 0, pcmDown: 0, texts: 0 
 const win = { up: [], down: [] };
 let ctx = null, mic = null, proc = null, geminiWs = null, roomWs = null;
 let queue = null, upOpus = null, downOpus = null, live = false;
+let transportMode = "pcm";        // aktueller Transport dieser Sitzung
+let partner = null;               // {lang, transport} oder null
+let langNames = {};               // code → Anzeigename (aus /api/languages)
 
 // ---- Sprachen laden ----------------------------------------------------
 async function loadLanguages() {
   const base = location.pathname.replace(/\/[^/]*$/, "");
   const r = await fetch(`${base}/api/languages`);
   const j = await r.json();
-  for (const sel of [el.speak, el.hear]) {
-    sel.innerHTML = "";
-    for (const l of j.languages) {
-      const o = document.createElement("option");
-      o.value = l.code; o.textContent = `${l.name} (${l.code})`;
-      sel.appendChild(o);
-    }
+  el.speak.innerHTML = "";
+  langNames = {};
+  for (const l of j.languages) {
+    langNames[l.code] = l.name;
+    const o = document.createElement("option");
+    o.value = l.code; o.textContent = `${l.name} (${l.code})`;
+    el.speak.appendChild(o);
   }
   el.speak.value = j.default_lang;
-  el.hear.value = j.default_target;
 }
 
 // ---- WebCodecs-Verfuegbarkeit pruefen ----------------------------------
@@ -85,16 +93,23 @@ function setStatus(t, isLive) {
 function setUI(active) {
   el.connect.disabled = active;
   el.disconnect.disabled = !active;
-  for (const e of [el.key, el.room, el.speak, el.hear, el.swap, el.trPcm, el.trOpus]) e.disabled = active;
+  for (const e of [el.key, el.room, el.speak, el.trPcm, el.trOpus]) e.disabled = active;
 }
 
-// ---- WS-URL zum Relay (subpfad-faehig) ----------------------------------
+// Partner-Anzeige: „Partner spricht: <Name> · <Normal|Sparmodus>" bzw. Warten.
+function renderPartner() {
+  if (!partner) { el.peer.textContent = "Warte auf Partner…"; return; }
+  const name = langNames[partner.lang] || partner.lang;
+  const modus = partner.transport === "opus" ? "Sparmodus" : "Normal";
+  el.peer.textContent = `Partner spricht: ${name} · ${modus}`;
+}
+
+// ---- WS-URL zum Relay (subpfad-faehig) — ohne target! -------------------
 function relayUrl(transport) {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const base = location.pathname.replace(/\/[^/]*$/, "");
   const p = new URLSearchParams({
-    room: el.room.value.trim(), transport,
-    lang: el.speak.value, target: el.hear.value,
+    room: el.room.value.trim(), transport, lang: el.speak.value,
   });
   return `${proto}//${location.host}${base}/ws?${p}`;
 }
@@ -102,22 +117,21 @@ function relayUrl(transport) {
 // ---- Start / Stop -------------------------------------------------------
 el.connect.addEventListener("click", start);
 el.disconnect.addEventListener("click", cleanup);
-el.swap.addEventListener("click", () => {
-  const a = el.speak.value; el.speak.value = el.hear.value; el.hear.value = a;
-});
 
 async function start() {
   const room = el.room.value.trim();
   if (!room) return alert("Bitte Raumnamen angeben!");
   localStorage.setItem("live_silk_room", room);
-  const transport = el.trOpus.checked ? "opus" : "pcm";
+  transportMode = el.trOpus.checked ? "opus" : "pcm";
+  partner = null;
+  renderPartner();
   setUI(true);
   setStatus("Initialisiere Audio…");
   try {
     ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
     await ctx.resume();
     queue = new GaplessQueue(ctx);
-    if (transport === "opus") await startOpus();
+    if (transportMode === "opus") await startOpus();
     else await startPcm();
   } catch (e) {
     setStatus("Fehler: " + e.message);
@@ -126,26 +140,40 @@ async function start() {
 }
 
 // ---- PCM-Pfad: Browser spricht selbst mit Gemini -----------------------
+// Verbindung zu Gemini entsteht erst, wenn ein Partner bekannt ist; sie wird
+// bei Partnerwechsel neu aufgebaut und geschlossen, wenn der Partner geht.
 async function startPcm() {
   const key = el.key.value.trim();
   if (!key) { setStatus("Im Normalmodus wird ein API-Key benoetigt."); return cleanup(); }
   localStorage.setItem("live_silk_key", key);
   connectRelay("pcm");
+  // Mikro laeuft dauerhaft; sendet aber nur, wenn eine Gemini-Sitzung offen ist.
+  await startMic(false);
+  // Nur „warten" anzeigen, wenn inzwischen noch kein Partner da ist (sonst
+  // hat onPartner bereits openGemini angestossen).
+  if (!partner) setStatus("Warte auf Partner…");
+}
+
+// Gemini-Sitzung (PCM) fuer die aktuelle Partner-Sprache oeffnen.
+function openGemini() {
+  if (!partner) return;
+  const key = el.key.value.trim();
+  const target = partner.lang;
+  const echo = (el.speak.value === partner.lang);
+  closeGemini();
   setStatus("Verbinde zu Gemini…");
   geminiWs = new WebSocket(`${GEMINI_BASE}?key=${key}`);
   geminiWs.onopen = () => {
+    const translationConfig = { targetLanguageCode: target };
+    if (echo) translationConfig.echoTargetLanguage = true;
     geminiWs.send(JSON.stringify({
       setup: {
         model: "models/gemini-3.5-live-translate-preview",
-        generationConfig: {
-          responseModalities: ["AUDIO"],
-          translationConfig: { targetLanguageCode: el.hear.value },
-        },
+        generationConfig: { responseModalities: ["AUDIO"], translationConfig },
         inputAudioTranscription: {},
         outputAudioTranscription: {},
       },
     }));
-    startMic(false);
   };
   geminiWs.onmessage = async (ev) => {
     const txt = ev.data instanceof Blob ? await ev.data.text() : ev.data;
@@ -156,7 +184,6 @@ async function startPcm() {
     for (const p of (sc.modelTurn?.parts || [])) {
       if (p.inlineData?.data) {
         const buf = b64ToBuf(p.inlineData.data);
-        // Eigene Uebersetzung an den Relay (Partner hoert sie).
         if (roomWs?.readyState === WebSocket.OPEN) {
           roomWs.send(buf.buffer); countUp(buf.byteLength);
         }
@@ -166,7 +193,11 @@ async function startPcm() {
     if (sc.outputTranscription?.text) subAndSend("out", sc.outputTranscription.text);
   };
   geminiWs.onerror = () => setStatus("Gemini-Fehler — API-Key pruefen.");
-  geminiWs.onclose = () => { if (live) setStatus("Gemini getrennt."); };
+  geminiWs.onclose = () => { if (live && partner) setStatus("Gemini getrennt."); };
+}
+
+function closeGemini() {
+  if (geminiWs) { geminiWs.onclose = null; try { geminiWs.close(); } catch {} geminiWs = null; }
 }
 
 // Transkript lokal zeigen und als Text an den Relay (fuer den Partner).
@@ -180,7 +211,7 @@ function subAndSend(dir, text) {
 // ---- Opus-Pfad: Sparmodus ----------------------------------------------
 async function startOpus() {
   connectRelay("opus");
-  setStatus("Sparmodus — verbinde…");
+  setStatus("Sparmodus — warte auf Partner…");
 }
 
 // Mikro starten; `opus` entscheidet Encoder-Pfad vs. Gemini-PCM.
@@ -197,6 +228,7 @@ async function startMic(opus) {
     if (opus) {
       if (upOpus) upOpus.pushInt16(int16);
     } else if (geminiWs?.readyState === WebSocket.OPEN) {
+      // Nur senden, wenn eine Gemini-Sitzung offen ist (Partner bekannt).
       const b64 = bufToB64(int16.buffer);
       const msg = JSON.stringify({ realtimeInput: { audio: { mimeType: "audio/pcm;rate=16000", data: b64 } } });
       geminiWs.send(msg); countUp(msg.length);
@@ -210,7 +242,6 @@ function connectRelay(transport) {
   roomWs.binaryType = "arraybuffer";
   roomWs.onopen = () => {
     if (transport === "opus") {
-      // hello mit optionalem Key (leer = Server-Key nutzen).
       roomWs.send(JSON.stringify({ type: "hello", key: el.key.value.trim() }));
       upOpus = new OpusUplink((buf) => {
         roomWs.send(buf); countUp(buf.byteLength); window.__stats.opusUp += buf.byteLength;
@@ -237,21 +268,40 @@ function connectRelay(transport) {
   roomWs.onclose = () => { if (live) setStatus("Relay getrennt."); };
 }
 
+// Reaktion auf einen Partnerwechsel (Join/Leave/Sprachwechsel).
+function onPartner(newPartner, transport) {
+  const before = partner ? partner.lang : null;
+  partner = newPartner;
+  renderPartner();
+  if (transport === "pcm") {
+    if (!partner) {
+      // Partner weg: Gemini schliessen (Mikro laeuft weiter, sendet nichts).
+      closeGemini();
+      setStatus("Warte auf Partner…");
+    } else if (partner.lang !== before) {
+      // Neuer/wechselnder Partner: Gemini mit neuer Zielsprache aufbauen.
+      openGemini();
+    }
+  }
+  // Opus-Modus: Status folgt waiting/ready vom Server.
+}
+
 function handleRelayText(m, transport) {
   switch (m.type) {
+    case "partner":
+      onPartner(m.partner || null, transport);
+      break;
+    case "waiting":
+      // Opus-Modus: Server hat (noch) keinen Partner → keine Sitzung.
+      setStatus("Warte auf Partner…");
+      break;
     case "ready":
-      // Opus-Pfad: jetzt erst Mikro starten und „Live!" melden.
-      if (transport === "opus") { startMic(true).catch((e) => setStatus("Mikro: " + e.message)); }
+      if (transport === "opus") {
+        // Mikro erst jetzt starten (Sitzung steht).
+        if (!mic) startMic(true).catch((e) => setStatus("Mikro: " + e.message));
+      }
       setStatus("Live!", true);
       break;
-    case "peers": {
-      const others = (m.peers || []).filter((p) => p.transport !== undefined);
-      el.peer.textContent = others.length > 1
-        ? `${others.length} im Raum` : (others.length === 1 ? "wartet…" : "—");
-      // genauer: Partner-Sprache zeigen, wenn genau 2.
-      if ((m.peers || []).length >= 2) el.peer.textContent = "verbunden";
-      break;
-    }
     case "text":
       addSub(m.who || "partner", m.dir || "", m.text || "");
       break;
@@ -266,11 +316,13 @@ function cleanup() {
   setUI(false);
   setStatus("Getrennt.");
   live = false;
+  partner = null;
+  renderPartner();
   if (proc) { proc.disconnect(); proc.onaudioprocess = null; proc = null; }
   if (mic) { mic.getTracks().forEach((t) => t.stop()); mic = null; }
   if (upOpus) { upOpus.close(); upOpus = null; }
   if (downOpus) { downOpus.close(); downOpus = null; }
-  if (geminiWs) { geminiWs.onclose = null; geminiWs.close(); geminiWs = null; }
+  closeGemini();
   if (roomWs) { roomWs.onclose = null; roomWs.close(); roomWs = null; }
   if (ctx && ctx.state !== "closed") { ctx.close(); ctx = null; }
 }
