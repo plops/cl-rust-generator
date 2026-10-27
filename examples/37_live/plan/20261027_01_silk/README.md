@@ -22,6 +22,7 @@ Stimmen-Spikes (2026-10-27):
 |---|---|---|
 | `spike/voice_probe.py` | Translate-Modell mit `speechConfig`: Stimme wird akzeptiert, aber die Ausgabe folgt der Stimme des Sprechers (F0 + Gemini-Urteil) | `uv run --with websockets --with numpy python voice_probe.py Charon` (bzw. `Kore`) |
 | `spike/voice_probe_live.py` | `gemini-3.8-live` + Dolmetsch-Anweisung: gewählte Stimme wird befolgt | `uv run --with websockets --with numpy python voice_probe_live.py Charon` oder mit Roh-PCM-Datei `x.raw` (spart TTS-Kontingent) |
+| `spike/vad_probe.py` | `gemini-3.8-live` als Dolmetscher bei DURCHGEHENDER Sprache: wie viel übersetztes Audio bei welcher `realtimeInputConfig`-Variante (Server-VAD liefert 0,0 s; eigene Segmentierung ~8–11 s). Beleg für die Segmentierung in `walkthrough.md` 2.14 | `uv run --with websockets --with numpy python vad_probe.py [SEG_S] translate\|default\|no_interrupt\|no_interrupt+fast_end\|manual3s` |
 
 Achtung: Die TTS-Referenz verbraucht Free-Tier-Kontingent (429 nach ~10
 Aufrufen); mit einer `.raw`-Datei (PCM 24 kHz) als Argument entfällt TTS.

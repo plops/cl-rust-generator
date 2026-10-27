@@ -10,6 +10,11 @@ Partner die Übersetzung hört): „Automatisch – eigene Stimme nachbilden"
 **101 Sprachen** beider Modelle sind wählbar, Default Deutsch ↔ Chinesisch,
 höchstens **2 Clients pro Raum**.
 
+> Hinweis: Das Live-Modell `gemini-3.8-live` übersetzt durchgehende Sprache nur
+> mit eigener Segmentierung (Server-VAD liefert sonst nichts). Client und
+> Server schneiden deshalb selbst in **~1,5–3 s**-Segmente; dadurch kommt die
+> Übersetzung mit leichter Verzögerung (siehe `walkthrough.md` 2.14).
+
 ## Start
 
 ```bash

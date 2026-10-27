@@ -445,6 +445,92 @@ kurzer Eingabe); eine Drossel über `realtimeInputConfig.automaticActivityDetect
 wurde erwogen, aber nicht gesetzt, weil kein belegter Vorteil vorlag und der
 Lauf grün war.
 
+### 2.14 Live-Modell braucht eigene Segmentierung
+
+**Das Problem.** Bei DURCHGEHENDER Sprache ohne Pause (≥ 0,3 s) übersetzte das
+`gemini-3.8-live`-Modell mit Server-VAD GAR NICHTS. Gemessen am Spike
+`spike/vad_probe.py` (30 s durchgehendes Mandarin mit Hintergrundmusik aus
+`/tmp/live-hil/mic-zh.wav`) und am echten HIL:
+
+| Variante | übersetztes Audio | erstes Audio |
+|---|---|---|
+| translate-preview (Vergleich) | 35,8 s | 3,0 s |
+| 3.8-live, automatische Sprecherkennung (VAD) default | 0,0 s | – |
+| 3.8-live, VAD + `activityHandling` NO_INTERRUPTION | 0,0 s | – |
+| 3.8-live, VAD + NO_INTERRUPTION + END_SENSITIVITY_HIGH + `silenceDurationMs` 300 | 0,0 s | – |
+| 3.8-live, VAD AUS, Client segmentiert selbst alle 3 s (`activityEnd`/`activityStart`) | 11,3 s, Deutsch korrekt | 3,8 s |
+| dito alle 2 s | 9,6 s | 2,7 s |
+| dito alle 5 s | 8,2 s | 6,2 s |
+
+Im echten HIL (vor der Änderung) kam A (hört B = 3.8-live) erst nach **17,7 s**
+Audio und insgesamt nur **4123 B Opus in 50 s**; B sah Platzhalter-Untertitel
+wie „(German translation pending)". Die Live-Transkription enthielt Artefakte
+wie `<no speech>` und `{pause}`.
+
+**Die Lösung: eigene Segmentierung statt Server-VAD.** Das Live-Setup bekommt
+`realtimeInputConfig {automaticActivityDetection:{disabled:true},
+activityHandling:"NO_INTERRUPTION"}`; der Client markiert die Sprecherwechsel
+selbst. Die Regel liegt als reine, unit-getestete Struktur `Segmenter` in
+`src/05b_segment.rs` (Konstanten `MIN_SEGMENT_MS` 1500, `MAX_SEGMENT_MS` 3000,
+`BLOCK_MS` 100, `QUIET_RMS_I16` 330 ≈ 0,01 normiert):
+
+```mermaid
+stateDiagram-v2
+  [*] --> Zu
+  Zu --> Offen: erster push / activityStart senden
+  Offen --> Offen: 100-ms-Block, RMS >= Schwelle ODER < MIN_SEGMENT_MS
+  Offen --> Zu: leiser 100-ms-Block ab MIN_SEGMENT_MS\nODER MAX_SEGMENT_MS erreicht / activityEnd nach dem Chunk
+  Zu --> Offen: nächster push / activityStart davor
+  Offen --> [*]: finish() / activityEnd (Sitzung schließt)
+```
+
+Reihenfolge am Netz bleibt immer `activityStart → Audio → … → activityEnd`;
+ein Schnitt schließt das aktuelle Segment nach dem Chunk, der nächste `push`
+öffnet das Folgesegment. **Opus-Pfad (Server):** der `Segmenter` läuft im
+Sende-Task von `gemini::connect` (nur bei Live, Flag `segment`), die Session
+sendet die Steuer-JSONs. **PCM-Pfad (Browser):** dieselbe Regel klein in
+`public/app.js` (`PcmSegmenter`); OB segmentiert wird, sagt der Server über das
+`partner`-Event (Feld `"segment":{"min_ms":1500,"max_ms":3000,"quiet_rms":0.01}`
+NUR bei Live) — keine eigene Modellentscheidung im JS.
+
+**Untertitel-Filter.** `segment::clean_subtitle` (Rust, unit-getestet) und
+`cleanSubtitle` (JS) entfernen `<…>`/`{…}`-Tokens (`<no speech>`, `{pause}`)
+und das Platzhalter-Wort „translation pending"; leere Untertitel werden nicht
+gesendet. Die Live-Systemanweisung nennt jetzt explizit Quell- UND Zielsprache
+und verbietet Platzhalter zu sprechen/schreiben; bei Stille soll nichts kommen.
+
+**Neue HIL-Zahlen (echtes Gemini, 50 s, Key maskiert `AIza…msBM`, Default-
+Stimmen → beide über `gemini-3.8-live`, F0 nach dem NCCF-Fix).** A (Opus,
+zh-Hans, Kore) 12 kbit/s, B (PCM, de, Charon) ~390 kbit/s. **Latenz drastisch
+besser:** erstes Partner-Audio bei A nach **3,4–8,7 s** (vorher 17,7 s).
+Richtung **B→A** (Deutsch→Chinesisch, saubere TTS) liefert **3,9–4,7 s** Audio,
+F0 Kore **185–200 Hz** (weiblich ✓), Übersetzung korrekt
+(`早上好，今天是个美好的一天，你怎么样？`). Richtung **A→B**
+(Chinesisch→Deutsch) bleibt schwach (**0,0–1,6 s**), F0 Charon **99–109 Hz**
+(männlich ✓). Untertitel sind jetzt sauber (keine `<…>`/`{…}`/„pending"), aber
+inhaltlich bei A→B oft Müll (`Chupapi Munyanyo`, `¿Qué?`).
+
+**Gegentest 2 s statt 3 s (mit Zahlen protokolliert).** `MAX_SEGMENT_MS` = 2000
+verschlechterte A→B von 1,6 s auf 0,0 s (opusDown 7143 B → 3275 B) — passend
+zum Spike, der bei 3,0 s das meiste Audio maß. Darum bei **3,0 s** belassen.
+
+**Ehrliche Bewertung (Kriterien NICHT aufgeweicht).** Die hil-real-PASS-Hürde
+„beide Richtungen ≥ 5 s Partner-Audio" wird mit den vorhandenen Fixture-WAVs
+nicht erreicht: `mic-zh.wav` ist durchgehendes Mandarin MIT Hintergrundmusik —
+das Live-Modell transkribiert daraus Müll statt kohärentem Chinesisch, also
+A→B bleibt dünn; `mic-de.wav` enthält nur ~6 s echte Sprache (3 kurze Sätze mit
+Pausen) in 15 s, daher deckelt B→A bei ~4,5 s. Die Segmentierung SELBST
+funktioniert nachweislich (B→A sauber übersetzt, korrekte Stimmen/F0, erstes
+Audio 3–8 s statt 17,7 s). Die Schwäche von A→B ist eine Eigenschaft des
+musik­belasteten Quell-WAV, kein Mechanik-Fehler.
+
+**Learning: F0-Messfehler.** `scripts/hil-real.js` schätzte F0 vorher per ROHER
+Autokorrelation und bevorzugte dadurch kurze Lags (mehr Fenster­überlappung) →
+systematisch zu hoch (Charon 166 statt ~110 Hz). Auf **normierte
+Kreuzkorrelation (NCCF)** umgestellt: Synth-Test 100–250 Hz exakt, Charon-TTS
+109 Hz, HIL Kore 185–224 Hz / Charon 99–129 Hz. Lehre: bei
+Autokorrelations-F0 immer über die Fenster­energie normieren.
+
 ## 3. Learnings und mögliche Erweiterungen
 
 Messung zur **Stimmenwahl** (Spike `spike/voice_probe.py`,
