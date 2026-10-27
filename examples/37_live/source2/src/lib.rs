@@ -16,3 +16,5 @@ pub mod relay;
 pub mod serve;
 #[path = "04_state.rs"]
 pub mod state;
+#[path = "08_status.rs"]
+pub mod status;
