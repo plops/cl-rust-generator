@@ -18,6 +18,7 @@ cargo run --release -- --listen 0.0.0.0:3000 --dir public --verbose
 ```
 
 Browser öffnen: `http://localhost:3000`
+Produktion hinter Nginx (`/silk/`, systemd, Key/Kosten): [`INSTALL.md`](INSTALL.md).
 Status: `/healthz`, Räume: `/api/rooms`, Sprachen: `/api/languages`.
 
 ## Modi
