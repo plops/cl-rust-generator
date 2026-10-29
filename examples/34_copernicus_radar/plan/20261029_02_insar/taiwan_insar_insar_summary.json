@@ -1,0 +1,26 @@
+{
+  "mode": "InSAR_TOPS",
+  "rows": 2518,
+  "cols": 2925,
+  "r_min_m": 799282.08,
+  "r_max_m": 962774.21,
+  "b_3d_m": 16.999,
+  "b_perp_m": -5.679,
+  "b_para_m": -16.022,
+  "b_radial_m": 9.188,
+  "b_cross_m": -14.302,
+  "dt_closest_approach_s": 0.049482,
+  "height_ambiguity_m": 2915.62,
+  "mean_coherence_raw": 0.1556,
+  "p90_coherence_raw": 0.3622,
+  "mean_coherence_filtered": 0.3512,
+  "p90_coherence_filtered": 0.7763,
+  "contrast_std_db": 5.869,
+  "goldstein_alpha": 0.65,
+  "elapsed_total_s": 129.391,
+  "swaths": [
+    { "swath": "IW1", "mean_burst_coherence": 0.1643, "da_px": 0.202, "dr_px": 6.732 },
+    { "swath": "IW2", "mean_burst_coherence": 0.3372, "da_px": 0.283, "dr_px": 5.941 },
+    { "swath": "IW3", "mean_burst_coherence": 0.2364, "da_px": 0.165, "dr_px": 5.129 }
+  ]
+}

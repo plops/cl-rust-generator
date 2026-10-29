@@ -265,6 +265,142 @@ pub mod sar_kernels {
             *o = cmul(*o, h);
         }
     }
+
+    /// TOPS InSAR: Kompensiert in-place die analytische stationäre TOPS-Restphase
+    /// $\exp(+j(2\pi f_{\text{DC,mid}} (\tau_{\text{foc}} - \tau_0) + \pi \frac{k_a(r) k_t}{k_a(r) - k_t} \tau_0^2))$,
+    /// sodass der fokussierte Burst zu einem reinen Zero-Doppler-Basisband-SLC wird.
+    #[kernel]
+    #[launch_bounds(256)]
+    #[launch_contract(domain = 1, block = (256, 1, 1))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn tops_insar_phase_comp_inplace(
+        mut buf: DisjointSlice<Complex32>,
+        veff: &[f64],
+        n_az_fft: u32,
+        n_rg: u32,
+        pri_s: f64,
+        r0_m: f64,
+        dr_m: f64,
+        lam: f64,
+        fdc_mid_hz: f64,
+        kt_hz_s: f64,
+    ) {
+        let idx = thread::index_1d();
+        let i = idx.get() as u32;
+        if i >= n_az_fft * n_rg {
+            return;
+        }
+        let a = i / n_rg;
+        let r = i % n_rg;
+        let ri = r as usize;
+        let mid_az = f64::from(n_az_fft) * 0.5;
+        let tau_foc = (f64::from(a) - mid_az) * pri_s;
+        let r_m = r0_m + f64::from(r) * dr_m;
+        let v = veff[ri];
+        let ka = -2.0 * v * v / (lam * r_m);
+        let keff = ka - kt_hz_s;
+        let tau_0 = tau_foc * (keff / ka);
+        let k_top = (ka * kt_hz_s) / keff;
+        let ph = 2.0 * PI * fdc_mid_hz * (tau_foc - tau_0) + PI * k_top * tau_0 * tau_0;
+        let rot = Complex32::new(ph.cos() as f32, ph.sin() as f32);
+        if let Some(o) = buf.get_mut(idx) {
+            *o = cmul(*o, rot);
+        }
+    }
+
+    /// TOPS InSAR: Sub-Pixel-bilineare komplexe Interpolation des Slave-Bursts auf das
+    /// Master-Burst-Gitter inklusive affinem Shift-Modell und Flat-Earth-/Ramp-Phasenabzug.
+    #[kernel]
+    #[launch_bounds(256)]
+    #[launch_contract(domain = 1, block = (256, 1, 1))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn insar_resample_and_ifg_kernel(
+        master: &[Complex32],
+        slave: &[Complex32],
+        mut ifg_out: DisjointSlice<Complex32>,
+        mut pm_out: DisjointSlice<f32>,
+        mut ps_out: DisjointSlice<f32>,
+        n_az: u32,
+        n_rg: u32,
+        da0: f64,
+        da_da: f64,
+        da_dr: f64,
+        dr0: f64,
+        dr_da: f64,
+        dr_dr: f64,
+        phi0: f64,
+        dphi_da: f64,
+        dphi_dr: f64,
+        dphi_dr2: f64,
+    ) {
+        let idx = thread::index_1d();
+        let i = idx.get() as u32;
+        if i >= n_az * n_rg {
+            return;
+        }
+        let a = i / n_rg;
+        let r = i % n_rg;
+        let af = f64::from(a) - f64::from(n_az) * 0.5;
+        let rf = f64::from(r) - f64::from(n_rg) * 0.5;
+
+        let da = da0 + da_da * af + da_dr * rf;
+        let dr = dr0 + dr_da * af + dr_dr * rf;
+        let sa = f64::from(a) + da;
+        let sr = f64::from(r) + dr;
+
+        let mut ig = Complex32::new(0.0, 0.0);
+        let mut pm = 0.0f32;
+        let mut ps = 0.0f32;
+
+        if sa >= 0.0
+            && sa < f64::from(n_az.saturating_sub(1))
+            && sr >= 0.0
+            && sr < f64::from(n_rg.saturating_sub(1))
+        {
+            let a0 = sa as u32;
+            let r0 = sr as u32;
+            let fa = (sa - f64::from(a0)) as f32;
+            let fr = (sr - f64::from(r0)) as f32;
+
+            let s00 = slave[(a0 * n_rg + r0) as usize];
+            let s01 = slave[(a0 * n_rg + r0 + 1) as usize];
+            let s10 = slave[((a0 + 1) * n_rg + r0) as usize];
+            let s11 = slave[((a0 + 1) * n_rg + r0 + 1) as usize];
+
+            let w00 = (1.0 - fa) * (1.0 - fr);
+            let w01 = (1.0 - fa) * fr;
+            let w10 = fa * (1.0 - fr);
+            let w11 = fa * fr;
+
+            let s_interp = Complex32::new(
+                w00 * s00.re + w01 * s01.re + w10 * s10.re + w11 * s11.re,
+                w00 * s00.im + w01 * s01.im + w10 * s10.im + w11 * s11.im,
+            );
+            let m_val = master[i as usize];
+            pm = m_val.re * m_val.re + m_val.im * m_val.im;
+            ps = s_interp.re * s_interp.re + s_interp.im * s_interp.im;
+
+            // M * conj(S)
+            let prod = Complex32::new(
+                m_val.re * s_interp.re + m_val.im * s_interp.im,
+                m_val.im * s_interp.re - m_val.re * s_interp.im,
+            );
+            // Flat-Earth- und Rampen-Kompensation exp(-j * phi_model)
+            let phi_mod = phi0 + dphi_da * af + dphi_dr * rf + dphi_dr2 * rf * rf;
+            let rot = Complex32::new(phi_mod.cos() as f32, (-phi_mod.sin()) as f32);
+            ig = cmul(prod, rot);
+        }
+
+        if let Some(o) = ifg_out.get_mut(idx) {
+            *o = ig;
+        }
+        if let Some(o) = pm_out.get_mut(thread::index_1d()) {
+            *o = pm;
+        }
+        if let Some(o) = ps_out.get_mut(thread::index_1d()) {
+            *o = ps;
+        }
+    }
 }
 
 /// Persistenter GPU-Kontext für Stripmap- und TOPS-SAR-Fokussierung.
@@ -584,5 +720,218 @@ impl GpuSarContext {
 
         let out = pad_dev.to_host_vec(&self.stream).map_err(err)?;
         Ok((out, n_az_fft, n_rg, steering))
+    }
+
+    /// Fokussiert einen TOPS-Burst für InSAR auf der GPU mit optional vorgegebenem
+    /// Referenz-Steering (`override_steering`) und wendet direkt im GPU-Speicher die
+    /// analytische stationäre TOPS-Restphasen-Kompensation (`tops_insar_phase_comp_inplace`) an.
+    pub fn focus_tops_burst_insar_gpu(
+        &self,
+        block: &BurstBlock,
+        apply_rcmc: bool,
+        override_steering: Option<TopsSteering>,
+    ) -> Result<(Vec<Complex32>, usize, usize, TopsSteering), Error> {
+        let n_az = block.n_az;
+        let n_rg = block.n_rg;
+        let pri_s = block.params.pri_s;
+        let prf = block.params.prf_hz;
+        let fs = block.params.fs_hz;
+        let chirp = ChirpParams {
+            txpsf_hz: block.params.tx_start_freq_hz,
+            txpl_s: block.params.tx_pulse_length_s,
+            txprr_hz_s: block.params.tx_ramp_rate_hz_s,
+            fs_hz: fs,
+        };
+
+        // 1. Range-Kompression auf der GPU
+        let n_raw_total = n_az * n_rg;
+        let rf_host = build_range_matched_filter(&chirp, n_rg, true);
+        let rf_dev = DeviceBuffer::from_host(&self.stream, &rf_host).map_err(err)?;
+        let mut rc_dev = DeviceBuffer::from_host(&self.stream, &block.raw).map_err(err)?;
+
+        let mut row_raw_plan = CufftPlan::plan_rows(n_rg, n_az)?;
+        row_raw_plan.set_stream(&self.stream)?;
+        unsafe {
+            row_raw_plan.exec_inplace(rc_dev.cu_deviceptr(), Direction::Forward)?;
+        }
+        let prep_rf = self
+            .module
+            .prepare_range_filter_inplace(Self::cfg_1d(n_raw_total))
+            .map_err(err)?;
+        self.module
+            .range_filter_inplace(
+                &self.stream,
+                &prep_rf,
+                &mut rc_dev,
+                &rf_dev,
+                n_raw_total as u32,
+                n_rg as u32,
+                1.0 / (n_rg as f32),
+            )
+            .map_err(err)?;
+        unsafe {
+            row_raw_plan.exec_inplace(rc_dev.cu_deviceptr(), Direction::Inverse)?;
+        }
+
+        // 2. Entweder Master-Steering schätzen oder übergebenes Referenz-Steering nutzen
+        let steering = if let Some(s) = override_steering {
+            s
+        } else {
+            let rc_host = rc_dev.to_host_vec(&self.stream).map_err(err)?;
+            estimate_tops_steering(&rc_host, n_az, n_rg, pri_s, &block.az_beam_addr)
+        };
+
+        // 3. GPU-Deramping + Padding auf n_az_fft
+        let r_mid = block.params.slant_range(n_rg / 2);
+        let veff_mid = block.veff[n_rg / 2];
+        let n_az_fft = tops_padded_az_len(n_az, pri_s, veff_mid, r_mid);
+        let pad_top = (n_az_fft - n_az) / 2;
+        let n_pad_total = n_az_fft * n_rg;
+
+        let mut pad_dev =
+            DeviceBuffer::<Complex32>::zeroed(&self.stream, n_pad_total).map_err(err)?;
+        let prep_deramp = self
+            .module
+            .prepare_tops_deramp_pad(Self::cfg_1d(n_pad_total))
+            .map_err(err)?;
+        self.module
+            .tops_deramp_pad(
+                &self.stream,
+                &prep_deramp,
+                &rc_dev,
+                &mut pad_dev,
+                n_az as u32,
+                n_az_fft as u32,
+                n_rg as u32,
+                pad_top as u32,
+                pri_s,
+                steering.fdc_mid_hz,
+                steering.kt_hz_s,
+            )
+            .map_err(err)?;
+
+        // 4. Spalten-FFT der Länge n_az_fft
+        let mut col_plan = CufftPlan::plan_strided(n_az_fft, n_rg, 1, n_rg)?;
+        col_plan.set_stream(&self.stream)?;
+        unsafe {
+            col_plan.exec_inplace(pad_dev.cu_deviceptr(), Direction::Forward)?;
+        }
+
+        // 5. Optionales RCMC im 2D-Frequenzbereich
+        if apply_rcmc {
+            let mut row_pad_plan = CufftPlan::plan_rows(n_rg, n_az_fft)?;
+            row_pad_plan.set_stream(&self.stream)?;
+            unsafe {
+                row_pad_plan.exec_inplace(pad_dev.cu_deviceptr(), Direction::Forward)?;
+            }
+            let prep_rcmc = self
+                .module
+                .prepare_tops_rcmc_inplace(Self::cfg_1d(n_pad_total))
+                .map_err(err)?;
+            self.module
+                .tops_rcmc_inplace(
+                    &self.stream,
+                    &prep_rcmc,
+                    &mut pad_dev,
+                    n_az_fft as u32,
+                    n_rg as u32,
+                    prf,
+                    fs,
+                    r_mid,
+                    veff_mid,
+                    LAMBDA,
+                    C_LIGHT,
+                    1.0 / (n_rg as f32),
+                )
+                .map_err(err)?;
+            unsafe {
+                row_pad_plan.exec_inplace(pad_dev.cu_deviceptr(), Direction::Inverse)?;
+            }
+        }
+
+        // 6. In-place Azimut-Kompression mit k_eff(r) = k_a(r) - k_t
+        let veff_dev = DeviceBuffer::from_host(&self.stream, &block.veff).map_err(err)?;
+        let prep_az = self
+            .module
+            .prepare_tops_az_compress_inplace(Self::cfg_1d(n_pad_total))
+            .map_err(err)?;
+        self.module
+            .tops_az_compress_inplace(
+                &self.stream,
+                &prep_az,
+                &mut pad_dev,
+                &veff_dev,
+                n_az_fft as u32,
+                n_rg as u32,
+                prf,
+                block.params.r0_m,
+                block.params.dr_m,
+                LAMBDA,
+                steering.kt_hz_s,
+                1.0 / (n_az_fft as f32),
+            )
+            .map_err(err)?;
+
+        // 7. Spalten-iFFT zurück in den fokussierten Azimut-Zeitbereich
+        unsafe {
+            col_plan.exec_inplace(pad_dev.cu_deviceptr(), Direction::Inverse)?;
+        }
+
+        let out = pad_dev.to_host_vec(&self.stream).map_err(err)?;
+        Ok((out, n_az_fft, n_rg, steering))
+    }
+
+    /// Berechnet das koregistrierte und Flat-Earth-kompensierte Burst-Interferogramm
+    /// `M * conj(S_resamp) * exp(-j * phi_model)` sowie `|M|^2` und `|S|^2` auf der GPU.
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+    pub fn resample_and_form_ifg_gpu(
+        &self,
+        master: &[Complex32],
+        slave: &[Complex32],
+        n_az: usize,
+        n_rg: usize,
+        da_coeffs: [f64; 3],
+        dr_coeffs: [f64; 3],
+        phi_coeffs: [f64; 4],
+    ) -> Result<(Vec<Complex32>, Vec<f32>, Vec<f32>), Error> {
+        let n_total = n_az * n_rg;
+        let m_dev = DeviceBuffer::from_host(&self.stream, master).map_err(err)?;
+        let s_dev = DeviceBuffer::from_host(&self.stream, slave).map_err(err)?;
+        let mut ifg_dev = DeviceBuffer::<Complex32>::zeroed(&self.stream, n_total).map_err(err)?;
+        let mut pm_dev = DeviceBuffer::<f32>::zeroed(&self.stream, n_total).map_err(err)?;
+        let mut ps_dev = DeviceBuffer::<f32>::zeroed(&self.stream, n_total).map_err(err)?;
+
+        let prep = self
+            .module
+            .prepare_insar_resample_and_ifg_kernel(Self::cfg_1d(n_total))
+            .map_err(err)?;
+        self.module
+            .insar_resample_and_ifg_kernel(
+                &self.stream,
+                &prep,
+                &m_dev,
+                &s_dev,
+                &mut ifg_dev,
+                &mut pm_dev,
+                &mut ps_dev,
+                n_az as u32,
+                n_rg as u32,
+                da_coeffs[0],
+                da_coeffs[1],
+                da_coeffs[2],
+                dr_coeffs[0],
+                dr_coeffs[1],
+                dr_coeffs[2],
+                phi_coeffs[0],
+                phi_coeffs[1],
+                phi_coeffs[2],
+                phi_coeffs[3],
+            )
+            .map_err(err)?;
+
+        let ifg = ifg_dev.to_host_vec(&self.stream).map_err(err)?;
+        let pm = pm_dev.to_host_vec(&self.stream).map_err(err)?;
+        let ps = ps_dev.to_host_vec(&self.stream).map_err(err)?;
+        Ok((ifg, pm, ps))
     }
 }

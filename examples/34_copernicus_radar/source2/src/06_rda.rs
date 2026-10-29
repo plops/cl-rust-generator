@@ -366,6 +366,106 @@ pub fn focus_tops_burst_cpu(
     (out, n_az_fft, n_rg, steering)
 }
 
+/// Fokussiert einen TOPS-Burst für InSAR auf der CPU mit optional vorgegebenem
+/// Referenz-Steering (`override_steering`) und wendet die analytische stationäre
+/// TOPS-Restphasen-Kompensation an, sodass ein reines Zero-Doppler-Basisband-SLC entsteht.
+pub fn focus_tops_burst_insar_cpu(
+    block: &BurstBlock,
+    apply_rcmc: bool,
+    override_steering: Option<TopsSteering>,
+) -> (Vec<Complex32>, usize, usize, TopsSteering) {
+    let n_az = block.n_az;
+    let n_rg = block.n_rg;
+    let pri_s = block.params.pri_s;
+    let prf_hz = block.params.prf_hz;
+    let fs_hz = block.params.fs_hz;
+
+    let chirp = ChirpParams {
+        txpsf_hz: block.params.tx_start_freq_hz,
+        txpl_s: block.params.tx_pulse_length_s,
+        txprr_hz_s: block.params.tx_ramp_rate_hz_s,
+        fs_hz,
+    };
+
+    let mut rc = block.raw.clone();
+    let rcomp = RangeCompressor::new(&chirp, n_rg);
+    rcomp.compress_matrix_parallel(&mut rc);
+
+    let steering = override_steering
+        .unwrap_or_else(|| estimate_tops_steering(&rc, n_az, n_rg, pri_s, &block.az_beam_addr));
+
+    let r_mid = block.params.slant_range(n_rg / 2);
+    let veff_mid = block.veff[n_rg / 2];
+    let n_az_fft = tops_padded_az_len(n_az, pri_s, veff_mid, r_mid);
+    let pad_top = (n_az_fft - n_az) / 2;
+    let mid_az = (n_az as f64) * 0.5;
+
+    let mut buf = vec![Nc32::new(0.0, 0.0); n_az_fft * n_rg];
+    for m in 0..n_az {
+        let t = (m as f64 - mid_az) * pri_s;
+        let ph = -2.0 * PI * steering.fdc_mid_hz * t - PI * steering.kt_hz_s * t * t;
+        let rot = Complex32::from_polar_unit(ph);
+        let src_row = &rc[m * n_rg..(m + 1) * n_rg];
+        let dst_row = &mut buf[(pad_top + m) * n_rg..(pad_top + m + 1) * n_rg];
+        for (dst, &src) in dst_row.iter_mut().zip(src_row.iter()) {
+            let c = src * rot;
+            *dst = Nc32::new(c.re, c.im);
+        }
+    }
+
+    let mut planner = FftPlanner::<f32>::new();
+    let col_fwd = planner.plan_fft_forward(n_az_fft);
+    let col_inv = planner.plan_fft_inverse(n_az_fft);
+    let fa_vec = fft_freqs_unshifted(n_az_fft, prf_hz);
+
+    process_columns_unshifted(&mut buf, n_az_fft, n_rg, &col_fwd);
+
+    if apply_rcmc {
+        let row_fwd = rcomp.row_fft_forward();
+        let row_inv = rcomp.row_fft_inverse();
+        let fr_vec = fft_freqs_unshifted(n_rg, fs_hz);
+        process_rows_parallel(&mut buf, n_rg, &row_fwd);
+        let scale_rg = 1.0 / (n_rg as f32);
+        for a in 0..n_az_fft {
+            let fa = fa_vec[a];
+            let d = d_factor(fa, veff_mid);
+            let shift_m = r_mid * (1.0 / d - 1.0);
+            let row = &mut buf[a * n_rg..(a + 1) * n_rg];
+            for (r, val) in row.iter_mut().enumerate() {
+                let ph = 4.0 * PI * fr_vec[r] * shift_m / C_LIGHT;
+                let (s, c) = ph.sin_cos();
+                *val = (*val * Nc32::new(c as f32, s as f32)) * scale_rg;
+            }
+        }
+        process_rows_parallel(&mut buf, n_rg, &row_inv);
+    }
+
+    let ka_vec: Vec<f64> = (0..n_rg)
+        .map(|r| ka_rate_hz_s(block.veff[r], block.params.slant_range(r)))
+        .collect();
+    let keff_vec: Vec<f64> = ka_vec.iter().map(|&ka| ka - steering.kt_hz_s).collect();
+
+    let scale_az = 1.0 / (n_az_fft as f32);
+    for a in 0..n_az_fft {
+        let fa = fa_vec[a];
+        let fa2 = fa * fa;
+        let row = &mut buf[a * n_rg..(a + 1) * n_rg];
+        for (r, val) in row.iter_mut().enumerate() {
+            let ph = PI * fa2 / keff_vec[r];
+            let (s, c) = ph.sin_cos();
+            *val = (*val * Nc32::new(c as f32, s as f32)) * scale_az;
+        }
+    }
+
+    process_columns_unshifted(&mut buf, n_az_fft, n_rg, &col_inv);
+
+    let out: Vec<Complex32> = buf
+        .into_iter()
+        .map(|c| Complex32::new(c.re, c.im))
+        .collect();
+    (out, n_az_fft, n_rg, steering)
+}
+
 /// Fokussiert einen Stripmap-Block (`BurstBlock`) auf der CPU mittels klassischem RDA.
 pub fn focus_stripmap_block_cpu(
     block: &BurstBlock,

@@ -11,6 +11,8 @@ pub mod ephem;
 pub mod gpu;
 #[path = "05_ingest.rs"]
 pub mod ingest;
+#[path = "11_insar.rs"]
+pub mod insar;
 #[path = "02_l0.rs"]
 pub mod l0;
 #[path = "10_mosaic.rs"]

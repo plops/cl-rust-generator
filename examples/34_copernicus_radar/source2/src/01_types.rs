@@ -66,6 +66,27 @@ impl Complex32 {
             im: self.im * s,
         }
     }
+
+    #[inline]
+    pub fn arg(self) -> f32 {
+        self.im.atan2(self.re)
+    }
+}
+
+impl std::ops::AddAssign for Complex32 {
+    #[inline]
+    fn add_assign(&mut self, rhs: Self) {
+        self.re += rhs.re;
+        self.im += rhs.im;
+    }
+}
+
+impl Mul<f32> for Complex32 {
+    type Output = Self;
+    #[inline]
+    fn mul(self, rhs: f32) -> Self {
+        self.scale(rhs)
+    }
 }
 
 impl Add for Complex32 {
@@ -157,6 +178,14 @@ impl Vec3d {
     #[inline]
     pub fn scale(self, s: f64) -> Self {
         Self::new(self.x * s, self.y * s, self.z * s)
+    }
+}
+
+impl Mul<f64> for Vec3d {
+    type Output = Self;
+    #[inline]
+    fn mul(self, rhs: f64) -> Self {
+        self.scale(rhs)
     }
 }
 

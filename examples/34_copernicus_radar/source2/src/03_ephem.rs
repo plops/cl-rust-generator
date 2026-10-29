@@ -118,6 +118,27 @@ fn lerp(a: f64, b: f64, f: f64) -> f64 {
     a + (b - a) * f
 }
 
+#[inline]
+fn hermite(p0: f64, v0: f64, p1: f64, v1: f64, dt: f64, f: f64) -> f64 {
+    let f2 = f * f;
+    let f3 = f2 * f;
+    let h00 = 2.0 * f3 - 3.0 * f2 + 1.0;
+    let h10 = f3 - 2.0 * f2 + f;
+    let h01 = -2.0 * f3 + 3.0 * f2;
+    let h11 = f3 - f2;
+    h00 * p0 + h10 * dt * v0 + h01 * p1 + h11 * dt * v1
+}
+
+#[inline]
+fn hermite_deriv(p0: f64, v0: f64, p1: f64, v1: f64, dt: f64, f: f64) -> f64 {
+    let f2 = f * f;
+    let dh00 = 6.0 * (f2 - f);
+    let dh10 = 3.0 * f2 - 4.0 * f + 1.0;
+    let dh01 = -dh00;
+    let dh11 = 3.0 * f2 - 2.0 * f;
+    (dh00 * p0 + dh01 * p1) / dt + dh10 * v0 + dh11 * v1
+}
+
 fn bracket(points: &[EphemPoint], t: f64) -> (EphemPoint, EphemPoint, f64) {
     if points.len() == 1 || t <= points[0].time_s {
         return (points[0], points[0], 0.0);
@@ -140,24 +161,158 @@ fn bracket(points: &[EphemPoint], t: f64) -> (EphemPoint, EphemPoint, f64) {
     (a, b, f)
 }
 
-/// Interpolierte ECEF-Position [m] zur Zeit `t` [s].
+/// Löst ein kleines symmetrisches Gleichungssystem `A * x = b` der Dimension `D` (Gauß-Jordan mit Pivotisierung).
+fn solve_sym<const D: usize>(mut a: [[f64; D]; D], mut b: [f64; D]) -> [f64; D] {
+    for i in 0..D {
+        let mut piv = i;
+        let mut max_v = a[i][i].abs();
+        for (r, row) in a.iter().enumerate().take(D).skip(i + 1) {
+            if row[i].abs() > max_v {
+                max_v = row[i].abs();
+                piv = r;
+            }
+        }
+        if max_v < 1e-14 {
+            continue;
+        }
+        if piv != i {
+            a.swap(i, piv);
+            b.swap(i, piv);
+        }
+        let inv = 1.0 / a[i][i];
+        for item in a[i].iter_mut().take(D).skip(i) {
+            *item *= inv;
+        }
+        b[i] *= inv;
+        for r in 0..D {
+            if r != i {
+                let f = a[r][i];
+                if f.abs() > 0.0 {
+                    for c in i..D {
+                        a[r][c] -= f * a[i][c];
+                    }
+                    b[r] -= f * b[i];
+                }
+            }
+        }
+    }
+    b
+}
+
+/// Glatte globale Polynom-Ausgleichung (Grad 3, gemeinsam angepasst an Position `pos` und
+/// Doppler-Geschwindigkeit `vel`) über den Szenen-Orbitbogen (`<= 180 s`).
+/// Liefert `(pos(t), vel(t))` ohne 1-Hz-GPS-Quantisierungssprünge, ohne Runge-Randfehler
+/// und mit exakt konsistenter analytischer Ableitung `vel(t) == d/dt pos(t)`.
+fn eval_smooth_orbit_poly(points: &[EphemPoint], t: f64) -> Option<(Vec3d, Vec3d)> {
+    if points.len() < 4 {
+        return None;
+    }
+    let t0 = points.first()?.time_s;
+    let t1 = points.last()?.time_s;
+    let span = t1 - t0;
+    if !(2.0..=180.0).contains(&span) {
+        return None;
+    }
+    let t_mid = 0.5 * (t0 + t1);
+    let half = 0.5 * span;
+
+    let mut ata = [[0.0f64; 4]; 4];
+    let mut atx = [0.0f64; 4];
+    let mut aty = [0.0f64; 4];
+    let mut atz = [0.0f64; 4];
+
+    // Gewichtung der Geschwindigkeits-Beobachtungen `half * v(u) = c1 + 2*c2*u + 3*c3*u^2`:
+    // Da die GPS-Doppler-Geschwindigkeit (`p.vel`) frei von den +-0.4 m entlang-Track-Positionssprüngen
+    // einzelner 1-Hz-Pakete ist, stabilisiert `w_vel` die 1. und 2. Ableitung bis an die Intervallränder.
+    let w_vel = 4.0f64;
+
+    for p in points {
+        let u = (p.time_s - t_mid) / half;
+        let u2 = u * u;
+        let b_pos = [1.0, u, u2, u2 * u];
+        let b_vel = [0.0, 1.0, 2.0 * u, 3.0 * u2];
+        let vx_scaled = p.vel.x * half;
+        let vy_scaled = p.vel.y * half;
+        let vz_scaled = p.vel.z * half;
+        for i in 0..4 {
+            for j in i..4 {
+                ata[i][j] += b_pos[i] * b_pos[j] + w_vel * b_vel[i] * b_vel[j];
+            }
+            atx[i] += b_pos[i] * p.pos.x + w_vel * b_vel[i] * vx_scaled;
+            aty[i] += b_pos[i] * p.pos.y + w_vel * b_vel[i] * vy_scaled;
+            atz[i] += b_pos[i] * p.pos.z + w_vel * b_vel[i] * vz_scaled;
+        }
+    }
+    for i in 0..4 {
+        for j in 0..i {
+            ata[i][j] = ata[j][i];
+        }
+    }
+
+    let cx = solve_sym(ata, atx);
+    let cy = solve_sym(ata, aty);
+    let cz = solve_sym(ata, atz);
+
+    let u = ((t - t_mid) / half).clamp(-1.5, 1.5);
+    let u2 = u * u;
+    let u3 = u2 * u;
+    let pos = Vec3d::new(
+        cx[0] + cx[1] * u + cx[2] * u2 + cx[3] * u3,
+        cy[0] + cy[1] * u + cy[2] * u2 + cy[3] * u3,
+        cz[0] + cz[1] * u + cz[2] * u2 + cz[3] * u3,
+    );
+    let inv_half = 1.0 / half;
+    let vel = Vec3d::new(
+        (cx[1] + 2.0 * cx[2] * u + 3.0 * cx[3] * u2) * inv_half,
+        (cy[1] + 2.0 * cy[2] * u + 3.0 * cy[3] * u2) * inv_half,
+        (cz[1] + 2.0 * cz[2] * u + 3.0 * cz[3] * u2) * inv_half,
+    );
+    Some((pos, vel))
+}
+
+/// Interpolierte ECEF-Position [m] zur Zeit `t` [s] mittels glatter Polynom-Ausgleichung (bzw. kubischer
+/// Hermite-Spline-Interpolation für kurze Punktlisten).
 pub fn interp_pos(points: &[EphemPoint], t: f64) -> Vec3d {
+    if let Some((pos, _)) = eval_smooth_orbit_poly(points, t) {
+        return pos;
+    }
     let (a, b, f) = bracket(points, t);
-    Vec3d::new(
-        lerp(a.pos.x, b.pos.x, f),
-        lerp(a.pos.y, b.pos.y, f),
-        lerp(a.pos.z, b.pos.z, f),
-    )
+    let dt = b.time_s - a.time_s;
+    if dt > 1e-4 && dt < 30.0 {
+        Vec3d::new(
+            hermite(a.pos.x, a.vel.x, b.pos.x, b.vel.x, dt, f),
+            hermite(a.pos.y, a.vel.y, b.pos.y, b.vel.y, dt, f),
+            hermite(a.pos.z, a.vel.z, b.pos.z, b.vel.z, dt, f),
+        )
+    } else {
+        Vec3d::new(
+            lerp(a.pos.x, b.pos.x, f),
+            lerp(a.pos.y, b.pos.y, f),
+            lerp(a.pos.z, b.pos.z, f),
+        )
+    }
 }
 
 /// Interpolierte ECEF-Geschwindigkeit [m/s] zur Zeit `t` [s].
 pub fn interp_vel(points: &[EphemPoint], t: f64) -> Vec3d {
+    if let Some((_, vel)) = eval_smooth_orbit_poly(points, t) {
+        return vel;
+    }
     let (a, b, f) = bracket(points, t);
-    Vec3d::new(
-        lerp(a.vel.x, b.vel.x, f),
-        lerp(a.vel.y, b.vel.y, f),
-        lerp(a.vel.z, b.vel.z, f),
-    )
+    let dt = b.time_s - a.time_s;
+    if dt > 1e-4 && dt < 30.0 {
+        Vec3d::new(
+            hermite_deriv(a.pos.x, a.vel.x, b.pos.x, b.vel.x, dt, f),
+            hermite_deriv(a.pos.y, a.vel.y, b.pos.y, b.vel.y, dt, f),
+            hermite_deriv(a.pos.z, a.vel.z, b.pos.z, b.vel.z, dt, f),
+        )
+    } else {
+        Vec3d::new(
+            lerp(a.vel.x, b.vel.x, f),
+            lerp(a.vel.y, b.vel.y, f),
+            lerp(a.vel.z, b.vel.z, f),
+        )
+    }
 }
 
 /// Inertiale Geschwindigkeit aus ECEF-Zustand: $\mathbf{v}_i = \mathbf{v}_e + \boldsymbol{\omega}_\oplus \times \mathbf{r}$.

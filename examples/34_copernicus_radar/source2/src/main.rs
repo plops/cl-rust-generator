@@ -4,6 +4,7 @@
 use sar_source2::chirp::{ChirpParams, RangeCompressor};
 use sar_source2::gpu::GpuSarContext;
 use sar_source2::ingest::load_l0_dataset;
+use sar_source2::insar::run_insar_pipeline;
 use sar_source2::mosaic::{
     DeburstedSwath, FocusedBurst, db_mean_std, deburst_swath, focus_stripmap_overlap_save,
     mosaic_swaths, power_to_db, save_cf_and_json, save_db_png,
@@ -15,12 +16,15 @@ use std::time::Instant;
 
 struct CliArgs {
     input: PathBuf,
+    slave: Option<PathBuf>,
     out_dir: PathBuf,
     prefix: String,
     use_cpu: bool,
     az_window: Option<(usize, usize)>,
     burst_range: Option<(usize, usize)>,
     multilook: Option<(usize, usize)>,
+    goldstein_alpha: f32,
+    coh_win: usize,
 }
 
 fn parse_pair(s: &str) -> Option<(usize, usize)> {
@@ -31,12 +35,15 @@ fn parse_pair(s: &str) -> Option<(usize, usize)> {
 fn parse_args() -> Result<CliArgs, Error> {
     let mut args = std::env::args().skip(1);
     let mut input: Option<PathBuf> = None;
+    let mut slave: Option<PathBuf> = None;
     let mut out_dir = PathBuf::from("out");
     let mut prefix = String::from("sar");
     let mut use_cpu = false;
     let mut az_window = None;
     let mut burst_range = None;
     let mut multilook = None;
+    let mut goldstein_alpha = 0.65f32;
+    let mut coh_win = 2usize;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -44,6 +51,12 @@ fn parse_args() -> Result<CliArgs, Error> {
                 input =
                     Some(PathBuf::from(args.next().ok_or_else(|| {
                         Error("Fehlendes Argument für --input".into())
+                    })?));
+            }
+            "--slave" | "--insar" | "-s" => {
+                slave =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        Error("Fehlendes Argument für --slave".into())
                     })?));
             }
             "--out-dir" | "-o" => {
@@ -87,6 +100,24 @@ fn parse_args() -> Result<CliArgs, Error> {
                         Error("Ungültiges Format für --multilook (laz,lrg)".into())
                     })?);
             }
+            "--goldstein-alpha" => {
+                let s = args
+                    .next()
+                    .ok_or_else(|| Error("Fehlendes Argument für --goldstein-alpha".into()))?;
+                goldstein_alpha = s
+                    .trim()
+                    .parse()
+                    .map_err(|_| Error("Ungültiges Float für --goldstein-alpha".into()))?;
+            }
+            "--coh-win" => {
+                let s = args
+                    .next()
+                    .ok_or_else(|| Error("Fehlendes Argument für --coh-win".into()))?;
+                coh_win = s
+                    .trim()
+                    .parse()
+                    .map_err(|_| Error("Ungültige Zahl für --coh-win".into()))?;
+            }
             other if !other.starts_with('-') && input.is_none() => {
                 input = Some(PathBuf::from(other));
             }
@@ -98,19 +129,22 @@ fn parse_args() -> Result<CliArgs, Error> {
 
     let input = input.ok_or_else(|| {
         Error(
-            "Aufruf: sar_source2 --input <datei.dat> [--out-dir out] [--prefix s6|iw|ew] [--cpu] [--az-window a0,a1] [--bursts b0,b1] [--multilook laz,lrg]"
+            "Aufruf: sar_source2 --input <master.dat> [--slave <slave.dat>] [--out-dir out] [--prefix s6|iw|ew] [--cpu] [--az-window a0,a1] [--bursts b0,b1] [--multilook laz,lrg] [--goldstein-alpha 0.65] [--coh-win 2]"
                 .into(),
         )
     })?;
 
     Ok(CliArgs {
         input,
+        slave,
         out_dir,
         prefix,
         use_cpu,
         az_window,
         burst_range,
         multilook,
+        goldstein_alpha,
+        coh_win,
     })
 }
 
@@ -150,6 +184,47 @@ fn run() -> Result<(), Error> {
             }
         }
     };
+
+    if let Some(ref slave_path) = cli.slave {
+        let ts0 = Instant::now();
+        println!(
+            "=== sar_source2 InSAR: Lade Slave-Level-0-Datensatz {} ===",
+            slave_path.display()
+        );
+        let slave_ds = load_l0_dataset(slave_path, cli.az_window, cli.burst_range)?;
+        println!(
+            "Slave Modus: {} | Pakete gesamt: {} | Echo-Pakete: {} | Orbit-Punkte: {} | Sub-Swaths: {} | Ingest: {:.2} s",
+            slave_ds.mode.as_str(),
+            slave_ds.total_packets,
+            slave_ds.echo_packets,
+            slave_ds.ephemeris.len(),
+            slave_ds.swaths.len(),
+            ts0.elapsed().as_secs_f64()
+        );
+        let summary = run_insar_pipeline(
+            &dataset,
+            &slave_ds,
+            gpu_opt.as_ref(),
+            cli.multilook,
+            cli.goldstein_alpha,
+            cli.coh_win,
+            &cli.out_dir,
+            &cli.prefix,
+        )?;
+        println!(
+            "=== InSAR Fertig: {} × {} Pixel, B_3D = {:.2} m, B_perp = {:+.2} m, Kohärenz roh = {:.3} (P90 {:.3}), gefiltert = {:.3} (P90 {:.3}), Zeit = {:.2} s ===",
+            summary.out_rg,
+            summary.out_az,
+            summary.baseline.b_3d_m,
+            summary.baseline.b_perp_m,
+            summary.mean_coherence_raw,
+            summary.p90_coherence_raw,
+            summary.mean_coherence_filtered,
+            summary.p90_coherence_filtered,
+            summary.elapsed_total_s
+        );
+        return Ok(());
+    }
 
     let t_foc_start = Instant::now();
     let mut debursted_swaths: Vec<DeburstedSwath> = Vec::with_capacity(dataset.swaths.len());
