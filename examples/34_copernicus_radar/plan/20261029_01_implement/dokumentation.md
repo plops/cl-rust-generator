@@ -27,14 +27,111 @@ Flugbahn │
                  867 km ──────────────────► 917 km Slant Range
 ```
 
-Warum macht man den Streifen nicht einfach 250 km oder 400 km breit, indem man länger zuhört?
-Weil zwischen zwei Sendepulsen nur $\text{PRI} = 1/\text{PRF} \approx 540\,\mu\text{s}$ Zeit liegen! Licht legt in dieser Zeit hin und zurück maximal $\frac{c \cdot \text{PRI}}{2} \approx 81\text{ km}$ Schrägentfernung zurück. Würde man die PRF senken, um ein breiteres Echo-Fenster zu öffnen, würde das Azimut-Dopplerspektrum ($\approx 1{,}2\text{ kHz}$ Breite) unterabgetastet (Aliasing) – im Bild entstünden Azimut-Geisterbilder.
+An dieser Stelle drängt sich sofort eine Frage auf: **Warum beleuchtet man nicht einfach einen 250 km oder 400 km breiten Streifen auf einmal und hört nach jedem Sendepuls einfach etwas länger zu?**
+
+Um zu verstehen, warum das physikalisch unmöglich ist, lohnt sich ein genauer Blick darauf, was oben am Satelliten im Mikrosekunden-Takt passiert. Es gibt nämlich **zwei harte physikalische Grenzen**, die direkt gegeneinander arbeiten:
+
+---
+
+#### Grenze 1: Das Zeitfenster zwischen zwei Pulsen begrenzt die Streifenbreite (Range-Eindeutigkeit)
+
+Dieselbe Antenne, die mit mehreren Kilowatt Leistung den Sendepuls abstrahlt, muss wenige Mikrosekunden später das milliardenfach schwächere Echo vom Boden empfangen. **Während der Satellit sendet (für $T_{\text{tx}} \approx 50\,\mu\text{s}$), muss der hochempfindliche Empfänger blind geschaltet werden**, sonst würde er sofort zerstört.
+
+Noch spannender: Ein Ziel am Boden ist $R_0 \approx 867\text{ km}$ weit weg. Ein Radarpuls braucht für den Hin- und Rückweg ($2 \cdot 867\text{ km} = 1734\text{ km}$) mit Lichtgeschwindigkeit ($c \approx 300\,000\text{ km/s}$):
+$$\tau_{\text{Laufzeit}} = \frac{2 R_0}{c} = \frac{1734\text{ km}}{300\,000\text{ km/s}} \approx 5780\,\mu\text{s} = 5{,}78\text{ ms}$$
+Der Satellit wartet aber *nicht* $5{,}78\text{ ms}$, bis dieses Echo wieder da ist, sondern feuert **alle $\text{PRI} = \frac{1}{\text{PRF}} \approx 540\,\mu\text{s}$** schon den nächsten Puls ab! Das bedeutet: Zu jedem Zeitpunkt sind **9 bis 10 Radarpulse gleichzeitig wie Perlen auf einer Schnur durch den Weltraum unterwegs** (im Paket-Header heißt diese Zahl `rank`, bei S6 ist `rank = 10`).
+
+Das Echo von Puls #1 darf am Satelliten **nur genau in der kurzen Sendepause zwischen dem Abfeuern von Puls #10 und Puls #11** eintreffen:
+
+```text
+Zeitachse an der Satelliten-Antenne (PRI = 540 µs zwischen zwei Sendepulsen):
+
+Sendepuls #10                                              Sendepuls #11
+  (50 µs)          Empfangsfenster ("Hörpause" ~440 µs)       (50 µs)
+┌─────────┐    ┌──────────────────────────────────────────┐  ┌─────────┐
+│  BLIND  │    │ Echo von Puls #1 trifft vom Boden ein!   │  │  BLIND  │
+│ (Senden)│    │ ◄─ Near Range (867 km)   Far Range (917)─►│  │ (Senden)│
+└─────────┘    └──────────────────────────────────────────┘  └─────────┘
+0 µs     50 µs  90 µs                                   530 µs        590 µs
+```
+
+Was passiert, wenn wir den beleuchteten Streifen am Boden einfach von $50\text{ km}$ auf $250\text{ km}$ Schrägentfernung verbreitern würden?
+1. Ein $250\text{ km}$ breiter Streifen hat zwischen seinem vorderen Rand (Near Range) und seinem hinteren Rand (Far Range) einen Laufzeitunterschied von:
+   $$\Delta\tau = \frac{2 \cdot \Delta R}{c} = \frac{2 \cdot 250\text{ km}}{300\,000\text{ km/s}} \approx 1667\,\mu\text{s}$$
+2. Unsere Pause zwischen zwei Sendepulsen ist aber nur $\approx 440\,\mu\text{s}$ lang!
+3. Das Echo aus $250\text{ km}$ Tiefe würde erst drei Sendepulse später eintreffen – und sich im Empfänger **zur exakt selben Mikrosekunde mit den Echos der nachfolgenden Pulse aus dem vorderen Streifenbereich überlagern (Range Ambiguity / Entfernungs-Mehrdeutigkeit)**:
+
+```text
+Wenn der Streifen breiter ist als c · PRI / 2 ≈ 81 km:
+
+Echo von Puls #1:  [Near 800 km ................. Far 950 km]
+Echo von Puls #2:                    [Near 800 km ................. Far 950 km]
+                                     ▲──────────▲
+                              Überlappung im Empfänger!
+                 (Stammt das Signal aus 920 km von Puls #1 oder aus 840 km von Puls #2?)
+```
+
+**Zwischenfazit 1:** Bei einer Pulspause von $\text{PRI} = 540\,\mu\text{s}$ legt das Licht in einer kompletten Periode hin und zurück maximal $\frac{c \cdot \text{PRI}}{2} \approx 81\text{ km}$ zurück (abzüglich Sendepulsdauer $T_{\text{tx}}$ und Schutzrändern bleiben real **ca. 50–70 km nutzbare Schrägentfernungs-Breite**).
+
+---
+
+#### Grenze 2: Warum senkt man dann nicht einfach die Pulswiederholfrequenz (PRF)?
+
+Jetzt liegt der nächste Gedanke nahe: *„Dann senden wir eben nicht alle $540\,\mu\text{s}$ ($\text{PRF} = 1850\text{ Hz}$), sondern warten zwischen zwei Pulsen viermal so lange ($\text{PRI} = 2200\,\mu\text{s}$, also $\text{PRF} = 450\text{ Hz}$)! Dann haben wir doch Platz für $300\text{ km}$ Streifenbreite!“*
+
+Genau hier schlägt die **zweite Grenze** zu: die **Azimut-Abtastung (der Doppler-Effekt in Flugrichtung)**.
+
+Warum schickt ein SAR überhaupt so viele Pulse pro Sekunde, obwohl sich der Satellit zwischen zwei Pulsen nur um $7590\text{ m/s} \cdot 0{,}54\text{ ms} \approx 4{,}1\text{ m}$ weiterbewegt?
+Weil der Radarstrahl in Flugrichtung eine gewisse Breite hat ($\Delta\theta_{\text{az}} \approx \frac{\lambda}{L_{\text{Antenne}}} \approx \frac{5{,}55\text{ cm}}{12{,}3\text{ m}} \approx 0{,}26^\circ$, am Boden rund $4\text{ km}$ breit). In jedem einzelnen Echo antworten gleichzeitig Ziele, die **schräg vor**, **genau neben** und **schräg hinter** dem Satelliten liegen:
+
+```text
+Blick von oben auf die Flugbahn (Satellit fliegt mit V_s ≈ 7.590 m/s nach rechts):
+
+                    [Satellit] ──────► V_s = 7.590 m/s
+                   ╱    │     ╲
+         Abstand  ╱     │      ╲  Abstand wird kleiner!
+       wird größer      │       ╲ (Satellit fliegt auf Ziel C zu)
+                ╱       │        ╲
+    ═══════════●════════●═════════●═══════════  Boden
+            Ziel A    Ziel B    Ziel C
+     Doppler: -617 Hz   0 Hz    +617 Hz
+              ◄─── Bandbreite B_az ≈ 1.234 Hz ───►
+```
+
+- Auf **Ziel C** (vorn am Rand der Antennenkeule) fliegt der Satellit zu: Dessen Echo kommt mit einer **positiven Doppler-Frequenz** von bis zu $f_{\max} \approx +\frac{V_s}{L_{\text{Antenne}}} \approx +\frac{7590\text{ m/s}}{12{,}3\text{ m}} \approx +617\text{ Hz}$ zurück.
+- **Ziel B** (genau querab) hat $0\text{ Hz}$ Doppler.
+- Von **Ziel A** (hinten am Rand der Keule) fliegt der Satellit weg: Dessen Echo hat bis zu $-617\text{ Hz}$ Doppler.
+
+Jedes Ziel durchläuft während des Vorbeiflugs genau diesen Tonverlauf von $+617\text{ Hz}$ nach $-617\text{ Hz}$ (den **Azimut-Doppler-Chirp** mit einer Gesamtbandbreite von $B_{\text{az}} = 2 \cdot 617\text{ Hz} \approx 1234\text{ Hz}$). Nur weil wir diesen Tonverlauf sauber aufzeichnen, können wir später Ziele A, B und C, die im selben Echo stecken, voneinander trennen und auf $5\text{ m}$ genau fokussieren!
+
+Und wie oft pro Sekunde messen („sampeln“) wir diesen Tonverlauf in Flugrichtung? **Genau einmal pro Sendepuls – unsere Abtastrate in Azimut ist also exakt die $\text{PRF}$!**
+
+Nach dem **Nyquist-Shannon-Abtasttheorem** muss die Abtastrate ($\text{PRF}$) für komplexe Signale zwingend größer sein als die im Signal enthaltene Doppler-Bandbreite $B_{\text{az}}$ (inklusive Sicherheitszuschlag für die abfallenden Flanken der Antennenkeule):
+$$\text{PRF}_{\min} > B_{\text{az}} \approx 1234\text{ Hz} \quad \Longrightarrow \quad \text{typisch } \text{PRF} \in [1450\text{ Hz}, \, 1900\text{ Hz}]$$
+
+Was passiert, wenn wir die PRF trotzdem auf z. B. $500\text{ Hz}$ absenken würden, um Platz für einen breiten Streifen zu schaffen?
+Dann ist das Doppler-Spektrum ($\pm 617\text{ Hz}$) breiter als unsere Abtastrate ($500\text{ Hz}$). Genau wie bei einem zu langsam gefilmten Speichenrad im Westernfilm, das sich plötzlich rückwärts zu drehen scheint (**Aliasing**), kann der Prozessor eine Frequenz von $+600\text{ Hz}$ (Ziel weit vorn) nicht mehr von $+100\text{ Hz}$ (Ziel fast querab) oder $-400\text{ Hz}$ (Ziel hinten) unterscheiden. Im fertigen Bild entstehen dadurch helle **Azimut-Geisterbilder (Azimuth Ambiguities)**: Ein Frachtschiff vor der Küste oder eine helle Hafenanlage erscheint plötzlich zweimal oder dreimal versetzt im offenen Meer!
+
+---
+
+#### Das SAR-Dilemma auf einen Blick
+
+Fasst man beide Gesetze zusammen, steht jeder Radar-Satellit vor einem fundamentalen Widerspruch:
+
+| Wunsch | Physikalische Forderung an die PRF | Konsequenz |
+| :--- | :--- | :--- |
+| **Breiter Streifen (großes $\Delta R$)** | **Niedrige PRF** (lange Pause $\text{PRI}$ zwischen zwei Pulsen), damit das Echo vom hinteren Streifenrand vor dem nächsten Sendepuls eintrifft. | $\Delta R_{\max} < \frac{c}{2 \cdot \text{PRF}}$ |
+| **Geisterfreie Azimut-Schärfe** | **Hohe PRF** (schnelles Feuern), damit die Doppler-Bandbreite $B_{\text{az}} \approx 1{,}2\text{ kHz}$ des Vorbeiflugs ohne Aliasing abgetastet wird. | $\text{PRF} > \frac{2 V_s}{L_{\text{Antenne}}} \approx 1{,}45\text{ kHz}$ |
+
+Setzt man $\text{PRF} \ge 1450\text{ Hz}$ oben ein, folgt unweigerlich: **Ein einzelner Radarstrahl aus dem Orbit kann niemals breiter als ca. 60–70 km Schrägentfernung sein!** Will man 250 km (IW) oder 400 km (EW) abdecken, *muss* man den Streifen in mehrere ca. 60–70 km schmale **Sub-Swaths** unterteilen, die jeweils einzeln die hohe PRF von ~1.500–1.900 Hz einhalten, und zeitlich zwischen ihnen hin- und herspringen.
 
 ### 1.2 Die Lösung von Sentinel-1: TOPS (IW und EW)
 
-Um trotz hoher PRF einen **250 km (IW)** oder **400 km (EW)** breiten Streifen abzubilden, teilt Sentinel-1 den Streifen in **3 Sub-Swaths (IW1–IW3)** bzw. **5 Sub-Swaths (EW1–EW5)** auf. Die Antenne springt zyklisch von Sub-Swath zu Sub-Swath und beleuchtet jeden Teilstreifen jeweils für einen kurzen **Burst** (~0,8 s bei IW, ~0,5 s bei EW).
+Um trotz hoher PRF einen **250 km (IW)** oder **400 km (EW)** breiten Streifen abzubilden, teilt Sentinel-1 den Streifen in **3 Sub-Swaths (IW1–IW3)** bzw. **5 Sub-Swaths (EW1–EW5)** auf. Jedes einzelne Sub-Swath ist nur ca. 60–85 km breit und passt damit problemlos in das $\approx 550\,\mu\text{s}$ kurze Hörfenster einer normalen PRF von $1.450\text{–}1.900\text{ Hz}$! Die Antenne springt nun zyklisch von Sub-Swath zu Sub-Swath und beleuchtet jeden Teilstreifen jeweils für einen kurzen **Burst** (~0,8 s bei IW, ~0,5 s bei EW).
 
-Damit dabei jedes Ziel am Boden von einer ausreichend langen synthetischen Apertur (und mit gleichem Antennenverlauf!) getroffen wird, **schwenkt die Antenne während jedes Bursts elektronisch in Flugrichtung (Azimut) von hinten nach vorne** – genau wie ein Leuchtturmstrahl, der den Bodenstreifen von hinten nach vorne überstreicht:
+Aber warum heißt das Verfahren bei Sentinel-1 **TOPS** (*Terrain Observation with Progressive Scans*) und nicht einfach ScanSAR wie bei älteren Satelliten (z. B. Envisat ASAR)?
+- Würde die Antenne während eines Bursts starr geradeaus zur Seite schauen (klassisches ScanSAR), dann würde ein Ziel am Anfang des Bursts nur noch vom hinteren, schwachen Rand der Antennenkeule gestreift, während ein Ziel in der Burst-Mitte das helle Zentrum der Keule abbekommt. Das Bild hätte alle paar Kilometer starke helle und dunkle Querstreifen (*Scalloping*) und ungleichmäßige Schärfe.
+- Deshalb macht Sentinel-1 bei jedem Burst einen eleganten Trick: **Während des Bursts schwenkt die Antenne elektronisch in Flugrichtung (Azimut) von hinten nach vorne** – genau wie ein Leuchtturmstrahl, der den Bodenstreifen zügig von hinten nach vorne überstreicht. Dadurch streicht über **jedes** Ziel im Burst einmal das gesamte Antennendiagramm (vom vorderen Rand über das helle Maximum bis zum hinteren Rand) hinweg!
 
 ```text
 TOPS-Prinzip (IW mit 3 Sub-Swaths, EW analog mit 5 Sub-Swaths):
