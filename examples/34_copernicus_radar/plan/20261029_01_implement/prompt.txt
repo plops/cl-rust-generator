@@ -1,0 +1,13 @@
+sc6chau dir ../20261028_01_architektur_ueberblick und auch die anderen plaene an
+ich habe in /workspace/src/cl-rust-generator/examples/34_copernicus_radar/data
+auch IW und EW datensaetze abgelegt.
+
+schreibe deinen neuen code in einen folder source2 (separat vom existierenden code)
+
+plane und implementiere das processing dieser daten
+du bist in einem docker container und hast zugriff auf nvidia gpu
+
+
+nutze deepwiki mcp und programmierkonventionen wie in den anderen prompts
+
+am ende sollst du wie immer ein walkthorugh dokument schreiben

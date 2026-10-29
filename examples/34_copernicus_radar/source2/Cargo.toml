@@ -1,0 +1,19 @@
+[package]
+name = "sar_source2"
+version = "0.1.0"
+edition = "2024"
+description = "Unified Sentinel-1 SAR Level-0 Decoder & Stripmap/TOPS (IW/EW) CPU/GPU Focuser"
+license = "MIT"
+
+[workspace]
+
+[dependencies]
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "a0cc6cc0bc18722ec5cdfbea136c118a7c051977" }
+cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "a0cc6cc0bc18722ec5cdfbea136c118a7c051977" }
+cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "a0cc6cc0bc18722ec5cdfbea136c118a7c051977" }
+memmap2 = "0.9"
+rustfft = "6.4"
+num-complex = "0.4"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[build-dependencies]
