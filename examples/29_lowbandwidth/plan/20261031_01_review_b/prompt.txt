@@ -1,0 +1,3 @@
+lies dier die plaene in plan/ durch und mache einen review vom code in source10_instrumentation. scrheibe den review in einen eneuen ordner in plan/ und plane eine verbesserte implementierung. setze diese in source10_instrumentation_b (neuer ordrner) um. gehe so vor wie bei den anderen entwicklungen (rust, tests mit realen daten, du bist in docker container und kannst deps installieren, nutze deepwiki, schreibe didaktikshc gutes handbuch und walkthrough).
+
+(nachtrag) if you can't test the cuda code, make the new implementatino cpu-only
