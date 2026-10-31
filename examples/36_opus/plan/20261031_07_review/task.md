@@ -43,40 +43,40 @@ Verifikation: `final_range` SILK 100 % (inkl. FEC, Stereo, 10–120 ms).
       ausser nach SILK→CELT-Redundanz), Redundanz beidseitig inkl.
       Storage-Kuerzung, Hybrid→SILK-Ausblend-Frame, PLC-Frames, `Budget`.
 - [x] `08_decode.rs`: `final_range` je Paket.
-- [ ] `tests/oracle.rs`: alle Fixtures (immer), grosse Dateien
+- [x] `tests/oracle.rs`: alle Fixtures (immer), grosse Dateien
       (`#[ignore]`), Budget-Identitaet, `opusenc --save-range`.
 
 Verifikation: `cargo test --test oracle` gruen; `--ignored` in Release gruen.
 
 ## R4 — Modell
 
-- [ ] `09b_model.rs`: `HopInfo` (ein Struct je Hop) statt 13 Vektoren,
+- [x] `09b_model.rs`: `HopInfo` (ein Struct je Hop) statt 13 Vektoren,
       Paket-Zusammenfassung (`PacketInfo`), Spalten Bitstrom/Dichte
       (gemessen), Divergenz; Hybrid ohne Sonderpfad.
-- [ ] Bestehende Werte-Orakel (Pitch, Huelle, Energie↔PCM) portieren.
+- [x] Bestehende Werte-Orakel (Pitch, Huelle, Energie↔PCM) portieren.
 
 ## R5 — Darstellung
 
-- [ ] Renderer: Budget-Lane (gestapelte Anteile je Hop), Legende.
-- [ ] Viewer-Hover: Budget-Zeile, Redundanz/LBRR/Stereo-Marker.
-- [ ] JSON-Schema 3 (`final_range`, `budget_bits`, `pulses`), Writer mit
+- [x] Renderer: Budget-Lane (gestapelte Anteile je Hop), Legende.
+- [x] Viewer-Hover: Budget-Zeile, Redundanz/LBRR/Stereo-Marker.
+- [x] JSON-Schema 3 (`final_range`, `budget_bits`, `pulses`), Writer mit
       Listen-Helfer statt Hand-Kommas.
-- [ ] Report: Budget-Anteile, FEC/Redundanz/Stereo-Zeilen, Regel-Tests.
-- [ ] `CliConfig` nach `12_cli.rs`.
+- [x] Report: Budget-Anteile, FEC/Redundanz/Stereo-Zeilen, Regel-Tests.
+- [x] `CliConfig` nach `12_cli.rs`.
 
 ## R6 — Gegenproben
 
-- [ ] `scripts/libopus_oracle.py` (`ctypes` auf `libopus.so.0`):
+- [x] `scripts/libopus_oracle.py` (`ctypes` auf `libopus.so.0`):
       JSON-`final_range` gegen libopus je Paket, alle Fixtures.
-- [ ] `opusenc --save-range` in `tests/oracle.rs`.
+- [x] `opusenc --save-range` in `tests/oracle.rs`.
 
 ## R7 — Hygiene + Smoke/HIL
 
-- [ ] `fmt`, `clippy -D warnings`, `cargo upgrade --dry-run`, Dateigroessen.
-- [ ] `scripts/smoke.sh` + `interact.sh` unter Xvfb gruen.
+- [x] `fmt`, `clippy -D warnings`, `cargo upgrade --dry-run`, Dateigroessen.
+- [x] `scripts/smoke.sh` + `interact.sh` unter Xvfb gruen.
 
 ## R8 — Doku + Commits
 
-- [ ] `source2/HANDBUCH.md`, `README.md`, `deps.md`.
-- [ ] `plan/20261031_07_review/walkthrough.md`.
-- [ ] Commits je Schritt pruefen (`git log --oneline`).
+- [x] `source2/HANDBUCH.md`, `README.md`, `deps.md`.
+- [x] `plan/20261031_07_review/walkthrough.md`.
+- [x] Commits je Schritt pruefen (`git log --oneline`).

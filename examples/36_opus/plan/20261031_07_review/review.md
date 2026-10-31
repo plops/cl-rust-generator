@@ -62,7 +62,8 @@ nachweislich falsch oder grau.
 ## E. Messung nach dem Umbau (Gegenprobe, `source2`)
 
 Nach Umsetzung von A1–A11 (siehe `plan.md`) laufen alle Pfade bis zum
-letzten Bit. Ergebnis `cargo run --release --example oracle`:
+letzten Bit. Ergebnis `examples/oracle.rs` (opus-pure) und
+`scripts/libopus_oracle.py` (libopus) — beide identisch:
 
 | Datensatz | Pakete | `final_range` gleich |
 |---|---|---|
@@ -70,7 +71,8 @@ letzten Bit. Ergebnis `cargo run --release --example oracle`:
 | `silk.opus` (Hybrid FB) | 61 641 | 61 641 |
 | `silk.webm`-Audio (CELT stereo) | 61 641 | 61 641 |
 | `rpQs3m5jtIM.webm`-Audio (CELT stereo) | 38 655 | 38 655 |
-| 22 erzeugte Fixtures (Stereo, FEC, 2,5–120 ms, NB/MB/WB/SWB/FB, Wechsel, DTX) | 14 185 | 14 185 (59 DTX-PLC ausgenommen) |
+| 25 Fixtures (3 alt + 22 aus `mkfixtures.sh`: Stereo, FEC, 2,5–120 ms, NB–FB, Wechsel mit Redundanz, DTX) | 11 707 | 11 707 (libopus 1.6.1, inkl. PLC = 0) |
+| 12 RFC-6716-Testvektoren (Encoder-`rng` im Vektor) | 20 075 | 20 075 |
 
 Damit ist jeder Befund aus A nicht nur behoben, sondern durch ein
 unabhaengiges Orakel belegt.
