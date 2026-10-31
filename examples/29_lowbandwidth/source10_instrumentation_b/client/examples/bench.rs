@@ -15,7 +15,11 @@
 //! Dieselbe Datei baut gegen source10 (`tools/bench10`) und source10_b
 //! (`cargo run --release -p lbw-client --example bench`) — echter A/B.
 //!
-//! `bench <log> [--from S] [--secs N] [--budget B/s] [--drain S] [-- <Server-Args>]`
+//! `bench <log> [--from S] [--secs N] [--budget B/s] [--channel B/s] [--drain S] [-- <Server-Args>]`
+//!
+//! `--budget` ist das Server-Budget, `--channel` die echte Kanalrate
+//! (Default = Budget). `--channel` < `--budget` modelliert einen stockenden
+//! Kanal, den der Server überschätzt — dann staut es sich wirklich.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -164,6 +168,7 @@ pub fn run(raw: &[String]) -> Report {
     let (own, srv_args) = (&raw[..split], raw.get(split + 1..).unwrap_or(&[]));
     let mut file = None;
     let (mut from, mut secs, mut budget, mut drain) = (0.0f64, 30.0f64, 6000.0f64, 15.0f64);
+    let mut channel: Option<f64> = None;
     let mut i = 0;
     while i < own.len() {
         let v = || own.get(i + 1).and_then(|s| s.parse::<f64>().ok());
@@ -172,6 +177,7 @@ pub fn run(raw: &[String]) -> Report {
             "--secs" => secs = v().expect("--secs N"),
             "--budget" => budget = v().expect("--budget B"),
             "--drain" => drain = v().expect("--drain S"),
+            "--channel" => channel = Some(v().expect("--channel B")),
             f => {
                 file = Some(f.to_owned());
                 i += 1;
@@ -256,14 +262,15 @@ pub fn run(raw: &[String]) -> Report {
     let mut fr = FrameReader::new();
     let mut buf = Vec::new();
     let t_start = Instant::now();
-    let (mut tokens, mut last) = (budget, Instant::now());
+    let chan = channel.unwrap_or(budget);
+    let (mut tokens, mut last) = (chan, Instant::now());
     let (mut bytes, mut tiles, mut max_msg, mut texts_rx) = (0usize, 0usize, 0usize, 0usize);
     let mut arrived: HashMap<(Rect, String), f64> = HashMap::new();
     let deadline = Duration::from_secs_f64(secs + drain);
     'outer: while t_start.elapsed() < deadline {
         // Token-Bucket: höchstens `budget` B/s vom Socket nehmen.
         let now = Instant::now();
-        tokens = (tokens + now.duration_since(last).as_secs_f64() * budget).min(budget);
+        tokens = (tokens + now.duration_since(last).as_secs_f64() * chan).min(chan);
         last = now;
         if tokens < 1.0 {
             std::thread::sleep(Duration::from_millis(2));
@@ -330,7 +337,7 @@ pub fn run(raw: &[String]) -> Report {
         bps: bytes as f64 / elapsed,
     };
     println!(
-        "bench: {file} Fenster {from:.0}+{secs:.0}s, Kanal {budget:.0} B/s, Server-Args {srv_args:?}"
+        "bench: {file} Fenster {from:.0}+{secs:.0}s, Budget {budget:.0} B/s, Kanal {chan:.0} B/s, Server-Args {srv_args:?}"
     );
     println!(
         "bench: Text-Latenz n={n} p50={:.0} p90={:.0} max={:.0} ms, fehlend {missing}",
