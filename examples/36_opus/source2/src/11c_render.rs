@@ -231,8 +231,13 @@ fn axes(img: &mut Image, lay: &Layout, t0_ms: f64, t1_ms: f64) {
     }
     while t <= t1_s + 1e-9 {
         let x = lay.plot_x + ((t - t0_s) / span * lay.plot_w as f64) as u32;
-        img.rect(x, lay.pitch_y + lay.pitch_h + 2, 1, 4, GRID);
-        img.text(x + 2, lay.pitch_y + lay.pitch_h + 3, &fmt_time(t, step), FG);
+        img.rect(x, lay.budget_y + lay.budget_h + 2, 1, 4, GRID);
+        img.text(
+            x + 2,
+            lay.budget_y + lay.budget_h + 3,
+            &fmt_time(t, step),
+            FG,
+        );
         t += step;
     }
 }

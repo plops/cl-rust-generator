@@ -1,5 +1,29 @@
 # Abhaengigkeiten (`<organization>/<projekt>`)
 
+**source2 (07_review, 2026-10-31):** unveraendert genau zwei Crates.
+`cargo tree -e normal --depth 1` → nur `opus-pure v0.2.2`;
+`cargo upgrade --dry-run` → `latest: minifb, opus-pure`. Neu genutzt wird
+nur ein schon vorhandenes API-Stueck: `OpusDecoder::final_range()` als
+Orakel (`08_decode.rs`). DeepWiki-Abfragen dazu:
+
+- `xiph/opus`: `opus_decode_frame` kuerzt bei Hybrid-Redundanz
+  `dec.storage` um die Redundanz-Bytes und setzt `rangeFinal = 0` fuer
+  Frames ≤ 1 Byte (PLC); `rangeFinal = dec.rng ^ redundant_rng`.
+- `stephenberry/opus-pure`: `final_range()` = `last_range`; leere
+  DTX-Payloads werden (anders als libopus) normal decodiert → das
+  opus-pure-Orakel klammert PLC-Frames aus, das libopus-Orakel nicht.
+
+Test-Werkzeuge (keine Crates, nur System):
+
+| Werkzeug | Herkunft (`<org>/<repo>`) | Wofuer |
+|---|---|---|
+| `libopus.so.0` (1.6.1) | `xiph/opus` | `scripts/libopus_oracle.py` (ctypes) |
+| `opusenc` | `xiph/opus-tools` | `--save-range` (Encoder-rng), DTX-Fixture |
+| `ffmpeg` (libopus) | `FFmpeg/FFmpeg` | `scripts/mkfixtures.sh` |
+| RFC-Testvektoren | opus-codec.org `opus_testvectors.tar.gz` → `/tmp/tv` | `tests/celt.rs` (20 075 Pakete, Encoder-rng) |
+| `xvfb`, `xdotool`, `scrot` | X.Org / `jordansissel/xdotool` | HIL `scripts/interact.sh` |
+
+
 Zwei Crates, sonst nur `std`: TOC-Parser, FFT, PNG-Writer, Font und
 CLI-Parsing sind eigener Code. `cargo upgrade --dry-run` (2026-10-11):
 beide auf `latest`. Stand 2026-10-13 (`05_verstehen`: Fakten, Report,

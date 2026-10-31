@@ -1,6 +1,6 @@
 #!/bin/sh
 # Smoke: bauen, Demo rendern, PNG/JSON pruefen, --show unter xvfb.
-# Aufruf: scripts/smoke.sh  (braucht ffprobe, python3, xvfb-run)
+# Aufruf: scripts/smoke.sh  (braucht ffprobe, python3, xvfb-run, libopus)
 set -eu
 cd "$(dirname "$0")/.."
 BIN=target/release/opus-vis
@@ -34,7 +34,9 @@ python3 -m json.tool /tmp/smoke.json > /dev/null
 python3 -c "
 import json
 d = json.load(open('/tmp/smoke.json'))
-assert d['schema'] == 2, d.get('schema')
+assert d['schema'] == 3, d.get('schema')
+assert d['bits']['final_range_equal'] == d['bits']['final_range_compared'] > 0, d['bits']
+assert all('budget_bits' in f for f in d['frames'])
 assert len(d['frames']) == 300, len(d['frames'])
 assert d['summary']['silk_frac'] > 0.4
 assert d['summary']['celt_frac'] > 0.4
@@ -72,6 +74,10 @@ assert d['summary']['silk_frac'] == 1.0, d['summary']
 assert all(f['mode'] == 'silk' and f['silk'] is not None for f in d['frames'])
 print('silk ok:', d['summary']['frames'], 'frames mit SILK')
 "
+
+echo "== orakel: fixture-matrix (opus-pure + libopus) =="
+cargo run -q --release --example oracle -- tests/data/*.opus tests/data/gen/*.opus | tail -3
+python3 scripts/libopus_oracle.py tests/data/*.opus tests/data/gen/*.opus | tail -1
 
 echo "== stdin/stdout-pfad =="
 ./$BIN - -o - --width 320 < /tmp/smoke_demo.opus > /tmp/smoke_stdout.png

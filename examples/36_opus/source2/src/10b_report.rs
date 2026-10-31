@@ -225,7 +225,7 @@ fn stille_zeile(pcm: &PcmFakten, enc: &EncoderFakten) -> String {
         .silence
         .iter()
         .take(5)
-        .map(|(t, d)| format!("{t:.1} s +{d:.1} s"))
+        .map(|(t, d)| format!("{:.1} s +{:.1} s", t / 1000.0, d / 1000.0))
         .collect();
     if pcm.silence.len() > 5 {
         parts.push(format!("... ({} insgesamt)", pcm.silence.len()));
@@ -558,6 +558,15 @@ mod tests {
         head.gain_db = 2.0;
         let s = erklaerungen(&a, &enc, &pcm, &head, &silk_f(0.0, 0.0));
         assert!(s.len() <= MAX_SAETZE, "{s:?}");
+    }
+
+    #[test]
+    fn stille_zeile_rechnet_ms_in_sekunden() {
+        // source1 druckte ms als Sekunden ("800.0 s" fuer 0,8 s).
+        let a = analysis(&[(Mode::Celt, 20.0)], &[64.0]);
+        let (enc, mut pcm, _, _) = fakten(&a, &[], None, 0);
+        pcm.silence = vec![(800.0, 200.0)];
+        assert_eq!(stille_zeile(&pcm, &enc), "0.8 s +0.2 s");
     }
 
     #[test]

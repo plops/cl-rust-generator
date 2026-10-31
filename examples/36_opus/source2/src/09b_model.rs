@@ -9,7 +9,7 @@
 //!   LPC-Huelle (Peak = 0 dB, relativ).
 //! - **Dichte**: *gelesene* Bits je Log-Bin. CELT-Baender tragen ihre
 //!   gemessenen Bits (Coarse+Fine+PVQ+Finalise), SILK-Bits werden nach
-//!   Huellen-Leistung ueber 0..Nyquist verteilt (SILK kennt keine Baender —
+//!   gedaempfter Huelle ueber 0..Nyquist verteilt (SILK kennt keine Baender —
 //!   das ist die einzige Modellannahme, im Handbuch erklaert).
 //!
 //! `source1` hielt dieselben Daten in 13 parallelen Vektoren; hier gibt es
@@ -300,14 +300,16 @@ fn hop_columns(
         (hop.silk_signal, hop.silk_pitch, hop.silk_gain) = (s.signal, s.pitch_hz, s.gains_db);
         let env = lpc_envelope_db(&s.nlsf_q15, s.order, s.fs_khz);
         col = env;
-        // SILK-Bits nach Huellen-Leistung bis zur SILK-Nyquist verteilen.
+        // SILK-Bits bis zur SILK-Nyquist verteilen, gewichtet mit der
+        // *gedaempften* Huelle (4. Wurzel der Leistung): Die rohe Huelle hat
+        // 40+ dB Dynamik und kippte alle Bits in einen Formant-Bin.
         let ny = s.fs_khz as f32 * 500.0;
         let w: Vec<f32> = env
             .iter()
             .enumerate()
             .map(|(j, v)| {
                 let f = FMIN * (FMAX / FMIN).powf((j as f32 + 0.5) / BINS as f32);
-                if f <= ny { 10.0f32.powf(v / 10.0) } else { 0.0 }
+                if f <= ny { 10.0f32.powf(v / 40.0) } else { 0.0 }
             })
             .collect();
         let tot: f32 = w.iter().sum();
@@ -392,7 +394,7 @@ pub struct Sources {
     pub model: Model,
     /// Divergenz-Spalten (dB, NaN wo kein Modell).
     pub divergence: Vec<[f32; BINS]>,
-    /// Globales Dichte-Maximum (Normierung).
+    /// Dichte-Normierung: 99-%-Perzentil aller Bin-Werte (Ausreisser-fest).
     pub density_max: f32,
 }
 
@@ -406,15 +408,15 @@ impl Sources {
         model.bitstream.truncate(n);
         model.density.truncate(n);
         let mut divergence = Vec::with_capacity(n);
-        let mut density_max = 0.0f32;
         for ((s, hop), (bs, den)) in stft
             .iter()
             .zip(&model.hops)
             .zip(model.bitstream.iter().zip(&model.density))
         {
+            let _ = den;
             divergence.push(divergence_col(s, bs, hop.celt || hop.silk));
-            density_max = den.iter().fold(density_max, |a, v| a.max(*v));
         }
+        let density_max = percentile99(&model.density);
         Self {
             spectrum: stft,
             model,
@@ -433,6 +435,21 @@ impl Sources {
             Source::Density => &self.model.density,
         }
     }
+}
+
+/// 99-%-Perzentil der positiven Dichtewerte (Farbskala der Ansicht 4).
+fn percentile99(cols: &[[f32; BINS]]) -> f32 {
+    let mut v: Vec<f32> = cols
+        .iter()
+        .flatten()
+        .copied()
+        .filter(|x| *x > 0.0)
+        .collect();
+    if v.is_empty() {
+        return 1e-6;
+    }
+    v.sort_by(f32::total_cmp);
+    v[(v.len() * 99 / 100).min(v.len() - 1)]
 }
 
 /// Divergenz STFT − Bitstrom in dB (`NaN` wo kein Modell).

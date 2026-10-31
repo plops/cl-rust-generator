@@ -395,3 +395,45 @@ fn huelle_ist_hop_spezifisch() {
     assert!(med(&null) <= 0.40, "Kontrolle unerwartet hoch");
     assert!(med(&own) - med(&null) >= 0.15, "kein Hop-Signal");
 }
+
+/// Real-Daten, Multi-Frame-Pakete (120 ms = 6 Opus-Frames je Paket, Code 3):
+/// `source1` las die Flags nur im ersten Payload und lag bei 39/67 Paketen
+/// mit der Tonhoehe daneben. Jetzt muss jeder Frame zur PCM-Autokorrelation
+/// passen — auch Frame 2..6 eines Pakets.
+#[test]
+fn pitch_folgt_autokorrelation_in_120ms_paketen() {
+    use opus_vis::decode::decode_mono;
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/gen/silk_120ms.opus"
+    );
+    let data = std::fs::read(path).unwrap();
+    let w = silk_walk(&data);
+    let dec = decode_mono(&data).unwrap();
+    let skip = read_packets(&data, data.len() as u64)
+        .unwrap()
+        .head
+        .pre_skip as usize;
+    let (mut ratios, mut s0) = (Vec::new(), 0usize);
+    for f in &w.frames {
+        let len = f.nb_subfr * 5 * 48;
+        if f.signal_type == 2 && s0 >= skip && s0 + len - skip <= dec.samples.len() {
+            let f0 = autocorr_f0(&dec.samples[s0 - skip..s0 + len - skip]);
+            if f0 > 0.0 {
+                ratios.push(f.pitch_hz[0] / f0);
+            }
+        }
+        s0 += len;
+    }
+    assert!(
+        ratios.len() > 100,
+        "zu wenig stimmhafte Frames: {}",
+        ratios.len()
+    );
+    let ok = ratios.iter().filter(|r| (**r - 1.0).abs() < 0.1).count();
+    eprintln!(
+        "120ms: {ok}/{} Frames ±10 % zur Autokorrelation",
+        ratios.len()
+    );
+    assert!(ok as f32 / ratios.len() as f32 > 0.8, "Pitch folgt nicht");
+}
