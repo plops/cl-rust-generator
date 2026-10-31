@@ -1,0 +1,29 @@
+Follow-up zu 20261011_01_init bis 20261013_06_silk (opus-vis in source1:
+PNG/JSON/Report, 4 Ansichten, interaktiver X11-Viewer, CELT- und
+SILK-Header-Walk, Hybrid-Dividende, 113 Tests gruen, 2 Crates).
+
+Auftrag (wortwoertlich, 2026-10-31):
+"lies dir die plaene in plan/ durch und mache einen review vom code in
+source1. schreibe den review in einen neuen ordner in plan/ und plane
+eine verbesserte implementierung. setze diese in source2 um. gehe so
+vor wie bei den anderen entwicklungen (rust, tests mit realen daten, du
+bist in docker container und kannst deps installieren, nutze deepwiki,
+schreibe didaktisch gutes handbuch und walkthrough)."
+
+Leitplanken (aus 01_init/prompt.txt, weiter gueltig):
+- Rust 2024, kleiner/uebersichtlicher Code, moeglichst wenig Deps
+  (Ziel: keine neue Crate), forbid(unsafe_code).
+- Datei-Aufteilung: < 600 Zeilen, eine Zustaendigkeit, zweistellige
+  Nummer nach Datenfluss; lib.rs/main.rs nur Verdrahtung.
+- cargo fmt, cargo clippy -D warnings, cargo upgrade.
+- deps.md mit <org>/<repo> fuer DeepWiki.
+- Tests mit realen Daten (silk.webm, silk.opus, silk_silk.opus,
+  rpQs3m5jtIM.webm neben source1), Unit + Integration + Smoke/HIL (xvfb).
+- Commits im Conventional-Commit-Format mit ausfuehrlicher Beschreibung.
+- Walkthrough + Handbuch auf Deutsch, didaktisch, Mermaid, Glossar,
+  Abkuerzungen bei Erstgebrauch erklaert, Beispiele aus echten Tests;
+  Struktur: was implementiert / Entscheidungen durch Tests / Learnings
+  + Erweiterungen / Pakete fuers Dockerfile.
+
+Ergebnis-Ordner: plan/20261031_07_review/ (prompt.txt, review.md,
+plan.md, task.md, walkthrough.md) und source2/ (inkl. HANDBUCH.md).
