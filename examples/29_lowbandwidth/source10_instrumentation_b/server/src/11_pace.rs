@@ -42,6 +42,19 @@ impl Pacer {
         self.pace_at(nbytes, Instant::now())
     }
 
+    /// Wie [`Pacer::new`], aber mit eigenem Eimer von `burst` Byte statt
+    /// 1 s Budget. HIL-Befund (source10_b): Mit 1-s-Eimer gingen nach einer
+    /// Kodierpause drei 2,4-kB-Streifen am Stück raus — Texte dahinter
+    /// warteten ~0,9 s im Tunnel. Ein Eimer von einer Kachel begrenzt das
+    /// auf eine Kachel-Leitungszeit.
+    #[must_use]
+    pub fn with_burst(budget_bps: u32, burst: usize) -> Self {
+        let mut p = Self::new(budget_bps);
+        p.max_allowance = (burst.max(1) as f64).min(p.budget_bps.max(burst as f64));
+        p.allowance = p.max_allowance;
+        p
+    }
+
     /// Wie [`Pacer::pace`], aber mit expliziter Uhr (deterministische Tests).
     pub fn pace_at(&mut self, nbytes: usize, now: Instant) -> Duration {
         let elapsed = now.saturating_duration_since(self.last).as_secs_f64();
@@ -160,6 +173,19 @@ mod tests {
         p.note_at(100, t0); // Text verbraucht das ganze Budget ...
         let w = p.pace_at(100, t0); // ... Tile wartet die volle Sekunde
         assert!((w.as_secs_f64() - 1.0).abs() < 1e-6, "{w:?}");
+    }
+
+    #[test]
+    fn small_burst_limits_back_to_back_tiles() {
+        let t0 = Instant::now();
+        let mut p = Pacer::with_burst(6000, 2400);
+        p.last = t0;
+        // Lange Pause: trotzdem nur 2400 B Guthaben → zweite Kachel wartet 0,4 s.
+        let t1 = t0 + Duration::from_secs(10);
+        assert_eq!(p.wait_for_at(2400, t1), Duration::ZERO);
+        p.note_at(2400, t1);
+        let w = p.wait_for_at(2400, t1);
+        assert!((w.as_secs_f64() - 0.4).abs() < 1e-9, "{w:?}");
     }
 
     #[test]

@@ -119,7 +119,14 @@ pub fn serve_client<S: FrameSource, R: Recognize, I: Inject + Send + 'static>(
     if version != PROTO_VERSION {
         return Err(format!("Protokoll {version}, erwartet {PROTO_VERSION}"));
     }
-    let mut pacer = Pacer::new(cfg.budget);
+    // Eimer = eine Kachel (mind. ¼ s, höchstens 1 s Budget): nie mehrere
+    // Kacheln am Stück vor einem Text (HIL-Befund, s. `Pacer::with_burst`).
+    let budget = cfg.budget as usize;
+    let burst = match cfg.max_tile {
+        0 => budget,
+        m => budget.min(m.max(budget / 4)),
+    };
+    let mut pacer = Pacer::with_burst(cfg.budget, burst);
     let n = write_msg(&mut wr, &ServerMsg::Hello).map_err(|e| e.to_string())?;
     pacer.note(n);
     rec.msg_server(&ServerMsg::Hello, n);

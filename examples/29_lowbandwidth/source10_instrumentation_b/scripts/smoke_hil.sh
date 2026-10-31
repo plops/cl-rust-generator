@@ -4,7 +4,10 @@
 # (großer Bildwechsel), wird per xdotool getippt; der Probe-Client nimmt
 # auf, logstat wertet Erst-Echo-Latenz und Kanal-Simulation aus.
 # Aufruf aus source10_instrumentation_b/: ./scripts/smoke_hil.sh
-# Env: DISPLAY_NR (97), PORT (17881), BUDGET (6000), MODELS (models).
+# Env: DISPLAY_NR (97), PORT (17881), BUDGET (6000), MODELS (models),
+# SERVER_BIN (Default ./target/release/lbw-server; z. B. source10 für A/B),
+# ANIM (1 = ffplay-Testbild-Animation 400×300 als Bildlast, wie die
+# Browser-Animation aus dem 0614-Log; 0 = nur xterm-Bildlauf).
 set -eu
 
 DISPLAY_NR="${DISPLAY_NR:-97}"
@@ -25,7 +28,7 @@ done
 rm -f "$SRV_LOG" "$CLI_LOG"
 
 cleanup() {
-  kill "${SERVER_PID:-}" "${PROXY_PID:-}" "${XTERM_PID:-}" "${TYPER_PID:-}" 2>/dev/null || true
+  kill "${SERVER_PID:-}" "${PROXY_PID:-}" "${XTERM_PID:-}" "${TYPER_PID:-}" "${ANIM_PID:-}" 2>/dev/null || true
   sleep 0.5
   kill "${XVFB_PID:-}" 2>/dev/null || true
 }
@@ -40,8 +43,14 @@ sleep 1
 DISPLAY="$DISP" xterm -geometry 120x40+0+0 -fa Monospace -fs 11 -e sh &
 XTERM_PID=$!
 sleep 1
+if [ "${ANIM:-1}" = 1 ] && command -v ffplay >/dev/null; then
+  # Startet erst nach dem Verbindungsaufbau (sleep), läuft dann dauerhaft.
+  (sleep 6; exec env DISPLAY="$DISP" SDL_AUDIODRIVER=dummy ffplay -loglevel error -an -noborder \
+    -left 860 -top 380 -f lavfi -i "testsrc2=size=400x300:rate=10") &
+  ANIM_PID=$!
+fi
 
-DISPLAY="$DISP" ./target/release/lbw-server --listen "127.0.0.1:$PORT" --models "$MODELS" \
+DISPLAY="$DISP" "${SERVER_BIN:-./target/release/lbw-server}" --listen "127.0.0.1:$PORT" --models "$MODELS" \
   --budget "$BUDGET" --record "$SRV_LOG" > /tmp/smoke_hil_server.log 2>&1 &
 SERVER_PID=$!
 ./target/release/examples/throttle "127.0.0.1:$PROXY_PORT" "127.0.0.1:$PORT" "$BUDGET" \

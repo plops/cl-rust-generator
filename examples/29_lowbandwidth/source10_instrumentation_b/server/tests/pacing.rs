@@ -124,11 +124,24 @@ fn paced_tiles_arrive_whole() {
         Instant::now() + Duration::from_secs(10),
         &mut |m| matches!(m, ServerMsg::Hello),
     );
-    // Vollbild-Kachel + eine Dirty-Kachel danach, beide ganz.
+    // Vollbild-Kachel + eine Dirty-Kachel danach, beide ganz. Erst das
+    // Vollbild abwarten, dann ändern (sonst kann die Änderung schon im
+    // ersten Grab stecken — dann gäbe es nur eine Kachel).
+    let mut got = Vec::new();
+    read_until(
+        &mut fr,
+        &mut s,
+        Instant::now() + Duration::from_secs(10),
+        &mut |m| {
+            if let ServerMsg::Tile { x, y, data } = m {
+                got.push((*x, *y, data.len()));
+            }
+            !got.is_empty()
+        },
+    );
     let mut img = solid(128, 128, [40; 3]);
     img.put_pixel(100, 10, image::Rgb([9; 3]));
     shared.set(img);
-    let mut got = Vec::new();
     read_until(
         &mut fr,
         &mut s,
