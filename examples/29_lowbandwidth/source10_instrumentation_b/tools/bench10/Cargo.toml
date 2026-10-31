@@ -1,0 +1,29 @@
+# A/B-Prüfstand: baut `client/examples/bench.rs` (source10_b) gegen die
+# Crates von source10 — dieselbe Quelle, derselbe Log, alter Server.
+# Eigener Workspace (nicht Teil von source10_b), Aufruf:
+#   cargo run --release --manifest-path tools/bench10/Cargo.toml -- <log> …
+[package]
+name = "lbw-bench10"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "bench10"
+path = "../../client/examples/bench.rs"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+image = { version = "0.24", default-features = false }
+lbw-client = { path = "../../../source10_instrumentation/client" }
+lbw-common = { path = "../../../source10_instrumentation/common" }
+lbw-log = { path = "../../../source10_instrumentation/log" }
+lbw-server = { path = "../../../source10_instrumentation/server" }
+# source10 nutzt die rc.13-API (`Session::builder()` ohne Environment);
+# `^rc.13` würde sonst auf rc.15 auflösen und nicht bauen.
+ort = { version = "=2.0.0-rc.13", default-features = false }
+
+[profile.release]
+opt-level = 3

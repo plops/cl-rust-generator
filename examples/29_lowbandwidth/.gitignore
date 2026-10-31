@@ -9,3 +9,5 @@ source10_instrumentation/20261010*
 source10_instrumentation/*.lbwlog
 source10_instrumentation/*.xz
 source10_instrumentation/data*.txt
+source10_instrumentation_b/models
+source10_instrumentation_b/*.lbwlog
