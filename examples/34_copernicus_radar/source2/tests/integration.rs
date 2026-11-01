@@ -15,6 +15,9 @@ use sar_source2::ephem::{
     EphemPoint, WGS84_A_M, WGS84_B_M, compute_veff_vector, decode_block, effective_velocity,
     inertial_vel, interp_pos, interp_vel,
 };
+use sar_source2::geoloc::{
+    HgtTile, ecef_to_geodetic, geodetic_to_ecef, locate_asset, parse_poeorb_eof,
+};
 use sar_source2::gpu::GpuSarContext;
 use sar_source2::ingest::load_l0_dataset;
 use sar_source2::insar::{
@@ -822,4 +825,103 @@ fn test_insar_real_south_taiwan_single_burst_and_panel_downsample() {
         );
     }
     let _ = std::fs::remove_dir_all(out_dir);
+}
+
+#[test]
+fn test_geoloc_eof_parser_und_srtm_kachel() {
+    let eof = Path::new(
+        "../data/aux_orbits/S1C_OPER_AUX_POEORB_OPOD_20261018T070921_V20260927T225942_20260929T005942.EOF",
+    );
+    let dem = Path::new("../data/dem/N22E120.hgt");
+    if !eof.exists() || !dem.exists() {
+        return;
+    }
+    // EOF: ~9.4k Zehn-Sekunden-Stützstellen, ECEF-Beträge plausibel, Zeit monoton.
+    let pts = parse_poeorb_eof(eof).expect("EOF-Parsing des Master-Orbits fehlgeschlagen");
+    assert!(
+        (9_000..10_000).contains(&pts.len()),
+        "unerwartete OSV-Zahl: {}",
+        pts.len()
+    );
+    for p in &pts {
+        let r = p.pos.norm();
+        assert!(
+            (6.5e6..7.3e6).contains(&r),
+            "Orbitradius unplausibel: {r} m"
+        );
+    }
+    assert!(pts.windows(2).all(|w| w[1].time_s > w[0].time_s));
+
+    // SRTM: Kaohsiung ist Flachland, Yushan-Nähe ist Hochgebirge.
+    let tile = HgtTile::load(dem).expect("SRTM-Kachel N22E120 nicht ladbar");
+    let h_flach = tile.height(22.62, 120.31);
+    assert!(
+        (0.0..80.0).contains(&h_flach),
+        "Kaohsiung-Höhe unplausibel: {h_flach} m"
+    );
+    let tile23 = HgtTile::load(Path::new("../data/dem/N23E120.hgt"))
+        .expect("SRTM-Kachel N23E120 nicht ladbar");
+    let h_berg = tile23.height(23.47, 120.96);
+    assert!(h_berg > 3_000.0, "Yushan-Nähe zu flach: {h_berg} m");
+}
+
+#[test]
+fn test_geoloc_reverse_geokodierung_kaohsiung() {
+    let master_path = Path::new(
+        "../data/insar/S1C_IW_RAW__0SDV_20260928T215149_20260928T215222_009653_01336F_D2EE.SAFE/s1c-iw-raw-s-vv-20260928t215149-20260928t215222-009653-01336f.dat",
+    );
+    let dem_path = Path::new("../data/dem/N22E120.hgt");
+    let eof_path = Path::new(
+        "../data/aux_orbits/S1C_OPER_AUX_POEORB_OPOD_20261018T070921_V20260927T225942_20260929T005942.EOF",
+    );
+    if !master_path.exists() || !dem_path.exists() || !eof_path.exists() {
+        return;
+    }
+    let ds = load_l0_dataset(master_path, None, None).expect("Master-Datensatz nicht ladbar");
+    let tile = HgtTile::load(dem_path).unwrap();
+    // Asset: Kaohsiung (Hafenstadt, Flachland) — muss im Master-Bild liegen.
+    let (lat, lon) = (22.62, 120.31);
+    let h = tile.height(lat, lon);
+
+    // 1) Mit den bordeigenen SubCom-Ephemeriden des Datensatzes.
+    let hits = locate_asset(&ds.ephemeris, &ds, lat, lon, h);
+    assert!(
+        !hits.is_empty(),
+        "Kaohsiung nicht im Master-Bild gefunden (h={h} m)"
+    );
+    let hit = hits[0];
+    assert!(
+        (20.0..55.0).contains(&hit.incidence_deg),
+        "Einfallswinkel unplausibel: {} Grad",
+        hit.incidence_deg
+    );
+
+    // 2) Rundreise: (az, rg) → ECEF → geodätisch muss den Punkt treffen.
+    let pos_s = interp_pos(&ds.ephemeris, hit.t_zd_s);
+    let vel_s = interp_vel(&ds.ephemeris, hit.t_zd_s);
+    let x = solve_zero_doppler_target_ecef(pos_s, vel_s, hit.slant_m, h);
+    let (la2, lo2, _) = ecef_to_geodetic(x);
+    assert!(
+        (lat - la2).abs() < 0.002 && (lon - lo2).abs() < 0.002,
+        "Rundreise verfehlt: ({la2}, {lo2}) vs ({lat}, {lon})"
+    );
+
+    // 3) Mit präzisen POEORB-Ephemeriden: gleicher Burst, Pixel nah beieinander
+    //    (fängt Epochen-/Leapsekunden-Fehler in der Zeitbasis ab).
+    let precise = parse_poeorb_eof(eof_path).unwrap();
+    let hits_p = locate_asset(&precise, &ds, lat, lon, h);
+    assert_eq!(hits_p.len(), hits.len(), "Trefferzahl Orbitquelle-abhängig");
+    let hp = hits_p[0];
+    assert_eq!(
+        (hp.swath_number, hp.burst_index),
+        (hit.swath_number, hit.burst_index),
+        "anderer Burst mit präzisem Orbit"
+    );
+    assert!(
+        (hp.az - hit.az).abs() < 50.0 && (hp.rg - hit.rg).abs() < 50.0,
+        "Pixelversatz Bord- vs. Präzisionsorbit zu groß: da={}, dr={}",
+        hp.az - hit.az,
+        hp.rg - hit.rg
+    );
+    let _ = geodetic_to_ecef(lat, lon, h);
 }

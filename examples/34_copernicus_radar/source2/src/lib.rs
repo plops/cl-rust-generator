@@ -7,6 +7,8 @@ pub mod chirp;
 pub mod cufft;
 #[path = "03_ephem.rs"]
 pub mod ephem;
+#[path = "12_geoloc.rs"]
+pub mod geoloc;
 #[path = "09_gpu.rs"]
 pub mod gpu;
 #[path = "05_ingest.rs"]

@@ -1,0 +1,33 @@
+was ist noch notwendig um die funktionalitaet von source2 in einer
+website anzubieten. welche aufgaben koennte die webseite fuer nutzer
+uebernehmen (use cases: autobahnparkplatz-fuellstand, tankfuellstand,
+oelentnahme-senkung, wasserentnahme, vulkan/magma, erdrutsch-warnung,
+schneedicke, ueberschwemmungswarnung) hast du weitere vorschlaege?
+welche von denen wuerden den meisten menschen den groessten nutzen
+bringen?
+
+[zwischenfragen: was ist PSI? die katastrophenarbeit ist doch schon
+von copernicus direkt abgedeckt (EMS/EGMS) - welche anwendungen sind
+noch offen, vor allem solche deren interpretation frueher menschen
+brauchte und heute KI uebernehmen kann? was sind tailings-daemme?
+kann ich die vorschlaege ohne remapping mit DEM umsetzen, die
+satelliten fliegen doch immer das gleiche orbit, also sollten
+aenderungen auch ohne komplizierte reprojektion sichtbar sein?]
+
+vielleicht kann man den nutzer die assets auf der karte ausweahlen
+lassen und diese ins bild mappen lassen
+
+erzeuge einen neuen ordner in plan/ und fange an die notwendigen
+informationen zusammenzutragen (POD-Hub zugriff, ...)
+
+ich habe einen login fuer https://browser.dataspace.copernicus.eu.
+was muss ich machen, damit du die daten runterladen kannst?
+[antwort: s3-keys statt passwort; keys wurden im chat uebergeben,
+nicht hier ablegen! danach ggf. widerrufen]
+
+arbeite weiter
+[geolok-prototyp: EOF-Parser + reverse-geokodierung + tests]
+
+stelle sicher dass du in plan/ auch den aktuell bearbeiteten
+prompt.txt hinschreibst, mitsamt walkthrough.md. die dokumente
+sollen den leser abholen und mitnehmen und didaktisch gut sein
