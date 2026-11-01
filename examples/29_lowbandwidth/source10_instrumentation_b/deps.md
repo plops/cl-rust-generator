@@ -9,6 +9,26 @@ Abfragen: `xiph/rav1e` (Header/Tiles/Kontext pro Frame), `pykeio/ort`
 (CPU-only-Features). Hilfs-Workspace `tools/bench10` nutzt die
 source10-Crates per Pfad (A/B).
 
+### Mobile Clients + SSH (source10_b, neu)
+
+Der Server bleibt ohne neue Crates. Für die Mobil-Clients (Android/iOS)
+und die eingebaute SSH-Kette kommen Crates hinzu, die **source11_compact
+bereits eingeführt und erprobt** hat (Tunnel-Crate von dort übernommen):
+
+| Crate | Version | GitHub | Wo | Wofür |
+|---|---|---|---|---|
+| `russh` | 0.64.1 | `Eugeny/russh` | tunnel | SSH-2-Client in Rust: Jump-Kette via `direct-tcpip`, Publickey-Auth (Ed25519) |
+| `ssh-key` | 0.6.7 | `RustCrypto/SSH` | tunnel | OpenSSH-Keyformat, `SHA256:`-Fingerprints (TOFU-Pins) |
+| `tokio` | 1.54.1 | `tokio-rs/tokio` | tunnel | Async-Runtime des Forward-Threads |
+| `async-trait` | 0.1.92 | `dtolnay/async-trait` | tunnel | russh-Handler |
+| `aws-lc-rs` (transitiv) | 1.19.0 | `aws/aws-lc-rs` | via russh | Krypto; braucht beim iOS-Build das Apple-SDK (→ nur auf macOS) |
+| `jni-sys` | =0.4.1 | `jni-rs/jni-sys` | mobile/core | rohe JNI-Typen für die Android-Brücke |
+| `serde_json` | 1.0.154 | `serde-rs/json` | mobile/core | Verbindungs-Konfig aus den Apps |
+
+App-Seite: Android (Gradle 9.8, AGP 9.4.1, Kotlin 2.4.20, keine
+Java-Krypto), iOS (SwiftUI/UIKit, XcodeGen `yonaskolb/XcodeGen`).
+DeepWiki: `ask_wiki_question(repoName="Eugeny/russh", question="...")`.
+
 Historie (source10): Stand 2026-10-10. **Keine neuen externen Abhängigkeiten** gegenüber
 `source9_gpu` (dort Stand 2026-10-09, erneut geprüft: `serde` 1.0.229 ist max,
 `bincode` 3.0.0 bleibt kaputter Stub → 2.0.1). Neu sind nur interne

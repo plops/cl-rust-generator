@@ -1,0 +1,225 @@
+name: Release 29-source10b
+
+# Builds examples/29_lowbandwidth/source10_instrumentation_b:
+#   Linux server (+ PP-OCRv6 weights) and desktop client, Android APK,
+#   iOS app (unsigned .ipa + LbwCore.xcframework). Both mobile clients
+#   connect through an SSH jump host with Ed25519 keys (Rust core, russh).
+# Tag lbw10b-v<version> publishes a GitHub release; workflow_dispatch and
+# pull requests are dry runs (artifacts only).
+#   lbw10b-server-<v>-linux-x86_64.tar.gz   server + models
+#   lbw10b-client-<v>-linux-x86_64.tar.gz   desktop client + logstat + replay
+#   lbw10b-android-<v>.apk                   Android client (arm64-v8a, x86_64)
+#   lbw10b-ios-<v>-unsigned.ipa              iOS client, sign before install
+#   lbw10b-ios-core-<v>.xcframework.zip      Rust core for own Xcode projects
+#   SHA256SUMS.txt
+
+on:
+  push:
+    tags:
+      - 'lbw10b-v*'
+  pull_request:
+    paths:
+      - 'examples/29_lowbandwidth/source10_instrumentation_b/**'
+      - '.github/workflows/release-29-source10b.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: release-lbw10b-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SRC: examples/29_lowbandwidth/source10_instrumentation_b
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: Check tag against Cargo.toml
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(awk '/^\[workspace.package\]/{p=1;next} /^\[/{p=0} p&&/^version/{gsub(/"/,"",$3);print $3;exit}' "$SRC/Cargo.toml")
+          [[ "$version" =~ ^[0-9]+\.[0-9]{1,2}\.[0-9]{1,2}(-[0-9A-Za-z.]+)?$ ]] \
+            || { echo "::error::workspace version '$version' invalid" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            [ "$GITHUB_REF_NAME" = "lbw10b-v$version" ] \
+              || { echo "::error::tag $GITHUB_REF_NAME != lbw10b-v$version" >&2; exit 1; }
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  linux:
+    name: Linux server + client (tests incl. SSH chain)
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+        working-directory: examples/29_lowbandwidth/source10_instrumentation_b
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            libxcb1-dev libxcb-shm0-dev libxcb-randr0-dev libxkbcommon-x11-0 \
+            openssh-server openssh-client xvfb xterm x11-utils xdotool
+          sudo mkdir -p /run/sshd
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal -c rustfmt,clippy
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: examples/29_lowbandwidth/source10_instrumentation_b
+          key: lbw10b-linux
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.SRC }}/models
+          key: lbw10b-models-${{ hashFiles('examples/29_lowbandwidth/source10_instrumentation_b/scripts/fetch_models.sh') }}
+      - name: Models (models/ is a local symlink, a real directory in CI)
+        run: |
+          if [ -L models ]; then rm models; fi
+          ./scripts/fetch_models.sh
+      - name: fmt, clippy, tests
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Package
+        run: |
+          scripts/package_release.sh "$RUNNER_TEMP/dist"
+          du -sh "$RUNNER_TEMP"/dist/* | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lbw10b-linux
+          path: ${{ runner.temp }}/dist/*.tar.gz
+          if-no-files-found: error
+
+  android:
+    name: Android APK (Rust core arm64-v8a + x86_64)
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+        working-directory: examples/29_lowbandwidth/source10_instrumentation_b
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: NDK + platform
+        run: |
+          sdkmanager --install "ndk;27.0.12077973" "platforms;android-36" "build-tools;36.0.0" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+      - name: Packages (Unifont for CJK, xcb for host core tests)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends fonts-unifont \
+            libxcb1-dev libxcb-shm0-dev libxcb-randr0-dev
+      - name: Rust toolchain + targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: examples/29_lowbandwidth/source10_instrumentation_b
+          key: lbw10b-android
+      - name: Release keystore (optional; without it the APK is debug-signed)
+        env:
+          KS_B64: ${{ secrets.LBW_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "LBW_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          fi
+      - name: Build core + APK + JVM tests
+        env:
+          LBW_KEYSTORE_PASSWORD: ${{ secrets.LBW_KEYSTORE_PASSWORD }}
+          LBW_KEY_ALIAS: ${{ secrets.LBW_KEY_ALIAS }}
+        run: |
+          mobile/android/build_android.sh release
+          mkdir -p "$RUNNER_TEMP/dist"
+          cp mobile/android/app/build/outputs/apk/release/*.apk \
+            "$RUNNER_TEMP/dist/lbw10b-android-${{ needs.version.outputs.version }}.apk"
+          du -sh "$RUNNER_TEMP"/dist/* | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lbw10b-android
+          path: ${{ runner.temp }}/dist/*.apk
+          if-no-files-found: error
+
+  ios:
+    name: iOS app (unsigned) + XCFramework
+    needs: version
+    runs-on: macos-15
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+        working-directory: examples/29_lowbandwidth/source10_instrumentation_b
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain + targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: examples/29_lowbandwidth/source10_instrumentation_b
+          key: lbw10b-ios
+      - name: XcodeGen
+        run: brew install xcodegen
+      - name: Core unit tests on macOS host
+        run: cargo test -p lbw-mobile-core --lib
+      - name: Build XCFramework, simulator app and unsigned device .ipa
+        run: |
+          mobile/ios/build_ios.sh
+          v=${{ needs.version.outputs.version }}
+          mkdir -p "$RUNNER_TEMP/dist"
+          cp mobile/ios/build/LbwClient-unsigned.ipa "$RUNNER_TEMP/dist/lbw10b-ios-$v-unsigned.ipa"
+          (cd mobile/ios/build && zip -qry "$RUNNER_TEMP/dist/lbw10b-ios-core-$v.xcframework.zip" LbwCore.xcframework)
+          du -sh "$RUNNER_TEMP"/dist/* | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lbw10b-ios
+          path: ${{ runner.temp }}/dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: [version, linux, android, ios]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "source10_instrumentation_b: CPU-only server with weights, desktop client, Android + iOS clients (SSH jump host, Ed25519). iOS .ipa is unsigned (sign with your own profile / AltStore)."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

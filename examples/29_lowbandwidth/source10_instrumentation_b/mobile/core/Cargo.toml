@@ -1,0 +1,27 @@
+[package]
+name = "lbw-mobile-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# Ein Kern für Android (JNI, `cdylib` → liblbw_mobile_core.so) und iOS
+# (C-ABI, `staticlib` → liblbw_mobile_core.a + include/lbw_core.h).
+[lib]
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[dependencies]
+jni-sys = "=0.4.1"
+lbw-client = { path = "../../client", default-features = false }
+lbw-common = { path = "../../common" }
+lbw-tunnel = { path = "../../tunnel" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+lbw-server = { path = "../../server" }
+lbw-log = { path = "../../log" }
+image = { version = "0.24", default-features = false }
+clap = { version = "4.6.7", features = ["derive"] }
+# Nur für die geteilten sshd-Helfer aus tunnel/tests/common.rs.
+tokio = { version = "1", features = ["rt", "net", "io-util", "macros"] }

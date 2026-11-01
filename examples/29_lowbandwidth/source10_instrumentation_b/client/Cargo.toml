@@ -5,17 +5,32 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+# Desktop-Fenster (macroquad). Mobile Kerne (`mobile/core`) nutzen nur
+# Netz, Decoder und Szene: `default-features = false`.
+default = ["desktop"]
+desktop = ["dep:macroquad"]
+
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 lbw-common = { path = "../common" }
 lbw-log = { path = "../log" }
-macroquad = "0.4.16"
+macroquad = { version = "0.4.16", optional = true }
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8"] }
 
 [dev-dependencies]
 lbw-server = { path = "../server" }
 # Nur der Prüfstand (`examples/bench.rs`) baut RgbImage-Quellen.
 image = { version = "0.24", default-features = false }
+
+[[bin]]
+name = "lbw-client"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[[example]]
+name = "render_probe"
+required-features = ["desktop"]
 
 [[bin]]
 name = "lbw-replay"

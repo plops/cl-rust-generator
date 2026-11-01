@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["common", "log", "server", "client"]
+members = ["common", "log", "server", "client", "tunnel", "mobile/core"]
 
 [workspace.package]
 version = "0.1.0"

@@ -256,8 +256,7 @@ Browser-Animation des 0614-Logs) trennt die Varianten.
   (Quantizer hoch), im Leerlauf nachschärfen.
 - **Kachel-Cache** für wiederkehrende Kleinstkacheln (B8, 1,4 %).
 - **`MoveText`** für Scrollen (Text-Dedup 16 %).
-- **Mobile Clients** (Android/iPhone mit SSH-Jump + Ed25519): s.
-  `mobile/` und Abschnitt unten, sobald umgesetzt.
+- **Mobile Clients:** umgesetzt, s. §5.
 
 ## 4. Programme/Pakete für das Dockerfile
 
@@ -269,4 +268,92 @@ Browser-Animation des 0614-Logs) trennt die Varianten.
 | `libxkbcommon-x11-0` | macroquad-Fenster des Clients |
 | `cargo-edit` (cargo install) | `cargo upgrade --dry-run` |
 
+| `openssh-server` | sshd-Paare für Tunnel-/Mobil-Tests |
+| `openjdk-21-jdk-headless`, Android cmdline-tools → SDK 36, NDK 27.0.12077973, emulator + `system-images;android-36;google_apis;x86_64` | Android-Build und Emulator-E2E |
+| `fonts-unifont` | CJK-Schrift für die Android-App |
+| `swiftlang` | Swift-Hülle der iOS-App auf Linux testen |
+| rustup-Targets `aarch64-linux-android`, `x86_64-linux-android` | Android-Kern |
+
 Nicht mehr nötig für source10_b: CUDA/cuDNN (CPU-only).
+
+## 5. Nachtrag: Mobil-Clients (Android + iPhone) mit SSH-Jump-Host
+
+Auftrag nach dem Server: Clients für Android und iPhone, gebaut per GitHub
+Actions, Verbindung über SSH-Jump-Host mit Ed25519-Keys. Bedienung:
+[`handbuch_mobile.md`](handbuch_mobile.md).
+
+### 5.1 Was implementiert wurde
+
+```mermaid
+flowchart TB
+    subgraph Rust [mobile/core — ein Kern für beide]
+        FFI[04_ffi C-ABI] --> E[01_engine]
+        JNI[05_jni JNI] --> E
+        E --> N[lbw_client::net::Net
+unverändert]
+        N -->|127.0.0.1:x| FW[tunnel/03_forward]
+        FW --> CH[tunnel/02_chain
+russh, aus source11]
+    end
+    AND[Android-App Kotlin
+aus source11 übernommen] --> JNI
+    IOS[iOS-App SwiftUI
+neu] --> FFI
+    CH --> J[Jump-sshd] --> Z[Ziel-sshd] --> S[lbw-server]
+```
+
+- `tunnel/` aus source11 übernommen (dort gegen echte sshd-Ketten
+  getestet) und um `03_forward.rs` ergänzt: ein lokaler Forward wie
+  `ssh -L`. Der Desktop-Netz-Thread (`Net`) läuft unverändert darüber —
+  Protokoll v3, Reconnect, AV1-Decode und Maus-Bündelung existieren nur
+  einmal. Dafür wurde `macroquad` im Client hinter das Feature `desktop`
+  gelegt.
+- `mobile/core`: `Engine` (JSON-Konfig, Forward + Net + Szene), C-ABI mit
+  Header `include/lbw_core.h`, JNI mit **denselben Signaturen wie
+  source11** — die dort per Emulator-E2E erprobte Kotlin-App (Viewport,
+  Trackpad, Sondertasten) ließ sich fast unverändert übernehmen.
+- Tastennamen auf die des source10-Servers abgebildet (`Backspace` statt
+  `BackSpace`, kein F1–F12/Insert); Tasten werden gedrückt **und**
+  losgelassen (source11 schickte nur `down`).
+- iOS-App neu (SwiftUI-Formular, UIKit-`RemoteView` mit `CADisplayLink`,
+  `UIKeyInput`, Keys im Schlüsselbund), Projekt per XcodeGen.
+- Workflow `.github/workflows/release-29-source10b.yml`: Linux
+  (fmt/clippy/Tests inkl. SSH-Kette, Server-Paket **mit Gewichten**,
+  Client 2,8 MB), Android (APK, JVM-Tests), iOS (macOS-Runner:
+  XCFramework, Simulator-Build, unsigniertes `.ipa`), Release bei Tag
+  `lbw10b-v*`. `actionlint` sauber.
+
+### 5.2 Nachweise
+
+| Nachweis | Ergebnis |
+|---|---|
+| `ssh_e2e.rs`: C-ABI → Forward → Jump-sshd → genestet → Ziel-sshd (Ed25519 überall) → `serve_client` | Verbindung, Text, Kachel, Pins = echte Hostkeys, 6 Eingaben exakt beim Injector |
+| falscher Pin am Jump | nie verbunden, Fehler in der Statuszeile |
+| `c_header.rs`: C-Programm mit `-Wall -Werror` gegen `lbw_core.h` | läuft gegen echten Server |
+| `c_header.rs`: `LbwCore.swift` der iOS-App mit `swiftc` (Linux) gegen den Kern | läuft gegen echten Server (fand einen Parser-Fehler, §5.3) |
+| Android-Cross-Build (NDK 27) | `.so` arm64 5,3 MB / x86_64 6,7 MB (gestrippt), 15 JNI + 11 C-Symbole |
+| Gradle: APK + JVM-Tests | 29 Tests grün (4 davon laden den echten Kern) |
+| `emulator_e2e.sh` (KVM, Android 36) gegen echten Server mit CPU-OCR durch Jump-Kette | **9/9 OK**: Kette, OCR-Text, Tippen → Server, xterm-Text → OCR → App, Screenshot, beide Pins, Reconnect nach HOME |
+| `cargo test --workspace` | **142 passed** (2× hintereinander) |
+
+Nicht hier prüfbar: der iOS-Build selbst. `aws-lc-sys` (Krypto von
+russh) braucht für `aarch64-apple-ios` das Apple-SDK — `cargo check
+--target aarch64-apple-ios` scheitert auf Linux im Build-Skript. Der Job
+`ios` auf `macos-15` ist ungelaufen; Swift-Code: `LbwCore.swift`
+funktional getestet, alle Dateien `swiftc -parse`-sauber, UIKit/SwiftUI-
+Teile nicht typgeprüft.
+
+### 5.3 Umentscheidungen durch Tests
+
+- **Text-Parser (Swift):** Der Linux-Swift-Test lieferte „1 Texte", aber
+  einen leeren Parse — die Mindestlänge je Eintrag war 26 statt 24 Byte,
+  kurze Texte fielen weg. Ohne den Linux-Test wäre das erst auf dem iPhone
+  aufgefallen.
+- **Pins positionsgenau:** Die source11-Kotlin-Form ließ fehlende Pins weg
+  (`mapNotNull`) — ein ungepinnter Jump verschob den Ziel-Pin auf den
+  Jump (Dauerfehler „falscher Hostkey"). Fix + JVM-Test `EngineJsonTest`.
+- **Fehler je Versuch:** Ein falscher Pin erschien erst nach allen
+  Retries (~9 s) in der Statuszeile; der Forward meldet jetzt jeden
+  Fehlversuch sofort.
+- **Port 7878 belegt:** Im Container (Host-Netz) lauscht dort ein Server
+  außerhalb des Containers; der Emulator-Test nimmt `LBW_PORT` (7979).

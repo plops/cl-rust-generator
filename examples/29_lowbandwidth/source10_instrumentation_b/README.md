@@ -15,6 +15,10 @@ Fokus auf **Text-Echo und Eingaben während großer Bildänderungen**:
 - Client fasst Mausbewegungen zusammen.
 - `lbw-logstat`: Erst-Echo-Latenz (statt verfälschender 1:1-FIFO),
   Kanal-Simulation je Nachricht, Logs der Version 2 wieder lesbar.
+- **Mobil-Clients** (`mobile/`): gemeinsamer Rust-Kern (`mobile/core`:
+  SSH-Jump-Kette mit Ed25519-Keys + TOFU-Pins, Protokoll v3, AV1, Szene),
+  Android-App (Kotlin, JNI) und iOS-App (SwiftUI, C-ABI `lbw_core.h`);
+  gebaut per GitHub Actions (`.github/workflows/release-29-source10b.yml`).
 - **Prüfstand mit echten Daten** (`client/examples/bench.rs`, A/B gegen
   source10 über `tools/bench10`) und HIL-Smoke hinter einem Drossel-Proxy.
 
@@ -39,4 +43,8 @@ cargo run --release --manifest-path tools/bench10/Cargo.toml -- \
 cargo test --workspace                       # Unit + Loopback + Realdaten (falls Log da)
 cargo test --release -p lbw-server --test models -- --ignored   # echte Modelle, CPU
 ./scripts/smoke_hil.sh                       # Xvfb + Modelle + 6-kB/s-Proxy + Tippen
+
+mobile/android/build_android.sh              # .so + APK + JVM-Tests (SDK/NDK/JDK 21)
+mobile/android/emulator_e2e.sh               # App im Emulator durch Jump-Kette (KVM)
+mobile/ios/build_ios.sh                      # nur macOS: XCFramework + App + .ipa
 ```

@@ -1,0 +1,33 @@
+# XcodeGen-Projekt (xcodegen generate → LbwClient.xcodeproj). Das
+# .xcodeproj wird nicht eingecheckt; build_ios.sh erzeugt es (CI: macOS).
+name: LbwClient
+options:
+  bundleIdPrefix: de.lbw
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  LbwClient:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    dependencies:
+      - framework: build/LbwCore.xcframework
+        embed: false
+      - sdk: Security.framework
+    info:
+      path: build/Info.plist
+      properties:
+        CFBundleDisplayName: lbw-client
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          [UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight, UIInterfaceOrientationPortrait]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.lbw.client10b
+        MARKETING_VERSION: "0.1.0"
+        SWIFT_VERSION: "5.0"
+        SWIFT_OBJC_BRIDGING_HEADER: Bridging.h
+        HEADER_SEARCH_PATHS: $(SRCROOT)/../core/include
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
