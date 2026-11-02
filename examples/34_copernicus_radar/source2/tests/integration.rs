@@ -17,7 +17,8 @@ use sar_source2::ephem::{
 };
 use sar_source2::geoloc::{
     AmpelStatus, HgtTile, bewerte_zeitreihe, chip_stats, ecef_to_geodetic, focused_line,
-    geodetic_to_ecef, locate_asset, locate_polygon, mosaic_column, parse_poeorb_eof, tops_alpha,
+    geodetic_to_ecef, layover_check, locate_asset, locate_polygon, mosaic_column, parse_poeorb_eof,
+    tops_alpha,
 };
 use sar_source2::gpu::GpuSarContext;
 use sar_source2::ingest::load_l0_dataset;
@@ -864,6 +865,27 @@ fn test_geoloc_eof_parser_und_srtm_kachel() {
         .expect("SRTM-Kachel N23E120 nicht ladbar");
     let h_berg = tile23.height(23.47, 120.96);
     assert!(h_berg > 3_000.0, "Yushan-Nähe zu flach: {h_berg} m");
+
+    // Hangneigung aus echten Kacheln: Kaohsiung flach (kein Layover),
+    // Westflanke des Zentralgebirges steil (Blick von Osten).
+    let sat_n = geodetic_to_ecef(27.62, 120.31, 700_000.0);
+    let flach = layover_check(22.62, 120.31, |la, lo| tile.height(la, lo), sat_n, 40.0);
+    assert!(
+        flach.slope_facing_deg.abs() < 5.0 && !flach.layover,
+        "Kaohsiung-Hang unplausibel: {:?}",
+        flach
+    );
+    let sat_o = geodetic_to_ecef(23.50, 125.95, 700_000.0);
+    let hang = layover_check(23.50, 120.95, |la, lo| tile23.height(la, lo), sat_o, 40.0);
+    assert!(
+        hang.slope_facing_deg.is_finite(),
+        "Hangneigung nicht endlich: {:?}",
+        hang
+    );
+    println!(
+        "Hang Zentralgebirge: {:.1}°, layover={}",
+        hang.slope_facing_deg, hang.layover
+    );
 }
 
 #[test]

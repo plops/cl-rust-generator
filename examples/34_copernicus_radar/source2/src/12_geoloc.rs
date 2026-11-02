@@ -618,6 +618,59 @@ pub fn bewerte_zeitreihe(medians_db: &[f64], warn_db: f64, alarm_db: f64) -> Amp
     }
 }
 
+/// Ergebnis der Hangneigungs-Layoverprüfung (siehe [`layover_check`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SlopeCheck {
+    /// Hangneigung zum Satelliten hin [Grad, + = ansteigend].
+    pub slope_facing_deg: f64,
+    /// Wahr, wenn der Gegenhang steiler ist als das Komplement des
+    /// Einfallswinkels (dann überlagern sich mehrere Höhen im selben
+    /// Range-Bin: Layover).
+    pub layover: bool,
+}
+
+/// Präzise Layoverprüfung aus dem Höhenmodell statt der
+/// Einfallswinkel-Faustregel in [`AssetHit::layover_risk`]: Misst die
+/// Hangneigung entlang der Bodenprojektion der Blickrichtung (je eine
+/// `HgtTile`-Abfrage 90 m vor und hinter dem Punkt) und meldet Layover,
+/// sobald der dem Sensor zugewandte Hang steiler als `90° − incidence`
+/// ansteigt. In Polnähe (entartete Längen) defensiv `layover: false`.
+pub fn layover_check(
+    lat_deg: f64,
+    lon_deg: f64,
+    h_of: impl Fn(f64, f64) -> f64,
+    sat_ecef: Vec3d,
+    incidence_deg: f64,
+) -> SlopeCheck {
+    let h0 = h_of(lat_deg, lon_deg);
+    let target = geodetic_to_ecef(lat_deg, lon_deg, h0);
+    let (la, lo) = (lat_deg.to_radians(), lon_deg.to_radians());
+    let up = Vec3d::new(la.cos() * lo.cos(), la.cos() * lo.sin(), la.sin());
+    let mut to_sat = sat_ecef - target;
+    to_sat = to_sat - up * to_sat.dot(up);
+    let norm = to_sat.norm();
+    if norm.is_nan() || norm <= 0.0 || la.cos().abs() < 1e-6 {
+        return SlopeCheck {
+            slope_facing_deg: 0.0,
+            layover: false,
+        };
+    }
+    to_sat = to_sat * (1.0 / norm);
+    // Lokale Ost-/Nord-Basis (ECEF) für den Schritt in Grad.
+    let east = Vec3d::new(-lo.sin(), lo.cos(), 0.0);
+    let north = Vec3d::new(-la.sin() * lo.cos(), -la.sin() * lo.sin(), la.cos());
+    let step_m = 90.0;
+    let dlat = step_m * to_sat.dot(north) / 111_320.0;
+    let dlon = step_m * to_sat.dot(east) / (111_320.0 * la.cos());
+    let h_to = h_of(lat_deg + dlat, lon_deg + dlon);
+    let h_from = h_of(lat_deg - dlat, lon_deg - dlon);
+    let slope = ((h_to - h_from) / (2.0 * step_m)).atan().to_degrees();
+    SlopeCheck {
+        slope_facing_deg: slope,
+        layover: slope > 90.0 - incidence_deg,
+    }
+}
+
 /// Sucht einen Kartenpunkt (geodätisch + Höhe über Ellipsoid [m]) in allen
 /// Sub-Swaths/Bursts eines Datensatzes. Bei TOPS trifft geometrisch genau ein
 /// Sub-Swath; Überlappungen an Burst-Rändern können Mehrfachtreffer geben.
@@ -901,6 +954,31 @@ mod tests {
             fdc_mid_hz: 0.0,
             data: Vec::new(),
         }
+    }
+
+    #[test]
+    fn layover_hangneigung() {
+        // Satellit 5° nördlich, 700 km hoch → Bodenblickrichtung ≈ Nord.
+        let sat = geodetic_to_ecef(27.0, 120.0, 700_000.0);
+        // Flachland: Neigung 0, kein Layover.
+        let flach = layover_check(22.0, 120.0, |_, _| 20.0, sat, 40.0);
+        assert!((flach.slope_facing_deg).abs() < 1e-9);
+        assert!(!flach.layover);
+        // Rampe gen Nord, 60° Hang: über 90°−40°=50° → Layover.
+        let m = 111_320.0 * 60.0f64.to_radians().tan();
+        let steil = layover_check(22.0, 120.0, |la, _| m * (la - 22.0), sat, 40.0);
+        assert!(
+            (55.0..65.0).contains(&steil.slope_facing_deg),
+            "{} Grad",
+            steil.slope_facing_deg
+        );
+        assert!(steil.layover);
+        // Gleicher Hang, aber Blick von der Rückseite (Satellit im Süden):
+        // Gefälle → kein Layover.
+        let sat_s = geodetic_to_ecef(17.0, 120.0, 700_000.0);
+        let rueck = layover_check(22.0, 120.0, |la, _| m * (la - 22.0), sat_s, 40.0);
+        assert!(rueck.slope_facing_deg < -55.0);
+        assert!(!rueck.layover);
     }
 
     #[test]

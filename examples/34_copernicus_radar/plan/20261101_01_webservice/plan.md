@@ -128,6 +128,11 @@ Prototyp).
 Polygon-Assets (`locate_polygon`: Ecken + Raster + Punkt-im-Polygon, an
 Realdaten geprüft) und Ampel-Bewertung (`bewerte_zeitreihe`) sind gebaut.
 Offen: Schwellen an beschrifteten Zeitreihen kalibrieren, Wochenreport.
+Erledigt: Layover präzise — `layover_check` misst die Hangneigung aus dem
+DEM entlang der Blickrichtung (je eine Abfrage 90 m vor/hinter dem Punkt)
+und meldet Layover erst bei Hang > 90° − Einfallswinkel. Gemessen:
+Kaohsiung ≈ 0° (kein Layover), Westflanke Zentralgebirge +33,9° bei 40°
+Einfall (steil, aber korrekt kein Layover — Schwelle 50°).
 Erledigt: Range-Achse abgeglichen — `mosaic_column` (Treffer-`rg` =
 Mosaik-Spalte, gültig in `[0, n_rg − n_chirp/4)`; an Kaohsiung-Realdaten
 geprüft; Doku-Fehler `n_rg − n_chirp` in `FocusedBurst` korrigiert).

@@ -214,9 +214,10 @@ Geprüft an echten Daten (Master-Aufnahme Süd-Taiwan). Die Beweise:
   Mosaik-Spalte identisch zum Treffer-`rg`; `mosaic_column` prüft nur
   noch die Gültigkeit (an Realdaten: Kaohsiung bei 15305,4 tief im
   gültigen Bereich).
-- **Layover richtig:** Heute Faustregel über den Einfallswinkel.
-  Korrekt braucht es die Hangneigung aus dem Höhenmodell entlang der
-  Blickrichtung.
+- **Layover richtig:** Erledigt — `layover_check` misst die Neigung aus
+  dem DEM entlang der Blickrichtung statt der 25°-Faustregel
+  (Kaohsiung ≈ 0°, Zentralgebirge-Westflanke +33,9° bei 40° Einfall —
+  steil, aber unter der 50°-Schwelle, also kein Layover).
 - **Range-Achse abgleichen:** Die fokussierte Range-Richtung schneidet
   einen Wrap-Rand ab; Treffer-Spalte und Bild-Spalte sind noch nicht
   deckungsgleich dokumentiert.
