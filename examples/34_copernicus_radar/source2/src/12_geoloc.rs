@@ -12,6 +12,8 @@ use std::path::Path;
 use crate::ephem::{EphemPoint, WGS84_A_M, WGS84_B_M, interp_pos, interp_vel};
 use crate::ingest::L0Dataset;
 use crate::insar::project_target_to_slave;
+use crate::mosaic::FocusedBurst;
+use crate::rda::ka_rate_hz_s;
 use crate::types::{Complex32, Error, RadarParams, SwathData, Vec3d};
 
 /// GPS-Zeit (s seit 1980-01-06) minus Unix-Zeit (s seit 1970-01-01), inkl.
@@ -230,6 +232,20 @@ fn parse_hemi(hemi: Option<char>, digits: Option<&str>) -> Result<i32, Error> {
     })
 }
 
+/// TOPS-Stauchungsfaktor `α = |k_a / (k_a − k_t)|` (Formel und Klemmung
+/// exakt wie in `deburst_swath`): Eine fokussierte Zeile entspricht
+/// `dt = PRI/α` wahrer Zero-Doppler-Zeit statt einer PRI.
+pub fn tops_alpha(kt_hz_s: f64, veff: f64, slant_m: f64) -> f64 {
+    let ka = ka_rate_hz_s(veff, slant_m);
+    (ka / (ka - kt_hz_s)).abs().clamp(0.05, 1.0)
+}
+
+/// Fokussierte Zeile zur Zero-Doppler-Zeit `t_zd_s` im Burstbild
+/// (`n_fft` Zeilen um `t_mid_s`, Zeilenabstand `PRI/α`).
+pub fn focused_line(n_fft: usize, t_mid_s: f64, pri_s: f64, alpha: f64, t_zd_s: f64) -> f64 {
+    n_fft as f64 * 0.5 + alpha * (t_zd_s - t_mid_s) / pri_s
+}
+
 /// Spaltenversatz zwischen Treffer-Range und Mosaik-Produkt.
 ///
 /// Das fokussierte Burstbild ist linksbündig zum Mosaik: Die Debursting-
@@ -246,6 +262,90 @@ pub fn mosaic_column(params: &RadarParams, n_rg: usize, rg: f64) -> Option<f64> 
         Some(rg)
     } else {
         None
+    }
+}
+
+/// Azimut-Zeitraster eines entbursteten Sub-Swaths: Mosaik-Zeile `a`
+/// entspricht der Zero-Doppler-Zeit `t_start_s + a * dt_az_s`.
+///
+/// Die Konstanten spiegeln exakt `deburst_swath` (`10_mosaic.rs`): Bei
+/// Stripmap (ein Burst, `kt == 0`) ist das Raster das Pulsraster um die
+/// Burst-Mitte; bei TOPS wird es über den Stauchungsfaktor
+/// `α = |k_a / (k_a − k_t)|` und den medianen Burst-Abstand gelegt.
+/// Weicht `deburst_swath` ab, fängt der Konsistenztest
+/// (`test_geoloc_mosaik_raster_gegen_deburst`) es ab.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DeburstGrid {
+    pub t_start_s: f64,
+    pub dt_az_s: f64,
+    pub n_az_out: usize,
+}
+
+/// Baut das Mosaik-Zeitraster aus fokussierten Bursts (nur Metadaten nötig).
+/// Gibt `None` bei leerer Liste oder entartetem Raster.
+pub fn deburst_grid(focused_bursts: &[FocusedBurst]) -> Option<DeburstGrid> {
+    let b0 = focused_bursts.first()?;
+    let n_rg_full = b0.n_rg;
+    if n_rg_full == 0 || b0.n_az_fft == 0 || b0.pri_s.is_nan() || b0.pri_s <= 0.0 {
+        return None;
+    }
+    // Stripmap-Sonderfall wie in `deburst_swath`.
+    if focused_bursts.len() == 1 && b0.kt_hz_s == 0.0 {
+        let n_az = b0.n_az_fft;
+        return Some(DeburstGrid {
+            t_start_s: b0.mid_time_s - 0.5 * (n_az as f64) * b0.pri_s,
+            dt_az_s: b0.pri_s,
+            n_az_out: n_az,
+        });
+    }
+    let n_rg = b0.n_valid_rg.clamp(1, n_rg_full);
+    let r_mid = b0.r0_m + 0.5 * (n_rg as f64) * b0.dr_m;
+    let ka_mid = ka_rate_hz_s(b0.veff_mid, r_mid);
+    let kt_mean =
+        focused_bursts.iter().map(|b| b.kt_hz_s).sum::<f64>() / (focused_bursts.len() as f64);
+    let alpha = (ka_mid / (ka_mid - kt_mean)).abs().clamp(0.05, 1.0);
+    let dt_az_s = b0.pri_s / alpha;
+    let nominal_stride = if focused_bursts.len() >= 2 {
+        let mut diffs: Vec<f64> = focused_bursts
+            .windows(2)
+            .map(|w| ((w[1].mid_time_s - w[0].mid_time_s) / dt_az_s).abs())
+            .filter(|&d| d > 10.0)
+            .collect();
+        if diffs.is_empty() {
+            (b0.n_az_raw as f64) * 0.90
+        } else {
+            diffs.sort_by(f64::total_cmp);
+            diffs[diffs.len() / 2]
+        }
+    } else {
+        (b0.n_az_raw as f64) * 0.90
+    };
+    let overlap_half = (nominal_stride * 0.035).round().clamp(8.0, 36.0) as isize;
+    let default_half = ((0.5 * nominal_stride).round() as isize + overlap_half)
+        .clamp(16, (b0.n_az_fft / 2) as isize) as usize;
+    let t_start_s = b0.mid_time_s - (default_half as f64) * dt_az_s;
+    let b_last = focused_bursts.last()?;
+    let t_end_s = b_last.mid_time_s + (default_half as f64) * dt_az_s;
+    let n_az_out = (((t_end_s - t_start_s) / dt_az_s).ceil() as usize).max(1);
+    if dt_az_s.is_nan() || dt_az_s <= 0.0 {
+        return None;
+    }
+    Some(DeburstGrid {
+        t_start_s,
+        dt_az_s,
+        n_az_out,
+    })
+}
+
+/// Mosaik-Zeile zur Zero-Doppler-Zeit `t_zd_s` (z. B. aus [`AssetHit`]).
+/// `None` außerhalb des entbursteten Bildes. Randzeilen überblenden per
+/// Konstruktion Nachbar-Bursts (Feathering in `deburst_swath`).
+pub fn mosaic_row(grid: &DeburstGrid, t_zd_s: f64) -> Option<usize> {
+    let row = ((t_zd_s - grid.t_start_s) / grid.dt_az_s).round() as isize;
+    if row < 0 || (row as usize) >= grid.n_az_out {
+        None
+    } else {
+        Some(row as usize)
     }
 }
 
@@ -331,9 +431,17 @@ pub fn chip_stats(
 pub struct AssetHit {
     pub swath_number: u8,
     pub burst_index: usize,
-    /// Gebrochene Zeile im FOKUSSIERTEN Burst (TOPS: `n_az_fft`-Achse um die
-    /// Burst-Mitte; Stripmap: Rohzeile = fokussierte Zeile).
+    /// Gebrochene Zeile im fokussierten Burst: Bei Stripmap exakt
+    /// (Rohzeile = fokussierte Zeile); bei TOPS eine erste Näherung mit
+    /// α=1 (derampte Gitterzeile). Die exakte fokussierte Zeile braucht
+    /// den Stauchungsfaktor aus dem Fokus-Schritt:
+    /// `focused_line(n_fft, t_mid, pri, tops_alpha(kt, veff, r), t_zd_s)`
+    /// — ohne α läge ein Punkt am Burst-Rand um Hunderte Zeilen daneben.
     pub az: f64,
+    /// Azimut-Länge des fokussierten Bursts (`n_az_fft` bei TOPS, `n_az`
+    /// bei Stripmap) — zusammen mit `az` die Sortiergrundlage: Der erste
+    /// Treffer liegt am nächsten an der Burst-Mitte.
+    pub n_fft: usize,
     /// Gebrochener Range-Index innerhalb des Bursts.
     pub rg: f64,
     /// Zero-Doppler-Zeit des Punkts [s, GPS-Skala des Datensatzes].
@@ -534,6 +642,14 @@ pub fn locate_asset(
     for swath in &dataset.swaths {
         hits.extend(locate_in_swath(ephem, swath, target, up));
     }
+    // Bester Treffer zuerst: am nächsten an der Burst-Mitte. Bei TOPS
+    // können Überlappzonen mehrere Burst-Kandidaten liefern; die exakte
+    // Mitgliedschaft entscheidet erst α aus dem Fokus-Schritt.
+    hits.sort_by(|a, b| {
+        let da = (a.az - a.n_fft as f64 * 0.5).abs();
+        let db = (b.az - b.n_fft as f64 * 0.5).abs();
+        da.total_cmp(&db)
+    });
     hits
 }
 
@@ -554,12 +670,16 @@ pub fn locate_in_swath(
         let t_last = burst.pulse_times[n_az - 1];
         let t_mid = 0.5 * (t_first + t_last);
         let (t_zd, slant) = project_target_to_slave(ephem, target_ecef, t_mid);
-        // Azimut-Achse des FOKUSSIERTEN Bursts: Bei TOPS ist sie `n_az_fft`
-        // Zeilen lang (Deramping spreizt die Zero-Doppler-Zeiten über die
-        // gepaddete Achse um die Burst-Mitte); bei Stripmap entspricht sie
-        // den Rohzeilen. `az` ist also stets die Zeile im fokussierten Burst.
+        // Azimut-Fenster des (fokussierten) Bursts: Bei TOPS ist die Achse
+        // `n_az_fft` Zeilen lang (Deramping spreizt die Zero-Doppler-Zeiten
+        // über die gepaddete Achse um die Burst-Mitte); bei Stripmap
+        // entspricht sie den Rohzeilen. `az` ist die α=1-Näherung der
+        // fokussierten Zeile — gut genug für die Burst-Auswahl, für Chips
+        // danach mit `focused_line` + α aus dem Fokus-Schritt korrigieren.
+        // Das Fenster ist bewusst doppelt so breit wie das Bild: Die wahre
+        // Zeile liegt durch die Stauchung (α ≤ 1) stets näher an der Mitte.
         let tops = matches!(swath.swath_number, 10..=12 | 20..=24);
-        let (az, az_len) = if tops {
+        let (az, n_fft, half_win) = if tops {
             let n_fft = crate::rda::tops_padded_az_len(
                 n_az,
                 burst.params.pri_s,
@@ -568,6 +688,7 @@ pub fn locate_in_swath(
             );
             (
                 (t_zd - t_mid) / burst.params.pri_s + n_fft as f64 * 0.5,
+                n_fft,
                 n_fft as f64,
             )
         } else {
@@ -575,10 +696,11 @@ pub fn locate_in_swath(
             if dt <= 0.0 {
                 continue;
             }
-            ((t_zd - t_first) / dt, n_az as f64)
+            ((t_zd - t_first) / dt, n_az, n_az as f64 * 0.5)
         };
+        let center = n_fft as f64 * 0.5;
         let rg = (slant - burst.params.r0_m) / burst.params.dr_m;
-        if az < 0.0 || az > az_len || rg < 0.0 || rg > burst.n_rg as f64 {
+        if (az - center).abs() > half_win || rg < 0.0 || rg > burst.n_rg as f64 {
             continue;
         }
         let sat = interp_pos(ephem, t_zd);
@@ -592,6 +714,7 @@ pub fn locate_in_swath(
             swath_number: swath.swath_number,
             burst_index: burst.burst_index,
             az,
+            n_fft,
             rg,
             t_zd_s: t_zd,
             slant_m: slant,
@@ -712,6 +835,72 @@ mod tests {
         // Roll-Off dahinter und negative: None.
         assert_eq!(mosaic_column(&p, 24_000, 23_200.0), None);
         assert_eq!(mosaic_column(&p, 24_000, -0.1), None);
+    }
+
+    #[test]
+    fn alpha_und_zeile() {
+        // kt=0 → keine Stauchung.
+        assert!((tops_alpha(0.0, 7_400.0, 887_000.0) - 1.0).abs() < 1e-12);
+        // α<1 zieht zur Mitte: 2 ms neben der Mitte sind nur eine halbe Zeile.
+        assert!((focused_line(1000, 10.0, 0.001, 0.5, 10.002) - 501.0).abs() < 1e-9);
+        assert!((focused_line(1000, 10.0, 0.001, 1.0, 10.002) - 502.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn mosaik_raster_stripmap() {
+        // Ein Burst, kt=0: Pulsraster um die Mitte.
+        let b = test_burst(100.0, 0.0);
+        let g = deburst_grid(std::slice::from_ref(&b)).unwrap();
+        assert!((g.t_start_s - 99.5).abs() < 1e-12);
+        assert!((g.dt_az_s - 0.001).abs() < 1e-15);
+        assert_eq!(g.n_az_out, 1000);
+        assert_eq!(mosaic_row(&g, 100.0), Some(500));
+        assert_eq!(mosaic_row(&g, 99.4), None);
+        assert_eq!(mosaic_row(&g, 100.6), None);
+        assert!(deburst_grid(&[]).is_none());
+    }
+
+    #[test]
+    fn mosaik_raster_tops() {
+        // Zwei Bursts im Abstand 100·dt: Median-Stride 100, Overlap max(8,…).
+        let bs = [test_burst(0.0, 500.0), test_burst(0.1, 500.0)];
+        let g = deburst_grid(&bs).unwrap();
+        // dt = pri/α mit α = |ka/(ka−kt)| aus veff/r der Test-Bursts.
+        let ka = ka_rate_hz_s(7_400.0, 845_000.0 + 0.5 * 23_200.0 * 2.7);
+        let alpha = (ka / (ka - 500.0)).abs().clamp(0.05, 1.0);
+        let dt = 0.001 / alpha;
+        assert!((g.dt_az_s - dt).abs() < 1e-15);
+        // Stride in dt-Einheiten: 0.1 s / dt.
+        let stride = (0.1 / dt).abs();
+        let overlap = ((stride * 0.035).round().clamp(8.0, 36.0)) as isize;
+        let half = ((0.5 * stride).round() as isize + overlap).clamp(16, 500) as usize;
+        assert!((g.t_start_s - (0.0 - half as f64 * dt)).abs() < 1e-12);
+        let n_out = (((0.1 + half as f64 * dt - g.t_start_s) / dt).ceil() as usize).max(1);
+        assert_eq!(g.n_az_out, n_out);
+        assert_eq!(
+            mosaic_row(&g, 0.05),
+            Some(((0.05 - g.t_start_s) / dt).round() as usize)
+        );
+        assert_eq!(mosaic_row(&g, -10.0), None);
+    }
+
+    /// Test-Burst (n_fft=1000, n_rg=24000, n_valid=23200, veff=7400).
+    fn test_burst(mid: f64, kt: f64) -> FocusedBurst {
+        FocusedBurst {
+            burst_index: 0,
+            n_az_raw: 900,
+            n_az_fft: 1000,
+            n_rg: 24_000,
+            n_valid_rg: 23_200,
+            mid_time_s: mid,
+            pri_s: 0.001,
+            r0_m: 845_000.0,
+            dr_m: 2.7,
+            veff_mid: 7_400.0,
+            kt_hz_s: kt,
+            fdc_mid_hz: 0.0,
+            data: Vec::new(),
+        }
     }
 
     #[test]

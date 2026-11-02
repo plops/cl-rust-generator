@@ -16,8 +16,8 @@ use sar_source2::ephem::{
     inertial_vel, interp_pos, interp_vel,
 };
 use sar_source2::geoloc::{
-    AmpelStatus, HgtTile, bewerte_zeitreihe, chip_stats, ecef_to_geodetic, geodetic_to_ecef,
-    locate_asset, locate_polygon, mosaic_column, parse_poeorb_eof,
+    AmpelStatus, HgtTile, bewerte_zeitreihe, chip_stats, ecef_to_geodetic, focused_line,
+    geodetic_to_ecef, locate_asset, locate_polygon, mosaic_column, parse_poeorb_eof, tops_alpha,
 };
 use sar_source2::gpu::GpuSarContext;
 use sar_source2::ingest::load_l0_dataset;
@@ -985,7 +985,7 @@ fn test_geoloc_asset_chip_master_slave() {
             .iter()
             .find(|b| b.burst_index == hit.burst_index)
             .expect("Treffer-Burst fehlt");
-        let (focused, n_fft, n_rg, _) = focus_tops_burst_cpu(burst, true);
+        let (focused, n_fft, n_rg, steering) = focus_tops_burst_cpu(burst, true);
         // Treffer-Range muss als Mosaik-Spalte gültig sein (linksbündig,
         // vor dem Far-Range-Roll-Off).
         assert_eq!(
@@ -994,7 +994,20 @@ fn test_geoloc_asset_chip_master_slave() {
             "Treffer-Range außerhalb des Mosaik-Bereichs in {}",
             path.display()
         );
-        let stats = chip_stats(&focused, n_fft, n_rg, hit.az, hit.rg, 16, 20)
+        // Exakte Chip-Zeile: α aus dem Fokus-Schritt (kt), nicht die
+        // α=1-Näherung aus der Ortung.
+        let t_mid_b = 0.5 * (burst.pulse_times[0] + burst.pulse_times[burst.n_az - 1]);
+        let alpha = tops_alpha(
+            steering.kt_hz_s,
+            burst.veff[burst.n_rg / 2],
+            burst.params.slant_range(burst.n_rg / 2),
+        );
+        let line = focused_line(n_fft, t_mid_b, burst.params.pri_s, alpha, hit.t_zd_s);
+        println!(
+            "kt={:+.0} Hz/s alpha={:.3} schätzung={:.1} zeile={:.1}",
+            steering.kt_hz_s, alpha, hit.az, line
+        );
+        let stats = chip_stats(&focused, n_fft, n_rg, line, hit.rg, 16, 20)
             .expect("Chip liegt außerhalb des fokussierten Bursts");
         assert!(stats.n > 500, "Chip zu klein: n={}", stats.n);
         assert!(
@@ -1032,4 +1045,43 @@ fn test_geoloc_asset_chip_master_slave() {
         ampel
     );
     println!("Ampel Kaohsiung: {}", ampel.detail);
+}
+
+#[test]
+fn test_geoloc_mosaik_raster_gegen_deburst() {
+    use sar_source2::geoloc::{deburst_grid, mosaic_row};
+    use sar_source2::mosaic::deburst_swath;
+    // Drei synthetische Bursts durch das ECHTE deburst_swath: Das replizierte
+    // Raster muss exakt dessen (t_start_s, dt_az_s, n_az) treffen — sonst ist
+    // die Replikation bei der nächsten Mosaik-Änderung unbemerkt falsch.
+    let bursts: Vec<FocusedBurst> = [0.0, 0.2, 0.4]
+        .into_iter()
+        .enumerate()
+        .map(|(i, mid)| FocusedBurst {
+            burst_index: i,
+            n_az_raw: 140,
+            n_az_fft: 128,
+            n_rg: 64,
+            n_valid_rg: 60,
+            mid_time_s: mid,
+            pri_s: 0.001,
+            r0_m: 800_000.0,
+            dr_m: 10.0,
+            veff_mid: 7_400.0,
+            kt_hz_s: 400.0,
+            fdc_mid_hz: 0.0,
+            data: vec![Complex32::ZERO; 128 * 64],
+        })
+        .collect();
+    let deb = deburst_swath(10, "IW1", &bursts).expect("Debursting fehlgeschlagen");
+    let grid = deburst_grid(&bursts).expect("Rasteraufbau fehlgeschlagen");
+    assert_eq!(grid.t_start_s, deb.t_start_s, "t_start weicht ab");
+    assert_eq!(grid.dt_az_s, deb.dt_az_s, "dt_az weicht ab");
+    assert_eq!(grid.n_az_out, deb.n_az, "n_az weicht ab");
+    // Zeilenformel invertiert das Raster exakt.
+    assert_eq!(
+        mosaic_row(&grid, grid.t_start_s + 5.0 * grid.dt_az_s),
+        Some(5)
+    );
+    assert_eq!(mosaic_row(&grid, grid.t_start_s - grid.dt_az_s), None);
 }

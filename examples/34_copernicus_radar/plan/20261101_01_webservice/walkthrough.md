@@ -148,8 +148,28 @@ sitzt Kaohsiung in **Sub-Swath IW2, Burst 9**. Zweite Falle gleich
 danach: Der Einfallswinkel kam als 139° heraus — das Komplement.
 Gemeint ist der Winkel zur Vertikalen in Blickrichtung *zum*
 Satelliten: 180° − 139,4° = **40,6°**, exakt der Sollbereich für IW2
-(29–46°). Beides sind Fehler der Sorte „Physik richtig, Konvention
-falsch" — und beide fängt nur ein Test mit einem bekannten Ort.
+(29–46°).
+
+## 6b. Die Stauchung: Warum 267 trotzdem falsch war
+
+Der Chip bei Zeile 267 sah plausibel aus (5 dB, stabile Drift) — und
+war trotzdem 650 Zeilen daneben. Der Hinweis steht in der Doku von
+`deburst_swath`: Eine fokussierte Zeile entspricht nicht einer PRI,
+sondern `dt = PRI/α` wahrer Zeit, mit dem Stauchungsfaktor
+α = |k_a/(k_a − k_t)|. Das Deramping beim Fokussieren staucht die
+Achse; wer mit PRI rechnet, schätzt den Abstand zur Burst-Mitte zu
+groß. Gemessen an IW2/Burst 9: kt = +4629 Hz/s, α = 0,310 — die wahre
+Zeile ist **1496,5** statt 267,0, also rund 5 km weiter.
+
+Die Lehre in einem Satz: Die Ortung liefert Burst-Index und
+Zero-Doppler-Zeit exakt (dafür braucht sie kein kt); die Zeile im
+fokussierten Bild erst der Fokus-Schritt (dafür misst er kt). Unser
+`AssetHit.az` ist deshalb ehrlich dokumentiert als α=1-Näherung für
+die Burst-Auswahl, und `focused_line` rechnet nach dem Fokussieren
+exakt um. Die Chips liegen jetzt an wahrer Stelle (beide ≈ 62 dB,
+Drift 0,3 dB → Grün), und ein Konsistenztest vergleicht unser
+nachgebautes Mosaik-Raster bit-exakt mit dem echten `deburst_swath` —
+damit eine künftige Mosaik-Änderung nicht unbemerkt alles verschiebt.
 
 ## 7. Was jetzt da ist (Behauptung → Beweis)
 
@@ -181,9 +201,10 @@ Geprüft an echten Daten (Master-Aufnahme Süd-Taiwan). Die Beweise:
 - **Zeitreihe + Ampel:** Der Trefferpunkt ist erst die halbe Miete. Der
   erste Schritt ist getan: `chip_stats` schneidet je Aufnahme einen
   Ausschnitt (±16×±20 Pixel) um den Treffer aus und fasst die Leistung
-  zusammen (Kaohsiung: Master-Median 4,8 dB, Slave 5,1 dB — Drift 0,4 dB
-  über 12 Tage → Ampel Grün bei Schwellen 3/6 dB). Noch offen: Schwellen
-  an beschrifteten Zeitreihen kalibrieren und der Wochenreport.
+  zusammen (Kaohsiung: beide Chips ≈ 62 dB an wahrer Zeile ≈ 1496 —
+  Drift 0,3 dB über 12 Tage → Ampel Grün bei Schwellen 3/6 dB).
+  Noch offen: Schwellen an beschrifteten Zeitreihen kalibrieren und
+  der Wochenreport.
 - **Polygone statt Punkte:** Erledigt — ein Damm ist eine Linie, also
   tastet `locate_polygon` Ecken plus Raster ab (Punkt-im-Polygon-Test
   inklusive) und ortet jeden Punkt. An Kaohsiung-Dreiecken in beiden

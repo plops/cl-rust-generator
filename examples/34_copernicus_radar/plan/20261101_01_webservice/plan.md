@@ -120,14 +120,22 @@ grün; `cargo-oxide` dafür per `cargo install --git NVlabs/cuda-oxide` geholt):
   Präzisionsorbit gleicher Burst.
 
 Nächster Baustein (Stand 2026-11-02): `ChipStats` + `chip_stats` in
-`12_geoloc.rs` sind gebaut und getestet — erster Zeitreihen-Punkt Kaohsiung:
-Master (IW2/Burst 9, az=267,3, rg=15305,4) Median 4,8 dB / p90 9,1 dB,
-Slave (IW2/Burst 9, az=268,0, rg=15311,3) Median 5,1 dB / p90 9,3 dB —
-Drift 0,4 dB über 12 Tage → Ampel Grün (Schwellen 3/6 dB, Prototyp).
+`12_geoloc.rs` sind gebaut und getestet — erster Zeitreihen-Punkt Kaohsiung
+(IW2/Burst 9, rg≈15305): An der α=1-Näherung (Zeile ≈ 267) zunächst
+Median ≈ 5 dB; nach α-Korrektur (Zeile ≈ 1496, s. unten) beide Chips
+≈ 62 dB, Drift 0,3 dB über 12 Tage → Ampel Grün (Schwellen 3/6 dB,
+Prototyp).
 Polygon-Assets (`locate_polygon`: Ecken + Raster + Punkt-im-Polygon, an
 Realdaten geprüft) und Ampel-Bewertung (`bewerte_zeitreihe`) sind gebaut.
 Offen: Schwellen an beschrifteten Zeitreihen kalibrieren, Wochenreport.
 Erledigt: Range-Achse abgeglichen — `mosaic_column` (Treffer-`rg` =
 Mosaik-Spalte, gültig in `[0, n_rg − n_chirp/4)`; an Kaohsiung-Realdaten
 geprüft; Doku-Fehler `n_rg − n_chirp` in `FocusedBurst` korrigiert).
-Volle Suite 13/13 + 7/7, clippy/fmt grün.
+Erledigt: Azimut-Achse mit Stauchung α — `tops_alpha`/`focused_line`/
+`deburst_grid`/`mosaic_row`. Entscheidend: Die fokussierte Zeile folgt
+`t = mid + dm·dt` mit `dt = PRI/α` (nicht PRI); gemessen IW2/Burst 9:
+kt=+4629 Hz/s, α=0,310, wahre Zeile 1496,5 statt 267,0 der α=1-Näherung
+(≈650 Zeilen ≈ 5 km daneben). Chips jetzt an wahrer Stelle: beide
+≈ 62 dB, Drift 0,3 dB → Grün. `deburst_grid` ist bit-exakt gegen das
+echte `deburst_swath` getestet (Divergenz-Wächter).
+Volle Suite 14/14 + 11/11, clippy/fmt grün.
