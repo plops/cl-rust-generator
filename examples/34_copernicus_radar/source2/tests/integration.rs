@@ -16,9 +16,9 @@ use sar_source2::ephem::{
     inertial_vel, interp_pos, interp_vel,
 };
 use sar_source2::geoloc::{
-    AmpelStatus, HgtTile, bewerte_zeitreihe, chip_stats, ecef_to_geodetic, focused_line,
-    geodetic_to_ecef, layover_check, locate_asset, locate_polygon, mosaic_column, parse_poeorb_eof,
-    tops_alpha,
+    AmpelStatus, HgtTile, ReportEintrag, bewerte_zeitreihe, chip_stats, ecef_to_geodetic,
+    focused_line, geodetic_to_ecef, layover_check, locate_asset, locate_polygon, mosaic_column,
+    parse_poeorb_eof, tops_alpha, wochenbericht,
 };
 use sar_source2::gpu::GpuSarContext;
 use sar_source2::ingest::load_l0_dataset;
@@ -967,6 +967,7 @@ fn test_geoloc_asset_chip_master_slave() {
     let (lat, lon) = (22.62, 120.31);
     let h = tile.height(lat, lon);
     let mut medians = Vec::new();
+    let mut p90s = Vec::new();
     // Kleines Dreieck um Kaohsiung (±2 km): jeder Abtastpunkt muss treffen.
     let dreieck = [(22.60, 120.29), (22.64, 120.29), (22.62, 120.33)];
     for path in [master_path, slave_path] {
@@ -1049,6 +1050,7 @@ fn test_geoloc_asset_chip_master_slave() {
             stats.n
         );
         medians.push(stats.median_db);
+        p90s.push(stats.p90_db);
     }
     // Gleiche Stadt, 12 Tage Abstand: Median-Leistung muss grob stabil sein
     // (weite Schranke — Schiffe/Hafenverkehr ändern einzelne Pixel).
@@ -1067,6 +1069,26 @@ fn test_geoloc_asset_chip_master_slave() {
         ampel
     );
     println!("Ampel Kaohsiung: {}", ampel.detail);
+    // Echter Wochenreport aus den gemessenen Chips.
+    let bericht = wochenbericht(
+        "Kaohsiung-Hafen",
+        &[
+            ReportEintrag {
+                datum: "2026-09-28".into(),
+                median_db: medians[0],
+                p90_db: p90s[0],
+            },
+            ReportEintrag {
+                datum: "2026-10-10".into(),
+                median_db: medians[1],
+                p90_db: p90s[1],
+            },
+        ],
+        3.0,
+        6.0,
+    );
+    assert!(bericht.contains("Ampel: Grün"));
+    println!("{bericht}");
 }
 
 #[test]

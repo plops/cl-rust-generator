@@ -203,8 +203,9 @@ Geprüft an echten Daten (Master-Aufnahme Süd-Taiwan). Die Beweise:
   Ausschnitt (±16×±20 Pixel) um den Treffer aus und fasst die Leistung
   zusammen (Kaohsiung: beide Chips ≈ 62 dB an wahrer Zeile ≈ 1496 —
   Drift 0,3 dB über 12 Tage → Ampel Grün bei Schwellen 3/6 dB).
-  Noch offen: Schwellen an beschrifteten Zeitreihen kalibrieren und
-  der Wochenreport.
+  Der erste echte Wochenreport (Markdown-Tabelle mit Median/p90/Drift)
+  läuft im Chip-Test mit — noch offen: Schwellen an beschrifteten
+  Zeitreihen kalibrieren.
 - **Polygone statt Punkte:** Erledigt — ein Damm ist eine Linie, also
   tastet `locate_polygon` Ecken plus Raster ab (Punkt-im-Polygon-Test
   inklusive) und ortet jeden Punkt. An Kaohsiung-Dreiecken in beiden

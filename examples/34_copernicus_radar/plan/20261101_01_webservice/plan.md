@@ -127,7 +127,12 @@ Median ≈ 5 dB; nach α-Korrektur (Zeile ≈ 1496, s. unten) beide Chips
 Prototyp).
 Polygon-Assets (`locate_polygon`: Ecken + Raster + Punkt-im-Polygon, an
 Realdaten geprüft) und Ampel-Bewertung (`bewerte_zeitreihe`) sind gebaut.
-Offen: Schwellen an beschrifteten Zeitreihen kalibrieren, Wochenreport.
+Offen: Schwellen an beschrifteten Zeitreihen kalibrieren.
+Erledigt: Wochenreport — `wochenbericht` (Markdown: eine Zeile je
+Akquisition mit Median/p90/Drift plus Gesamt-Ampel; JSON später).
+Erster echter Report Kaohsiung-Hafen: 2026-09-28 Median 62,4 dB,
+2026-10-10 Median 62,1 dB, Ampel Grün.
+Volle Suite 14/14 + 12/12, clippy/fmt grün.
 Erledigt: Layover präzise — `layover_check` misst die Hangneigung aus dem
 DEM entlang der Blickrichtung (je eine Abfrage 90 m vor/hinter dem Punkt)
 und meldet Layover erst bei Hang > 90° − Einfallswinkel. Gemessen:

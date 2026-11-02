@@ -580,6 +580,52 @@ pub struct Ampel {
     pub detail: String,
 }
 
+/// Eine Akquisition der Asset-Zeitreihe für den Wochenreport.
+#[derive(Clone, Debug)]
+pub struct ReportEintrag {
+    /// Aufnahmedatum als Text (z. B. `"2026-09-28"`).
+    pub datum: String,
+    /// Chip-Median [dB].
+    pub median_db: f64,
+    /// Chip-p90 [dB].
+    pub p90_db: f64,
+}
+
+/// Wochenreport als Markdown-Text: eine Zeile je Akquisition plus
+/// Gesamt-Ampel aus [`bewerte_zeitreihe`]. Präsentationsschicht — für
+/// Maschinenlesbarkeit ist später JSON vorgesehen (siehe Plan).
+pub fn wochenbericht(
+    asset_name: &str,
+    eintraege: &[ReportEintrag],
+    warn_db: f64,
+    alarm_db: f64,
+) -> String {
+    let medians: Vec<f64> = eintraege.iter().map(|e| e.median_db).collect();
+    let ampel = bewerte_zeitreihe(&medians, warn_db, alarm_db);
+    let status = match ampel.status {
+        AmpelStatus::Gruen => "Grün",
+        AmpelStatus::Gelb => "Gelb",
+        AmpelStatus::Rot => "Rot",
+    };
+    let mut out = format!(
+        "# Asset-Report: {asset_name}\n\nAmpel: {status} ({})\n\n\
+         | Aufnahme | Median [dB] | p90 [dB] | Drift [dB] |\n\
+         |---|---|---|---|\n",
+        ampel.detail
+    );
+    let basis = medians.first().copied().unwrap_or(0.0);
+    for e in eintraege {
+        out.push_str(&format!(
+            "| {} | {:.1} | {:.1} | {:+.1} |\n",
+            e.datum,
+            e.median_db,
+            e.p90_db,
+            e.median_db - basis
+        ));
+    }
+    out
+}
+
 /// Bewertet eine Median-Zeitreihe (`medians_db`, chronologisch, erster Wert =
 /// Referenz) gegen Warn-/Alarmschwellen [dB].
 ///
@@ -979,6 +1025,49 @@ mod tests {
         let rueck = layover_check(22.0, 120.0, |la, _| m * (la - 22.0), sat_s, 40.0);
         assert!(rueck.slope_facing_deg < -55.0);
         assert!(!rueck.layover);
+    }
+
+    #[test]
+    fn wochenbericht_text() {
+        let ein = vec![
+            ReportEintrag {
+                datum: "2026-09-28".into(),
+                median_db: 62.1,
+                p90_db: 67.7,
+            },
+            ReportEintrag {
+                datum: "2026-10-10".into(),
+                median_db: 61.8,
+                p90_db: 67.2,
+            },
+        ];
+        let text = wochenbericht("Kaohsiung-Hafen", &ein, 3.0, 6.0);
+        assert!(text.contains("# Asset-Report: Kaohsiung-Hafen"));
+        assert!(text.contains("Ampel: Grün"));
+        assert!(text.contains("| 2026-09-28 | 62.1 | 67.7 | +0.0 |"));
+        assert!(text.contains("| 2026-10-10 | 61.8 | 67.2 | -0.3 |"));
+        // Rot-Fall mit Begründung.
+        let rot = wochenbericht(
+            "Damm",
+            &[
+                ReportEintrag {
+                    datum: "2026-09-28".into(),
+                    median_db: 10.0,
+                    p90_db: 12.0,
+                },
+                ReportEintrag {
+                    datum: "2026-10-10".into(),
+                    median_db: 17.5,
+                    p90_db: 19.0,
+                },
+            ],
+            3.0,
+            6.0,
+        );
+        assert!(rot.contains("Ampel: Rot"));
+        // Leer → Grün ohne Zeilen.
+        let leer = wochenbericht("Neu", &[], 3.0, 6.0);
+        assert!(leer.contains("Ampel: Grün") && leer.contains("keine Messwerte"));
     }
 
     #[test]
