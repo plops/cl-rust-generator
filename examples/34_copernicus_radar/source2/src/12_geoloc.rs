@@ -12,7 +12,7 @@ use std::path::Path;
 use crate::ephem::{EphemPoint, WGS84_A_M, WGS84_B_M, interp_pos, interp_vel};
 use crate::ingest::L0Dataset;
 use crate::insar::project_target_to_slave;
-use crate::types::{Complex32, Error, SwathData, Vec3d};
+use crate::types::{Complex32, Error, RadarParams, SwathData, Vec3d};
 
 /// GPS-Zeit (s seit 1980-01-06) minus Unix-Zeit (s seit 1970-01-01), inkl.
 /// 18 Schaltsekunden (Stand 2017..2026): `gps = unix - 315_964_800 + 18`.
@@ -228,6 +228,25 @@ fn parse_hemi(hemi: Option<char>, digits: Option<&str>) -> Result<i32, Error> {
         Some('S') | Some('W') => -v,
         _ => return Err(Error("DEM-Dateiname ohne Hemisphäre".into())),
     })
+}
+
+/// Spaltenversatz zwischen Treffer-Range und Mosaik-Produkt.
+///
+/// Das fokussierte Burstbild ist linksbündig zum Mosaik: Die Debursting-
+/// Stufe (`deburst_swath`) übernimmt die Spalten `[0, n_valid_rg)` und
+/// verwirft nur den Far-Range-Roll-Off dahinter, mit
+/// `n_valid_rg = n_rg − n_chirp/4` (`main.rs`; `n_chirp` aus Chirplänge
+/// mal Abtastrate gerundet). Die Mosaik-Spalte ist also identisch zum
+/// Treffer-`rg` — zu prüfen bleibt nur die Gültigkeit: `None` jenseits
+/// des Roll-Offs (oder bei negativem `rg`).
+pub fn mosaic_column(params: &RadarParams, n_rg: usize, rg: f64) -> Option<f64> {
+    let n_chirp = (params.tx_pulse_length_s * params.fs_hz).round() as usize;
+    let n_valid = n_rg.saturating_sub(n_chirp / 4).max(1) as f64;
+    if rg >= 0.0 && rg < n_valid {
+        Some(rg)
+    } else {
+        None
+    }
 }
 
 /// Leistungsstatistik eines Bildausschnitts („Chip") um einen [`AssetHit`].
@@ -663,6 +682,36 @@ mod tests {
         assert!(point_in_polygon(0.25, 0.25, &t));
         assert!(!point_in_polygon(0.75, 0.75, &t));
         assert!(point_in_polygon(0.5, 0.0, &t));
+    }
+
+    #[test]
+    fn mosaik_spalte() {
+        // n_chirp = 50 µs · 64 MHz = 3200 → gültig [0, 24000−800).
+        let p = RadarParams {
+            swath_number: 11,
+            elevation_beam: 0,
+            rgdec: 3,
+            rank: 0,
+            fs_hz: 64_000_000.0,
+            prf_hz: 1_500.0,
+            pri_s: 1.0 / 1_500.0,
+            swst_s: 0.0,
+            swl_s: 0.0,
+            tx_ramp_rate_hz_s: 0.0,
+            tx_start_freq_hz: 0.0,
+            tx_pulse_length_s: 50e-6,
+            fast_time_start_s: 0.0,
+            r0_m: 845_000.0,
+            dr_m: 2.7,
+            chirp_samples: 0,
+        };
+        // Linksbündig: Mosaik-Spalte = Treffer-Range.
+        assert_eq!(mosaic_column(&p, 24_000, 15_305.4), Some(15_305.4));
+        assert_eq!(mosaic_column(&p, 24_000, 0.0), Some(0.0));
+        assert_eq!(mosaic_column(&p, 24_000, 23_199.9), Some(23_199.9));
+        // Roll-Off dahinter und negative: None.
+        assert_eq!(mosaic_column(&p, 24_000, 23_200.0), None);
+        assert_eq!(mosaic_column(&p, 24_000, -0.1), None);
     }
 
     #[test]

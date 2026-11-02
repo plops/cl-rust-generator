@@ -17,7 +17,7 @@ use sar_source2::ephem::{
 };
 use sar_source2::geoloc::{
     AmpelStatus, HgtTile, bewerte_zeitreihe, chip_stats, ecef_to_geodetic, geodetic_to_ecef,
-    locate_asset, locate_polygon, parse_poeorb_eof,
+    locate_asset, locate_polygon, mosaic_column, parse_poeorb_eof,
 };
 use sar_source2::gpu::GpuSarContext;
 use sar_source2::ingest::load_l0_dataset;
@@ -986,6 +986,14 @@ fn test_geoloc_asset_chip_master_slave() {
             .find(|b| b.burst_index == hit.burst_index)
             .expect("Treffer-Burst fehlt");
         let (focused, n_fft, n_rg, _) = focus_tops_burst_cpu(burst, true);
+        // Treffer-Range muss als Mosaik-Spalte gültig sein (linksbündig,
+        // vor dem Far-Range-Roll-Off).
+        assert_eq!(
+            mosaic_column(&burst.params, n_rg, hit.rg),
+            Some(hit.rg),
+            "Treffer-Range außerhalb des Mosaik-Bereichs in {}",
+            path.display()
+        );
         let stats = chip_stats(&focused, n_fft, n_rg, hit.az, hit.rg, 16, 20)
             .expect("Chip liegt außerhalb des fokussierten Bursts");
         assert!(stats.n > 500, "Chip zu klein: n={}", stats.n);

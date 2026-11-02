@@ -126,5 +126,8 @@ Slave (IW2/Burst 9, az=268,0, rg=15311,3) Median 5,1 dB / p90 9,3 dB —
 Drift 0,4 dB über 12 Tage → Ampel Grün (Schwellen 3/6 dB, Prototyp).
 Polygon-Assets (`locate_polygon`: Ecken + Raster + Punkt-im-Polygon, an
 Realdaten geprüft) und Ampel-Bewertung (`bewerte_zeitreihe`) sind gebaut.
-Offen: Schwellen an beschrifteten Zeitreihen kalibrieren, Wochenreport,
-fokussierte Range-Achse (ntx-Rand) abgleichen.
+Offen: Schwellen an beschrifteten Zeitreihen kalibrieren, Wochenreport.
+Erledigt: Range-Achse abgeglichen — `mosaic_column` (Treffer-`rg` =
+Mosaik-Spalte, gültig in `[0, n_rg − n_chirp/4)`; an Kaohsiung-Realdaten
+geprüft; Doku-Fehler `n_rg − n_chirp` in `FocusedBurst` korrigiert).
+Volle Suite 13/13 + 7/7, clippy/fmt grün.

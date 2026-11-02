@@ -14,7 +14,8 @@ pub struct FocusedBurst {
     pub n_az_raw: usize,
     pub n_az_fft: usize,
     pub n_rg: usize,
-    /// Anzahl der gültigen Range-Samples ohne den Far-Range-Chirp-Roll-Off (`n_rg - n_chirp`).
+    /// Anzahl der gültigen Range-Samples ohne den Far-Range-Chirp-Roll-Off
+    /// (`n_rg - n_chirp/4`, gesetzt in `main.rs`).
     pub n_valid_rg: usize,
     pub mid_time_s: f64,
     pub pri_s: f64,

@@ -188,6 +188,11 @@ Geprüft an echten Daten (Master-Aufnahme Süd-Taiwan). Die Beweise:
   tastet `locate_polygon` Ecken plus Raster ab (Punkt-im-Polygon-Test
   inklusive) und ortet jeden Punkt. An Kaohsiung-Dreiecken in beiden
   Aufnahmen geprüft.
+- **Range-Achse abgeglichen:** Erledigt — das Mosaik übernimmt die
+  Spalten linksbündig (`[0, n_rg − n_chirp/4)`), also ist die
+  Mosaik-Spalte identisch zum Treffer-`rg`; `mosaic_column` prüft nur
+  noch die Gültigkeit (an Realdaten: Kaohsiung bei 15305,4 tief im
+  gültigen Bereich).
 - **Layover richtig:** Heute Faustregel über den Einfallswinkel.
   Korrekt braucht es die Hangneigung aus dem Höhenmodell entlang der
   Blickrichtung.
