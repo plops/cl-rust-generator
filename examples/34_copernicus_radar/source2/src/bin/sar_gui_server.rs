@@ -14,9 +14,12 @@
 //! `GET /api/jobs/{id}` (Schritt 5, Job-System mit Burst-Cache),
 //! `GET /api/chip/{id}` als Chip-PNG mit Fadenkreuz (Schritt 6),
 //! `GET /api/compare` für den Master/Slave-Vergleich (Drift über die
-//! Chip-Mediane, Ampel via `geoloc::bewerte_zeitreihe`) und
+//! Chip-Mediane, Ampel via `geoloc::bewerte_zeitreihe`),
 //! `GET /api/report` (Schritt 7, `geoloc::wochenbericht`-Text aus den
-//! abgeschlossenen Fokus-Jobs). Die Routen nutzen
+//! abgeschlossenen Fokus-Jobs) und `POST /api/polygon` (Schritt 8,
+//! Phase B: `geoloc::locate_polygon` mit Raster-Abtastung, nur
+//! Lokalisierung + Aggregation — bewusst kein Massen-Fokus).
+//! Die Routen nutzen
 //! `geoloc::locate_asset`, `ingest::load_l0_dataset`,
 //! `rda::focus_tops_burst_cpu` sowie `tops_alpha`/`focused_line`
 //! auf den hier konfigurierten Datensätzen (`--master`/`--slave`).
@@ -28,7 +31,7 @@ use image::ImageEncoder;
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use sar_source2::geoloc::{
     AmpelStatus, HgtTile, ReportEintrag, bewerte_zeitreihe, chip_stats, focused_line, locate_asset,
-    parse_poeorb_eof, tops_alpha, wochenbericht,
+    locate_polygon, parse_poeorb_eof, tops_alpha, wochenbericht,
 };
 use sar_source2::ingest::{L0Dataset, load_l0_dataset};
 use sar_source2::rda::focus_tops_burst_cpu;
@@ -57,6 +60,13 @@ const MAX_HALF: usize = 200;
 /// `geoloc::bewerte_zeitreihe`).
 const DEFAULT_WARN_DB: f64 = 3.0;
 const DEFAULT_ALARM_DB: f64 = 6.0;
+
+/// Standard-Schrittweite [Grad] für `POST /api/polygon` (Schritt 8,
+/// Phase B): Raster-Abtastung des Polygons, im GUI editierbar.
+const DEFAULT_STEP_DEG: f64 = 0.01;
+/// Gültigkeitsbereich der Polygon-Schrittweite [Grad].
+const MIN_STEP_DEG: f64 = 1e-5;
+const MAX_STEP_DEG: f64 = 1.0;
 
 const INDEX_HTML: &str = r##"<!DOCTYPE html>
 <html lang="de">
@@ -131,6 +141,23 @@ Koordinateneingabe und alle Funktionen bleiben verfügbar.</p>
 <tbody id="tbody"></tbody>
 </table>
 </section>
+<section aria-label="Polygon (Phase B)">
+<h2>Polygon (Phase B)</h2>
+<p class="hinweis">Polygon-Modus einschalten, dann Ecken auf die Karte klicken
+(braucht Netz für die Karte). Auswertung nur Lokalisierung + Aggregation —
+bewusst kein Massen-Fokus.</p>
+<p>
+<button id="btn-polygonmodus" type="button">Polygon-Modus: aus</button>
+<button id="btn-polygonreset" type="button">Zurücksetzen</button>
+</p>
+<label>Schrittweite (stepDeg, 0.00001…1.0): <input id="stepdeg" type="number" step="any" value="0.01"></label>
+<p><button id="btn-polygon" type="button">Polygon auswerten</button></p>
+<p id="polygonstatus">Noch kein Polygon.</p>
+<table id="polygontabelle" hidden>
+<thead><tr><th>Swath</th><th>Burst</th><th>Samples</th><th>az (best)</th><th>rg (best)</th><th>Inzidenz (°)</th></tr></thead>
+<tbody id="polygontbody"></tbody>
+</table>
+</section>
 <section aria-label="Fokus-Job">
 <h2>Fokus-Job</h2>
 <label>Chip ±Zeilen (halfAz): <input id="halfaz" type="number" step="1" min="1" max="200" value="16"></label>
@@ -186,6 +213,7 @@ var vergleichdetailEl = document.getElementById("vergleichdetail");
 var reporttextEl = document.getElementById("reporttext");
 var slaveHinweisEl = document.getElementById("slavehinweis");
 var karte = null, marker = null, pollTimer = null, treffer = [];
+var polygonModus = false, ecken = [], eckMarker = [], polyLinie = null, punktSchicht = null;
 var letzterDatensatz = "master";
 var letzteJobs = { master: null, slave: null };
 var slaveVerfuegbar = false;
@@ -233,6 +261,11 @@ try {
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(karte);
   karte.on("click", function (e) {
+    if (polygonModus) {
+      ecken.push([e.latlng.lat, e.latlng.lng]);
+      zeichnePolygon();
+      return;
+    }
     latEl.value = e.latlng.lat.toFixed(5);
     lonEl.value = e.latlng.lng.toFixed(5);
     setzeMarker(e.latlng.lat, e.latlng.lng);
@@ -392,6 +425,114 @@ function stoppePolling() {
   if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
 }
 
+function zeichnePolygon() {
+  if (karte) {
+    eckMarker.forEach(function (m) { karte.removeLayer(m); });
+    eckMarker = [];
+    if (polyLinie) { karte.removeLayer(polyLinie); polyLinie = null; }
+    ecken.forEach(function (e) { eckMarker.push(L.marker(e).addTo(karte)); });
+    if (ecken.length >= 2) polyLinie = L.polyline(ecken.concat([ecken[0]]), { color: "red" }).addTo(karte);
+  }
+  document.getElementById("polygonstatus").textContent =
+    ecken.length < 3 ? ecken.length + " Ecke(n) — mindestens 3 für die Auswertung." :
+    ecken.length + " Ecken — bereit für „Polygon auswerten“.";
+}
+
+function polygonZuruecksetzen() {
+  ecken = [];
+  if (karte) {
+    eckMarker.forEach(function (m) { karte.removeLayer(m); });
+    eckMarker = [];
+    if (polyLinie) { karte.removeLayer(polyLinie); polyLinie = null; }
+    if (punktSchicht) { karte.removeLayer(punktSchicht); punktSchicht = null; }
+  }
+  document.getElementById("polygonstatus").textContent = "Noch kein Polygon.";
+  document.getElementById("polygontabelle").hidden = true;
+  document.getElementById("polygontbody").innerHTML = "";
+}
+
+document.getElementById("btn-polygonmodus").addEventListener("click", function () {
+  polygonModus = !polygonModus;
+  this.textContent = polygonModus ? "Polygon-Modus: ein" : "Polygon-Modus: aus";
+  if (!karte) {
+    zeigeFehler("Die Karte ist offline — Ecken bitte bei Netz anklicken, Auswertung geht trotzdem.");
+  }
+  zeichnePolygon();
+});
+
+document.getElementById("btn-polygonreset").addEventListener("click", function () {
+  zeigeFehler("");
+  polygonModus = false;
+  document.getElementById("btn-polygonmodus").textContent = "Polygon-Modus: aus";
+  polygonZuruecksetzen();
+});
+
+document.getElementById("btn-polygon").addEventListener("click", function () {
+  zeigeFehler("");
+  var statusEl = document.getElementById("polygonstatus");
+  var tbody = document.getElementById("polygontbody");
+  var tabelle = document.getElementById("polygontabelle");
+  if (ecken.length < 3) {
+    zeigeFehler("Ein Polygon braucht mindestens 3 Ecken — erst Ecken anklicken.");
+    return;
+  }
+  var step = Number(document.getElementById("stepdeg").value);
+  if (!isFinite(step) || step < 0.00001 || step > 1.0) {
+    zeigeFehler("Die Schrittweite (stepDeg) muss zwischen 0.00001 und 1.0 Grad liegen.");
+    return;
+  }
+  var h = zahlOderLeer(hEl);
+  if (h !== null && !isFinite(h)) {
+    zeigeFehler("Die Höhe (h) muss eine endliche Zahl in Metern sein oder leer bleiben (DEM-Vorschlag).");
+    return;
+  }
+  var body = {
+    corners: ecken.map(function (e) { return [e[0], e[1]]; }),
+    stepDeg: step,
+    datasetId: gewaehlterDatensatz()
+  };
+  if (h !== null) body.h = h;
+  statusEl.textContent = "Polygon wird ausgewertet …";
+  tabelle.hidden = true;
+  tbody.innerHTML = "";
+  fetch("/api/polygon", { method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body) }).then(function (r) {
+    return r.json().then(function (j) { return { ok: r.ok, j: j }; });
+  }).then(function (x) {
+    if (!x.ok) {
+      statusEl.textContent = "Polygon-Auswertung fehlgeschlagen.";
+      zeigeFehler(x.j.error || "Polygon-Auswertung fehlgeschlagen.");
+      return;
+    }
+    var gruppen = x.j.groups || [];
+    statusEl.textContent = x.j.sampleCount + " Sample(s), " + gruppen.length + " Burst-Gruppe(n).";
+    if (!gruppen.length) return;
+    tabelle.hidden = false;
+    if (karte) {
+      if (punktSchicht) karte.removeLayer(punktSchicht);
+      punktSchicht = L.layerGroup().addTo(karte);
+      gruppen.forEach(function (g) {
+        L.circleMarker([g.best.lat, g.best.lon], { radius: 5, color: "blue" })
+          .bindTooltip("Swath " + g.swathNumber + " / Burst " + g.burstIndex + ": " + g.count + " Sample(s)")
+          .addTo(punktSchicht);
+      });
+    }
+    gruppen.forEach(function (g) {
+      var tr = document.createElement("tr");
+      [String(g.swathNumber), String(g.burstIndex), String(g.count),
+        Number(g.best.azEstimated).toFixed(1), Number(g.best.rg).toFixed(1),
+        Number(g.best.incidenceDeg).toFixed(1)].forEach(function (z) {
+        var td = document.createElement("td"); td.textContent = z; tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+  }).catch(function () {
+    statusEl.textContent = "Polygon-Auswertung fehlgeschlagen.";
+    zeigeFehler("Der Server antwortet nicht. Läuft sar_gui_server auf Loopback?");
+  });
+});
+
 document.getElementById("btn-lokalisieren").addEventListener("click", lokalisieren);
 document.getElementById("btn-demo").addEventListener("click", function () {
   latEl.value = "22.62"; lonEl.value = "120.31"; hEl.value = "";
@@ -407,6 +548,9 @@ document.getElementById("btn-neu").addEventListener("click", function () {
   letzteJobs = { master: null, slave: null };
   setzeStatus("datenbereit");
   if (marker && karte) { karte.removeLayer(marker); marker = null; }
+  polygonModus = false;
+  document.getElementById("btn-polygonmodus").textContent = "Polygon-Modus: aus";
+  polygonZuruecksetzen();
 });
 
 function schwelle(id, fallback) {
@@ -940,6 +1084,234 @@ fn handle_locate(state: &AppState, body: &str) -> (u16, &'static str, String) {
             hit.t_zd_s,
             hit.incidence_deg,
             hit.layover_risk
+        ));
+    }
+    out.push_str("] }");
+    (200, "OK", out)
+}
+
+/// Prüft, ob `"key":` im JSON-Body vorkommt — unterscheidet "fehlt"
+/// von "ungültig" (letzteres meldet der Aufrufer als 400).
+fn has_key(body: &str, key: &str) -> bool {
+    let pat = format!("\"{key}\"");
+    let mut rest = body;
+    while let Some(i) = rest.find(pat.as_str()) {
+        rest = &rest[i + pat.len()..];
+        if rest.trim_start().starts_with(':') {
+            return true;
+        }
+    }
+    false
+}
+
+/// Liest eine führende Dezimalzahl (Vorzeichen/Bruchteil/Exponent) am
+/// String-Anfang; gibt Wert und Rest zurück.
+fn json_leading_number(s: &str) -> Option<(f64, &str)> {
+    let mut end = 0usize;
+    for (k, c) in s.char_indices() {
+        if c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E' {
+            end = k + c.len_utf8();
+        } else {
+            break;
+        }
+    }
+    if end == 0 {
+        return None;
+    }
+    let v: f64 = s[..end].parse().ok()?;
+    Some((v, &s[end..]))
+}
+
+/// Liest `"corners": [[lat, lon], ...]` aus dem JSON-Body. Gibt `None`
+/// bei fehlendem/fehlerhaftem Array zurück (Aufrufer meldet 400).
+fn json_corners(body: &str) -> Option<Vec<(f64, f64)>> {
+    let i = body.find("\"corners\"")?;
+    let mut rest = body[i + "\"corners\"".len()..].trim_start();
+    rest = rest.strip_prefix(':')?.trim_start();
+    rest = rest.strip_prefix('[')?.trim_start();
+    // Leeres Array `[]` ist wohlgeformt (Aufrufer meldet < 3 Ecken).
+    if rest.strip_prefix(']').is_some() {
+        return Some(Vec::new());
+    }
+    let mut corners = Vec::new();
+    loop {
+        rest = rest.strip_prefix('[')?.trim_start();
+        let (lat, r) = json_leading_number(rest)?;
+        rest = r.trim_start();
+        rest = rest.strip_prefix(',')?.trim_start();
+        let (lon, r) = json_leading_number(rest)?;
+        rest = r.trim_start();
+        rest = rest.strip_prefix(']')?.trim_start();
+        corners.push((lat, lon));
+        if let Some(after) = rest.strip_prefix(',') {
+            rest = after.trim_start();
+            continue;
+        }
+        if rest.strip_prefix(']').is_some() {
+            return Some(corners);
+        }
+        return None;
+    }
+}
+
+/// `POST /api/polygon` (Schritt 8, Phase B): lokalisiert ein
+/// Ecken-Polygon per `locate_polygon` — Raster-Abtastung mit `stepDeg`,
+/// pro Sample-Punkt `locate_asset` mit DEM-Höhe (oder `h`-Default wie
+/// bei `/api/locate`). Antwort: Sample-Anzahl plus Treffer, aggregiert
+/// pro Burst-Identität (Anzahl + bestes Sample mit `azEstimated`/`rg`/
+/// `incidenceDeg`). Bewusst kein Fokus pro Sample (nur Lokalisierung
+/// + Aggregation).
+fn handle_polygon(state: &AppState, body: &str) -> (u16, &'static str, String) {
+    let Some(corners) = json_corners(body) else {
+        return (
+            400,
+            "Bad Request",
+            error_json("Bitte gib mindestens 3 Ecken als [[lat, lon], ...] an."),
+        );
+    };
+    if corners.len() < 3 {
+        return (
+            400,
+            "Bad Request",
+            error_json("Ein Polygon braucht mindestens 3 Ecken."),
+        );
+    }
+    for (lat, lon) in &corners {
+        if !lat.is_finite()
+            || !lon.is_finite()
+            || *lat < -90.0
+            || *lat > 90.0
+            || *lon < -180.0
+            || *lon > 180.0
+        {
+            return (
+                400,
+                "Bad Request",
+                error_json(
+                    "Jede Ecke braucht eine Breite in [-90, 90] und eine Länge in \
+                     [-180, 180] als endliche Zahlen.",
+                ),
+            );
+        }
+    }
+    let step_deg = if has_key(body, "stepDeg") {
+        match json_number(body, "stepDeg") {
+            Some(v) if v.is_finite() && (MIN_STEP_DEG..=MAX_STEP_DEG).contains(&v) => v,
+            _ => {
+                return (
+                    400,
+                    "Bad Request",
+                    error_json(
+                        "Die Schrittweite (stepDeg) muss zwischen 0.00001 und 1.0 Grad liegen.",
+                    ),
+                );
+            }
+        }
+    } else {
+        DEFAULT_STEP_DEG
+    };
+    let h_fest = if has_key(body, "h") {
+        match json_number(body, "h") {
+            Some(v) if v.is_finite() => Some(v),
+            _ => {
+                return (
+                    400,
+                    "Bad Request",
+                    error_json("Die Höhe (h) muss eine endliche Zahl in Metern sein."),
+                );
+            }
+        }
+    } else {
+        None
+    };
+    let dataset_id = json_string(body, "datasetId").unwrap_or_else(|| "master".into());
+    let Some(entry) = state.find_dataset(&dataset_id) else {
+        return (
+            404,
+            "Not Found",
+            error_json("Unbekannte Datensatz-Kennung (datasetId) — ggf. fehlt --slave."),
+        );
+    };
+    let ds = &entry.data;
+    let samples = locate_polygon(&ds.ephemeris, ds, &corners, step_deg, |lat, lon| {
+        h_fest.unwrap_or_else(|| dem_height(lat, lon).unwrap_or(0.0))
+    });
+    // Pro Burst-Identität aggregieren: Anzahl Samples plus bestes Sample
+    // (am nächsten an der Burst-Mitte — dieselbe Ordnung wie `locate_asset`).
+    struct BurstGruppe {
+        swath: u8,
+        burst: usize,
+        anzahl: usize,
+        lat: f64,
+        lon: f64,
+        az: f64,
+        rg: f64,
+        t_zd: f64,
+        incidenz: f64,
+        abstand: f64,
+    }
+    let mut gruppen: Vec<BurstGruppe> = Vec::new();
+    for sample in &samples {
+        let mut gesehen: Vec<(u8, usize)> = Vec::new();
+        for hit in &sample.hits {
+            let schluessel = (hit.swath_number, hit.burst_index);
+            if gesehen.contains(&schluessel) {
+                continue;
+            }
+            gesehen.push(schluessel);
+            let abstand = (hit.az - hit.n_fft as f64 * 0.5).abs();
+            match gruppen
+                .iter_mut()
+                .find(|g| g.swath == schluessel.0 && g.burst == schluessel.1)
+            {
+                Some(g) => {
+                    g.anzahl += 1;
+                    if abstand < g.abstand {
+                        g.lat = sample.lat_deg;
+                        g.lon = sample.lon_deg;
+                        g.az = hit.az;
+                        g.rg = hit.rg;
+                        g.t_zd = hit.t_zd_s;
+                        g.incidenz = hit.incidence_deg;
+                        g.abstand = abstand;
+                    }
+                }
+                None => gruppen.push(BurstGruppe {
+                    swath: schluessel.0,
+                    burst: schluessel.1,
+                    anzahl: 1,
+                    lat: sample.lat_deg,
+                    lon: sample.lon_deg,
+                    az: hit.az,
+                    rg: hit.rg,
+                    t_zd: hit.t_zd_s,
+                    incidenz: hit.incidence_deg,
+                    abstand,
+                }),
+            }
+        }
+    }
+    // Größte Gruppe zuerst, dann nach Swath/Burst.
+    gruppen.sort_by(|a, b| {
+        b.anzahl
+            .cmp(&a.anzahl)
+            .then_with(|| a.swath.cmp(&b.swath))
+            .then_with(|| a.burst.cmp(&b.burst))
+    });
+    let mut out = format!(
+        "{{ \"datasetId\": \"{}\", \"sampleCount\": {}, \"stepDeg\": {step_deg:.6}, \"groups\": [",
+        json_escape(&dataset_id),
+        samples.len()
+    );
+    for (i, g) in gruppen.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&format!(
+            "{{ \"swathNumber\": {}, \"burstIndex\": {}, \"count\": {}, \
+             \"best\": {{ \"lat\": {:.6}, \"lon\": {:.6}, \"azEstimated\": {:.3}, \
+             \"rg\": {:.3}, \"tZd\": {:.6}, \"incidenceDeg\": {:.3} }} }}",
+            g.swath, g.burst, g.anzahl, g.lat, g.lon, g.az, g.rg, g.t_zd, g.incidenz
         ));
     }
     out.push_str("] }");
@@ -1520,6 +1892,10 @@ fn handle(stream: &mut TcpStream, state: &Arc<AppState>) {
         }
         ("POST", "/api/locate") => {
             let (code, reason, out) = handle_locate(state, &body_str);
+            respond(stream, code, reason, "application/json", &out);
+        }
+        ("POST", "/api/polygon") => {
+            let (code, reason, out) = handle_polygon(state, &body_str);
             respond(stream, code, reason, "application/json", &out);
         }
         ("POST", "/api/focus") => {

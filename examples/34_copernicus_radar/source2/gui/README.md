@@ -73,6 +73,13 @@ wie `127.0.0.1`, `::1`, `localhost` werden akzeptiert).
    gekennzeichnet). Der Wochenreport erscheint als schreibgeschützter
    Text; bei weniger als zwei Messungen steht ein Hinweis darin statt
    einer Ampel-Behauptung.
+7. **Polygon (Phase B).** „Polygon-Modus“ einschalten, drei Ecken als
+   Kleinpolygon um Kaohsiung anklicken (z. B. `22.62/120.31`,
+   `22.64/120.31`, `22.63/120.33`), Schrittweite `0.01` lassen und
+   „Polygon auswerten“. Erwartung: mehrere Samples, aggregiert
+   rund um **Burst 9** (größte Gruppe zuerst, mit bestem Sample).
+   „Zurücksetzen“ löscht Ecken und Ergebnis; fokussiert wird dabei
+   bewusst nichts.
 
 ## Wenn etwas schiefgeht
 
@@ -91,6 +98,7 @@ wie `127.0.0.1`, `::1`, `localhost` werden akzeptiert).
 - `GET /` — Frontend (einzelne eingebettete HTML-Datei, kein Build-Schritt).
 - `GET /api/status` — `{"state","dataset","slaveAvailable","slaveDataset","ephemerisAvailable","demTilesAvailable"}`.
 - `POST /api/locate` — `{"lat","lon"[,"h"][,"datasetId"]}` → `{"datasetId","hits":[…]}` (bester zuerst). Ohne `h` DEM-Vorschlag, sonst 0 m.
+- `POST /api/polygon` — `{"corners":[[lat,lon],…≥3][,"stepDeg"=0.01][,"h"][,"datasetId"]}` → `{"datasetId","sampleCount","stepDeg","groups":[{swathNumber,burstIndex,count,best}]}` (größte Gruppe zuerst; nur Lokalisierung, kein Fokus).
 - `POST /api/focus` — `{"datasetId","swathNumber","burstIndex","az","rg","tZd"[,"halfAz","halfRg","asset"]}` → `202 {"jobId"}`. Chip-Fenster-Default ±16 × ±20.
 - `GET /api/jobs/{id}` — `pending`/`running`/`done`/`error`; bei `done` Chip-Statistik, Chip-Mitte (`centerRow`/`centerCol`), `halfAz`/`halfRg`, `pngUrl`, TOPS-Parameter (`alpha`, `ktHzS`).
 - `GET /api/chip/{id}` — Chip-PNG (Graustufen, rotes Fadenkreuz auf der fokussierten Mitte).
