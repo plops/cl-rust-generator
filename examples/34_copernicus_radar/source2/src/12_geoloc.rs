@@ -12,7 +12,7 @@ use std::path::Path;
 use crate::ephem::{EphemPoint, WGS84_A_M, WGS84_B_M, interp_pos, interp_vel};
 use crate::ingest::L0Dataset;
 use crate::insar::project_target_to_slave;
-use crate::types::{Error, SwathData, Vec3d};
+use crate::types::{Complex32, Error, SwathData, Vec3d};
 
 /// GPS-Zeit (s seit 1980-01-06) minus Unix-Zeit (s seit 1970-01-01), inkl.
 /// 18 Schaltsekunden (Stand 2017..2026): `gps = unix - 315_964_800 + 18`.
@@ -230,6 +230,82 @@ fn parse_hemi(hemi: Option<char>, digits: Option<&str>) -> Result<i32, Error> {
     })
 }
 
+/// Leistungsstatistik eines Bildausschnitts („Chip") um einen [`AssetHit`].
+///
+/// Alle dB-Werte sind `10·log10(Leistung)`, Leistung = `re²+im²` (linear).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChipStats {
+    /// Zahl der einbezogenen Pixel.
+    pub n: usize,
+    /// Mittlere Leistung [dB].
+    pub mean_db: f64,
+    /// Median der Leistung [dB] (robust gegen einzelne Streuer).
+    pub median_db: f64,
+    /// 90-%-Quantil der Leistung [dB] (helle Strukturen im Chip).
+    pub p90_db: f64,
+}
+
+/// Schneidet einen Chip (`±half_az` Zeilen, `±half_rg` Spalten um die
+/// gebrochene Position `az`/`rg`) aus einem fokussierten Burstbild
+/// (`n_az` × `n_rg`, zeilenmajor) und fasst die Leistung zusammen.
+///
+/// Die Achsen entsprechen exakt [`AssetHit`]: `az` ist die Zeile im
+/// fokussierten Burst, `rg` der Range-Index. Das Fenster wird am
+/// Bildrand beschnitten; liegt gar kein Pixel im Bild, kommt `None`.
+pub fn chip_stats(
+    img: &[Complex32],
+    n_az: usize,
+    n_rg: usize,
+    az: f64,
+    rg: f64,
+    half_az: usize,
+    half_rg: usize,
+) -> Option<ChipStats> {
+    if img.len() != n_az * n_rg || n_az == 0 || n_rg == 0 {
+        return None;
+    }
+    // Fenstergrenzen erst in i64 prüfen: `as usize` würde eine negative
+    // Mitte (Chip komplett außerhalb) per Wrap-around in einen riesigen
+    // Index verwandeln, bevor die Leer-Prüfung greifen kann.
+    let r0i = az.round() as i64 - half_az as i64;
+    let r1i = az.round() as i64 + half_az as i64;
+    let c0i = rg.round() as i64 - half_rg as i64;
+    let c1i = rg.round() as i64 + half_rg as i64;
+    if r1i < 0 || c1i < 0 || r0i > n_az as i64 - 1 || c0i > n_rg as i64 - 1 {
+        return None;
+    }
+    let r0 = r0i.max(0) as usize;
+    let r1 = r1i.min(n_az as i64 - 1) as usize;
+    let c0 = c0i.max(0) as usize;
+    let c1 = c1i.min(n_rg as i64 - 1) as usize;
+    let mut powers: Vec<f64> = Vec::new();
+    for r in r0..=r1 {
+        for c in c0..=c1 {
+            let p = img[r * n_rg + c];
+            powers.push(f64::from(p.re) * f64::from(p.re) + f64::from(p.im) * f64::from(p.im));
+        }
+    }
+    if powers.is_empty() {
+        return None;
+    }
+    let n = powers.len();
+    let mean = powers.iter().sum::<f64>() / n as f64;
+    powers.sort_by(f64::total_cmp);
+    let median = if n % 2 == 1 {
+        powers[n / 2]
+    } else {
+        0.5 * (powers[n / 2 - 1] + powers[n / 2])
+    };
+    let p90 = powers[((0.9 * (n - 1) as f64) as usize).min(n - 1)];
+    let db = |p: f64| 10.0 * p.max(1e-30).log10();
+    Some(ChipStats {
+        n,
+        mean_db: db(mean),
+        median_db: db(median),
+        p90_db: db(p90),
+    })
+}
+
 /// Treffer eines Kartenpunkts im Rohbild: Sub-Swath, Burst und gebrochene
 /// Pixelkoordinaten (Azimut-/Range-Index, 0-basiert, Bruchteil = Sub-Pixel).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -249,6 +325,170 @@ pub struct AssetHit {
     pub incidence_deg: f64,
     /// Heuristik: steiles Gelände / kleiner Einfallswinkel → Layover-Verdacht.
     pub layover_risk: bool,
+}
+
+/// Ein abgetasteter Polygon-Punkt mit seinen Radar-Treffern.
+#[derive(Clone, Debug)]
+pub struct AssetSample {
+    pub lat_deg: f64,
+    pub lon_deg: f64,
+    pub h_m: f64,
+    pub hits: Vec<AssetHit>,
+}
+
+/// Prüft, ob ein Punkt (`lat`, `lon`) im Polygon `corners` liegt
+/// (Even-Odd-Regel, Rand zählt als innen, Toleranz 1e-9 Grad).
+pub fn point_in_polygon(lat: f64, lon: f64, corners: &[(f64, f64)]) -> bool {
+    if corners.len() < 3 {
+        return false;
+    }
+    let eps = 1e-9;
+    // Randtest: Punkt auf einer Kante → innen.
+    for w in 0..corners.len() {
+        let (alat, alon) = corners[w];
+        let (blat, blon) = corners[(w + 1) % corners.len()];
+        let cross = (blon - alon) * (lat - alat) - (blat - alat) * (lon - alon);
+        if cross.abs() < eps
+            && lat >= alat.min(blat) - eps
+            && lat <= alat.max(blat) + eps
+            && lon >= alon.min(blon) - eps
+            && lon <= alon.max(blon) + eps
+        {
+            return true;
+        }
+    }
+    // Strahl nach Osten (+lon): zählt Kanten, die ihn kreuzen.
+    let mut inside = false;
+    for w in 0..corners.len() {
+        let (alat, alon) = corners[w];
+        let (blat, blon) = corners[(w + 1) % corners.len()];
+        if (alat > lat) != (blat > lat) {
+            let x = alon + (lat - alat) * (blon - alon) / (blat - alat);
+            if x > lon {
+                inside = !inside;
+            }
+        }
+    }
+    inside
+}
+
+/// Tastet ein Asset-Polygon (`corners` als (Breite, Länge)) auf einem
+/// Grad-Raster der Schrittweite `step_deg` ab (immer inkl. Ecken).
+/// Gibt die Abtastpunkte im Inneren zurück (leer bei < 3 Ecken).
+pub fn sample_polygon(corners: &[(f64, f64)], step_deg: f64) -> Vec<(f64, f64)> {
+    if corners.len() < 3 || step_deg.is_nan() || step_deg <= 0.0 {
+        return Vec::new();
+    }
+    let (mut la0, mut la1) = (f64::INFINITY, f64::NEG_INFINITY);
+    let (mut lo0, mut lo1) = (f64::INFINITY, f64::NEG_INFINITY);
+    for &(la, lo) in corners {
+        la0 = la0.min(la);
+        la1 = la1.max(la);
+        lo0 = lo0.min(lo);
+        lo1 = lo1.max(lo);
+    }
+    let mut lats = Vec::new();
+    let mut v = la0;
+    while v < la1 - 1e-12 {
+        lats.push(v);
+        v += step_deg;
+    }
+    lats.push(la1);
+    let mut lons = Vec::new();
+    let mut u = lo0;
+    while u < lo1 - 1e-12 {
+        lons.push(u);
+        u += step_deg;
+    }
+    lons.push(lo1);
+    let mut out = Vec::new();
+    for &la in &lats {
+        for &lo in &lons {
+            if point_in_polygon(la, lo, corners) {
+                out.push((la, lo));
+            }
+        }
+    }
+    out
+}
+
+/// Ortet ein Asset-Polygon: tastet es ab und ruft pro Punkt [`locate_asset`].
+/// Die Höhe liefert `h_of` (z. B. eine DEM-Kachel pro Punkt).
+pub fn locate_polygon(
+    ephem: &[EphemPoint],
+    dataset: &L0Dataset,
+    corners: &[(f64, f64)],
+    step_deg: f64,
+    h_of: impl Fn(f64, f64) -> f64,
+) -> Vec<AssetSample> {
+    sample_polygon(corners, step_deg)
+        .into_iter()
+        .map(|(lat, lon)| {
+            let h = h_of(lat, lon);
+            let hits = locate_asset(ephem, dataset, lat, lon, h);
+            AssetSample {
+                lat_deg: lat,
+                lon_deg: lon,
+                h_m: h,
+                hits,
+            }
+        })
+        .collect()
+}
+
+/// Ampelzustand einer Asset-Zeitreihe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AmpelStatus {
+    Gruen,
+    Gelb,
+    Rot,
+}
+
+/// Bewertung einer Asset-Zeitreihe mit Begründungstext (deutsch).
+#[derive(Clone, Debug)]
+pub struct Ampel {
+    pub status: AmpelStatus,
+    /// Maximale |Abweichung| eines Folgewerts vom Startwert [dB].
+    pub drift_db: f64,
+    pub detail: String,
+}
+
+/// Bewertet eine Median-Zeitreihe (`medians_db`, chronologisch, erster Wert =
+/// Referenz) gegen Warn-/Alarmschwellen [dB].
+///
+/// Prototyp-Schwellen — vor Produktiveinsatz an beschrifteten Zeitreihen
+/// kalibrieren (siehe Plan). Leere Reihe → Grün ohne Aussage.
+pub fn bewerte_zeitreihe(medians_db: &[f64], warn_db: f64, alarm_db: f64) -> Ampel {
+    let Some((&basis, rest)) = medians_db.split_first() else {
+        return Ampel {
+            status: AmpelStatus::Gruen,
+            drift_db: 0.0,
+            detail: "keine Messwerte".into(),
+        };
+    };
+    let drift = rest
+        .iter()
+        .map(|m| (m - basis).abs())
+        .fold(0.0f64, f64::max);
+    if drift >= alarm_db {
+        Ampel {
+            status: AmpelStatus::Rot,
+            drift_db: drift,
+            detail: format!("Drift {drift:.1} dB ≥ Alarm {alarm_db:.1} dB"),
+        }
+    } else if drift >= warn_db {
+        Ampel {
+            status: AmpelStatus::Gelb,
+            drift_db: drift,
+            detail: format!("Drift {drift:.1} dB ≥ Warnung {warn_db:.1} dB"),
+        }
+    } else {
+        Ampel {
+            status: AmpelStatus::Gruen,
+            drift_db: drift,
+            detail: format!("Drift {drift:.1} dB < Warnung {warn_db:.1} dB"),
+        }
+    }
 }
 
 /// Sucht einen Kartenpunkt (geodätisch + Höhe über Ellipsoid [m]) in allen
@@ -348,6 +588,9 @@ pub fn locate_in_swath(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ingest::L0Dataset;
+    use crate::rda::tops_padded_az_len;
+    use crate::types::{BurstBlock, RadarParams, SarMode, SwathData};
 
     #[test]
     fn zivilzeit_rundreise() {
@@ -376,5 +619,154 @@ mod tests {
             assert!((lo - lo2).abs() < 1e-9, "lon {lo} vs {lo2}");
             assert!((h - h2).abs() < 1e-3, "h {h} vs {h2}");
         }
+    }
+
+    #[test]
+    fn chip_statistik_synth() {
+        // 4×5-Bild, Leistungen 1..=20 (re = sqrt(p), im = 0).
+        let img: Vec<Complex32> = (1..=20)
+            .map(|p| Complex32::new((p as f32).sqrt(), 0.0))
+            .collect();
+        // Vollchip: Mittel 10.5, Median 10.5, p90 = Wert an Index 17 → 18.
+        let s = chip_stats(&img, 4, 5, 1.5, 2.0, 10, 10).unwrap();
+        assert_eq!(s.n, 20);
+        assert!((s.mean_db - 10.0 * 10.5f64.log10()).abs() < 1e-6);
+        assert!((s.median_db - 10.0 * 10.5f64.log10()).abs() < 1e-6);
+        assert!((s.p90_db - 10.0 * 18.0f64.log10()).abs() < 1e-6);
+        assert!(s.median_db < s.p90_db);
+        // Teilchip an der Ecke (Zeilen 0..1, Spalten 0..1 → Leistungen 1,2,6,7).
+        let e = chip_stats(&img, 4, 5, 0.0, 0.0, 1, 1).unwrap();
+        assert_eq!(e.n, 4);
+        assert!((e.median_db - 10.0 * 4.0f64.log10()).abs() < 1e-6);
+        // Außerhalb: None. Falsche Geometrie: None.
+        assert!(chip_stats(&img, 4, 5, -100.0, 2.0, 1, 1).is_none());
+        assert!(chip_stats(&img, 4, 4, 1.5, 2.0, 10, 10).is_none());
+        assert!(chip_stats(&[], 0, 0, 0.0, 0.0, 1, 1).is_none());
+    }
+
+    #[test]
+    fn polygon_abtastung() {
+        // Einheitsquadrat, Schritt 0.4 → 4×4-Raster, alles innen.
+        let q = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        let pts = sample_polygon(&q, 0.4);
+        assert_eq!(pts.len(), 16);
+        assert!(pts.contains(&(0.0, 0.0)) && pts.contains(&(1.0, 1.0)));
+        // Rechtwinkliges Dreieck (x+y≤1), Schritt 0.5 → 6 von 9 Punkten.
+        let t = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)];
+        let pts = sample_polygon(&t, 0.5);
+        assert_eq!(pts.len(), 6);
+        assert!(!pts.contains(&(1.0, 1.0)));
+        // Entartet: < 3 Ecken oder Schritt ≤ 0 → leer.
+        assert!(sample_polygon(&[(0.0, 0.0), (1.0, 1.0)], 0.5).is_empty());
+        assert!(sample_polygon(&q, 0.0).is_empty());
+        // Punktprüfung: innen, außen, Kante.
+        assert!(point_in_polygon(0.25, 0.25, &t));
+        assert!(!point_in_polygon(0.75, 0.75, &t));
+        assert!(point_in_polygon(0.5, 0.0, &t));
+    }
+
+    #[test]
+    fn ampel_schwellen() {
+        let g = bewerte_zeitreihe(&[4.8, 5.1, 4.6], 3.0, 6.0);
+        assert_eq!(g.status, AmpelStatus::Gruen);
+        assert!((g.drift_db - 0.3).abs() < 1e-9);
+        let y = bewerte_zeitreihe(&[4.8, 9.0], 3.0, 6.0);
+        assert_eq!(y.status, AmpelStatus::Gelb);
+        let r = bewerte_zeitreihe(&[4.8, -2.0], 3.0, 6.0);
+        assert_eq!(r.status, AmpelStatus::Rot);
+        assert!(!r.detail.is_empty());
+        let leer = bewerte_zeitreihe(&[], 3.0, 6.0);
+        assert_eq!(leer.status, AmpelStatus::Gruen);
+    }
+
+    /// Kreisbahn-Äquator als Vorwärtsmodell: Ziel (0°N, 0°E, 0 m) liegt
+    /// exakt unter dem Scheitel bei t=10 s; die Ortung muss Burstmitte
+    /// (fokussierte Achse) und Range-Index wiederfinden.
+    fn synth_dataset() -> (Vec<EphemPoint>, L0Dataset) {
+        let r_orb = 7_080_000.0f64;
+        let v_sat = 7_540.0f64;
+        let w = v_sat / r_orb;
+        let ephem: Vec<EphemPoint> = [0.0, 10.0, 20.0, 30.0, 40.0]
+            .into_iter()
+            .map(|t| {
+                let th = w * (t - 10.0);
+                EphemPoint {
+                    time_s: t,
+                    pos: Vec3d::new(r_orb * th.cos(), r_orb * th.sin(), 0.0),
+                    vel: Vec3d::new(-v_sat * th.sin(), v_sat * th.cos(), 0.0),
+                    quat: [0.0; 4],
+                }
+            })
+            .collect();
+        let pri = 0.0006f64;
+        let n_az = 200usize;
+        let params = RadarParams {
+            swath_number: 10,
+            elevation_beam: 0,
+            rgdec: 3,
+            rank: 0,
+            fs_hz: 64_000_000.0,
+            prf_hz: 1.0 / pri,
+            pri_s: pri,
+            swst_s: 0.0,
+            swl_s: 0.0,
+            tx_ramp_rate_hz_s: 0.0,
+            tx_start_freq_hz: 0.0,
+            tx_pulse_length_s: 0.0,
+            fast_time_start_s: 0.0,
+            r0_m: 700_000.0,
+            dr_m: 2.3,
+            chirp_samples: 0,
+        };
+        let burst = BurstBlock {
+            burst_index: 3,
+            swath_number: 10,
+            params,
+            n_az,
+            n_rg: 5000,
+            raw: Vec::new(),
+            pulse_times: (0..n_az)
+                .map(|i| 10.0 + (i as f64 - (n_az as f64 - 1.0) * 0.5) * pri)
+                .collect(),
+            az_beam_addr: Vec::new(),
+            veff: vec![7_400.0; 5000],
+            pos_ecef: Vec::new(),
+            vel_ecef: Vec::new(),
+        };
+        let ds = L0Dataset {
+            mode: SarMode::Iw,
+            total_packets: 0,
+            echo_packets: 0,
+            ephemeris: Vec::new(),
+            swaths: vec![SwathData {
+                swath_number: 10,
+                swath_name: "IW1".into(),
+                params,
+                bursts: vec![burst],
+            }],
+        };
+        (ephem, ds)
+    }
+
+    #[test]
+    fn ortung_synth_kreisbahn() {
+        let (ephem, ds) = synth_dataset();
+        let hits = locate_asset(&ephem, &ds, 0.0, 0.0, 0.0);
+        assert_eq!(hits.len(), 1, "genau ein Treffer erwartet");
+        let hit = hits[0];
+        assert_eq!((hit.swath_number, hit.burst_index), (10, 3));
+        // Fokussierte Achse: Burstmitte + Slant (R−A)/dr.
+        let n_fft = tops_padded_az_len(200, 0.0006, 7_400.0, 700_000.0 + 2500.0 * 2.3);
+        assert!(
+            (hit.az - n_fft as f64 * 0.5).abs() < 2.0,
+            "az={} vs Mitte {}",
+            hit.az,
+            n_fft as f64 * 0.5
+        );
+        let rg_soll = (7_080_000.0 - WGS84_A_M - 700_000.0) / 2.3;
+        assert!((hit.rg - rg_soll).abs() < 5.0, "rg={} vs {rg_soll}", hit.rg);
+        // Lotrecht darüber: Einfallswinkel ≈ 0.
+        assert!(hit.incidence_deg < 5.0, "{} Grad", hit.incidence_deg);
+        assert!((hit.t_zd_s - 10.0).abs() < 0.01, "t={}", hit.t_zd_s);
     }
 }

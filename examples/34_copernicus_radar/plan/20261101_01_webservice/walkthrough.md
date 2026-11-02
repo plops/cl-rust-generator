@@ -178,11 +178,16 @@ Geprüft an echten Daten (Master-Aufnahme Süd-Taiwan). Die Beweise:
 
 ## 8. Was noch fehlt — ehrlich
 
-- **Zeitreihe + Ampel:** Der Trefferpunkt ist erst die halbe Miete. Es
-  fehlt der Ausschnitt („Chip") je Aufnahme um den Punkt und eine
-  Statistik, die aus 20 Chips „normal/anomal" macht.
-- **Polygone statt Punkte:** Ein Damm ist eine Linie. Eckpunkte plus
-  Rasterpunkte abtasten — Fleiß, keine Forschung.
+- **Zeitreihe + Ampel:** Der Trefferpunkt ist erst die halbe Miete. Der
+  erste Schritt ist getan: `chip_stats` schneidet je Aufnahme einen
+  Ausschnitt (±16×±20 Pixel) um den Treffer aus und fasst die Leistung
+  zusammen (Kaohsiung: Master-Median 4,8 dB, Slave 5,1 dB — Drift 0,4 dB
+  über 12 Tage → Ampel Grün bei Schwellen 3/6 dB). Noch offen: Schwellen
+  an beschrifteten Zeitreihen kalibrieren und der Wochenreport.
+- **Polygone statt Punkte:** Erledigt — ein Damm ist eine Linie, also
+  tastet `locate_polygon` Ecken plus Raster ab (Punkt-im-Polygon-Test
+  inklusive) und ortet jeden Punkt. An Kaohsiung-Dreiecken in beiden
+  Aufnahmen geprüft.
 - **Layover richtig:** Heute Faustregel über den Einfallswinkel.
   Korrekt braucht es die Hangneigung aus dem Höhenmodell entlang der
   Blickrichtung.

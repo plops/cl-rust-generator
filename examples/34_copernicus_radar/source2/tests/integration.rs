@@ -16,7 +16,8 @@ use sar_source2::ephem::{
     inertial_vel, interp_pos, interp_vel,
 };
 use sar_source2::geoloc::{
-    HgtTile, ecef_to_geodetic, geodetic_to_ecef, locate_asset, parse_poeorb_eof,
+    AmpelStatus, HgtTile, bewerte_zeitreihe, chip_stats, ecef_to_geodetic, geodetic_to_ecef,
+    locate_asset, locate_polygon, parse_poeorb_eof,
 };
 use sar_source2::gpu::GpuSarContext;
 use sar_source2::ingest::load_l0_dataset;
@@ -924,4 +925,103 @@ fn test_geoloc_reverse_geokodierung_kaohsiung() {
         hp.rg - hit.rg
     );
     let _ = geodetic_to_ecef(lat, lon, h);
+}
+
+#[test]
+fn test_geoloc_asset_chip_master_slave() {
+    let master_path = Path::new(
+        "../data/insar/S1C_IW_RAW__0SDV_20260928T215149_20260928T215222_009653_01336F_D2EE.SAFE/s1c-iw-raw-s-vv-20260928t215149-20260928t215222-009653-01336f.dat",
+    );
+    let slave_path = Path::new(
+        "../data/insar/S1C_IW_RAW__0SDV_20261010T215149_20261010T215222_009828_013950_CEB1.SAFE/s1c-iw-raw-s-vv-20261010t215149-20261010t215222-009828-013950.dat",
+    );
+    let dem_path = Path::new("../data/dem/N22E120.hgt");
+    if !master_path.exists() || !slave_path.exists() || !dem_path.exists() {
+        return;
+    }
+    // Asset-Zeitreihe, erster Punkt: Kaohsiung-Chip in beiden Aufnahmen
+    // (CPU-Fokus des Treffer-Bursts, Statistik über ±16×±20 Pixel).
+    let tile = HgtTile::load(dem_path).unwrap();
+    let (lat, lon) = (22.62, 120.31);
+    let h = tile.height(lat, lon);
+    let mut medians = Vec::new();
+    // Kleines Dreieck um Kaohsiung (±2 km): jeder Abtastpunkt muss treffen.
+    let dreieck = [(22.60, 120.29), (22.64, 120.29), (22.62, 120.33)];
+    for path in [master_path, slave_path] {
+        let ds = load_l0_dataset(path, None, None).expect("Datensatz nicht ladbar");
+        let hits = locate_asset(&ds.ephemeris, &ds, lat, lon, h);
+        assert!(!hits.is_empty(), "Kaohsiung fehlt in {}", path.display());
+        let hit = hits[0];
+        let samples = locate_polygon(&ds.ephemeris, &ds, &dreieck, 0.02, |la, lo| {
+            tile.height(la, lo)
+        });
+        assert!(
+            samples.len() >= 4,
+            "Polygon-Abtastung zu dünn in {}: {}",
+            path.display(),
+            samples.len()
+        );
+        for s in &samples {
+            assert!(
+                !s.hits.is_empty(),
+                "Polygon-Punkt ({}, {}) ohne Treffer in {}",
+                s.lat_deg,
+                s.lon_deg,
+                path.display()
+            );
+            assert!(
+                s.hits.iter().any(|x| x.swath_number == 11),
+                "Polygon-Punkt außerhalb IW2 in {}",
+                path.display()
+            );
+        }
+        let swath = ds
+            .swaths
+            .iter()
+            .find(|s| s.swath_number == hit.swath_number)
+            .expect("Treffer-Swath fehlt");
+        let burst = swath
+            .bursts
+            .iter()
+            .find(|b| b.burst_index == hit.burst_index)
+            .expect("Treffer-Burst fehlt");
+        let (focused, n_fft, n_rg, _) = focus_tops_burst_cpu(burst, true);
+        let stats = chip_stats(&focused, n_fft, n_rg, hit.az, hit.rg, 16, 20)
+            .expect("Chip liegt außerhalb des fokussierten Bursts");
+        assert!(stats.n > 500, "Chip zu klein: n={}", stats.n);
+        assert!(
+            stats.median_db.is_finite() && stats.p90_db.is_finite(),
+            "Chip-Statistik nicht endlich: {stats:?}"
+        );
+        assert!(stats.median_db < stats.p90_db, "Median über p90: {stats:?}");
+        println!(
+            "{}: swath {} burst {} az={:.1} rg={:.1} median={:.1} dB p90={:.1} dB (n={})",
+            path.display(),
+            hit.swath_number,
+            hit.burst_index,
+            hit.az,
+            hit.rg,
+            stats.median_db,
+            stats.p90_db,
+            stats.n
+        );
+        medians.push(stats.median_db);
+    }
+    // Gleiche Stadt, 12 Tage Abstand: Median-Leistung muss grob stabil sein
+    // (weite Schranke — Schiffe/Hafenverkehr ändern einzelne Pixel).
+    assert!(
+        (medians[0] - medians[1]).abs() < 15.0,
+        "Master/Slave-Chip driftet: {:.1} vs {:.1} dB",
+        medians[0],
+        medians[1]
+    );
+    // Ampel an den gemessenen Medianen: 0,3 dB Drift → Grün.
+    let ampel = bewerte_zeitreihe(&medians, 3.0, 6.0);
+    assert_eq!(
+        ampel.status,
+        AmpelStatus::Gruen,
+        "Kaohsiung-Ampel unerwartet: {:?}",
+        ampel
+    );
+    println!("Ampel Kaohsiung: {}", ampel.detail);
 }

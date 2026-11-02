@@ -119,5 +119,12 @@ grün; `cargo-oxide` dafür per `cargo install --git NVlabs/cuda-oxide` geholt):
   Einfallswinkel 40,6°, Rundreise ECEF↔geodätisch konsistent, Bord- vs.
   Präzisionsorbit gleicher Burst.
 
-Nächster Baustein: Asset-Zeitreihe (Chip je Akquisition um den Trefferpunkt,
-Ampel-Statistik) + Höhenmodell für Polygon-Assets (Eckpunkte + Raster).
+Nächster Baustein (Stand 2026-11-02): `ChipStats` + `chip_stats` in
+`12_geoloc.rs` sind gebaut und getestet — erster Zeitreihen-Punkt Kaohsiung:
+Master (IW2/Burst 9, az=267,3, rg=15305,4) Median 4,8 dB / p90 9,1 dB,
+Slave (IW2/Burst 9, az=268,0, rg=15311,3) Median 5,1 dB / p90 9,3 dB —
+Drift 0,4 dB über 12 Tage → Ampel Grün (Schwellen 3/6 dB, Prototyp).
+Polygon-Assets (`locate_polygon`: Ecken + Raster + Punkt-im-Polygon, an
+Realdaten geprüft) und Ampel-Bewertung (`bewerte_zeitreihe`) sind gebaut.
+Offen: Schwellen an beschrifteten Zeitreihen kalibrieren, Wochenreport,
+fokussierte Range-Achse (ntx-Rand) abgleichen.

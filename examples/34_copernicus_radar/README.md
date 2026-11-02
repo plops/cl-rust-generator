@@ -188,8 +188,8 @@ Quality gates (all three crates): `cargo clippy --all-targets -- -D warnings`
 and `cargo fmt --check` are green; `cargo test` (decoder, 41 tests incl. 3
 real-data regressions that skip without the dataset), `cargo oxide test`
 (`sar_focus`, 48 tests on synthetic data, no dataset needed) and
-`cargo oxide test` (`source2`, 20 integration tests on synthetic data, no
-dataset needed).
+`cargo oxide test` (`source2`, 13 integration tests, partly on real data,
+skipped without the dataset).
 
 ## Layout and further reading
 
