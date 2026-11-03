@@ -55,9 +55,9 @@ const DEFAULT_HALF_RG: usize = 20;
 /// PNG-Größen; der Chip wird am Bildrand beschnitten).
 const MAX_HALF: usize = 200;
 
-/// Standard-Schwellen [dB] für die Vergleichs-Ampel (Schritt 6, Prototyp —
-/// vor Produktiveinsatz an beschrifteten Zeitreihen kalibrieren, siehe
-/// `geoloc::bewerte_zeitreihe`).
+/// Standard-Schwellen [dB] für die Vergleichs-Ampel (Schritt 6 — am
+/// 2026-11-03 an 24 beschrifteten Master/Slave-Chip-Paaren + synthetischen
+/// Positiven kalibriert bestätigt, siehe `geoloc::bewerte_zeitreihe`).
 const DEFAULT_WARN_DB: f64 = 3.0;
 const DEFAULT_ALARM_DB: f64 = 6.0;
 
@@ -174,7 +174,7 @@ Fadenkreuz = fokussierte Mitte — kein Karten-Overlay.</p>
 </section>
 <section id="vergleich" aria-label="Master-Slave-Vergleich">
 <h2>Master/Slave-Vergleich</h2>
-<p class="hinweis">Prototyp: Schwellen nicht kalibriert (Warnung 3 dB / Alarm 6 dB,
+<p class="hinweis">Prototyp: Schwellen 2026-11-03 kalibriert (Warnung 3 dB / Alarm 6 dB,
 editierbar). Drift = Slave-Median minus Master-Median; Ampel nach
 <code>bewerte_zeitreihe</code> mit Median-Basis.</p>
 <label>Warnung [dB]: <input id="warn" type="number" step="any" value="3"></label>
@@ -1731,8 +1731,8 @@ fn query_float(path: &str, key: &str, fallback: f64) -> f64 {
 /// `GET /api/compare?master={id}&slave={id}&warn=&alarm=`: vergleicht zwei
 /// abgeschlossene Fokus-Jobs. Drift = Slave-Median minus Master-Median
 /// (Median-Basis); Ampel via `geoloc::bewerte_zeitreihe` über
-/// `[master, slave]`. Schwellen sind Prototyp-Werte (editierbar, Standard
-/// Warnung 3 dB / Alarm 6 dB, nicht kalibriert — siehe `bewerte_zeitreihe`).
+/// `[master, slave]`. Schwellen sind editierbar (Standard Warnung 3 dB /
+/// Alarm 6 dB, 2026-11-03 kalibriert — siehe `bewerte_zeitreihe`).
 fn handle_compare(state: &AppState, path: &str) -> (u16, &'static str, String) {
     let (Some(master_id), Some(slave_id)) =
         (query_param(path, "master"), query_param(path, "slave"))

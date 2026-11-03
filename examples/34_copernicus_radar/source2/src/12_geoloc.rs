@@ -629,8 +629,18 @@ pub fn wochenbericht(
 /// Bewertet eine Median-Zeitreihe (`medians_db`, chronologisch, erster Wert =
 /// Referenz) gegen Warn-/Alarmschwellen [dB].
 ///
-/// Prototyp-Schwellen — vor Produktiveinsatz an beschrifteten Zeitreihen
-/// kalibrieren (siehe Plan). Leere Reihe → Grün ohne Aussage.
+/// Kalibrierstand 2026-11-03 (Defaults Warn 3.0 / Alarm 6.0 bestätigt):
+/// Datenbasis 24 echte Master-vs-Slave Chip-Paare (Kaohsiung-Region,
+/// Sentinel-1 IW2/Burst 9, 12 Tage Abstand, Chip ±16×±20) + synthetische
+/// Positive (zentrale 25 % des Chips um 1/2/3/5/8 dB angehoben, Median neu
+/// berechnet; Vollchip-+3 dB → exakt 3.0 dB Drift). Nullverteilung: Median
+/// 0.4 dB, 21/24 < 3 dB, max 5.0 dB (hafennah = echte Szenenvariabilität,
+/// kein Rauschen); Fehlalarm 3/24 an Warn-, 0/24 an Alarmschwelle.
+/// Kaohsiung-Referenz 0.3 dB → Grün. Grenze (by design): Der Median ist
+/// robust — lokale Änderungen (25 % des Chips) bis 8 dB bleiben unter Warn;
+/// Gelb/Rot meldet flächige Änderungen ab 3/6 dB. Details in
+/// `/tmp/kalibrierung_rohwerte.txt` (nicht im Repo). Leere Reihe → Grün
+/// ohne Aussage.
 pub fn bewerte_zeitreihe(medians_db: &[f64], warn_db: f64, alarm_db: f64) -> Ampel {
     let Some((&basis, rest)) = medians_db.split_first() else {
         return Ampel {
@@ -1082,6 +1092,20 @@ mod tests {
         assert!(!r.detail.is_empty());
         let leer = bewerte_zeitreihe(&[], 3.0, 6.0);
         assert_eq!(leer.status, AmpelStatus::Gruen);
+        // Kalibriergrenzen (2026-11-03, warn=3.0/alarm=6.0): knapp
+        // unter/über den Schwellen, inkl. negativer Richtung (Betrag).
+        let knapp_gruen = bewerte_zeitreihe(&[62.1, 65.0], 3.0, 6.0);
+        assert_eq!(knapp_gruen.status, AmpelStatus::Gruen);
+        assert!((knapp_gruen.drift_db - 2.9).abs() < 1e-9);
+        let an_warn = bewerte_zeitreihe(&[62.1, 59.1], 3.0, 6.0);
+        assert_eq!(an_warn.status, AmpelStatus::Gelb);
+        assert!((an_warn.drift_db - 3.0).abs() < 1e-9);
+        let knapp_gelb = bewerte_zeitreihe(&[10.0, 15.9], 3.0, 6.0);
+        assert_eq!(knapp_gelb.status, AmpelStatus::Gelb);
+        assert!((knapp_gelb.drift_db - 5.9).abs() < 1e-9);
+        let an_alarm = bewerte_zeitreihe(&[10.0, 16.0], 3.0, 6.0);
+        assert_eq!(an_alarm.status, AmpelStatus::Rot);
+        assert!((an_alarm.drift_db - 6.0).abs() < 1e-9);
     }
 
     /// Kreisbahn-Äquator als Vorwärtsmodell: Ziel (0°N, 0°E, 0 m) liegt

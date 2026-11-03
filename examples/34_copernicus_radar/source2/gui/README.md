@@ -69,8 +69,8 @@ wie `127.0.0.1`, `::1`, `localhost` werden akzeptiert).
 6. **Vergleichen (nur mit Slave).** Master- und Slave-Job je einmal
    fokussieren, dann zeigt der Vergleichsbereich die Drift (Slave minus
    Master, Erwartung ≈ −0.2 dB) mit **Ampel Grün** bei den
-   Prototyp-Schwellen Warn 3 dB / Alarm 6 dB (editierbar, als Prototyp
-   gekennzeichnet). Der Wochenreport erscheint als schreibgeschützter
+   kalibrierten Schwellen Warn 3 dB / Alarm 6 dB (editierbar, Stand
+   2026-11-03, als Prototyp gekennzeichnet). Der Wochenreport erscheint als schreibgeschützter
    Text; bei weniger als zwei Messungen steht ein Hinweis darin statt
    einer Ampel-Behauptung.
 7. **Polygon (Phase B).** „Polygon-Modus“ einschalten, drei Ecken als
@@ -102,7 +102,7 @@ wie `127.0.0.1`, `::1`, `localhost` werden akzeptiert).
 - `POST /api/focus` — `{"datasetId","swathNumber","burstIndex","az","rg","tZd"[,"halfAz","halfRg","asset"]}` → `202 {"jobId"}`. Chip-Fenster-Default ±16 × ±20.
 - `GET /api/jobs/{id}` — `pending`/`running`/`done`/`error`; bei `done` Chip-Statistik, Chip-Mitte (`centerRow`/`centerCol`), `halfAz`/`halfRg`, `pngUrl`, TOPS-Parameter (`alpha`, `ktHzS`).
 - `GET /api/chip/{id}` — Chip-PNG (Graustufen, rotes Fadenkreuz auf der fokussierten Mitte).
-- `GET /api/compare?master={job}&slave={job}[&warn=3][&alarm=6]` — Drift (Slave-Median minus Master-Median) + Ampel nach `bewerte_zeitreihe`. Schwellen sind Prototyp-Werte, nicht kalibriert (`"prototyp": true`).
+- `GET /api/compare?master={job}&slave={job}[&warn=3][&alarm=6]` — Drift (Slave-Median minus Master-Median) + Ampel nach `bewerte_zeitreihe`. Schwellen 2026-11-03 kalibriert (Endpunkt weiter Prototyp: `"prototyp": true`).
 - `GET /api/report?asset=&warn=&alarm=` — Wochenreport als Markdown-Text (`wochenbericht`) aus den abgeschlossenen Fokus-Jobs dieses Assets; Hinweis im Text bei weniger als zwei Einträgen.
 - Alle Fehler: JSON `{"error": "<deutsche Meldung>"}` mit 400 (Eingabe), 404 (Job/Datensatz unbekannt), 500 (System).
 
@@ -112,5 +112,5 @@ wie `127.0.0.1`, `::1`, `localhost` werden akzeptiert).
 - Keine Persistenz: Jobs, Burst-Cache und Report-Einträge verfallen bei Neustart (steht auch im GUI).
 - Karte (Leaflet/OSM) braucht Netz; offline bleibt sie leer, alle API-Funktionen laufen weiter.
 - Chip-Ausschnitte liegen in Slant-Range-Geometrie (Azimut × Schrägentfernung) — kein Karten-Overlay.
-- Vergleichs-Ampel (Warnung 3 dB / Alarm 6 dB) ist ein unkalibrierter Prototyp; Schwellen vor Produktiveinsatz an beschrifteten Zeitreihen kalibrieren.
+- Vergleichs-Ampel (Warnung 3 dB / Alarm 6 dB) ist 2026-11-03 an 24 beschrifteten Master/Slave-Chip-Paaren + synthetischen Positiven kalibriert (Fehlalarm 3/24 an Warn-, 0/24 an Alarmschwelle; Details im Doku-Kommentar von `bewerte_zeitreihe`).
 - Code: alles in `src/bin/sar_gui_server.rs` (Frontend als String-Konstante eingebettet, siehe Kopfkommentar dort). Es wird bewusst nichts aus `12_geoloc.rs`/`05_ingest.rs`/`06_rda.rs` nachgebaut — der Server wrappt nur.

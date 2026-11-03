@@ -127,7 +127,12 @@ Median ≈ 5 dB; nach α-Korrektur (Zeile ≈ 1496, s. unten) beide Chips
 Prototyp).
 Polygon-Assets (`locate_polygon`: Ecken + Raster + Punkt-im-Polygon, an
 Realdaten geprüft) und Ampel-Bewertung (`bewerte_zeitreihe`) sind gebaut.
-Offen: Schwellen an beschrifteten Zeitreihen kalibrieren.
+Erledigt 2026-11-03: Schwellen kalibriert — 24 Master/Slave-Chip-Paare
+(Kaohsiung-Region, IW2/Burst 9) + synthetische Positive (25-%-Subregion
++1/2/3/5/8 dB; Vollchip +3 dB → exakt 3.0 Drift): Null-Median 0.4 dB,
+Fehlalarm 3/24 (warn) / 0/24 (alarm), Referenz 0.3 dB → Grün. Warn 3.0 /
+Alarm 6.0 bestätigt (senken trüge Wasser-Variabilität als Warn ein;
+Median meldet nur flächige Änderungen). Rohwerte: `/tmp/kalibrierung_rohwerte.txt`.
 Erledigt: Wochenreport — `wochenbericht` (Markdown: eine Zeile je
 Akquisition mit Median/p90/Drift plus Gesamt-Ampel; JSON später).
 Erster echter Report Kaohsiung-Hafen: 2026-09-28 Median 62,4 dB,
