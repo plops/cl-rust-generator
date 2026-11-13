@@ -212,29 +212,33 @@ pub fn big_levers(engine: &Engine<'_>, world: &[String]) -> EngineResult<Vec<Big
         .collect();
     let mut levers = levers?;
     // Ausgeschaltete bekannte Flags: Einschalten simulieren (positives Delta).
-    let mut off_levers: Vec<BigLever> = Vec::new();
-    for flag in off_flags {
-        let packages = &known_off[&flag];
-        let mut sim = engine.fork();
-        for cpn in packages {
-            sim.overrides
-                .entry(cpn.clone())
-                .or_default()
-                .insert(flag.clone(), true);
-        }
-        let outcome = resolve_with_cascade_opts(&mut sim, world, false)?;
-        let totals = outcome.graph.totals();
-        off_levers.push(BigLever {
-            flag: flag.clone(),
-            packages: packages.len(),
-            total: SizeMetrics {
-                binpkg_bytes: totals.binpkg_bytes - base_totals.binpkg_bytes,
-                download_bytes: totals.download_bytes - base_totals.download_bytes,
-            },
-            conflicts: outcome.conflicts.len(),
-        });
-    }
-    levers.extend(off_levers);
+    // Ebenfalls parallel (sonst dominiert diese Schleife die Laufzeit, HIL:
+    // hunderte Off-Flags mal je ein voller Kaskadenlauf).
+    let mut off_levers: Vec<BigLever> = off_flags
+        .into_par_iter()
+        .map(|flag| {
+            let packages = &known_off[&flag];
+            let mut sim = engine.fork();
+            for cpn in packages {
+                sim.overrides
+                    .entry(cpn.clone())
+                    .or_default()
+                    .insert(flag.clone(), true);
+            }
+            let outcome = resolve_with_cascade_opts(&mut sim, world, false)?;
+            let totals = outcome.graph.totals();
+            Ok(BigLever {
+                flag: flag.clone(),
+                packages: packages.len(),
+                total: SizeMetrics {
+                    binpkg_bytes: totals.binpkg_bytes - base_totals.binpkg_bytes,
+                    download_bytes: totals.download_bytes - base_totals.download_bytes,
+                },
+                conflicts: outcome.conflicts.len(),
+            })
+        })
+        .collect::<EngineResult<Vec<BigLever>>>()?;
+    levers.append(&mut off_levers);
     levers.sort_by_key(|l| l.total.binpkg_bytes);
     Ok(levers)
 }

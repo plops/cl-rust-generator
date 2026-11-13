@@ -153,3 +153,16 @@ Latenz-Budgets stehen als Tests in `tests/perf_system.rs`
 (`cargo test --release --test perf_system -- --nocapture`).
 HIL-Abgleich auf echtem Snapshot: `GENTOO_HIL_REPO=/tmp/gentoo-hil cargo test
 --release` (hier nicht verfügbar, Test skippt sauber).
+
+**Echte Messung auf dem Gentoo-Host** (32 Kerne, 13.700 Pakete im Index,
+156 `world`-Einträge → 570 Knoten im Graphen; Stand 2026-11-13):
+
+| Befehl | Wandzeit | CPU-Zeit | Befund |
+| :--- | :--- | :--- | :--- |
+| `graph` | 0,4 s | 1,0 s | Basisauflösung unkritisch |
+| `deltas media-video/ffmpeg` (~100 Flags) | 1,2 s | 24,5 s (~20× parallel) | pro Toggle spürbar, aber ok |
+| `big-levers` | **83 s → 7,7 s** | 167 s → 218 s (~28×) | sequentielle Off-Flag-Schleife war der Engpass (Fix: alles parallel) |
+
+Lehre: Die synthetischen 0–6 ms sagten nichts über den Ernstfall. Der
+HIL-Lauf fand den echten Engpass (nicht-parallelisierte zweite Schleife),
+den die Unit-Tests nicht sehen konnten.

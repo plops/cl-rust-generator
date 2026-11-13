@@ -183,6 +183,9 @@ Pakete ziehen und welche längst kostenlos sind.
   `USE=` aus `make.defaults` inkl. `${USE}`, `-flag`-Negation in
   `use.mask`/`use.force`, versionierte `package.use`-Atome, echte
   `QuickSwitch`-Changes, `verify` mit `--root` + `--config-root`.
-- **Offen:** `src/`-Dateien über ~600 Zeilen warten noch auf Aufteilung,
-  HIL-Zahlen auf echtem Snapshot stehen aus
-  (`GENTOO_HIL_REPO=/tmp/gentoo-hil cargo test --release`).
+- **Nachgemessen (2026-11-13, Gentoo-Host, 32 Kerne, 570 Graph-Knoten):**
+  `graph` 0,4 s, `deltas media-video/ffmpeg` 1,2 s (~20× parallel),
+  `big-levers` erst 83 s (nur ~2× parallel) → sequentielle Off-Flag-Schleife
+  als Engpass gefunden und parallelisiert → **7,9 s (~27×)**. Details in
+  `gentoo-dep-tui/README.md`.
+- **Offen:** `src/`-Dateien über ~600 Zeilen warten noch auf Aufteilung.
