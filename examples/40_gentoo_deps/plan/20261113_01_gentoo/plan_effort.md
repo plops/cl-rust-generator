@@ -37,3 +37,23 @@ Arbeitsverlauf, keine Messwerte.
    gleichzeitig betraf.
 3. Der HIL-Regressionstest braucht ~3 Minuten (353-MB-Snapshot);
    das begrenzt, wie oft man ihn „einfach mal" laufen lässt.
+
+
+_ Worked for 59m 59s · 9:30 AM · 13/Nov
+
+┌────────────────────────────────────────────────────────┐
+│  Session usage                                         │
+│                                                        │
+│    Input      104,822,540                              │
+│    Cached     103,327,592                              │
+│    Output         355,433                              │
+│    Total      105,177,973                              │
+│                                                        │
+│    Turns               398                             │
+│    Subagents          none                             │
+│    Observers  239 completed (4,306,987 tokens)         │
+│                                                        │
+│  Subscription · Muse Code Everyday Usage               │
+│    Current        30% used · Resets at 9:36 AM         │
+│    Weekly         15% used · Resets Nov 16 at 12:00 AM │
+└────────────────────────────────────────────────────────┘
