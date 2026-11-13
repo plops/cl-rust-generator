@@ -1,0 +1,136 @@
+# Allgemeine Anweisungen
+
+Du arbeitest im Auftrag von Wol Pumba (wolpumba@gmail.com)
+
+## Repo
+
+Arbeite in einem branch basierend auf dem master branch. Commite mit
+conventional commit messages.
+
+## Docker
+
+Du läufst in einem Docker-Image (Ubuntu 26) auf einem Gentoo
+Linux-Host, mit Zugriff auf Kernel-Messages und USB-Geräte. Gebaut aus
+`/workspace/src/cl-cl-generator/example/05_dockerfile_meta/source01/examples/03_ai_env/Dockerfile`,
+gestartet mit
+```
+sudo cl-cl-generator/example/05_dockerfile_meta/source01/examples/03_ai_env/setup02_run.sh  \
+     --host-kmsg --usb --source-isolation --docker-sock --x11 --host-network
+```
+Fehlende Pakete selbst installieren und im Walkthrough fürs Dockerfile
+auflisten.
+
+Du kannst den host mit `ssh kiel@localhost -i ~/.ssh/from_android` erreichen
+
+## Code-Anforderungen
+
+- Kleiner, übersichtlicher, effizienter Code
+- Aber auch gute, testbare und erweiterbare architektur
+
+- stelle sicher, dass du beim editieren von klammern auf darauf
+aufpasst dass du dich nicht verzaehlst, lasse sbcl oft laufen, falls
+doch ein fehler auftritt vergleiche mit der vorherigen git version um
+das problem zu identifizieren.
+
+
+## Abhaengigkeiten
+
+Lies in plan/misc ein paar dokumente. ansonsten nutze deepwiki mcp um
+dokumentation und code beispiele fuer die verwendung von dependencies
+zu erhalten.
+
+verwalte deps.md mit den github urls bzw. <organization>/<project> so
+dass der deepwiki mcp lookup einfach wird
+
+in deps.md sollst du die pfade der abhaengigkeiten auf github in der
+<organization>/<projekt> notation auflisten. dies kannst du benutzen
+um in deepwiki mcp nach weiteren informationen zu suchen / fragen.
+
+##  Vorgehen
+
+1. Code und Architektur lesen. Vorschlagen, wie das Feature umgesetzt wird. Prüfen, ob alle
+   wichtigen Anforderungen genannt sind, und weitere sinnvolle Punkte als Vorschläge auflisten.
+2. `plan.md` schreiben: Implementierungsplan, der einen unabhängigen Agenten befähigt, selbstständig
+   Kontext aufzubauen (Liste der relevanten Dateien mit Kurzbeschreibung), Commit-Plan mit Messages.
+3. `tasks.md` so detailliert, dass eine schwächere KI sie abarbeiten kann.
+4. Unit- und Integrationstests wie erforderlich einführen und ausführen.
+5. Ein Problem, das sich in zwei Versuchen nicht lösen lässt → anhalten und berichten.
+
+
+## Rust
+
+Vorgehensweise: Arbeite mit aktuellem Rust (2024). Nutze Tools um
+konsistenten und aufgeraeumten Quellcode zu gewaehrleisten (also
+`cargo fmt` um Formatierung zu normalisieren, `cargo clippy` um
+moegliche Fehler oder Verbesserungen zu finden, `cargo upgrade` um bei
+den Abhaengigkeiten die neueste Version zu verwenden, ...).
+
+Jedes Beispiel-Crate in diesem Repo steht fuer sich (kein Workspace-
+`Cargo.toml` im Repo-Root); `target/` und `*.lock` sind per
+`.gitignore` ausgeschlossen.
+
+
+datei-aufteilung (neu, verbindlich): lange quelltext-dateien sind zu
+vermeiden. sobald eine datei mehr als eine klar abgrenzbare
+zustaendigkeit hat oder ca. 600 zeilen ueberschreitet, ist sie in
+semantisch getrennte einzelne dateien zu unterteilen. jede neue datei
+bekommt am anfang eine zweistellige nummer plus einen namen der
+widerspiegelt was darinsteht, z.b. `01_clock.rs`, `02_usb_cdc.rs`,
+`03_router.rs` in `firmware/src/` bzw. `01_types.rs`, `02_frame.rs` in
+`common/src/`. regeln: aufsteigende nummern folgen der
+initialisierungs-/datenfluss-reihenfolge (clock vor peripherie,
+transport vor protokoll, protokoll vor modus), zusammengehoeriges
+bleibt in einer datei (kein auseinanderreissen von zusammengehoerigen
+typen + ihren tests), `mod.rs`/`lib.rs`/`main.rs` enthalten nur
+modul-deklarationen und die oberste verdrahtung (init, spawn, join),
+kein verhalten. aufteilung immer ohne verhaltens-aenderung
+durchfuehren (vorher/nachher: alle tests plus smoke
+gruens). bestehende dateien (`main.rs`, `text.rs`, `frame.rs`,
+`router.rs`) bei bedarf nach diesen regeln umbauen, sobald du sie
+anfasst.
+
+
+## Spikes mit Python
+
+Falls du python scripte nutzen moechtest, installiere deren
+abhaengigkeiten mit uv.
+
+## Tests
+
+Neue Unit-Tests und Integration-Tests sollen wie erforderlich
+eingefuehrt werden. Diese sollen auch ausgefuehrt werden. Zusaetzlich
+soll es Regressionstests auf dem echten Datensatz geben (Paketzensus,
+Echo- und Rauschpaket-Dekodierung), die ohne Datensatz uebersprungen
+werden. Gates: `cargo test`, `cargo clippy --all-targets -- -D
+warnings`, `cargo fmt --check`.
+
+
+## Aufwand
+
+Halte den Token-Verbrauch der Session in `plan_effort.md` im selben
+Ordner fest (Input/Output/Cached/Total, Turns, Subagents), damit
+spaeter abschaetzbar ist, was ein solcher Port kostet.
+
+
+## Walkthrough (`walkthrough.md` im Ordner der prompt.txt)
+
+Zusammenfassung dessen, was wirklich implementiert wurde, welche Stellen aufgrund von Tests geändert
+wurden, Learnings und mögliche Erweiterungen, neue Programme für den Docker-Container.
+Strikte Regeln:
+
+- **Sprache und Stil:** zwingend Deutsch; didaktisch, holt den Leser ab, flüssig lesbar.
+  Abkürzungen bei erster Verwendung einführen und in einem Glossar erklären. Mit Erklärungen und
+  guten Beispielen (Daten aus Tests oder Spikes) begründen. Erzeugte Bilder einbinden und erklären.
+- **Erklärungen:** Fachbegriffe kurz und verständlich erklären.
+- **Visualisierung:** reichlich Beispiele und **Mermaid-Diagramme** für Architektur, Datenfluss und
+  komplexe Konzepte.
+- **Inhaltliche Struktur:**
+  1. Was exakt implementiert wurde.
+  2. Welche Architektur-Entscheidungen aufgrund von Tests spontan geändert werden mussten.
+  3. Learnings und mögliche zukünftige Erweiterungen.
+  4. Liste der neuen Programme/Pakete, die dauerhaft ins Dockerfile aufgenommen werden sollten.
+
+
+# Spezifische Aufgabe
+
+<hier kommt die spezifische aufgabe fuer den ausfuehrenden agenten hin>

@@ -1,0 +1,25 @@
+schaue dir das research an. deine aufgabe ist plan.md, deps.md und
+tasks.md fuer den auszufuehrenden AI agenten zu planen und zu
+schreiben.
+
+
+## Plan
+
+Schreibe einen Implementierungsplan. Dieser Implementierungsplan soll
+einen unabhaengigen AI-Agenten dazu befaehigen, selbstaendig einen
+Kontext aufzubauen, der die wesentlichen Quellen beinhaltet. Das
+heisst, der Implementierungsplan hat eine Liste von Dateien, die der
+Agent sich anschauen sollte, mit einer kurzen Beschreibung fuer jede
+Datei. Weiterhin soll der Implementierungsplan erklaeren, wie Commit
+Messages gesendet werden sollen. Und zwar sollen diese mit einer
+umfassenden Beschreibung und als Conventional Commit formatiert
+ausgefuehrt werden.
+
+Lege den Plan als `plan.md` neben diese `prompt.txt` in
+`plan/2026.../`.
+
+schreibe task.md wo du die implementierungs und test schritte
+aufeinander abfolgen laesst, so dass ein agent die tasks seriell
+abarbeiten kann und die arbeit in jedem schritt getested und validiert
+wird. jeder modus bekommt eigene tasks (implementierung, host-tests,
+HIL-nachweis), danach erst die TUI-tasks.
