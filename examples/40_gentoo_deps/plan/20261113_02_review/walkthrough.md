@@ -183,9 +183,49 @@ Pakete ziehen und welche längst kostenlos sind.
   `USE=` aus `make.defaults` inkl. `${USE}`, `-flag`-Negation in
   `use.mask`/`use.force`, versionierte `package.use`-Atome, echte
   `QuickSwitch`-Changes, `verify` mit `--root` + `--config-root`.
-- **Nachgemessen (2026-11-13, Gentoo-Host, 32 Kerne, 570 Graph-Knoten):**
-  `graph` 0,4 s, `deltas media-video/ffmpeg` 1,2 s (~20× parallel),
-  `big-levers` erst 83 s (nur ~2× parallel) → sequentielle Off-Flag-Schleife
-  als Engpass gefunden und parallelisiert → **7,9 s (~27×)**. Details in
-  `gentoo-dep-tui/README.md`.
 - **Offen:** `src/`-Dateien über ~600 Zeilen warten noch auf Aufteilung.
+  Details und alle Messwerte: Abschnitt 8.
+
+## 8. HIL-Benchmarks: gemessen statt geraten (2026-11-13)
+
+Die synthetischen `perf_system`-Zahlen (0–6 ms bei 125 Paketen) sagten nichts
+über den Ernstfall. Darum: Release-Binary per `scp` auf den Gentoo-Host,
+gemessen per Wanduhr (`date +%s%N`), je Befehl ein Prozess.
+
+**Messumgebung:** 32 Kerne, 62 GB RAM, Kernel `6.18.57-gentoo-dist`,
+Repo mit 13.700 Paketen / 34.119 Cache-Dateien, `world` mit 156 Einträgen
+→ **571 Knoten** im aufgelösten Graphen. Kein `--binhost` (reine `dl`-Deltas).
+
+| Befehl | Wandzeit | CPU-Last | Deutung |
+| :--- | :--- | :--- | :--- |
+| `index-check` (Repo laden) | 0,2 s | 1 Kern | vernachlässigbar |
+| `graph` (volle Auflösung + Kaskade) | 0,45 s (stabil) | ~2 Kerne | Basis ist schnell |
+| `deltas app-misc/jq` (11 Flags) | 0,6 s | parallel | pro Toggle spürbar, ok |
+| `deltas app-editors/emacs` (54 Flags) | 0,8 s | parallel | dto. |
+| `deltas dev-lang/rust` (49 Flags) | 0,9 s | parallel | dto. |
+| `deltas media-video/ffmpeg` (~100 Flags) | 1,2 s | 24,5 s (~20×) | größtes Einzelpaket, noch ok |
+| `big-levers` (**vor** Fix) | 83 s | 167 s (~2× auf 32 Kernen!) | **der Engpass, der sich „langsam" anfühlte** |
+| `big-levers` (**nach** Fix) | **7,9 s** | ~216 s (~27×) | 11× schneller |
+
+**Skalierung `big-levers` nach Fix** (`RAYON_NUM_THREADS`):
+
+| Kerne | 4 | 8 | 32 |
+| :--- | :--- | :--- | :--- |
+| Wandzeit | 35,5 s | 18,8 s | ~8 s |
+
+4→8 skaliert fast linear (1,9×), 8→32 nur noch 2,4× — Rest ist serieller
+Anteil (Basis-Kaskade, Sortierung, je ein Fork pro Simulation).
+
+**Was der HIL-Lauf aufdeckte:** Meine Toggle-back-Verbesserung (ausgeschaltete,
+aber bekannte Flags weiter als Hebel führen) lief in einer **sequentiellen**
+Schleife — hunderte volle Kaskadenläufe hintereinander. Die Unit-Tests konnten
+das nicht sehen (Mini-Repo, alles 0 ms). Fix: zweite Schleife ebenfalls per
+`rayon` parallel ([c80432b](https://github.com/cl-rust-generator/commit/c80432b)).
+
+**Ehrliche Rest-Einordnung für die TUI:** Ein `Space` auf einem großen Paket
+kostet weiter ~1 s Block (Kaskade ~0,45 s + Deltas) — aber nur noch auf
+explizite Aktion, nie beim Scrollen/Filtern. Der 8-s-`big-levers`-Lauf passiert
+genau einmal beim ersten Tab-2-Besuch. Wer es schneller braucht: Der nächste
+Hebel wäre die Resolve-Engine selbst (`Dep::parse`-Caching, Integer-IDs aus
+`01_types.rs` tatsächlich nutzen) — je Durchlauf ~0,3–0,4 s einsparen hieße
+`big-levers` auf ~2–3 s drücken.
