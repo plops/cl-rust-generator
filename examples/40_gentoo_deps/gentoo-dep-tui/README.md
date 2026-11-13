@@ -25,6 +25,26 @@ Laufzeitgröße; `dl` zählt nur herunterzuladende Quell-Tarballs.
 werden getrennt als `BDEPEND-extra` gezählt und verfälschen die
 Runtime-Größe nicht.
 
+### Empfohlener Default-Binhost
+
+Das Tool liest eine lokale `Packages`-Indexdatei. Guter Default ist der
+[offizielle Gentoo-Binhost](https://wiki.gentoo.org/wiki/Gentoo_Binary_Host_Quickstart)
+(für amd64/23.0):
+
+```bash
+wget -O /tmp/Packages \
+  https://distfiles.gentoo.org/releases/amd64/binpackages/23.0/x86-64/Packages
+gentoo-dep-tui tui --repo ... --world ... --binhost /tmp/Packages
+```
+
+Hinweise: Der Pfad muss zum Profil passen (`23.0/x86-64` für Standard-amd64;
+für `hardened`, `musl`, `no-multilib` o. Ä. gibt es eigene Unterverzeichnisse
+bzw. keinen exakt passenden Binhost — die `SIZE`-Werte bleiben dann ein
+Näherungs-Proxy). Ob der Index zu deinem Repo-Stand passt, zeigt
+`index-check` als `Binhost-Treffer`-Quote; unter ~80 % lohnt ein frischer
+Download. Die `USE`-Flags der Binpkgs müssen nicht deinen entsprechen —
+für reine Größen-Deltas ist das egal.
+
 **Im Docker-Container** (kein `/var/db/repos/gentoo`, keine `world`) musst du
 die Pfade per Flag übergeben, z. B. auf einen Snapshot unter `/tmp/gentoo-hil`.
 Prüfe zuerst mit `index-check`, ob alle Pfade stimmen:

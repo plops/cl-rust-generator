@@ -33,7 +33,12 @@ pub struct CommonArgs {
     #[arg(long, default_value = "/var/lib/portage/world")]
     pub world: PathBuf,
     /// Binhost-`Packages`-Datei (optional, sonst keine Binpkg-Groessen).
-    #[arg(long)]
+    ///
+    /// Empfohlener Default (offizieller Gentoo-Binhost, amd64/23.0):
+    /// `https://distfiles.gentoo.org/releases/amd64/binpackages/23.0/x86-64/Packages`
+    /// als Datei laden, z. B. `wget -O /tmp/Packages <URL>`, und hier per
+    /// `--binhost /tmp/Packages` uebergeben. `index-check` zeigt die Trefferquote.
+    #[arg(long, value_name = "PACKAGES-DATEI")]
     pub binhost: Option<PathBuf>,
     /// `make.conf` (fuer globale USE/ACCEPT_KEYWORDS).
     #[arg(long, default_value = "/etc/portage/make.conf")]
