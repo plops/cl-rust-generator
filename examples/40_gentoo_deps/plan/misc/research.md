@@ -269,3 +269,114 @@ proof of concept sollten.  ordne die anforderungen nochmal nach der
 prioritaet und sortiere. starte mit den wichtigsten und plane damit
 die umsetzung des mvp und die ersten paar steigerungen in der
 funktionalitaet
+
+Das ergibt jetzt ein sehr klares, stimmiges Bild. Besonders der Mix aus **Binhost-`SIZE` (für reale Runtime-Größe) + `Manifest`-Download (für feine USE-Deltas) + Blame-View + `||`-Alternativen aus `md5-cache`** macht das Tool extrem praxisnah – und reduziert die Abhängigkeit von einer AI erheblich.
+
+Damit du dich nicht verrennst, sortieren wir zuerst alle Anforderungen knallhart nach **Priorität (Nutzen vs. technische Abhängigkeit)** und bauen daraus eine klare **Stufen-Roadmap** vom PoC bis zur Ausbaustufe.
+
+---
+
+### 1. Priorisierung der Anforderungen (Top-Down)
+
+#### Priorität 1: Fundament (ohne das geht nichts)
+1. **Daten-Loader (`md5-cache` + `Manifest` + Binhost `Packages` + Profile/Keywords/Masks):**
+   * *Wichtiges Detail:* Du musst zwingend `KEYWORDS` (z. B. `amd64`) und `package.mask` berücksichtigen, sonst wählt dein Resolver ständig `9999`-Live-Ebuilds ohne `Manifest`-Größe und ohne Binhost-`SIZE`.
+2. **In-Memory `RDEPEND`-Graph mit Reference-Counting:**
+   * Auflösen der Laufzeit-Abhängigkeiten ab einer Baseline-`world` und Berechnung von **Total-Size** sowie **Marginal-Deltas** (was ändert sich *wirklich* am Gesamtsystem?).
+   * *Hinweis zu Dual-Metrik:* Wenn ein USE-Flag auf Paket A andere Pakete B und C reinzieht/rauswirft, siehst du das direkt über deren Binhost-`SIZE`. Wenn ein Flag nur Paket A selbst verändert (ohne neue Deps), liefert zumindest `SRC_URI` einen Hinweis.
+3. **TOML-Format (Baseline `world` -> TOML-Konvertierung & Speichern):**
+   * Struktur für Pakete, aktive USE-Flags und Alternativen (`[[choice]]`), sodass Zustand und Entscheidungen persistent bleiben.
+
+#### Priorität 2: Kern-MVP (macht das Tool im Alltag benutzbar)
+4. **Minimale TUI (`ratatui`) mit Paketliste, USE-Flags & Live-Deltas.**
+5. **„Blame / Why is this here?“-View (2.1):**
+   * Rückwärts-Pfad von jedem beliebigen Paket zurück zu `world` + auslösendem USE-Flag. (Ohne dieses Feature sind große Dep-Graphen kaum debuggbar.)
+6. **Transitive `|| ( a b )`-Alternativen aus `md5-cache` (2.2):**
+   * Versteckte Wahlmöglichkeiten im Baum sichtbar und umschaltbar machen.
+7. **`REQUIRED_USE` & `cat/pkg[flag]`-Kaskaden + Konflikt-Erkennung (1C Teil 1):**
+   * Mitberechnen von erzwungenen Flags und rotes Markieren von Widersprüchen.
+8. **Export (`world` & `package.use`).**
+
+#### Priorität 3: Produktivitäts-Booster (erste echte Steigerung)
+9. **Globale „Big Levers“-Ansicht (2.3):** Globale USE-Flags inkl. Gesamtersparnis, Paketanzahl und Konfliktanzahl.
+10. **Interaktiver Konflikt-Resolver / Quick-Switch (1C Teil 2):** Auf einem Konflikt schnell zwischen gültigen Auflösungen wechseln und speichern.
+11. **`emerge -p` Verifikation (2.6):** Einmal-Check gegen das echte Portage im Docker-Container.
+
+#### Priorität 4: Tiefe & Zukunft (später)
+12. **Multi-Slot- & `virtual/*`-Detektor (2.4).**
+13. **`BDEPEND`-Trennung / Stage3-Subtraktion / Empirische SQLite-DB** (reale gemessene Größen aus `/var/db/pkg/*/*/SIZE` und Bauzeiten aus `/var/log/emerge.log`).
+14. **AI-Alternativen-Generator & SAT-Solver.**
+
+---
+
+### 2. Umsetzungsplan: PoC → MVP → Ausbaustufen
+
+#### Phase 0: Proof of Concept (PoC) – *„Der Motor läuft“*
+**Ziel:** Beweisen, dass das Einlesen, Auflösen und Delta-Rechnen in Rust schnell und korrekt funktioniert – **noch ohne komplexe TUI**.
+
+* **Scope:**
+  * Ein kleines CLI-Binary (`cargo run -- --world ./world`).
+  * Lädt `md5-cache`, `Manifest` und eine lokale Binhost-`Packages`-Datei.
+  * Filtert Versionen sauber nach `KEYWORDS` (z. B. `amd64`) und `package.mask` (erstmal ohne komplexe Slot-Rebuilds, einfach höchste stabile Version pro `cat/pkg`).
+  * Baut den `RDEPEND`-Graphen ab der `world`-Datei auf (bei `|| ( a b )` wird für den PoC stumpf immer Option `a` genommen).
+  * Berechnet für ein übergebenes Paket alle seine USE-Flags (inkl. einfachem Reference-Counting) und gibt sie im Terminal aus:
+    ```text
+    www-servers/nginx (Binpkg: 1.2 MB | Subgraph: 14.5 MB)
+      [x] ssl      (removing saves: -4.2 MB bin / -9.8 MB dl)
+      [ ] http2    (enabling costs: +0.0 MB bin / +0.0 MB dl)
+      [ ] pcre2    (removing saves: -1.8 MB bin / -2.3 MB dl)
+    ```
+* **Architektur-Tipp:** Trenne strikt in zwei Crates/Module: `engine` (daten + graph + delta) und `cli/tui`.
+* **Definition of Done:** Der PoC läuft auf deiner echten `world`-Datei in unter 500 ms durch und die ausgegebenen Pakete/Größen sind plausibel.
+
+---
+
+#### Phase 1: MVP – *„Die interaktive Arbeitsversion“*
+**Ziel:** Du kannst deine `world`-Datei interaktiv in der TUI verkleinern und gültige Portage-Configs für deinen Docker-Build exportieren.
+
+* **Schritt 1.1: TOML-State & `world`-Import**
+  * Befehl `init`: Liest eine normale `world`-Datei ein und erzeugt eine `plan.toml` (inkl. gewählter Defaults).
+  * Zustand (`plan.toml`) speichert explizit gesetzte USE-Flags und getroffene Entscheidungen.
+* **Schritt 1.2: Kaskaden & Konflikte (`REQUIRED_USE` & `pkg[flag]`)**
+  * Erweiterung des Graph-Resolvers: Wenn Flag `A` auf Paket 1 ein Flag `B` auf Paket 1 (`REQUIRED_USE`) oder Paket 2 (`cat/pkg[B]`) erzwingt, wird das rekursiv durchgerechnet.
+  * Tritt ein Widerspruch auf (`B` wird sowohl als `+B` als auch als `-B` verlangt), wird das betreffende Flag als **`CONFLICT`** markiert (inkl. Angabe, *wer* widerspricht).
+* **Schritt 1.3: Transitive `|| ( a b )`-Alternativen**
+  * Stößt der Resolver im `md5-cache` auf `|| ( ... )`, legt er das im Zustand als offene Entscheidung ab (Default: erste gültige Option), sodass du sie in der TUI umschalten kannst.
+* **Schritt 1.4: Die `ratatui`-Oberfläche (3-Pane-Layout)**
+  * **Links:** Liste der `world`-Einträge + (einklappbar/separat) gefundene `||`-Entscheidungen aus dem Tree + alle transitiv gezogenen Pakete sortiert nach Größe.
+  * **Mitte:** Details zum gewählten Paket: Alle USE-Flags mit Live-Marginal-Delta (`+X MB` / `-Y kB` / `CONFLICT`). Leertaste toggelt das Flag und aktualisiert alle Zahlen live.
+  * **Rechts (oder Tab/Popup): Blame-View („Warum ist das hier?“):** Zeigt für das aktuell ausgewählte Paket alle Dependency-Ketten von `world` bis zu diesem Paket.
+  * **Footer:** Gesamtgröße (Binpkg-Summe + Download-Summe), Paketanzahl, Konflikt-Counter, `[S]` Speichern in TOML, `[E]` Export (`world` + `package.use`).
+
+* **Definition of Done:** Du nimmst eine echte `world`-Datei aus deinem Docker-Setup, drückst in der TUI unerwünschte fette Pakete über Blame-View & USE-Flags raus, exportierst `package.use` und baust damit erfolgreich ein kleineres Image.
+
+---
+
+#### Phase 2: Erste funktionale Steigerung – *„Komfort & Verifikation“*
+**Ziel:** Weniger manuelle Klickarbeit und 100 % Sicherheit vor dem Docker-Build.
+
+1. **Globale „Big Levers“-Ansicht (2.3):**
+   * Neuer Tab `[2] Global USE`: Aggregiert jedes USE-Flag über alle aktiven Pakete. Zeigt: *Flag-Name | Betroffene Pakete | Gesamt-Delta bei Deaktivierung | Anzahl entstehender Konflikte*.
+2. **Schnell-Umschalter bei Konflikten (1C):**
+   * Wenn du auf einem roten Konflikt stehst, öffnet `[Enter]` ein kleines Menü mit validen Auflösungen (z. B. *Option A: `libX[+foo]` erzwingen (+3 MB)* vs. *Option B: `pkgC[-bar]` abschalten (-1 MB)*) und übernimmt die gewählte Konfiguration direkt in die `plan.toml`.
+3. **`emerge -p`-Verifikation (2.6):**
+   * Ein Export-Hook/Befehl, der die generierten `world` & `package.use` gegen ein lokales `emerge --pretend --emptytree` (oder via `docker run` gegen dein Basis-Image) prüft und Abweichungen meldet (z. B. falls ein versteckter Sub-Slot-Konflikt übersehen wurde).
+
+---
+
+#### Phase 3: Präzision & Realdaten – *„Vom Proxy zur Exaktheit“*
+**Ziel:** Exakte Zahlen für *deine* spezifischen `CFLAGS` und optional Build-Zeiten.
+
+1. **Multi-Slot- & `virtual/*`-Warnungen (2.4):**
+   * Banner/Badge in der UI, sobald zwei Slots desselben Pakets (z. B. `python:3.12` und `3.13`) aktiv sind.
+2. **Empirische Build-Telemetrie (SQLite):**
+   * Kleines Post-Build-Skript für dein Dockerfile, das `/var/db/pkg/*/*/SIZE`, `USE` und Bauzeiten aus `/var/log/emerge.log` einsammelt.
+   * Die Engine nutzt diese lokalen Messwerte automatisch mit höherer Priorität als den Binhost-`SIZE`-Schätzwert – und kann zusätzlich `BDEPEND`-Größen und geschätzte Compile-Zeiten anzeigen.
+3. **Optional: Stage3-Subtraktion & AI-Anreicherung:**
+   * Baseline-Liste abziehen, falls man auf einem Standard-Stage3 aufsetzt.
+   * Hilfsbefehl, der deine `plan.toml` um `[[choice]]`-Alternativen (mit `pros`/`cons`) per LLM anreichert.
+
+---
+
+### Ein letzter Technik-Tipp für den Start von Phase 0
+Prüfe am Tag 1, ob dir für das Parsing die Crate **`pkgcraft`** (sehr vollständig, inkl. Profiles/EAPI/Repos, aber schwergewichtiger) oder die schlankere Kombination **`portage-metadata` + `portage-atom`** besser liegt. Für den PoC brauchst du von den Ebuilds wirklich nur `RDEPEND`, `IUSE`, `REQUIRED_USE`, `SLOT`, `KEYWORDS`, `SRC_URI` + `Manifest` + Binhost-`Packages`. Wenn du dir das hinter einem kleinen eigenen `RepoIndex`-Struct kapselst, bleibt dein Graph-Motor komplett unabhängig vom Parser.

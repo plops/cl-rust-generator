@@ -152,7 +152,7 @@ pub fn build_question(repo: &Repo) -> String {
          ## Architektur & Zusammenspiel\n\
          Ein valides ```mermaid Diagramm, das visualisiert, wie diese Komponenten/Algorithmen ineinandergreifen.\n\n\
          ## Notes\n\
-         Ehrenhafte Erwähnungen weiterer technischer Highlights, Nebenläufigkeitsmodelle oder Caching-Strategien.\n\n\
+         Erwähnungen weiterer technischer Highlights, Nebenläufigkeitsmodelle oder Caching-Strategien.\n\n\
          Wichtig: Antworte komplett auf Deutsch auf Senior-Entwickler-Niveau."
     )
 }
