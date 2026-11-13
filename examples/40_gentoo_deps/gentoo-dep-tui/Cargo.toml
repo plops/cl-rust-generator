@@ -1,0 +1,22 @@
+[package]
+name = "gentoo-dep-tui"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "ncdu fuer Gentoo-USE-Flags: loest world-Abhaengigkeiten auf, zeigt Marginal-Deltas und exportiert Portage-Konfigurationen"
+
+[dependencies]
+portage-atom = "0.12"
+portage-metadata = "0.11"
+clap = { version = "4", features = ["derive"] }
+rayon = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+thiserror = "2"
+anyhow = "1"
+walkdir = "2"
+ratatui = "0.30"
+crossterm = "0.29"
+
+[dev-dependencies]
+tempfile = "3"
