@@ -10,7 +10,7 @@ use portage_atom::UseDepKind;
 use portage_metadata::RequiredUseExpr;
 
 use crate::mod_01_types::{ConflictInfo, EngineResult, QuickSwitch};
-use crate::mod_06_graph::{Engine, ResolvedGraph, resolve};
+use crate::mod_06_graph::{Engine, ResolvedGraph};
 
 /// Maximalrunden des Kaskaden-Fixpunkts (danach: Konflikt statt Endlosschleife).
 const MAX_ROUNDS: u8 = 8;
@@ -31,6 +31,16 @@ pub fn resolve_with_cascade(
     engine: &mut Engine<'_>,
     world: &[String],
 ) -> EngineResult<CascadeOutcome> {
+    resolve_with_cascade_opts(engine, world, true)
+}
+
+/// Wie `resolve_with_cascade`, aber `include_build` steuerbar (Sims: `false`).
+pub fn resolve_with_cascade_opts(
+    engine: &mut Engine<'_>,
+    world: &[String],
+    include_build: bool,
+) -> EngineResult<CascadeOutcome> {
+    crate::mod_01_types::perf_count_cascade();
     // Snapshot der User-Overrides: alles, was danach in `overrides` landet,
     // stammt aus der Kaskade (kein User-Intent) und darf ueberschrieben oder
     // per Parent-Flip aufgeloest werden.
@@ -39,7 +49,7 @@ pub fn resolve_with_cascade(
     let mut conflicts: Vec<ConflictInfo> = Vec::new();
     let mut rounds = 0u8;
     loop {
-        let graph = resolve(engine, world)?;
+        let graph = crate::mod_06_graph::resolve_with_options(engine, world, include_build)?;
         // Schritt-Scope: `step` leiht `engine` mutabel, danach ist es frei.
         // `forced` ueberlebt Runden (Ping-Pong-Schutz bei harten Widerspruechen).
         let (changed, step_conflicts) = {
@@ -61,7 +71,7 @@ pub fn resolve_with_cascade(
             }
         }
         if !changed || rounds >= MAX_ROUNDS {
-            let graph = resolve(engine, world)?;
+            let graph = crate::mod_06_graph::resolve_with_options(engine, world, include_build)?;
             if changed {
                 conflicts.push(ConflictInfo {
                     package: "(kaskade)".into(),
@@ -188,7 +198,7 @@ impl<'e, 'a, 'u, 'f> CascadeStep<'e, 'a, 'u, 'f> {
         };
         let current = self.current_flags(cpn, active);
         let mut actions = Vec::new();
-        enforce_expr(expr, &current, &mut actions);
+        enforce_expr(expr, &current, &mut actions, cpn);
         for action in actions {
             match action {
                 ForceAction::On(flag) => {
@@ -485,7 +495,12 @@ enum ForceAction {
 }
 
 /// `REQUIRED_USE`-Baum gegen aktive Flags auswerten (sammelt Aktionen).
-fn enforce_expr(expr: &RequiredUseExpr, active: &HashSet<String>, out: &mut Vec<ForceAction>) {
+fn enforce_expr(
+    expr: &RequiredUseExpr,
+    active: &HashSet<String>,
+    out: &mut Vec<ForceAction>,
+    cpn: &str,
+) {
     match expr {
         RequiredUseExpr::Flag { name, negated } => {
             let has = active.contains(name);
@@ -495,7 +510,7 @@ fn enforce_expr(expr: &RequiredUseExpr, active: &HashSet<String>, out: &mut Vec<
                         format!("REQUIRED_USE verbietet {name}, ist aber an"),
                         vec![QuickSwitch {
                             label: format!("{name} abschalten"),
-                            changes: vec![],
+                            changes: vec![(cpn.to_string(), name.clone(), false)],
                         }],
                     ));
                 }
@@ -510,13 +525,13 @@ fn enforce_expr(expr: &RequiredUseExpr, active: &HashSet<String>, out: &mut Vec<
         } => {
             if active.contains(flag) != *negated {
                 for child in entries {
-                    enforce_expr(child, active, out);
+                    enforce_expr(child, active, out, cpn);
                 }
             }
         }
         RequiredUseExpr::All(entries) => {
             for child in entries {
-                enforce_expr(child, active, out);
+                enforce_expr(child, active, out, cpn);
             }
         }
         RequiredUseExpr::AnyOf(children) => {
@@ -545,7 +560,7 @@ fn enforce_expr(expr: &RequiredUseExpr, active: &HashSet<String>, out: &mut Vec<
         RequiredUseExpr::ExactlyOne(children) => {
             let n = children.iter().filter(|c| satisfied(c, active)).count();
             if n == 0 {
-                enforce_expr(&RequiredUseExpr::AnyOf(children.clone()), active, out);
+                enforce_expr(&RequiredUseExpr::AnyOf(children.clone()), active, out, cpn);
             } else if n > 1 {
                 out.push(ForceAction::Conflict(
                     "REQUIRED_USE-^^ mehrfach erfuellt (genau eines erlaubt)".into(),

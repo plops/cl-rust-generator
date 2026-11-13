@@ -188,9 +188,9 @@ fn hil_tui_core_actions_on_snapshot() {
     );
 
     // Tabs + Panes schalten (reine State-Uebergaenge).
-    state.set_tab(Tab::BigLevers);
+    state.set_tab(Tab::BigLevers).unwrap();
     assert!(!state.levers.is_empty(), "keine Big Levers");
-    state.set_tab(Tab::Packages);
+    state.set_tab(Tab::Packages).unwrap();
     state.cycle_pane();
     assert_eq!(state.pane, Pane::Middle);
     state.cycle_pane();

@@ -7,6 +7,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+use ratatui::widgets::{ListState, TableState};
+
 use crate::mod_01_types::{BigLever, ConflictInfo, EngineResult, FlagDelta, QuickSwitch};
 use crate::mod_02_profile::Profile;
 use crate::mod_05_repo_index::RepoIndex;
@@ -46,6 +48,8 @@ pub enum LeftEntry {
     OrDecision(String),
     /// Transitives Paket (nach Binpkg-Groesse sortiert).
     Transitive(String),
+    /// `[[choice]]`-Gruppe aus `plan.toml` (Choice-ID, T07).
+    PlanChoice(String),
 }
 
 /// Geoeffnetes Modal.
@@ -100,6 +104,20 @@ pub struct AppState<'a> {
     pub dirty: bool,
     /// Statuszeile (z. B. Verify-Ergebnis).
     pub status: String,
+    /// Scroll-Zustand links (T06, `render_stateful_widget`).
+    pub left_list_state: ListState,
+    /// Scroll-Zustand Big-Levers-Tabelle (T06).
+    pub lever_table_state: TableState,
+    /// Vertikaler Scroll-Offset Mitte (T06, `Paragraph::scroll`).
+    pub middle_scroll: u16,
+    /// Vertikaler Scroll-Offset rechts (T06, `j`/`k` auf `Pane::Right`).
+    pub right_scroll: u16,
+    /// `levers` veraltet (T05: lazy Neuberechnung erst bei Tab-2-Besuch).
+    pub levers_dirty: bool,
+    /// Deltas werden gerade nachgeladen (T05: Cache-Miss/Idle-Recompute).
+    pub deltas_loading: bool,
+    /// Delta-Cache: `(cpn, overrides-Fingerprint)` → Deltas (T05).
+    pub delta_cache: HashMap<(String, String), Vec<FlagDelta>>,
 }
 
 impl<'a> AppState<'a> {
@@ -136,23 +154,54 @@ impl<'a> AppState<'a> {
             modal: None,
             dirty: false,
             status: String::new(),
+            left_list_state: ListState::default(),
+            lever_table_state: TableState::default(),
+            middle_scroll: 0,
+            right_scroll: 0,
+            levers_dirty: true,
+            deltas_loading: false,
+            delta_cache: HashMap::new(),
         };
         state.refresh()?;
         Ok(state)
     }
 
-    /// Neu aufloesen + Listen/Deltas/Levers aktualisieren.
+    /// Neu aufloesen + Listen/Deltas aktualisieren (Levers lazy, T05).
     pub fn refresh(&mut self) -> EngineResult<()> {
         let outcome = resolve_with_cascade(&mut self.engine, &self.world)?;
         self.graph = outcome.graph;
         self.conflicts = outcome.conflicts;
+        self.delta_cache.clear();
         self.rebuild_left();
         self.rebuild_middle()?;
-        self.levers = big_levers(&self.engine, &self.world).unwrap_or_default();
+        // Big Levers nur in Tab 2 frisch halten; sonst als dirty markieren.
+        if self.tab == Tab::BigLevers {
+            self.levers = big_levers(&self.engine, &self.world).unwrap_or_default();
+            self.levers_dirty = false;
+            self.sync_table_states();
+        } else {
+            self.levers_dirty = true;
+        }
         Ok(())
     }
 
-    /// Linke Liste aufbauen: Welt → `||` → Transitive (nach Binpkg).
+    /// Big Levers bei Bedarf (nach-)berechnen (T05: lazy beim Tab-2-Besuch).
+    pub fn ensure_levers(&mut self) -> EngineResult<()> {
+        if self.levers_dirty {
+            self.levers = big_levers(&self.engine, &self.world).unwrap_or_default();
+            self.levers_dirty = false;
+            self.sync_table_states();
+        }
+        Ok(())
+    }
+
+    /// Listen-/Tabellen-States mit Selektion synchronisieren (T06).
+    fn sync_table_states(&mut self) {
+        self.left_list_state.select(Some(self.left_selected));
+        self.lever_table_state.select(Some(self.lever_selected));
+    }
+
+    /// Linke Liste aufbauen: Welt → Choices → `||` → Transitive (nach Binpkg).
     fn rebuild_left(&mut self) {
         let mut left = Vec::new();
         let mut seen = HashSet::new();
@@ -163,6 +212,10 @@ impl<'a> AppState<'a> {
                 left.push(LeftEntry::WorldPkg(cpn.clone()));
                 seen.insert(cpn);
             }
+        }
+        // `[[choice]]`-Gruppen als eigene Eintraege (T07).
+        for choice in &self.plan.choice {
+            left.push(LeftEntry::PlanChoice(choice.id.clone()));
         }
         for alt in &self.graph.alternatives {
             left.push(LeftEntry::OrDecision(alt.group_id.clone()));
@@ -183,6 +236,17 @@ impl<'a> AppState<'a> {
         }
         self.left = left;
         self.left_selected = self.left_selected.min(self.left.len().saturating_sub(1));
+        self.left_list_state.select(Some(self.left_selected));
+    }
+
+    /// Nur Filter anwenden (T05): kein Resolve, keine Deltas, kein Big-Levers.
+    pub fn apply_filter_only(&mut self) {
+        self.rebuild_left();
+        // Selektion erhalten, falls Paket noch sichtbar; Mitte unangetastet.
+        self.middle_selected = self
+            .middle_selected
+            .min(self.middle_len().saturating_sub(1));
+        self.middle_scroll = 0;
     }
 
     /// Mitte neu berechnen (Flags des Pakets oder `||`-Kandidaten).
@@ -190,11 +254,32 @@ impl<'a> AppState<'a> {
         self.flag_deltas.clear();
         match self.left.get(self.left_selected).cloned() {
             Some(LeftEntry::WorldPkg(cpn)) | Some(LeftEntry::Transitive(cpn)) => {
-                self.flag_deltas = package_deltas(&self.engine, &self.world, &cpn)?;
+                let key = (cpn.clone(), overrides_fingerprint(&self.engine));
+                if let Some(cached) = self.delta_cache.get(&key) {
+                    self.flag_deltas = cached.clone();
+                    self.deltas_loading = false;
+                } else {
+                    self.deltas_loading = true;
+                    let deltas = package_deltas(&self.engine, &self.world, &cpn)?;
+                    self.delta_cache.insert(key, deltas.clone());
+                    self.flag_deltas = deltas;
+                    self.deltas_loading = false;
+                }
             }
-            _ => {}
+            _ => {
+                self.deltas_loading = false;
+            }
         }
         self.middle_selected = 0;
+        self.middle_scroll = 0;
+        Ok(())
+    }
+
+    /// Ausstehende Deltas nachladen (T05: Idle-Recompute nach Cache-Miss).
+    pub fn ensure_deltas(&mut self) -> EngineResult<()> {
+        if self.deltas_loading {
+            self.rebuild_middle()?;
+        }
         Ok(())
     }
 
@@ -202,7 +287,7 @@ impl<'a> AppState<'a> {
     pub fn selected_package(&self) -> Option<String> {
         match self.left.get(self.left_selected)? {
             LeftEntry::WorldPkg(cpn) | LeftEntry::Transitive(cpn) => Some(cpn.clone()),
-            LeftEntry::OrDecision(_) => None,
+            LeftEntry::OrDecision(_) | LeftEntry::PlanChoice(_) => None,
         }
     }
 
@@ -214,9 +299,21 @@ impl<'a> AppState<'a> {
         }
     }
 
-    /// Tab wechseln.
-    pub fn set_tab(&mut self, tab: Tab) {
+    /// Selektierte `[[choice]]`-ID (`None` bei Paket-/`||`-Eintrag, T07).
+    pub fn selected_choice(&self) -> Option<String> {
+        match self.left.get(self.left_selected)? {
+            LeftEntry::PlanChoice(id) => Some(id.clone()),
+            _ => None,
+        }
+    }
+
+    /// Tab wechseln (Big Levers werden lazy nachgeladen, T05).
+    pub fn set_tab(&mut self, tab: Tab) -> EngineResult<()> {
         self.tab = tab;
+        if tab == Tab::BigLevers {
+            self.ensure_levers()?;
+        }
+        Ok(())
     }
 
     /// Pane weiter schalten (`Tab`-Taste).
@@ -238,33 +335,80 @@ impl<'a> AppState<'a> {
     }
 
     /// Selektion bewegen (Listen-Laenge beachten, Wrap-around).
+    ///
+    /// Links wird die gecachte Variante genutzt (T05): Cache-Hit ist sofort
+    /// da, Cache-Miss setzt `deltas_loading` und wird per `ensure_deltas`
+    /// (Idle im Event-Loop) nachgeladen. Rechts scrollt `right_scroll` (T06).
     pub fn move_selection(&mut self, delta: i32) {
-        let len = match (self.tab, self.pane) {
-            (Tab::BigLevers, _) => self.levers.len(),
-            (_, Pane::Left) => self.left.len(),
-            (_, Pane::Middle) => self.middle_len(),
-            (_, Pane::Right) => 0,
-        };
-        if len == 0 {
+        if self.tab == Tab::BigLevers {
+            if self.levers.is_empty() {
+                return;
+            }
+            let len = self.levers.len() as i32;
+            self.lever_selected = (self.lever_selected as i32 + delta).rem_euclid(len) as usize;
+            self.lever_table_state.select(Some(self.lever_selected));
             return;
         }
-        let cur = match (self.tab, self.pane) {
-            (Tab::BigLevers, _) => self.lever_selected,
-            (_, Pane::Left) => self.left_selected,
-            _ => self.middle_selected,
-        } as i32;
-        let next = (cur + delta).rem_euclid(len as i32) as usize;
-        match (self.tab, self.pane) {
-            (Tab::BigLevers, _) => self.lever_selected = next,
-            (_, Pane::Left) => {
-                self.left_selected = next;
-                let _ = self.rebuild_middle();
+        match self.pane {
+            Pane::Left => {
+                if self.left.is_empty() {
+                    return;
+                }
+                let len = self.left.len() as i32;
+                self.left_selected = (self.left_selected as i32 + delta).rem_euclid(len) as usize;
+                self.left_list_state.select(Some(self.left_selected));
+                self.select_left_fast(self.left_selected);
             }
-            _ => self.middle_selected = next,
+            Pane::Middle => {
+                let len = self.middle_len();
+                if len == 0 {
+                    return;
+                }
+                self.middle_selected =
+                    (self.middle_selected as i32 + delta).rem_euclid(len as i32) as usize;
+            }
+            Pane::Right => {
+                // Blame-/Pros-Cons-Text scrollen (T06).
+                if delta < 0 {
+                    self.right_scroll = self.right_scroll.saturating_sub((-delta) as u16);
+                } else {
+                    self.right_scroll = self.right_scroll.saturating_add(delta as u16);
+                }
+            }
         }
     }
 
-    /// Laenge der mittleren Liste (Flags oder Kandidaten).
+    /// Schnellauswahl links (T05): Selektion + Cache-Hit sofort, Miss → `deltas_loading`.
+    pub fn select_left_fast(&mut self, idx: usize) {
+        if self.left.is_empty() {
+            return;
+        }
+        self.left_selected = idx.min(self.left.len() - 1);
+        self.left_list_state.select(Some(self.left_selected));
+        match self.left.get(self.left_selected).cloned() {
+            Some(LeftEntry::WorldPkg(cpn)) | Some(LeftEntry::Transitive(cpn)) => {
+                let key = (cpn, overrides_fingerprint(&self.engine));
+                if let Some(cached) = self.delta_cache.get(&key) {
+                    self.flag_deltas = cached.clone();
+                    self.deltas_loading = false;
+                } else {
+                    // Miss: alte Flags nicht weiter anzeigen (Idle-Recompute folgt).
+                    self.flag_deltas.clear();
+                    self.deltas_loading = true;
+                }
+                self.middle_selected = 0;
+                self.middle_scroll = 0;
+            }
+            _ => {
+                self.flag_deltas.clear();
+                self.deltas_loading = false;
+                self.middle_selected = 0;
+                self.middle_scroll = 0;
+            }
+        }
+    }
+
+    /// Laenge der mittleren Liste (Flags, Kandidaten oder Choice-Optionen).
     pub fn middle_len(&self) -> usize {
         match self.left.get(self.left_selected) {
             Some(LeftEntry::OrDecision(group)) => self
@@ -275,6 +419,13 @@ impl<'a> AppState<'a> {
                 .map(|a| a.candidates.len())
                 .unwrap_or(0),
             Some(LeftEntry::WorldPkg(_)) | Some(LeftEntry::Transitive(_)) => self.flag_deltas.len(),
+            Some(LeftEntry::PlanChoice(id)) => self
+                .plan
+                .choice
+                .iter()
+                .find(|c| &c.id == id)
+                .map(|c| c.option.len())
+                .unwrap_or(0),
             None => 0,
         }
     }
@@ -330,6 +481,126 @@ impl<'a> AppState<'a> {
         self.dirty = true;
         self.refresh()?;
         Ok(true)
+    }
+
+    /// `Space` auf Tab 2 (T07): selektiertes Big-Lever-Flag global umschalten.
+    ///
+    /// Ist das Flag irgendwo an, wird es ueberall ausgeschaltet; ist es
+    /// ueberall aus, wird es fuer alle Pakete eingeschaltet, die es kennen.
+    pub fn toggle_big_lever(&mut self) -> EngineResult<bool> {
+        let lever = match self.levers.get(self.lever_selected) {
+            Some(l) => l.clone(),
+            None => return Ok(false),
+        };
+        let flag = lever.flag;
+        let holders: Vec<String> = self
+            .graph
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.use_flags.contains(&flag))
+            .map(|(cpn, _)| cpn.clone())
+            .collect();
+        if holders.is_empty() {
+            // Ueberall aus → fuer alle Pakete mit diesem IUSE-Flag einschalten.
+            let mut any = false;
+            let cpns: Vec<String> = self.graph.nodes.keys().cloned().collect();
+            for cpn in cpns {
+                let knows = self
+                    .engine
+                    .index
+                    .select(&cpn)
+                    .is_some_and(|p| p.iuse_defaults.contains_key(&flag));
+                if knows {
+                    self.engine
+                        .overrides
+                        .entry(cpn)
+                        .or_default()
+                        .insert(flag.clone(), true);
+                    any = true;
+                }
+            }
+            if !any {
+                return Ok(false);
+            }
+        } else {
+            for cpn in holders {
+                self.engine
+                    .overrides
+                    .entry(cpn)
+                    .or_default()
+                    .insert(flag.clone(), false);
+            }
+        }
+        self.dirty = true;
+        self.refresh()?;
+        Ok(true)
+    }
+
+    /// `Enter`/`Space` auf `[[choice]]` (T07): naechste Option waehlen.
+    pub fn cycle_choice_option(&mut self) -> EngineResult<bool> {
+        let id = match self.selected_choice() {
+            Some(id) => id,
+            None => return Ok(false),
+        };
+        let next = match self.plan.choice.iter().find(|c| c.id == id) {
+            Some(c) if !c.option.is_empty() => (c.selected + 1) % c.option.len(),
+            _ => return Ok(false),
+        };
+        if let Some(choice) = self.plan.choice.iter_mut().find(|c| c.id == id) {
+            choice.selected = next;
+        }
+        self.sync_world_from_plan();
+        // `suggested_use` der neu gewaehlten Option einmischen (manuelle
+        // Toggles bleiben erhalten — kein Voll-Reset der Overrides!).
+        if let Some(choice) = self.plan.choice.iter().find(|c| c.id == id)
+            && let Some(opt) = choice.option.get(choice.selected)
+        {
+            for token in &opt.suggested_use {
+                if let Some(flag) = token.strip_prefix('-') {
+                    self.engine
+                        .overrides
+                        .entry(opt.atom.clone())
+                        .or_default()
+                        .insert(flag.to_string(), false);
+                } else {
+                    self.engine
+                        .overrides
+                        .entry(opt.atom.clone())
+                        .or_default()
+                        .insert(token.clone(), true);
+                }
+            }
+        }
+        self.dirty = true;
+        self.refresh()?;
+        Ok(true)
+    }
+
+    /// Welt aus `plan.baseline.world` + gewaehlten Choice-Optionen ableiten.
+    fn sync_world_from_plan(&mut self) {
+        use std::collections::HashSet;
+        let mut choice_atoms: HashSet<&String> = HashSet::new();
+        for choice in &self.plan.choice {
+            for opt in &choice.option {
+                choice_atoms.insert(&opt.atom);
+            }
+        }
+        let mut world = self.plan.baseline.world.clone();
+        if world.is_empty() {
+            // Ohne Baseline: bisherige Welt ohne alte Choice-Atome behalten.
+            world = self
+                .world
+                .iter()
+                .filter(|w| !choice_atoms.contains(w))
+                .cloned()
+                .collect();
+        }
+        for atom in self.plan.effective_world() {
+            if !world.contains(&atom) {
+                world.push(atom);
+            }
+        }
+        self.world = world;
     }
 
     /// Konflikt-Modal fuer Paket oeffnen (erster passender Konflikt).
@@ -428,8 +699,34 @@ fn world_atom_cpn(atom: &str) -> String {
     }
 }
 
+/// Overrides-Fingerabdruck fuer den Delta-Cache (T05).
+fn overrides_fingerprint(engine: &Engine<'_>) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut cpns: Vec<&String> = engine.overrides.keys().collect();
+    cpns.sort();
+    for cpn in cpns {
+        let mut flags: Vec<String> = engine.overrides[cpn]
+            .iter()
+            .map(|(f, on)| format!("{f}={on}"))
+            .collect();
+        flags.sort();
+        parts.push(format!("{cpn}:{}", flags.join(",")));
+    }
+    let mut ors: Vec<String> = engine
+        .or_decisions
+        .iter()
+        .map(|(g, s)| format!("{g}={s}"))
+        .collect();
+    ors.sort();
+    parts.push(format!("or:{}", ors.join(",")));
+    parts.join("|")
+}
+
 /// Plan aus State synchronisieren (Overrides, `||`-Entscheidungen).
-fn sync_plan_from_state(plan: &mut Plan, engine: &Engine<'_>, world: &[String]) {
+///
+/// `baseline.world` wird NICHT mit gewaehlten Choice-Atomen ueberschrieben
+/// (T07): Choice-Atome gehoeren zur Option, nicht zur Baseline.
+pub fn sync_plan_from_state(plan: &mut Plan, engine: &Engine<'_>, world: &[String]) {
     use std::collections::BTreeMap;
     let mut by_pkg: BTreeMap<&String, &HashMap<String, bool>> = BTreeMap::new();
     for (cpn, map) in &engine.overrides {
@@ -458,7 +755,17 @@ fn sync_plan_from_state(plan: &mut Plan, engine: &Engine<'_>, world: &[String]) 
         }
     }
     plan.package.sort_by(|a, b| a.atom.cmp(&b.atom));
-    plan.baseline.world = world.to_vec();
+    // Choice-Atome duerfen `baseline.world` nicht verfuettern (T07).
+    let choice_atoms: std::collections::HashSet<&String> = plan
+        .choice
+        .iter()
+        .flat_map(|c| c.option.iter().map(|o| &o.atom))
+        .collect();
+    plan.baseline.world = world
+        .iter()
+        .filter(|w| !choice_atoms.contains(w))
+        .cloned()
+        .collect();
     let mut decisions: Vec<_> = engine.or_decisions.iter().collect();
     decisions.sort_by(|a, b| a.0.cmp(b.0));
     plan.or_decision = decisions
@@ -476,6 +783,7 @@ pub fn left_label(entry: &LeftEntry) -> String {
         LeftEntry::WorldPkg(cpn) => cpn.clone(),
         LeftEntry::OrDecision(group) => format!("|| {group}"),
         LeftEntry::Transitive(cpn) => format!("  {cpn}"),
+        LeftEntry::PlanChoice(id) => format!("choice: {id}"),
     }
 }
 
@@ -556,7 +864,7 @@ mod tests {
         let profile = Profile::test_default();
         let mut st = fixture(&index, &profile);
         assert_eq!(st.tab, Tab::Packages);
-        st.set_tab(Tab::BigLevers);
+        st.set_tab(Tab::BigLevers).unwrap();
         assert_eq!(st.tab, Tab::BigLevers);
         st.cycle_pane();
         assert_eq!(st.pane, Pane::Middle);
@@ -637,5 +945,107 @@ mod tests {
     fn world_atom_cpn_strips_version() {
         assert_eq!(world_atom_cpn(">=dev-libs/openssl-3.0"), "dev-libs/openssl");
         assert_eq!(world_atom_cpn("app-misc/jq"), "app-misc/jq");
+    }
+
+    #[test]
+    fn big_lever_toggle_disables_globally() {
+        let index = test_index();
+        let profile = Profile::test_default();
+        let mut st = fixture(&index, &profile);
+        st.set_tab(Tab::BigLevers).unwrap();
+        assert!(!st.levers.is_empty());
+        let pos = st.levers.iter().position(|l| l.flag == "ssl").unwrap();
+        st.lever_selected = pos;
+        st.lever_table_state.select(Some(pos));
+        assert!(st.toggle_big_lever().unwrap());
+        // ssl ueberall aus → openssl faellt aus dem Graphen.
+        assert!(!st.graph.nodes.contains_key("dev-libs/openssl"));
+        // Zurueck: wieder einschalten stellt openssl wieder her.
+        st.set_tab(Tab::BigLevers).unwrap();
+        let pos = st.levers.iter().position(|l| l.flag == "ssl").unwrap();
+        st.lever_selected = pos;
+        assert!(st.toggle_big_lever().unwrap());
+        assert!(st.graph.nodes.contains_key("dev-libs/openssl"));
+    }
+
+    #[test]
+    fn choice_switch_updates_world_without_baseline() {
+        use crate::mod_09_plan_toml::{ChoiceOption, PlanChoice};
+        let mut map = HashMap::new();
+        for p in [
+            pkg("app/a", "+ssl", "dev-libs/openssl", 100),
+            pkg("net-misc/openssh", "", "", 200),
+            pkg("net-misc/dropbear", "", "", 50),
+            pkg("dev-libs/openssl", "+ssl", "", 800),
+        ] {
+            map.entry(p.cpn.clone()).or_insert_with(Vec::new).push(p);
+        }
+        let index = RepoIndex {
+            versions: map,
+            cache_files: 4,
+            load_ms: 0,
+        };
+        let profile = Profile::test_default();
+        let mut plan = Plan::default();
+        // Baseline ohne Choice-Atome (T07-Konvention): Optionen kommen aus `choice`.
+        plan.baseline.world = vec!["app/a".to_string()];
+        plan.choice.push(PlanChoice {
+            id: "ssh".into(),
+            required: true,
+            description: "ssh".into(),
+            selected: 0,
+            option: vec![
+                ChoiceOption {
+                    atom: "net-misc/openssh".into(),
+                    pros: "voll".into(),
+                    cons: "gross".into(),
+                    suggested_use: vec![],
+                },
+                ChoiceOption {
+                    atom: "net-misc/dropbear".into(),
+                    pros: "klein".into(),
+                    cons: "weniger".into(),
+                    suggested_use: vec![],
+                },
+            ],
+        });
+        let mut st = AppState::new(&index, &profile, plan.effective_world(), plan, None).unwrap();
+        assert!(
+            st.left
+                .iter()
+                .any(|e| *e == LeftEntry::PlanChoice("ssh".into()))
+        );
+        let idx = st
+            .left
+            .iter()
+            .position(|e| *e == LeftEntry::PlanChoice("ssh".into()))
+            .unwrap();
+        st.left_selected = idx;
+        assert!(st.cycle_choice_option().unwrap());
+        assert!(st.world.contains(&"net-misc/dropbear".to_string()));
+        assert!(!st.world.contains(&"net-misc/openssh".to_string()));
+        // Baseline darf das Choice-Atom nicht enthalten (T07).
+        sync_plan_from_state(&mut st.plan, &st.engine, &st.world);
+        assert!(
+            !st.plan
+                .baseline
+                .world
+                .contains(&"net-misc/dropbear".to_string())
+        );
+        assert!(st.plan.baseline.world.contains(&"app/a".to_string()));
+    }
+
+    #[test]
+    fn filter_only_does_not_resolve() {
+        let index = test_index();
+        let profile = Profile::test_default();
+        let mut st = fixture(&index, &profile);
+        let before = st.graph.nodes.len();
+        st.filtering = true;
+        st.filter.push('a');
+        st.apply_filter_only();
+        // Kein Resolve: Graph unveraendert, Levers unangetastet.
+        assert_eq!(st.graph.nodes.len(), before);
+        assert!(!st.filter.is_empty());
     }
 }

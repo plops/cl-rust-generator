@@ -7,9 +7,11 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use crate::mod_01_types::{BigLever, EngineResult, FlagDelta, SizeMetrics};
-use crate::mod_06_graph::{Engine, resolve};
-use crate::mod_07_cascade::resolve_with_cascade;
+use rayon::prelude::*;
+
+use crate::mod_01_types::{BigLever, EngineResult, FlagDelta, SizeMetrics, perf_count_delta};
+use crate::mod_06_graph::{Engine, ResolvedGraph, resolve_with_options};
+use crate::mod_07_cascade::{CascadeOutcome, resolve_with_cascade_opts};
 
 /// Marginal-Delta eines einzelnen USE-Flag-Toggles auf einem Paket.
 ///
@@ -22,34 +24,91 @@ pub fn flag_delta(
     package: &str,
     flag: &str,
 ) -> EngineResult<FlagDelta> {
+    perf_count_delta();
+    let mut sim = engine.fork();
+    sim.overrides
+        .entry(package.to_string())
+        .or_default()
+        .insert(
+            flag.to_string(),
+            !current_flags(engine, package).contains(flag),
+        );
+    let before_outcome = resolve_with_cascade_opts(&mut engine.fork(), world, false)?;
+    let outcome = resolve_with_cascade_opts(&mut sim, world, false)?;
+    Ok(build_delta(engine, package, flag, &before_outcome, outcome))
+}
+
+/// Wie `flag_delta`, nutzt aber eine vorberechnete Baseline (T04: kein Doppel-Resolve).
+pub fn flag_delta_with_base(
+    engine: &Engine<'_>,
+    world: &[String],
+    package: &str,
+    flag: &str,
+    before: &CascadeOutcome,
+) -> EngineResult<FlagDelta> {
+    perf_count_delta();
     let current = current_flags(engine, package);
     let toggled_on = !current.contains(flag);
-
-    // Nur der Toggle ist expliziter Intent (keine Defaults kopieren —
-    // sonst wuerde jeder Default zum scheinbaren User-Intent).
     let mut sim = engine.fork();
     sim.overrides
         .entry(package.to_string())
         .or_default()
         .insert(flag.to_string(), toggled_on);
-    let outcome = resolve_with_cascade(&mut sim, world)?;
-    let new_totals = outcome.graph.totals();
+    let outcome = resolve_with_cascade_opts(&mut sim, world, false)?;
+    Ok(build_delta(engine, package, flag, before, outcome))
+}
 
-    let before = resolve_with_cascade(&mut engine.fork(), world)?
-        .graph
-        .totals();
-    let delta = SizeMetrics {
-        binpkg_bytes: new_totals.binpkg_bytes - before.binpkg_bytes,
-        download_bytes: new_totals.download_bytes - before.download_bytes,
-    };
-    Ok(FlagDelta {
+/// Delta aus Baseline + Simulation bauen (inkl. Paket-Diff, T08).
+fn build_delta(
+    engine: &Engine<'_>,
+    package: &str,
+    flag: &str,
+    before: &CascadeOutcome,
+    outcome: CascadeOutcome,
+) -> FlagDelta {
+    let current = current_flags(engine, package);
+    let before_totals = before.graph.totals();
+    let new_totals = outcome.graph.totals();
+    let (added, removed) = diff_packages(&before.graph, &outcome.graph);
+    FlagDelta {
         package: package.to_string(),
         flag: flag.to_string(),
         current: current.contains(flag),
-        delta,
-        cascade_note: cascade_note(engine, package, flag, toggled_on),
+        delta: SizeMetrics {
+            binpkg_bytes: new_totals.binpkg_bytes - before_totals.binpkg_bytes,
+            download_bytes: new_totals.download_bytes - before_totals.download_bytes,
+        },
+        cascade_note: cascade_note(
+            engine,
+            package,
+            flag,
+            !current_flags(engine, package).contains(flag),
+        ),
         conflict: outcome.conflicts.into_iter().next(),
-    })
+        added_packages: added,
+        removed_packages: removed,
+        has_binhost_data: outcome.graph.nodes.values().any(|n| n.binpkg > 0)
+            || before.graph.nodes.values().any(|n| n.binpkg > 0),
+    }
+}
+
+/// Paket-Differenz zwischen zwei Graphen (sortiert, stabil).
+fn diff_packages(before: &ResolvedGraph, after: &ResolvedGraph) -> (Vec<String>, Vec<String>) {
+    let mut added: Vec<String> = after
+        .nodes
+        .keys()
+        .filter(|k| !before.nodes.contains_key(*k))
+        .cloned()
+        .collect();
+    let mut removed: Vec<String> = before
+        .nodes
+        .keys()
+        .filter(|k| !after.nodes.contains_key(*k))
+        .cloned()
+        .collect();
+    added.sort();
+    removed.sort();
+    (added, removed)
 }
 
 /// Ob ein Flag ein Plattform-Fakt ist (ARCH/ELIBC/KERNEL, nicht toggelbar).
@@ -94,12 +153,15 @@ fn cascade_note(
 /// alle Pakete, die es anhaben, schalten es aus) und aggregiert Gesamt-Delta,
 /// Paketanzahl und Konfliktanzahl. Sortiert nach Binpkg-Ersparnis.
 pub fn big_levers(engine: &Engine<'_>, world: &[String]) -> EngineResult<Vec<BigLever>> {
-    let base_graph = resolve(engine, world)?;
-    let base_totals = base_graph.totals();
+    let base_outcome = resolve_with_cascade_opts(&mut engine.fork(), world, false)?;
+    let base_totals = base_outcome.graph.totals();
 
-    // Alle (Paket, Flag-an)-Paare einsammeln.
+    // Alle (Paket, Flag-an)-Paare einsammeln; dazu Flags, die irgendwo
+    // bekannt, aber ueberall aus sind (T07: global wieder einschaltbar).
+    // Zwei Durchgaenge (erst alle aktiven sammeln!), sonst waere die
+    // Aufteilung von der HashMap-Iteration (nicht-deterministisch) abhaengig.
     let mut flag_packages: HashMap<String, Vec<String>> = HashMap::new();
-    for (cpn, node) in &base_graph.nodes {
+    for (cpn, node) in &base_outcome.graph.nodes {
         for flag in &node.use_flags {
             flag_packages
                 .entry(flag.clone())
@@ -107,22 +169,62 @@ pub fn big_levers(engine: &Engine<'_>, world: &[String]) -> EngineResult<Vec<Big
                 .push(cpn.clone());
         }
     }
+    let mut known_off: HashMap<String, Vec<String>> = HashMap::new();
+    for (cpn, node) in &base_outcome.graph.nodes {
+        if let Some(pkg) = engine.index.select(cpn) {
+            for flag in pkg.iuse_defaults.keys() {
+                if !node.use_flags.contains(flag) && !flag_packages.contains_key(flag) {
+                    known_off.entry(flag.clone()).or_default().push(cpn.clone());
+                }
+            }
+        }
+    }
 
-    let mut levers = Vec::new();
     let mut flags: Vec<String> = flag_packages.keys().cloned().collect();
     flags.sort();
-    for flag in flags {
-        let packages = &flag_packages[&flag];
+    let mut off_flags: Vec<String> = known_off.keys().cloned().collect();
+    off_flags.sort();
+    // Multi-Core: jede Flag-Simulation unabhaengig (T04). `Engine::fork` pro
+    // Flag ist billig (nur zwei HashMaps); Index/Profil sind read-only.
+    let levers: EngineResult<Vec<BigLever>> = flags
+        .into_par_iter()
+        .map(|flag| {
+            let packages = &flag_packages[&flag];
+            let mut sim = engine.fork();
+            for cpn in packages {
+                sim.overrides
+                    .entry(cpn.clone())
+                    .or_default()
+                    .insert(flag.clone(), false);
+            }
+            let outcome = resolve_with_cascade_opts(&mut sim, world, false)?;
+            let totals = outcome.graph.totals();
+            Ok(BigLever {
+                flag: flag.clone(),
+                packages: packages.len(),
+                total: SizeMetrics {
+                    binpkg_bytes: totals.binpkg_bytes - base_totals.binpkg_bytes,
+                    download_bytes: totals.download_bytes - base_totals.download_bytes,
+                },
+                conflicts: outcome.conflicts.len(),
+            })
+        })
+        .collect();
+    let mut levers = levers?;
+    // Ausgeschaltete bekannte Flags: Einschalten simulieren (positives Delta).
+    let mut off_levers: Vec<BigLever> = Vec::new();
+    for flag in off_flags {
+        let packages = &known_off[&flag];
         let mut sim = engine.fork();
         for cpn in packages {
             sim.overrides
                 .entry(cpn.clone())
                 .or_default()
-                .insert(flag.clone(), false);
+                .insert(flag.clone(), true);
         }
-        let outcome = resolve_with_cascade(&mut sim, world)?;
+        let outcome = resolve_with_cascade_opts(&mut sim, world, false)?;
         let totals = outcome.graph.totals();
-        levers.push(BigLever {
+        off_levers.push(BigLever {
             flag: flag.clone(),
             packages: packages.len(),
             total: SizeMetrics {
@@ -132,6 +234,7 @@ pub fn big_levers(engine: &Engine<'_>, world: &[String]) -> EngineResult<Vec<Big
             conflicts: outcome.conflicts.len(),
         });
     }
+    levers.extend(off_levers);
     levers.sort_by_key(|l| l.total.binpkg_bytes);
     Ok(levers)
 }
@@ -153,10 +256,17 @@ pub fn package_deltas(
     // Plattform-Fakten (ARCH/ELIBC/KERNEL) sind keine schaltbaren USE-Flags.
     candidates.retain(|f| !is_platform_flag(engine.profile, f));
 
-    let mut out = Vec::new();
-    for flag in candidates {
-        out.push(flag_delta(engine, world, package, &flag)?);
-    }
+    // Baseline genau einmal (T04), Simulationen parallel via rayon.
+    let base = resolve_with_cascade_opts(&mut engine.fork(), world, false)?;
+    let flags: Vec<String> = candidates.into_iter().collect();
+    let deltas: EngineResult<Vec<FlagDelta>> = flags
+        .into_par_iter()
+        .map(|flag| flag_delta_with_base(engine, world, package, &flag, &base))
+        .collect();
+    let mut out = deltas?;
+    out.sort_by(|a, b| a.flag.cmp(&b.flag));
+    // `resolve_with_options` spiegelt Runtime wider; BDEPEND bleibt aussen vor.
+    let _ = resolve_with_options as fn(&Engine<'_>, &[String], bool) -> EngineResult<ResolvedGraph>;
     Ok(out)
 }
 
@@ -236,5 +346,34 @@ mod tests {
         let deltas = package_deltas(&engine, &world, "app/a").unwrap();
         assert_eq!(deltas.len(), 1);
         assert!(deltas[0].current);
+    }
+
+    #[test]
+    fn flag_delta_reports_added_packages() {
+        // ffmpeg-Simulator: svt-av1 zieht svt-av1-Lib rein.
+        let mut map: HashMap<String, Vec<PkgVersion>> = HashMap::new();
+        for p in [
+            pkg(
+                "media-video/ffmpeg",
+                "1.0",
+                "svt-av1",
+                "svt-av1? ( media-libs/svt-av1 )",
+                100,
+            ),
+            pkg("media-libs/svt-av1", "1.0", "", "", 500),
+        ] {
+            map.entry(p.cpn.clone()).or_default().push(p);
+        }
+        let index = RepoIndex {
+            versions: map,
+            cache_files: 2,
+            load_ms: 0,
+        };
+        let profile = Profile::test_default();
+        let engine = Engine::new(&index, &profile);
+        let world = vec!["media-video/ffmpeg".to_string()];
+        let d = flag_delta(&engine, &world, "media-video/ffmpeg", "svt-av1").unwrap();
+        assert_eq!(d.added_packages, vec!["media-libs/svt-av1".to_string()]);
+        assert!(d.has_binhost_data);
     }
 }

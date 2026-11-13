@@ -71,7 +71,7 @@ fn render_packages(frame: &mut Frame, state: &AppState, area: Rect) {
     render_right(frame, state, cols[2]);
 }
 
-/// Links: Welt/`||`/Transitive, Konflikt-Markierung.
+/// Links: Welt/Choices/`||`/Transitive, Konflikt-Markierung (T06 stateful).
 fn render_left(frame: &mut Frame, state: &AppState, area: Rect) {
     let items: Vec<ListItem> = state
         .left
@@ -85,23 +85,33 @@ fn render_left(frame: &mut Frame, state: &AppState, area: Rect) {
                 spans.push(Span::styled(" CONFLICT", Style::default().fg(Color::Red)));
             }
             let mut item = ListItem::new(Line::from(spans));
-            if i == state.left_selected && state.pane == Pane::Left {
-                item = item.style(Style::default().bg(Color::DarkGray));
+            // Fokus links behalten, auch wenn Mitte/Rechts aktiv (T06).
+            if i == state.left_selected {
+                let bg = if state.pane == Pane::Left {
+                    Color::DarkGray
+                } else {
+                    Color::Blue
+                };
+                item = item.style(Style::default().bg(bg));
             }
             item
         })
         .collect();
-    let title = format!("Pakete ({})", state.left.len());
-    let list = List::new(items).block(
+    let mut title = format!("Pakete ({})", state.left.len());
+    if !state.filter.is_empty() {
+        title.push_str(&format!(" [Filter: {}]", state.filter));
+    }
+    let list = List::new(items).highlight_symbol("> ").block(
         Block::default()
             .borders(Borders::ALL)
             .title(title)
             .border_style(border_style(state.pane == Pane::Left)),
     );
-    frame.render_widget(list, area);
+    let mut list_state = state.left_list_state;
+    frame.render_stateful_widget(list, area, &mut list_state);
 }
 
-/// Mitte: Paketdetails + USE-Flags mit Deltas (oder `||`-Kandidaten).
+/// Mitte: Paketdetails + USE-Flags mit Deltas, `||`-Kandidaten oder Choice-Optionen.
 fn render_middle(frame: &mut Frame, state: &AppState, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     match state.left.get(state.left_selected) {
@@ -117,16 +127,35 @@ fn render_middle(frame: &mut Frame, state: &AppState, area: Rect) {
                 ]));
                 lines.push(Line::from(""));
             }
+            if state.deltas_loading {
+                lines.push(Line::from(vec![Span::styled(
+                    "(rechne Deltas...)",
+                    Style::default().fg(Color::Yellow),
+                )]));
+            }
             for (i, delta) in state.flag_deltas.iter().enumerate() {
                 let checkbox = if delta.current { "[x]" } else { "[ ]" };
+                let bin = if delta.has_binhost_data {
+                    fmt_delta(delta.delta.binpkg_bytes, "bin")
+                } else {
+                    "n/a (ohne --binhost)".to_string()
+                };
                 let mut spans = vec![
                     Span::raw(format!("{checkbox} {} ", delta.flag)),
                     Span::styled(
-                        fmt_delta(delta.delta.binpkg_bytes, "bin"),
+                        bin,
                         Style::default().fg(delta_color(delta.delta.binpkg_bytes)),
                     ),
                     Span::raw(format!(" / {} dl", fmt_bytes(delta.delta.download_bytes))),
                 ];
+                // Paket-Differenz kurz anzeigen (T08).
+                if !delta.added_packages.is_empty() || !delta.removed_packages.is_empty() {
+                    spans.push(Span::raw(format!(
+                        " (+{}/-{} pkg)",
+                        delta.added_packages.len(),
+                        delta.removed_packages.len()
+                    )));
+                }
                 if delta.conflict.is_some() {
                     spans.push(Span::styled(" CONFLICT", Style::default().fg(Color::Red)));
                 }
@@ -136,7 +165,7 @@ fn render_middle(frame: &mut Frame, state: &AppState, area: Rect) {
                     lines.push(Line::from(spans));
                 }
             }
-            if state.flag_deltas.is_empty() {
+            if state.flag_deltas.is_empty() && !state.deltas_loading {
                 lines.push(Line::from("(keine schaltbaren Flags)"));
             }
         }
@@ -162,8 +191,37 @@ fn render_middle(frame: &mut Frame, state: &AppState, area: Rect) {
                 }
             }
         }
+        Some(LeftEntry::PlanChoice(id)) => {
+            if let Some(choice) = state.plan.choice.iter().find(|c| &c.id == id) {
+                lines.push(Line::from(vec![Span::styled(
+                    format!("Choice: {} — {}", choice.id, choice.description),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )]));
+                lines.push(Line::from("[Enter] Option wechseln"));
+                for (i, opt) in choice.option.iter().enumerate() {
+                    let marker = if i == choice.selected { ">" } else { " " };
+                    let line = Line::from(format!(
+                        "{marker} {}  (Pros: {} / Cons: {})",
+                        opt.atom, opt.pros, opt.cons
+                    ));
+                    if i == state.middle_selected && state.pane == Pane::Middle {
+                        lines.push(line.style(Style::default().bg(Color::DarkGray)));
+                    } else {
+                        lines.push(line);
+                    }
+                }
+            }
+        }
         None => lines.push(Line::from("(leer)")),
     }
+    // Scroll-Offset: selektierte Zeile immer sichtbar (T06).
+    let inner_height = area.height.saturating_sub(2) as usize;
+    let selected_line = state.middle_selected + 2;
+    let offset = if inner_height == 0 {
+        0
+    } else {
+        selected_line.saturating_sub(inner_height.saturating_sub(1))
+    } as u16;
     let para = Paragraph::new(Text::from(lines))
         .block(
             Block::default()
@@ -171,7 +229,8 @@ fn render_middle(frame: &mut Frame, state: &AppState, area: Rect) {
                 .title("Details / USE-Flags")
                 .border_style(border_style(state.pane == Pane::Middle)),
         )
-        .wrap(Wrap { trim: true });
+        .scroll((offset, 0));
+    // Absichtlich kein Wrap: jede Zeile = ein Flag, Scroll-Offset bleibt exakt.
     frame.render_widget(para, area);
 }
 
@@ -216,6 +275,34 @@ fn render_right(frame: &mut Frame, state: &AppState, area: Rect) {
                 lines.push(Line::from(format!("Cons: {}", opt.cons)));
             }
         }
+        // Paket-Diff des selektierten Flags (T08).
+        if let Some(delta) = state.flag_deltas.get(state.middle_selected) {
+            if !delta.added_packages.is_empty() || !delta.removed_packages.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::styled(
+                    format!("Flag {} zieht:", delta.flag),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ));
+                for p in delta.added_packages.iter().take(8) {
+                    lines.push(Line::styled(
+                        format!("  + {p}"),
+                        Style::default().fg(Color::Green),
+                    ));
+                }
+                for p in delta.removed_packages.iter().take(8) {
+                    lines.push(Line::styled(
+                        format!("  - {p}"),
+                        Style::default().fg(Color::Red),
+                    ));
+                }
+                if delta.added_packages.len() + delta.removed_packages.len() > 8 {
+                    lines.push(Line::from("  (...)"));
+                }
+            }
+            if !delta.has_binhost_data {
+                lines.push(Line::from("bin: n/a (ohne --binhost)"));
+            }
+        }
     }
     let para = Paragraph::new(Text::from(lines))
         .block(
@@ -223,31 +310,26 @@ fn render_right(frame: &mut Frame, state: &AppState, area: Rect) {
                 .borders(Borders::ALL)
                 .title("Blame / Pros-Cons"),
         )
+        .scroll((state.right_scroll, 0))
         .wrap(Wrap { trim: true });
     frame.render_widget(para, area);
 }
 
-/// Tab 2: globale Hebel als Tabelle.
+/// Tab 2: globale Hebel als Tabelle (T06 stateful, T05 dirty-Hinweis).
 fn render_levers(frame: &mut Frame, state: &AppState, area: Rect) {
     let header = Row::new(vec!["Flag", "Pakete", "Bin-Delta", "DL-Delta", "Konflikte"])
         .style(Style::default().add_modifier(Modifier::BOLD));
     let rows: Vec<Row> = state
         .levers
         .iter()
-        .enumerate()
-        .map(|(i, lever)| {
-            let row = Row::new(vec![
+        .map(|lever| {
+            Row::new(vec![
                 Cell::from(lever.flag.clone()),
                 Cell::from(lever.packages.to_string()),
                 Cell::from(fmt_bytes(lever.total.binpkg_bytes)),
                 Cell::from(fmt_bytes(lever.total.download_bytes)),
                 Cell::from(lever.conflicts.to_string()),
-            ]);
-            if i == state.lever_selected {
-                row.style(Style::default().bg(Color::DarkGray))
-            } else {
-                row
-            }
+            ])
         })
         .collect();
     let widths = [
@@ -257,12 +339,17 @@ fn render_levers(frame: &mut Frame, state: &AppState, area: Rect) {
         Constraint::Length(12),
         Constraint::Length(10),
     ];
-    let table = Table::new(rows, widths).header(header).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Global Big Levers"),
-    );
-    frame.render_widget(table, area);
+    let mut title = "Global Big Levers [Space toggelt]".to_string();
+    if state.levers_dirty {
+        title.push_str(" (veraltet — wird neu gerechnet)");
+    }
+    let table = Table::new(rows, widths)
+        .header(header)
+        .row_highlight_style(Style::default().bg(Color::DarkGray))
+        .highlight_symbol("> ")
+        .block(Block::default().borders(Borders::ALL).title(title));
+    let mut table_state = state.lever_table_state;
+    frame.render_stateful_widget(table, area, &mut table_state);
 }
 
 /// Footer: Totals, Paket-/Konflikt-Zaehler, Tastenbelegung.
@@ -445,6 +532,62 @@ mod tests {
         }
     }
 
+    /// Scrolling (T06): Selektion 75 von 100 bleibt sichtbar, Eintrag 0 scrollt raus.
+    #[test]
+    fn scrolls_left_list_with_selection() {
+        let mut map = HashMap::new();
+        for i in 0..100 {
+            let cpn = format!("app-misc/pkg{i:03}");
+            map.entry(cpn.clone())
+                .or_insert_with(Vec::new)
+                .push(pkg(&cpn, "", "", 100));
+        }
+        let index = RepoIndex {
+            versions: map,
+            cache_files: 100,
+            load_ms: 0,
+        };
+        let profile = Profile::test_default();
+        let world: Vec<String> = (0..100).map(|i| format!("app-misc/pkg{i:03}")).collect();
+        let mut state = AppState::new(&index, &profile, world, Plan::default(), None).unwrap();
+        state.left_selected = 75;
+        state.left_list_state.select(Some(75));
+        let text = render_to(80, 24, &state).join("\n");
+        assert!(text.contains("app-misc/pkg075"), "Selektion 75 sichtbar");
+        assert!(
+            !text.contains("app-misc/pkg000"),
+            "Eintrag 0 herausgescrollt"
+        );
+    }
+
+    /// Scrolling (T06): Flag 75 von 80 in der Mitte bleibt sichtbar.
+    #[test]
+    fn scrolls_middle_flags_with_selection() {
+        let flags: Vec<String> = (0..80).map(|i| format!("f{i:02}")).collect();
+        let mut map = HashMap::new();
+        map.entry("app-misc/big".into())
+            .or_insert_with(Vec::new)
+            .push(pkg("app-misc/big", &flags.join(" "), "", 100));
+        let index = RepoIndex {
+            versions: map,
+            cache_files: 1,
+            load_ms: 0,
+        };
+        let profile = Profile::test_default();
+        let mut state = AppState::new(
+            &index,
+            &profile,
+            vec!["app-misc/big".to_string()],
+            Plan::default(),
+            None,
+        )
+        .unwrap();
+        state.pane = crate::mod_12_tui_state::Pane::Middle;
+        state.middle_selected = 75;
+        let text = render_to(80, 24, &state).join("\n");
+        assert!(text.contains("f75"), "Flag 75 sichtbar");
+    }
+
     /// Buffer als Textzeilen (fuer `contains`-Pruefungen).
     fn buffer_text(backend: &TestBackend) -> Vec<String> {
         let buf = backend.buffer();
@@ -502,9 +645,16 @@ mod tests {
             }],
         });
         let mut state = test_state(&index, &profile, plan);
-        // Transitives Paket selektieren (Index 1 nach Welt-Paket).
-        state.left_selected = 1;
-        let _ = state.refresh();
+        // Transitives Paket selektieren (hinter Welt + Choice-Eintraegen).
+        state
+            .select_left(
+                state
+                    .left
+                    .iter()
+                    .position(|e| *e == LeftEntry::Transitive("dev-libs/openssl".into()))
+                    .unwrap(),
+            )
+            .unwrap();
         let text = render_to(120, 40, &state).join("\n");
         assert!(text.contains("dev-libs/openssl"));
         assert!(text.contains("Pros: ueberall verfuegbar"));
@@ -545,12 +695,12 @@ mod tests {
             .overrides
             .insert("app/c".into(), [("baz".into(), true)].into_iter().collect());
         state.refresh().unwrap();
-        state.set_tab(Tab::BigLevers);
+        state.set_tab(Tab::BigLevers).unwrap();
         let text = render_to(120, 40, &state).join("\n");
         assert!(text.contains("Big Levers"));
         assert!(text.contains("Pakete"));
         // Konflikt-Modal rendern.
-        state.set_tab(Tab::Packages);
+        state.set_tab(Tab::Packages).unwrap();
         if !state.conflicts.is_empty() {
             state.modal = Some(Modal::Conflict {
                 conflict: 0,

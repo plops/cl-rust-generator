@@ -244,3 +244,46 @@ fn verify_parser_handles_profiles_and_manifest_behaviour() {
     .unwrap();
     assert_eq!(exp.package_use, vec!["a/b x"]);
 }
+
+#[test]
+fn missing_world_is_an_error_with_hint() {
+    use gentoo_dep_tui::mod_11_cli::{CommonArgs, load_world};
+    let args = CommonArgs {
+        repo: std::path::PathBuf::from("/nonexistent-repo"),
+        profile_dir: None,
+        profile: None,
+        world: std::path::PathBuf::from("/nonexistent-world-12345"),
+        binhost: None,
+        make_conf: std::path::PathBuf::from("/nonexistent-make.conf"),
+        package_use: std::path::PathBuf::from("/nonexistent-package.use"),
+    };
+    let err = load_world(&args).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(msg.contains("--world"), "Hinweis fehlt: {msg}");
+}
+
+#[test]
+fn ffmpeg_svt_av1_delta_lists_package() {
+    use gentoo_dep_tui::mod_06_graph::Engine;
+    use gentoo_dep_tui::mod_08_delta::package_deltas;
+    // ffmpeg-Simulator: svt-av1 zieht media-libs/svt-av1.
+    let text_ffmpeg = entry(
+        "amd64",
+        "svt-av1",
+        "svt-av1? ( media-libs/svt-av1 )",
+        "",
+        "http://x/ffmpeg.tar.gz",
+    );
+    let text_lib = entry("amd64", "", "", "", "http://x/svt.tar.gz");
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    write_pkg(&repo, "media-video/ffmpeg", "7.0", &text_ffmpeg);
+    write_pkg(&repo, "media-libs/svt-av1", "2.0", &text_lib);
+    let profile = Profile::test_default();
+    let index = RepoIndex::load(&repo, None, &profile).unwrap();
+    let engine = Engine::new(&index, &profile);
+    let world = vec!["media-video/ffmpeg".to_string()];
+    let deltas = package_deltas(&engine, &world, "media-video/ffmpeg").unwrap();
+    let svt = deltas.iter().find(|d| d.flag == "svt-av1").unwrap();
+    assert_eq!(svt.added_packages, vec!["media-libs/svt-av1".to_string()]);
+}

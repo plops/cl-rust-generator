@@ -217,3 +217,110 @@ werden — alles Benötigte war vorhanden:
 Folglich: **keine Änderung am Dockerfile nötig.** Falls der Container
 je ohne SSH-Client gebaut wird, ist `openssh-client` der einzige
 nachzutragende Eintrag.
+
+---
+
+# Teil 2 (2026-11-13): Review-Fixes — Performance, TUI-UX, Portage-Korrektheit
+
+Stand: Branch `feature/gentoo-dep-tui`, alle Gates grün
+(`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+`cargo test`, `cargo test --release --test perf_system -- --nocapture`).
+
+## Was war langsam — und was ist jetzt anders
+
+Drei Stellen fraßen je 100 % eines Cores: `package_deltas` rechnete die
+Baseline pro Flag neu (bei `ffmpeg` ~120 statt ~62 Graph-Läufe),
+`big_levers` lief seriell über alle Flags, und die TUI stieß bei **jedem**
+Tastendruck alles an (Cursor → Deltas, `Space` → komplettes `big_levers`,
+Filter-Tippen → volles `refresh` im UI-Thread).
+
+```mermaid
+flowchart LR
+    subgraph vorher [vorher: alles seriell, alles sofort]
+        F1[Filter-Tippen] --> R1[refresh: Resolve+Deltas+BigLevers]
+        C1[Cursor j/k] --> R1
+        S1[Space] --> R1
+    end
+    subgraph nachher [nachher: entkoppelt + parallel]
+        F2[Filter-Tippen] --> L2[rebuild_left only <1ms]
+        C2[Cursor j/k] --> K2[Cache-Hit sofort / Miss: Idle-Recompute]
+        S2[Space] --> R2[Resolve+Deltas, Levers lazy]
+        R2 -.->|rayon| P2[Simulationen auf allen Kernen]
+    end
+```
+
+Konkret: Baseline einmalig (`flag_delta_with_base`), Simulationen via
+`rayon` (`package_deltas`, `big_levers`), `BDEPEND` in Simulationen aus
+(`resolve_with_options/include_build=false`, `build_extra_calls == 0` in
+Delta-Läufen), `Manifest` einmal je Paketverzeichnis (Mutex-Cache),
+Filter/Cursor ohne Resolve (Delta-Cache + `deltas_loading`-Hinweis +
+Idle-Recompute im Event-Loop), Big Levers lazy erst bei Tab-2-Besuch
+(`levers_dirty`).
+
+## Vorher/Nachher (synthetisches Repo, 125 Pakete, Release)
+
+| Kennzahl | vorher (Code-Review-Befund) | nachher (gemessen) |
+| :--- | :--- | :--- |
+| `package_deltas` ffmpeg (60 Flags) | Baseline je Flag neu (~120 Resolves) | 62 Resolves, 0 ms, `build_extra == 0` |
+| `big_levers` | seriell, 1 Kern | 6 ms, 1 Thread ≡ Pool (exakt gleich) |
+| 10× Cursor | je Schritt ~60–120 Resolves (Block) | 0 ms (Cache/Selektion) |
+| 5× Filter-Tippen | je Buchstabe volles `refresh` | 0 ms (nur Liste) |
+| Tab → Big Levers | bei jedem `Space` neu | lazy, 0 ms (Repo klein; HIL folgt) |
+
+HIL-Abgleich (`GENTOO_HIL_REPO=/tmp/gentoo-hil cargo test --release`) läuft,
+sobald ein echter Snapshot vorliegt; ohne Variable skippt der Test sauber.
+
+## TUI: was jetzt mitscrollt und mitschaltet
+
+- Alle Listen/Tabellen sind stateful (`ListState`/`TableState`,
+  `Paragraph::scroll`): Selektion 75 von 100 bleibt sichtbar (Tests
+  `scrolls_left_list_with_selection`, `scrolls_middle_flags_with_selection`).
+- Links bleibt die Auswahl auch bei Fokus Mitte/Rechts markiert (blau),
+  der Filter steht im Titel (`Pakete (N) [Filter: …]`), rechts scrollt
+  `j`/`k` den Blame-Text (`right_scroll`).
+- Tab 2: `Space` toggelt das Lever-Flag global (ausgeschaltete, aber bekannte
+  Flags erscheinen weiter als Hebel zum Wiedereinschalten).
+- `[[choice]]` ist links eine eigene Gruppe (`choice: <id>`),
+  `Enter`/`Space` wechselt die Option live; `baseline.world` wird nie mit
+  Choice-Atomen vermischt (Test `choice_switch_updates_world_without_baseline`).
+- `E` synchronisiert vor dem Export (`sync_plan_from_state`); ohne
+  Subcommand startet die TUI.
+
+```mermaid
+sequenceDiagram
+    participant U as Nutzer (j/k)
+    participant S as AppState
+    participant C as Delta-Cache
+    participant I as Idle-Loop
+    U->>S: move_selection (sofort, <1ms)
+    S->>C: Lookup (cpn, overrides-Fingerprint)
+    alt Hit
+        C-->>S: Deltas (sofort rendern)
+    else Miss
+        S-->>U: Hinweis (rechne Deltas...)
+        I->>S: ensure_deltas (parallel via rayon)
+    end
+```
+
+## Portage-Korrektheit (Auswahl)
+
+- Fehlende `world` → klarer Fehler mit `--world`-Hinweis (statt leerem Graphen).
+- Ohne `--profile` wird `/etc/portage/make.profile` aufgelöst.
+- `USE=` aus `make.defaults` wird entlang des Stapels akkumuliert
+  (`${USE}`-Expansion, `-flag`-Negation); ebenso `${USE}` in `make.conf`.
+- `use.mask`/`use.force`: `-flag` hebt auf (vorher: falsch hinzugefügt).
+- `package.use` matcht versionierte/slottierte Atome (`>=cat/pkg-1.0`, `cat/pkg:0`).
+- `REQUIRED_USE !flag`-Konflikte bekommen echte `QuickSwitch`-Changes.
+- `verify` setzt `--root` + `--config-root` (vorher nur `--config-root`, das
+  `@world` nicht steuert).
+
+## Offene Folgepunkte (bewusst nicht in diesem Stand)
+
+- `src/`-Dateigrößen: `06_graph` (853), `07_cascade` (759), `02_profile`
+  (717), `13_tui_view` (713), `12_tui_state` (1051) sprengen die
+  ~600-Zeilen-Regel — Aufteilung in zwei nummerierte Module je Datei steht
+  aus (verhaltenstreu, mit Gates pro Teilschritt).
+- Echter Hintergrund-Worker-Thread für Deltas (statt Idle-Recompute):
+  braucht `'static`-fähige Engine-Snapshots; Cache + Debounce decken den
+  Alltag ab.
+- HIL-Zahlen auf echtem Snapshot (`GENTOO_HIL_REPO`) nachliefern.

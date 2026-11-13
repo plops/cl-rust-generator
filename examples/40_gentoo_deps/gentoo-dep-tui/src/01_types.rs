@@ -150,6 +150,60 @@ pub struct FlagDelta {
     pub cascade_note: Option<String>,
     /// Gesetzter Konflikt durch diesen Toggle.
     pub conflict: Option<ConflictInfo>,
+    /// Neu hinzukommende Pakete (`cat/pkg`, sortiert).
+    pub added_packages: Vec<String>,
+    /// Entfallende Pakete (`cat/pkg`, sortiert).
+    pub removed_packages: Vec<String>,
+    /// Ob Binhost-Groessen verfuegbar waren (`false` → `bin: n/a`).
+    pub has_binhost_data: bool,
+}
+
+/// Instrumentierungs-Zaehler fuer Systemtests (T01/T02).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PerfStats {
+    /// Anzahl `resolve()`-Aufrufe (inkl. Kaskaden-Runden).
+    pub resolve_calls: u64,
+    /// Anzahl `resolve_build_extra()`-Laeufe.
+    pub build_extra_calls: u64,
+    /// Anzahl Kaskaden-Fixpunkt-Durchlaeufe.
+    pub cascade_rounds: u64,
+    /// Anzahl Delta-Simulationen (`flag_delta`/`big_levers`).
+    pub delta_runs: u64,
+}
+
+static PERF_RESOLVE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PERF_BUILD_EXTRA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PERF_CASCADE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PERF_DELTA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Zaehler erhoehen (no-op Kosten, `Relaxed`-Ordering reicht).
+pub fn perf_count_resolve() {
+    PERF_RESOLVE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Zaehler erhoehen (Build-Extra-Lauf).
+pub fn perf_count_build_extra() {
+    PERF_BUILD_EXTRA.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Zaehler erhoehen (Kaskaden-Durchlauf).
+pub fn perf_count_cascade() {
+    PERF_CASCADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Zaehler erhoehen (Delta-Simulation).
+pub fn perf_count_delta() {
+    PERF_DELTA.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Snapshot + Reset (fuer `tests/perf_system.rs`).
+pub fn perf_snapshot_and_reset() -> PerfStats {
+    PerfStats {
+        resolve_calls: PERF_RESOLVE.swap(0, std::sync::atomic::Ordering::Relaxed),
+        build_extra_calls: PERF_BUILD_EXTRA.swap(0, std::sync::atomic::Ordering::Relaxed),
+        cascade_rounds: PERF_CASCADE.swap(0, std::sync::atomic::Ordering::Relaxed),
+        delta_runs: PERF_DELTA.swap(0, std::sync::atomic::Ordering::Relaxed),
+    }
 }
 
 /// Aggregierter globaler Hebel ueber alle Pakete.

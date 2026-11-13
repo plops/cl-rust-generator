@@ -149,11 +149,17 @@ pub struct VerifyRunner {
 }
 
 impl VerifyRunner {
-    /// Standard-Runner gegen ein Configroot-Verzeichnis.
+    /// Standard-Runner gegen ein Export-Verzeichnis.
+    ///
+    /// Das Verzeichnis enthaelt `world` + `package.use` (siehe `export_plan`).
+    /// `--config-root` steuert nur `/etc/portage` (package.use/make.conf),
+    /// `--root` steuert das Welt- und System-Root — beide zeigen hier auf
+    /// dasselbe Verzeichnis, damit `@world` dort aufgeloest wird.
     pub fn against_configroot(configroot: &Path) -> Self {
         Self {
             command: format!(
-                "emerge --pretend --emptytree --verbose --config-root {} @world",
+                "emerge --pretend --emptytree --verbose --root {} --config-root {} @world",
+                configroot.display(),
                 configroot.display()
             ),
             workdir: configroot.to_path_buf(),

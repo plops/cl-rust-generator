@@ -79,10 +79,22 @@ impl RepoIndex {
         files.sort();
         let cache_files = files.len();
 
+        // Manifest-Cache: ein `Manifest` pro `(kategorie, paket)` wird nur
+        // einmal von Platte gelesen (T03), nicht pro Ebuild-Version.
+        let manifest_cache: std::sync::Mutex<HashMap<String, crate::mod_03_manifest::Manifest>> =
+            std::sync::Mutex::new(HashMap::new());
         let parsed: Vec<(String, PkgVersion)> = files
             .par_iter()
             .filter_map(|path| {
-                parse_cache_file(repo_root, &cache_dir, path, &binhost_index, profile).ok()
+                parse_cache_file(
+                    repo_root,
+                    &cache_dir,
+                    path,
+                    &binhost_index,
+                    profile,
+                    &manifest_cache,
+                )
+                .ok()
             })
             .collect();
 
@@ -117,10 +129,15 @@ impl RepoIndex {
         self.versions.len()
     }
 
+    /// Ob irgendein Top-Paket Binhost-Daten hat (fuer `bin: n/a`-Hinweis).
+    pub fn has_any_binhost(&self) -> bool {
+        self.versions
+            .values()
+            .any(|l| l.first().is_some_and(|p| p.binhost_size.is_some()))
+    }
+
     /// Trefferquote Binhost-`SIZE` ueber alle gewaehlten Top-Versionen.
     pub fn binhost_hit_rate(&self) -> f64 {
-        let cpvs: Vec<String> = Vec::new();
-        let _ = cpvs;
         let total = self.versions.len();
         if total == 0 {
             return 1.0;
@@ -223,6 +240,7 @@ fn parse_cache_file(
     path: &Path,
     binhost: &BinpkgIndex,
     profile: &Profile,
+    manifest_cache: &std::sync::Mutex<HashMap<String, crate::mod_03_manifest::Manifest>>,
 ) -> EngineResult<(String, PkgVersion)> {
     let rel = path
         .strip_prefix(cache_dir)
@@ -285,7 +303,19 @@ fn parse_cache_file(
     for flag in &entry.metadata.iuse {
         iuse_defaults.insert(flag.name().to_string(), flag.is_enabled_default());
     }
-    let manifest = load_manifest_file(&repo_root.join(&category).join(&package))?;
+    let cache_key = format!("{category}/{package}");
+    let manifest = {
+        let guard = manifest_cache.lock().unwrap();
+        guard.get(&cache_key).cloned()
+    };
+    let manifest = match manifest {
+        Some(m) => m,
+        None => {
+            let m = load_manifest_file(&repo_root.join(&category).join(&package))?;
+            manifest_cache.lock().unwrap().insert(cache_key, m.clone());
+            m
+        }
+    };
     let binhost_size = binhost.get(&cpv).map(|e| e.size);
 
     Ok((

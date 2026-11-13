@@ -63,6 +63,18 @@ impl<'a> Engine<'a> {
         let mut active = self
             .profile
             .apply_use_defaults(&pkg.iuse_defaults, &pkg.cpn);
+        // Versionierte/slottierte `package.use`-Atome (`>=cat/pkg-1.0`).
+        for token in self
+            .profile
+            .package_use_for(&pkg.cpn, &pkg.version_str, &pkg.slot)
+        {
+            let token = token.trim();
+            if let Some(flag) = token.strip_prefix('-') {
+                active.remove(flag);
+            } else {
+                active.insert(token.to_string());
+            }
+        }
         if let Some(explicit) = self.overrides.get(&pkg.cpn) {
             for (flag, on) in explicit {
                 if *on {
@@ -186,6 +198,16 @@ impl ResolvedGraph {
 
 /// Welt-Atome → `ResolvedGraph` (ohne Kaskaden, siehe `07_cascade`).
 pub fn resolve(engine: &Engine<'_>, world: &[String]) -> EngineResult<ResolvedGraph> {
+    resolve_with_options(engine, world, true)
+}
+
+/// Wie `resolve`, aber `BDEPEND`-Extra optional (Simulationen: `false`).
+pub fn resolve_with_options(
+    engine: &Engine<'_>,
+    world: &[String],
+    include_build: bool,
+) -> EngineResult<ResolvedGraph> {
+    crate::mod_01_types::perf_count_resolve();
     let mut graph = ResolvedGraph {
         world: world.to_vec(),
         ..ResolvedGraph::default()
@@ -259,7 +281,9 @@ pub fn resolve(engine: &Engine<'_>, world: &[String]) -> EngineResult<ResolvedGr
         graph.refcounts.insert(child.clone(), distinct.len());
     }
 
-    resolve_build_extra(engine, &mut graph)?;
+    if include_build {
+        resolve_build_extra(engine, &mut graph)?;
+    }
     Ok(graph)
 }
 
@@ -513,6 +537,7 @@ fn collect_dist_files(entries: &[SrcUriEntry], active: &HashSet<String>, out: &m
 
 /// Buildtime-Extra: `DEPEND`/`BDEPEND`/`IDEPEND`-Schluss minus Runtime.
 fn resolve_build_extra(engine: &Engine<'_>, graph: &mut ResolvedGraph) -> EngineResult<()> {
+    crate::mod_01_types::perf_count_build_extra();
     let runtime: HashSet<String> = graph.nodes.keys().cloned().collect();
     let mut build: HashMap<String, u64> = HashMap::new();
     let mut queue: VecDeque<String> = VecDeque::new();

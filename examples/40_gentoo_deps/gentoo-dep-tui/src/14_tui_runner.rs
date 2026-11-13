@@ -14,7 +14,7 @@ use crate::mod_05_repo_index::RepoIndex;
 use crate::mod_09_plan_toml::Plan;
 use crate::mod_10_export_verify::VerifyRunner;
 use crate::mod_11_cli::{TuiArgs, export_plan, load_engine};
-use crate::mod_12_tui_state::{AppState, Modal, Pane, Tab};
+use crate::mod_12_tui_state::{AppState, Modal, Pane, Tab, sync_plan_from_state};
 use crate::mod_13_tui_view::render;
 
 /// TUI starten (aus CLI-`tui`): Engine laden, Loop bis `q`.
@@ -61,6 +61,8 @@ fn event_loop(
     loop {
         terminal.draw(|frame| render(frame, &state))?;
         if !event::poll(Duration::from_millis(100))? {
+            // Idle: ausstehende Deltas nach Cache-Miss nachladen (T05).
+            state.ensure_deltas()?;
             continue;
         }
         let Event::Key(key) = event::read()? else {
@@ -75,11 +77,11 @@ fn event_loop(
                 KeyCode::Esc | KeyCode::Enter => state.filtering = false,
                 KeyCode::Backspace => {
                     state.filter.pop();
-                    state.refresh()?;
+                    state.apply_filter_only();
                 }
                 KeyCode::Char(c) => {
                     state.filter.push(c);
-                    state.refresh()?;
+                    state.apply_filter_only();
                 }
                 _ => {}
             }
@@ -110,19 +112,35 @@ fn event_loop(
         }
         match key.code {
             KeyCode::Char('q') => return Ok(()),
-            KeyCode::Char('1') => state.set_tab(Tab::Packages),
-            KeyCode::Char('2') => state.set_tab(Tab::BigLevers),
+            KeyCode::Char('1') => state.set_tab(Tab::Packages)?,
+            KeyCode::Char('2') => state.set_tab(Tab::BigLevers)?,
             KeyCode::Tab => state.cycle_pane(),
-            KeyCode::Up | KeyCode::Char('k') => state.move_selection(-1),
-            KeyCode::Down | KeyCode::Char('j') => state.move_selection(1),
+            KeyCode::Up | KeyCode::Char('k') => {
+                state.move_selection(-1);
+                state.ensure_deltas()?;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                state.move_selection(1);
+                // Erster Besuch: sofort nachladen (Folge-Besuche aus Cache).
+                state.ensure_deltas()?;
+            }
             KeyCode::Char(' ') => {
-                state.pane = Pane::Middle;
-                state.toggle_selected_flag()?;
+                // Tab 2: Big-Lever global toggeln (T07).
+                if state.tab == Tab::BigLevers {
+                    state.toggle_big_lever()?;
+                } else if state.selected_choice().is_some() {
+                    state.cycle_choice_option()?;
+                } else {
+                    state.pane = Pane::Middle;
+                    state.toggle_selected_flag()?;
+                }
             }
             KeyCode::Enter => {
-                // Auf Paket mit Konflikt: Modal; auf ||: umschalten.
+                // Auf Paket mit Konflikt: Modal; auf ||: umschalten; auf Choice: Option wechseln.
                 if state.selected_or_group().is_some() {
                     state.cycle_or_decision()?;
+                } else if state.selected_choice().is_some() {
+                    state.cycle_choice_option()?;
                 } else if let Some(pkg) = state.selected_package() {
                     state.open_conflict_for_package(&pkg);
                 }
@@ -141,7 +159,10 @@ fn event_loop(
                 state.save()?;
             }
             KeyCode::Char('e' | 'E') => {
+                // Vor Export synchronisieren (T07): ungespeicherte Toggles landen im Export.
+                sync_plan_from_state(&mut state.plan, &state.engine, &state.world);
                 export_plan(&state.plan, export_default)?;
+                state.dirty = false;
                 state.status = format!("Exportiert: {}", export_default.display());
             }
             KeyCode::Char('v' | 'V') => {
@@ -193,7 +214,7 @@ mod tests {
         ])
         .unwrap();
         match cli.command {
-            crate::mod_11_cli::Commands::Tui(a) => {
+            Some(crate::mod_11_cli::Commands::Tui(a)) => {
                 assert_eq!(a.plan, Some(PathBuf::from("/tmp/p.toml")));
             }
             _ => panic!("falsches Subcommand"),

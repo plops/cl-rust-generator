@@ -58,6 +58,98 @@ impl Profile {
         self.use_mask.contains(flag)
     }
 
+    /// Alle `package.use`-Tokens, die auf ein konkretes Paket zutreffen.
+    ///
+    /// Exakte `cat/pkg`-Schluessel plus versionierte/slottierte Atome
+    /// (`>=cat/pkg-1.0`, `cat/pkg:0`), gematcht gegen Version und Slot.
+    pub fn package_use_for(&self, cpn: &str, version_str: &str, slot: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for (atom, tokens) in &self.package_use {
+            if atom == cpn {
+                out.extend(tokens.iter().cloned());
+                continue;
+            }
+            let Ok(dep) = portage_atom::Dep::parse(atom) else {
+                continue;
+            };
+            if dep.cpn.to_string() != cpn {
+                continue;
+            }
+            if !Self::dep_matches_version(&dep, version_str, slot) {
+                continue;
+            }
+            out.extend(tokens.iter().cloned());
+        }
+        out
+    }
+
+    /// Versions-/Slot-Abgleich eines `package.use`-Atoms.
+    fn dep_matches_version(dep: &portage_atom::Dep, version_str: &str, slot: &str) -> bool {
+        if let (Some(op), Some(want)) = (&dep.op, &dep.version) {
+            let Ok(have) = portage_atom::Version::parse(version_str) else {
+                return false;
+            };
+            use portage_atom::Operator as Op;
+            use std::cmp::Ordering as Ord;
+            let glob = dep.glob;
+            let ok = match op {
+                Op::Less => have.cmp(want) == Ord::Less,
+                Op::LessOrEqual => have.cmp(want) != Ord::Greater,
+                Op::Equal if glob => version_str.starts_with(&want.to_string()),
+                Op::Equal => have.cmp(want) == Ord::Equal,
+                Op::Approximate => {
+                    let strip = |v: &dyn ToString| {
+                        let r = v.to_string();
+                        match r.rsplit_once("-r") {
+                            Some((b, t)) if t.chars().all(|c| c.is_ascii_digit()) => b.to_string(),
+                            _ => r,
+                        }
+                    };
+                    strip(&have) == strip(want)
+                }
+                Op::GreaterOrEqual => have.cmp(want) != Ord::Less,
+                Op::Greater => have.cmp(want) == Ord::Greater,
+            };
+            if !ok {
+                return false;
+            }
+        }
+        if let Some(slot_dep) = &dep.slot_dep {
+            match slot_dep {
+                portage_atom::SlotDep::Slot {
+                    slot: Some(named), ..
+                } => {
+                    let (pkg_slot, pkg_sub) = match slot.split_once('/') {
+                        Some((s, sub)) => (s, Some(sub)),
+                        None => (slot, None),
+                    };
+                    if named.slot.as_str() != pkg_slot {
+                        return false;
+                    }
+                    if let Some(want) = &named.subslot
+                        && pkg_sub != Some(want.as_str())
+                    {
+                        return false;
+                    }
+                }
+                portage_atom::SlotDep::Slot { slot: None, .. }
+                | portage_atom::SlotDep::Operator(_) => {}
+            }
+        }
+        true
+    }
+
+    /// Gespeicherte globale USE-Tokens als String (fuer `${USE}`-Expansion).
+    pub fn global_use_tokens(&self) -> String {
+        let mut tokens: Vec<&String> = self.global_use.iter().collect();
+        tokens.sort();
+        tokens
+            .into_iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     /// Wendet Profil + globale USE auf einen IUSE-Defaultsatz an.
     ///
     /// Reihenfolge: IUSE-Defaults (`+flag`) → globale `USE` → `use.force` →
@@ -107,6 +199,16 @@ impl Profile {
             active.remove(flag);
         }
         active
+    }
+}
+
+/// Wendet ein Token auf eine gespeicherte USE-Menge an (`-flag` entfernt).
+fn apply_use_token_set(set: &mut HashSet<String>, token: &str) {
+    let token = token.trim();
+    if let Some(flag) = token.strip_prefix('-') {
+        set.remove(flag);
+    } else {
+        set.insert(token.to_string());
     }
 }
 
@@ -264,12 +366,8 @@ pub fn load_profile_stack(profile_path: &Path, profiles_dir: &Path) -> EngineRes
         if !name.is_empty() {
             profile.profile_name = name;
         }
-        profile
-            .use_mask
-            .extend(read_flag_list(&dir.join("use.mask"))?);
-        profile
-            .use_force
-            .extend(read_flag_list(&dir.join("use.force"))?);
+        apply_flag_list(&mut profile.use_mask, &dir.join("use.mask"))?;
+        apply_flag_list(&mut profile.use_force, &dir.join("use.force"))?;
         extend_atom_lines(&mut profile.package_mask, &dir.join("package.mask"))?;
         if let Ok(kv) = read_key_value(&dir.join("make.defaults")) {
             if let Some(arch) = kv.get("ARCH") {
@@ -283,6 +381,15 @@ pub fn load_profile_stack(profile_path: &Path, profiles_dir: &Path) -> EngineRes
             }
             if let Some(kernel) = kv.get("KERNEL") {
                 profile.kernel = kernel.clone();
+            }
+            // `USE` aus make.defaults akkumulieren (Kind erweitert Eltern;
+            // `${USE}` steht fuer den bisherigen Wert, `-flag` entfernt).
+            if let Some(use_line) = kv.get("USE") {
+                let previous = profile.global_use_tokens();
+                let expanded = use_line.replace("${USE}", &previous);
+                for token in expanded.split_whitespace() {
+                    apply_use_token_set(&mut profile.global_use, token);
+                }
             }
             // USE_EXPAND-Namen merken (Werte im zweiten Durchgang, da
             // Liste und Werte in verschiedenen Dateien stehen koennen).
@@ -340,10 +447,22 @@ fn extend_atom_lines(target: &mut Vec<String>, path: &Path) -> EngineResult<()> 
 }
 
 /// Liest `use.mask`/`use.force` (reine Flag-Listen, optional `atom: flags`).
+///
+/// Portage-Semantik: `-flag` hebt eine fruehere Maskierung/Erzwingung auf.
+/// Da der Profilstapel Eltern zuerst verarbeitet, entfernt `-flag` den Eintrag
+/// aus der akkumulierten Menge statt ihn hinzuzufuegen.
 pub fn read_flag_list(path: &Path) -> EngineResult<HashSet<String>> {
+    let mut out = HashSet::new();
+    apply_flag_list(&mut out, path)?;
+    Ok(out)
+}
+
+/// Wendet eine `use.mask`-/`use.force`-Datei auf eine akkumulierte Menge an
+/// (`-flag` entfernt, `+flag`/`flag` fuegt hinzu).
+pub fn apply_flag_list(target: &mut HashSet<String>, path: &Path) -> EngineResult<()> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashSet::new()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => {
             return Err(EngineError::Io {
                 path: path.display().to_string(),
@@ -351,7 +470,6 @@ pub fn read_flag_list(path: &Path) -> EngineResult<HashSet<String>> {
             });
         }
     };
-    let mut out = HashSet::new();
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -360,14 +478,16 @@ pub fn read_flag_list(path: &Path) -> EngineResult<HashSet<String>> {
         // Form `cat/pkg: flag1 -flag2` oder reine Flags.
         let flags = line.split(':').next_back().unwrap_or(line);
         for token in flags.split_whitespace() {
-            if token.starts_with('-') || token.starts_with('+') {
-                out.insert(token[1..].to_string());
+            if let Some(flag) = token.strip_prefix('-') {
+                target.remove(flag);
+            } else if let Some(flag) = token.strip_prefix('+') {
+                target.insert(flag.to_string());
             } else if !token.contains('/') {
-                out.insert(token.to_string());
+                target.insert(token.to_string());
             }
         }
     }
-    Ok(out)
+    Ok(())
 }
 
 /// Liest `package.use` (Datei oder Verzeichnis): `atom flag1 -flag2`.
@@ -524,6 +644,60 @@ mod tests {
         assert!(!active.contains("ssl"));
         assert!(active.contains("gui"));
         assert!(!active.contains("doc"));
+    }
+
+    #[test]
+    fn use_mask_negation_unmasks_parent() {
+        let d = tmpdir();
+        let profiles = d.path().join("profiles");
+        let base = profiles.join("base");
+        let child = profiles.join("child");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(base.join("use.mask"), "wayland\nsystemd\n").unwrap();
+        std::fs::write(base.join("make.defaults"), "ARCH=amd64\n").unwrap();
+        std::fs::write(child.join("parent"), "../base\n").unwrap();
+        std::fs::write(child.join("use.mask"), "-wayland\n").unwrap();
+        let prof = load_profile_stack(&child, &profiles).unwrap();
+        // `-wayland` im Kind hebt die Eltern-Maske auf, `systemd` bleibt.
+        assert!(!prof.use_mask.contains("wayland"));
+        assert!(prof.use_mask.contains("systemd"));
+    }
+
+    #[test]
+    fn make_defaults_use_accumulates_with_negation() {
+        let d = tmpdir();
+        let profiles = d.path().join("profiles");
+        let base = profiles.join("base");
+        let child = profiles.join("child");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(base.join("make.defaults"), "ARCH=amd64\nUSE=\"ssl doc\"\n").unwrap();
+        std::fs::write(child.join("parent"), "../base\n").unwrap();
+        std::fs::write(child.join("make.defaults"), "USE=\"${USE} -ssl ipv6\"\n").unwrap();
+        let prof = load_profile_stack(&child, &profiles).unwrap();
+        assert!(!prof.global_use.contains("ssl"));
+        assert!(prof.global_use.contains("doc"));
+        assert!(prof.global_use.contains("ipv6"));
+    }
+
+    #[test]
+    fn package_use_matches_version_and_slot() {
+        let mut p = Profile::test_default();
+        p.package_use.insert(
+            ">=dev-libs/openssl-3.0".into(),
+            vec!["tls-compression".into()],
+        );
+        p.package_use
+            .insert("dev-libs/openssl:0".into(), vec!["ssl".into()]);
+        // Version 3.0/Slot 0: beide Atome treffen.
+        let tokens = p.package_use_for("dev-libs/openssl", "3.0", "0/0");
+        assert!(tokens.contains(&"tls-compression".to_string()));
+        assert!(tokens.contains(&"ssl".to_string()));
+        // Version 1.1: nur das Slot-Atom trifft.
+        let tokens = p.package_use_for("dev-libs/openssl", "1.1", "0/0");
+        assert!(!tokens.contains(&"tls-compression".to_string()));
+        assert!(tokens.contains(&"ssl".to_string()));
     }
 
     #[test]

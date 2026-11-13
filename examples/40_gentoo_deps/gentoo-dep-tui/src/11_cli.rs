@@ -48,7 +48,7 @@ pub struct CommonArgs {
 #[command(name = "gentoo-dep-tui", about = "ncdu fuer Gentoo-USE-Flags")]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
 }
 
 /// Alle Subcommands.
@@ -141,7 +141,22 @@ pub struct TuiArgs {
 /// Einstieg (aus `main.rs`): parsen und dispatchen.
 pub fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    match cli.command {
+    // Default-Subcommand: ohne Angabe startet die TUI (T07).
+    let command = cli.command.unwrap_or_else(|| {
+        Commands::Tui(TuiArgs {
+            common: CommonArgs {
+                repo: PathBuf::from("/var/db/repos/gentoo"),
+                profile_dir: None,
+                profile: None,
+                world: PathBuf::from("/var/lib/portage/world"),
+                binhost: None,
+                make_conf: PathBuf::from("/etc/portage/make.conf"),
+                package_use: PathBuf::from("/etc/portage/package.use"),
+            },
+            plan: None,
+        })
+    });
+    match command {
         Commands::IndexCheck(a) => cmd_index_check(&a),
         Commands::Graph(a) => cmd_graph(&a),
         Commands::Blame(a) => cmd_blame(&a),
@@ -160,10 +175,11 @@ pub fn load_profile(args: &CommonArgs) -> anyhow::Result<Profile> {
         .profile_dir
         .clone()
         .unwrap_or_else(|| args.repo.join("profiles"));
-    let profile_name = args
-        .profile
-        .clone()
-        .unwrap_or_else(|| "default/linux/amd64/23.0".to_string());
+    // Ohne `--profile`: `/etc/portage/make.profile`-Symlink aufloesen (T09).
+    let profile_name = args.profile.clone().unwrap_or_else(|| {
+        resolve_make_profile(&profiles_dir)
+            .unwrap_or_else(|| "default/linux/amd64/23.0".to_string())
+    });
     let mut profile =
         mod_02_profile::load_profile_stack(&profiles_dir.join(&profile_name), &profiles_dir)
             .with_context(|| "Profilstapel laden")?;
@@ -174,10 +190,12 @@ pub fn load_profile(args: &CommonArgs) -> anyhow::Result<Profile> {
     if profile.accept_keywords.is_empty() {
         profile.accept_keywords.insert(profile.arch.clone());
     }
-    // make.conf: USE + ACCEPT_KEYWORDS einmischen.
+    // make.conf: USE + ACCEPT_KEYWORDS einmischen (`${USE}` expandieren, T09).
     if let Ok(kv) = mod_02_profile::read_key_value(&args.make_conf) {
         if let Some(use_line) = kv.get("USE") {
-            profile.global_use = mod_02_profile::parse_use_tokens(use_line);
+            let previous = profile.global_use_tokens();
+            let expanded = use_line.replace("${USE}", &previous);
+            profile.global_use = mod_02_profile::parse_use_tokens(&expanded);
         }
         if let Some(keywords) = kv.get("ACCEPT_KEYWORDS") {
             profile
@@ -211,9 +229,44 @@ pub fn load_profile(args: &CommonArgs) -> anyhow::Result<Profile> {
     Ok(profile)
 }
 
-/// Welt lesen (leere Welt ist erlaubt, ergibt leeren Graphen).
+/// `/etc/portage/make.profile`-Symlink auf Profilnamen aufloesen.
+///
+/// Gibt `None` zurueck, wenn kein Symlink existiert (Caller nutzt Fallback).
+/// Pfade innerhalb von `profiles_dir` werden relativ zurueckgegeben.
+fn resolve_make_profile(profiles_dir: &std::path::Path) -> Option<String> {
+    let link = std::path::Path::new("/etc/portage/make.profile");
+    let target = std::fs::read_link(link).ok()?;
+    let abs = if target.is_absolute() {
+        target
+    } else {
+        link.parent()
+            .unwrap_or(std::path::Path::new("/"))
+            .join(target)
+    };
+    // Relativ zu profiles_dir kuerzen (komponentenweise normalisiert).
+    let profiles_canonical = profiles_dir.components().collect::<Vec<_>>();
+    let abs_comps = abs.components().collect::<Vec<_>>();
+    if abs_comps.len() > profiles_canonical.len()
+        && abs_comps[..profiles_canonical.len()] == profiles_canonical[..]
+    {
+        let rest: std::path::PathBuf = abs_comps[profiles_canonical.len()..].iter().collect();
+        let s = rest.display().to_string();
+        if !s.is_empty() {
+            return Some(s);
+        }
+    }
+    // Fallback: letzter Pfadanteil als Hinweis (kein gueltiges Profil).
+    None
+}
+
+/// Welt lesen (fehlende Datei ist ein Fehler mit Hinweis, T09).
 pub fn load_world(args: &CommonArgs) -> anyhow::Result<Vec<String>> {
-    Ok(mod_02_profile::read_world(&args.world).unwrap_or_default())
+    mod_02_profile::read_world(&args.world).with_context(|| {
+        format!(
+            "world-Datei nicht gefunden unter {} — bitte mit --world <PFAD> angeben",
+            args.world.display()
+        )
+    })
 }
 
 /// Engine aus Common-Argumenten aufbauen.
@@ -299,15 +352,46 @@ fn cmd_blame(args: &BlameArgs) -> anyhow::Result<()> {
 
 fn cmd_deltas(args: &DeltasArgs) -> anyhow::Result<()> {
     let (engine, world, _lease) = load_engine(&args.common)?;
+    let any_binhost = engine.index.has_any_binhost();
     for d in package_deltas(&engine, &world, &args.package)? {
         let sign = if d.delta.binpkg_bytes <= 0 { "" } else { "+" };
+        let bin = if any_binhost {
+            format!("{sign}{} B bin", d.delta.binpkg_bytes)
+        } else {
+            "n/a (ohne --binhost)".to_string()
+        };
+        let mut extra = String::new();
+        if !d.added_packages.is_empty() || !d.removed_packages.is_empty() {
+            extra.push_str(&format!(
+                " (+{}/-{} Pakete",
+                d.added_packages.len(),
+                d.removed_packages.len()
+            ));
+            let mut names: Vec<&String> = d
+                .added_packages
+                .iter()
+                .chain(d.removed_packages.iter())
+                .collect();
+            names.sort();
+            names.dedup();
+            let shown: Vec<&str> = names.iter().take(3).map(|s| s.as_str()).collect();
+            extra.push_str(&format!(": {}", shown.join(", ")));
+            if names.len() > 3 {
+                extra.push_str(", ...");
+            }
+            extra.push(')');
+        }
         println!(
-            "  [{}] {}  ({}{} B bin / {} B dl){}",
+            "  [{}] {}  ({bin} / {} B dl{}{}){}",
             if d.current { "x" } else { " " },
             d.flag,
-            sign,
-            d.delta.binpkg_bytes,
             d.delta.download_bytes,
+            extra,
+            if d.cascade_note.is_some() {
+                " KASKADE"
+            } else {
+                ""
+            },
             d.conflict.map(|_| " CONFLICT").unwrap_or("")
         );
     }
