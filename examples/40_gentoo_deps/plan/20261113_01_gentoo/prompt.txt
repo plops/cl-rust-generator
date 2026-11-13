@@ -133,4 +133,4 @@ Strikte Regeln:
 
 # Spezifische Aufgabe
 
-<hier kommt die spezifische aufgabe fuer den ausfuehrenden agenten hin>
+Setze plan.md und tasks.md wie vom hydrogen planner geplant um.
