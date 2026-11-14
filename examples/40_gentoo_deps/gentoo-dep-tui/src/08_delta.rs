@@ -22,10 +22,7 @@ use crate::mod_07_cascade::{CascadeOutcome, resolve_with_cascade_opts};
 
 #[path = "08_delta/shared.rs"]
 mod shared;
-pub use shared::{
-    CutPlan, FlagBlocker, RemovalSavings, SharedRemovalImpact, cut_package,
-    shared_removal_impact,
-};
+pub use shared::{CutPlan, FlagBlocker, RemovalSavings, cut_package, shared_flag_deps};
 
 /// Marginal-Delta eines einzelnen USE-Flag-Toggles auf einem Paket.
 ///
@@ -96,8 +93,7 @@ fn noop_delta(
         current: current.contains(flag),
         delta: SizeMetrics::zero(),
         cascade_note: cascade_note(engine, package, flag, !current.contains(flag)),
-        // Identische Graphen → identische Konfliktlage wie die Baseline.
-        conflict: before.conflicts.first().cloned(),
+        conflict: None,
         added_packages: Vec::new(),
         removed_packages: Vec::new(),
         has_binhost_data: before.graph.nodes.values().any(|n| n.binpkg > 0),
@@ -221,6 +217,12 @@ fn build_delta(
     let before_totals = before.graph.totals();
     let new_totals = outcome.graph.totals();
     let (added, removed) = diff_packages(&before.graph, &outcome.graph);
+    let conflict = outcome.conflicts.into_iter().find(|c| {
+        !before
+            .conflicts
+            .iter()
+            .any(|b| b.package == c.package && b.message == c.message)
+    });
     FlagDelta {
         package: package.to_string(),
         flag: flag.to_string(),
@@ -230,7 +232,7 @@ fn build_delta(
             download_bytes: new_totals.download_bytes - before_totals.download_bytes,
         },
         cascade_note: cascade_note(engine, package, flag, !current.contains(flag)),
-        conflict: outcome.conflicts.into_iter().next(),
+        conflict,
         added_packages: added,
         removed_packages: removed,
         has_binhost_data: outcome.graph.nodes.values().any(|n| n.binpkg > 0)

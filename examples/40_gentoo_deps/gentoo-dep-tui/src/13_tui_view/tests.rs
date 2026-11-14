@@ -166,9 +166,9 @@ fn renders_big_levers_and_conflict_modal() {
     }
 }
 
-/// Rechte Pane zeigt Shared-Blocker-Analyse + Flag-Doku.
+/// Rechte Pane zeigt Flag-Doku + Geteilte Abhaengigkeiten (ohne Voll-Ersparnis).
 #[test]
-fn renders_shared_impact_and_flag_docs() {
+fn renders_shared_deps_and_flag_docs() {
     use crate::mod_02_profile::UseDescriptions;
     let index = repo_index(vec![
         PkgFixture::new("app/a")
@@ -204,15 +204,23 @@ fn renders_shared_impact_and_flag_docs() {
     std::fs::write(dir.path().join("use.desc"), "ssl - Secure Sockets Layer\n").unwrap();
     state.use_descriptions = UseDescriptions::load(dir.path());
     state.ensure_deltas().unwrap();
+    let shared = crate::mod_08_delta::shared_flag_deps(
+        &state.engine,
+        &state.graph,
+        "app/a",
+        "ssl",
+    );
     assert!(
-        state.shared_impact.is_some(),
+        !shared.is_empty(),
         "Shared-Analyse fehlt (openssl wird gehalten)"
     );
     let text = render_to(140, 36, &state).join("\n");
-    assert!(text.contains("Voll-Ersparnis"), "Impact-Titel fehlt");
-    assert!(text.contains("Flag aus bei:"), "Flag-Blocker fehlen");
+    assert!(!text.contains("Voll-Ersparnis"), "altes Impact-Rauschen");
+    assert!(
+        text.contains("Geteilte Abhaengigkeiten"),
+        "Geteilte-Abhaengigkeiten-Titel fehlt: {text}"
+    );
     assert!(text.contains("app/b"), "Blocker app/b fehlt");
-    assert!(text.contains("world entfernen:"), "World-Blocker fehlen");
     assert!(text.contains("app/c"), "Blocker app/c fehlt");
     assert!(text.contains("Secure Sockets Layer"), "Flag-Doku fehlt");
 }

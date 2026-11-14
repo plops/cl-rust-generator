@@ -49,25 +49,6 @@ pub struct CutPlan {
     pub without_all_blockers: RemovalSavings,
 }
 
-/// Voll-Ersparnis-Analyse fuer ein Flag auf einem Paket.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-pub struct SharedRemovalImpact {
-    /// Untersuchtes Paket.
-    pub package: String,
-    /// Untersuchtes Flag.
-    pub flag: String,
-    /// Geteilte Deps mit fremden Haltern.
-    pub shared_deps: Vec<String>,
-    /// Flag-Blocker.
-    pub flag_blockers: Vec<FlagBlocker>,
-    /// Welt-Blocker.
-    pub world_blockers: Vec<String>,
-    /// Ersparnis mit allen Flag-Blockern aus.
-    pub without_flag_blockers: RemovalSavings,
-    /// Maximale Ersparnis zusaetzlich ohne World-Blocker.
-    pub without_all_blockers: RemovalSavings,
-}
-
 /// Parst ein `via_flag` (`"gtk"` oder `"!minimal"`) in `(flag, want_on)`.
 fn parse_breakable_flag(
     engine: &Engine<'_>,
@@ -185,89 +166,74 @@ pub fn cut_package(
     }))
 }
 
-/// Shared-Blocker-Analyse fuer `package[flag]` (nur wenn Flag aktuell aktiv).
-pub fn shared_removal_impact(
+/// Direkte/transitive Abhaengigkeiten, die unter `flag?` auf `package` stehen
+/// und im Graphen auch von mindestens einem anderen Paket gehalten werden.
+pub fn shared_flag_deps(
     engine: &Engine<'_>,
-    world: &[String],
-    base: &CascadeOutcome,
+    graph: &ResolvedGraph,
     package: &str,
     flag: &str,
-) -> EngineResult<Option<SharedRemovalImpact>> {
-    let Some(node) = base.graph.nodes.get(package) else {
-        return Ok(None);
+) -> Vec<(String, Vec<String>)> {
+    let Some(node) = graph.nodes.get(package) else {
+        return Vec::new();
     };
-    if !node.use_flags.contains(flag) {
-        return Ok(None);
-    }
-    let mut alone = engine.fork();
-    alone
-        .overrides
-        .entry(package.to_string())
-        .or_default()
-        .insert(flag.to_string(), false);
-    let outcome_alone = resolve_with_cascade_opts(&mut alone, world, false, false)?;
+    let Some(pkg) = engine.index.select_cpv(package, &node.cpv) else {
+        return Vec::new();
+    };
+    let active = &node.use_flags;
+    let mut targets = BTreeSet::new();
+    collect_conditional_targets(pkg.entry.metadata.rdepend.list(), active, flag, false, &mut targets);
+    collect_conditional_targets(pkg.entry.metadata.pdepend.list(), active, flag, false, &mut targets);
 
-    let mut shared: Vec<String> = base
-        .graph
-        .reverse
-        .iter()
-        .filter(|(child, _)| child.as_str() != package)
-        .filter(|(_, parents)| {
-            parents
+    let mut out = Vec::new();
+    for dep_cpn in targets {
+        if dep_cpn == package || !graph.nodes.contains_key(&dep_cpn) {
+            continue;
+        }
+        if let Some(parents) = graph.reverse.get(&dep_cpn) {
+            let mut others: Vec<String> = parents
                 .iter()
-                .any(|(p, via)| p == package && via.as_deref() == Some(flag))
-        })
-        .filter(|(child, parents)| {
-            outcome_alone.graph.nodes.contains_key(*child)
-                && parents.iter().any(|(p, _)| p != package)
-        })
-        .map(|(child, _)| child.clone())
-        .collect();
-    shared.sort();
-    if shared.is_empty() {
-        return Ok(None);
+                .filter(|(p, _)| p != package)
+                .map(|(p, _)| p.clone())
+                .collect();
+            others.sort();
+            others.dedup();
+            if !others.is_empty() {
+                out.push((dep_cpn, others));
+            }
+        }
     }
+    out
+}
 
-    let world_cpns: HashSet<String> = world.iter().map(|w| atom_cpn(w)).collect();
-    let mut flag_blockers = BTreeSet::new();
-    let mut world_blockers = BTreeSet::new();
-    for dep in &shared {
-        let mut visited = HashSet::new();
-        collect_blockers_up(
-            &base.graph,
-            engine,
-            &world_cpns,
-            Some(package),
-            dep,
-            &mut flag_blockers,
-            &mut world_blockers,
-            &mut visited,
-        );
+fn collect_conditional_targets(
+    entries: &[portage_atom::DepEntry],
+    active: &HashSet<String>,
+    target_flag: &str,
+    inside_target: bool,
+    out: &mut BTreeSet<String>,
+) {
+    for entry in entries {
+        match entry {
+            portage_atom::DepEntry::Atom(dep) => {
+                if inside_target && dep.blocker.is_none() {
+                    out.insert(dep.cpn.to_string());
+                }
+            }
+            portage_atom::DepEntry::UseConditional { flag, negate, children } => {
+                if active.contains(flag.as_str()) != *negate {
+                    let now_inside = inside_target || flag.as_str() == target_flag;
+                    collect_conditional_targets(children, active, target_flag, now_inside, out);
+                }
+            }
+            portage_atom::DepEntry::AllOf(c)
+            | portage_atom::DepEntry::AnyOf(c)
+            | portage_atom::DepEntry::ExactlyOneOf(c)
+            | portage_atom::DepEntry::AtMostOneOf(c) => {
+                collect_conditional_targets(c, active, target_flag, inside_target, out);
+            }
+        }
     }
-    let flag_blockers: Vec<FlagBlocker> = flag_blockers.into_iter().collect();
-    let world_blockers: Vec<String> = world_blockers.into_iter().collect();
-
-    let self_off = FlagBlocker {
-        package: package.to_string(),
-        flag: flag.to_string(),
-        want_on: false,
-    };
-    let mut all_flags = vec![self_off];
-    all_flags.extend(flag_blockers.iter().cloned());
-
-    let without_flag_blockers = simulate_cut(engine, world, &base.graph, &all_flags, &[])?;
-    let without_all_blockers =
-        simulate_cut(engine, world, &base.graph, &all_flags, &world_blockers)?;
-
-    Ok(Some(SharedRemovalImpact {
-        package: package.to_string(),
-        flag: flag.to_string(),
-        shared_deps: shared,
-        flag_blockers,
-        world_blockers,
-        without_flag_blockers,
-        without_all_blockers,
-    }))
 }
 
 fn simulate_cut(
@@ -402,56 +368,29 @@ mod tests {
     }
 
     #[test]
-    fn diamond_names_flag_and_world_blockers() {
+    fn diamond_cut_names_flag_and_world_blockers() {
         let (index, profile, world) = diamond();
         let engine = Engine::new(&index, &profile);
         let base = diamond_base(&engine, &world);
         let marginal = flag_delta_with_base(&engine, &world, "app/a", "ssl", &base).unwrap();
         assert_eq!(marginal.delta.binpkg_bytes, 0);
         assert_eq!(marginal.delta.download_bytes, 0);
-        let impact = shared_removal_impact(&engine, &world, &base, "app/a", "ssl")
+        let plan = cut_package(&engine, &world, &base, "dev-libs/openssl")
             .unwrap()
-            .expect("Shared-Dep openssl erwartet");
-        let tuples: Vec<(String, String)> = impact
+            .expect("Cut-Plan erwartet");
+        let tuples: Vec<(String, String)> = plan
             .flag_blockers
             .iter()
             .map(|b| (b.package.clone(), b.flag.clone()))
             .collect();
-        assert_eq!(tuples, vec![("app/b".to_string(), "ssl".to_string())]);
-        assert_eq!(impact.world_blockers, vec!["app/c".to_string()]);
-        assert_eq!(impact.without_flag_blockers.metrics.binpkg_bytes, 0);
-        assert!(impact.without_flag_blockers.removed_packages.is_empty());
-        assert_eq!(impact.without_all_blockers.metrics.binpkg_bytes, -900);
-        assert_eq!(impact.without_all_blockers.metrics.download_bytes, -7100);
-        assert!(
-            impact
-                .without_all_blockers
-                .removed_packages
-                .contains(&"dev-libs/openssl".to_string())
+        assert_eq!(
+            tuples,
+            vec![
+                ("app/a".to_string(), "ssl".to_string()),
+                ("app/b".to_string(), "ssl".to_string())
+            ]
         );
-    }
-
-    #[test]
-    fn single_holder_returns_none() {
-        let index = repo_index(vec![
-            PkgFixture::new("app/a")
-                .iuse("+ssl")
-                .rdepend("ssl? ( dev-libs/openssl )")
-                .binpkg(Some(100))
-                .build(),
-            PkgFixture::new("dev-libs/openssl")
-                .binpkg(Some(800))
-                .build(),
-        ]);
-        let profile = Profile::test_default();
-        let engine = Engine::new(&index, &profile);
-        let world = vec!["app/a".to_string()];
-        let base = diamond_base(&engine, &world);
-        assert!(
-            shared_removal_impact(&engine, &world, &base, "app/a", "ssl")
-                .unwrap()
-                .is_none()
-        );
+        assert_eq!(plan.world_blockers, vec!["app/c".to_string()]);
     }
 
     #[test]
@@ -488,34 +427,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn transitive_leaf_bug_absent() {
-        // `readline`-artige Basis darf kein Blocker fuer app/entfernt sein.
-        let index = repo_index(vec![
-            PkgFixture::new("app/top")
-                .iuse("+js")
-                .rdepend("js? ( dev-libs/mid )")
-                .binpkg(Some(100))
-                .build(),
-            PkgFixture::new("dev-libs/mid")
-                .iuse("+extra")
-                .rdepend("extra? ( sys-libs/base )")
-                .binpkg(Some(100))
-                .build(),
-            PkgFixture::new("app/other")
-                .rdepend("sys-libs/base")
-                .binpkg(Some(100))
-                .build(),
-            PkgFixture::new("sys-libs/base")
-                .binpkg(Some(50))
-                .build(),
-        ]);
-        let profile = Profile::test_default();
-        let engine = Engine::new(&index, &profile);
-        let world = vec!["app/top".to_string(), "app/other".to_string()];
-        let base = diamond_base(&engine, &world);
-        let impact = shared_removal_impact(&engine, &world, &base, "app/top", "js").unwrap();
-        // mid wird allein entfernt -> keine Shared-Analyse noetig.
-        assert!(impact.is_none());
-    }
 }

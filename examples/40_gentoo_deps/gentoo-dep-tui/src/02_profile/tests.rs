@@ -206,6 +206,41 @@ fn package_use_matches_version_and_slot() {
 }
 
 #[test]
+fn package_use_file_order_precedence() {
+    // `>` (0x3E) sortiert vor `a`: alphabetisch wuerde `>=app/foo-2.0`
+    // immer gewinnen — Datei-/Zeilenreihenfolge muss gelten.
+    let mut a = Profile::test_default();
+    a.package_use_lines = vec![
+        (">=app/foo-2.0".into(), vec!["-ssl".into()]),
+        ("app/foo".into(), vec!["ssl".into()]),
+    ];
+    a.sync_pattern_caches();
+    assert_eq!(
+        a.package_use_for("app/foo", "2.0", "0"),
+        vec!["-ssl".to_string(), "ssl".to_string()]
+    );
+    let mut b = Profile::test_default();
+    b.package_use_lines = vec![
+        ("app/foo".into(), vec!["ssl".into()]),
+        (">=app/foo-2.0".into(), vec!["-ssl".into()]),
+    ];
+    b.sync_pattern_caches();
+    assert_eq!(
+        b.package_use_for("app/foo", "2.0", "0"),
+        vec!["ssl".to_string(), "-ssl".to_string()]
+    );
+    // Version 1.0: nur das unversionierte Atom trifft (beide Ordnungen).
+    assert_eq!(
+        a.package_use_for("app/foo", "1.0", "0"),
+        vec!["ssl".to_string()]
+    );
+    assert_eq!(
+        b.package_use_for("app/foo", "1.0", "0"),
+        vec!["ssl".to_string()]
+    );
+}
+
+#[test]
 fn glob_equal_is_pure_string_prefix() {
     // PMS 8.3.1 `=*`: reiner String-Prefix, `=1*` matcht auch `10`.
     let want = portage_atom::Version::parse("1.8").unwrap();

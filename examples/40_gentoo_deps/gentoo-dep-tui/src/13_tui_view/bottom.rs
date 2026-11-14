@@ -215,7 +215,7 @@ pub(super) fn render_help_modal(frame: &mut Frame, area: Rect) {
         Line::from("Binpkg (Binhost, Trefferquote) / Quell-DL (Tarballs)"),
         Line::from("Build-Only (BDEPEND, bin+src) / Pkg-Quell-DL (nur Paket)"),
         Line::from("0 B-Delta: geteilte Abh. oder Compile-only-Flag"),
-        Line::from("Voll-Ersparnis: rechte Pane (Flag-Blocker/world-Entfernung)"),
+        Line::from("Rechte Pane: j/k waehlt Pakete + Auto-Cut [x]; PgUp/PgDn blaettert"),
         Line::from(""),
         Line::styled("Navigation:", Style::default().add_modifier(Modifier::BOLD)),
         Line::from("/ Suche (Esc loescht Filter), Tab Pane, Space Toggle"),

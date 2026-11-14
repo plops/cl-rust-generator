@@ -163,9 +163,6 @@ pub struct DeltasArgs {
     pub common: CommonArgs,
     /// Zielpaket (`cat/pkg`).
     pub package: String,
-    /// Zusaetzlich Shared-Blocker-/Voll-Ersparnis-Analyse je Flag.
-    #[arg(long, default_value_t = false)]
-    pub deep: bool,
 }
 
 /// `cut`-Argumente.

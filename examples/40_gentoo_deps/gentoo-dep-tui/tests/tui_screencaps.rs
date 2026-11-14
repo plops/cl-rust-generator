@@ -356,8 +356,9 @@ fn run_scenario(width: u16, height: u16) -> Vec<(String, String)> {
         Key(KeyCode::Down),
         Idle,
         Capture("03_emacs_shared_blocker"),
-        // Cut-Analyse `x`, dann `a` (apply) und `u` (undo).
-        Key(KeyCode::Char('x')),
+        // Tab in Pane::Right: Auto-Cut, dann `a` (apply) und `u` (undo).
+        Key(KeyCode::Tab),
+        Idle,
         Capture("03b_cut_plan"),
         Key(KeyCode::Char('a')),
         Idle,
@@ -437,7 +438,7 @@ fn tui_review_scenario_screencaps() {
         );
         assert!(ffmpeg.contains("svt-av1"), "ffmpeg-Flag fehlt ({size})");
 
-        // 03: Toggle-Konflikt direkt in der rechten Pane (beide Breiten).
+        // 03: Geteilte Abhaengigkeiten direkt in der rechten Pane.
         let emacs = frames
             .iter()
             .find(|(n, _)| n == "03_emacs_shared_blocker")
@@ -445,23 +446,19 @@ fn tui_review_scenario_screencaps() {
             .1
             .clone();
         assert!(
-            emacs.contains("Toggle-Konflikt"),
-            "Inline-Konflikt fehlt ({size}):\n{emacs}"
+            !emacs.contains("Voll-Ersparnis"),
+            "altes Voll-Ersparnis-Rauschen ({size}):\n{emacs}"
         );
-        // Shared-Analyse: auf breitem Terminal voll sichtbar, schmal nur
-        // angerissen (rechte Pane ist dort 24 Spalten schmal).
+        // Geteilte Abhaengigkeiten: auf breitem Terminal voll sichtbar,
+        // schmal nur angerissen (rechte Pane ist dort 24 Spalten schmal).
         if width >= 100 {
             assert!(
-                emacs.contains("Voll-Ersparnis"),
-                "Shared-Analyse fehlt ({size}):\n{emacs}"
-            );
-            assert!(
-                emacs.contains("world entfernen:"),
-                "World-Blocker fehlen ({size}):\n{emacs}"
+                emacs.contains("Geteilte Abhaengigkeiten"),
+                "Geteilte Abhaengigkeiten fehlen ({size}):\n{emacs}"
             );
             assert!(emacs.contains("firefox-bin"), "Blocker fehlt ({size})");
         }
-        // 03b: Cut-Analyse `x` (breit: voll sichtbar).
+        // 03b: Cut-Analyse per Auto-Cut in Pane::Right (breit: voll sichtbar).
         let cut = frames
             .iter()
             .find(|(n, _)| n == "03b_cut_plan")

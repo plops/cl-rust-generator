@@ -29,6 +29,18 @@ impl<'a> AppState<'a> {
         Ok(())
     }
 
+    fn move_clamped(cur: usize, delta: i32, len: usize) -> usize {
+        if len == 0 {
+            return 0;
+        }
+        let max = (len - 1) as i32;
+        (cur as i32 + delta).clamp(0, max) as usize
+    }
+
+    pub fn page_step(&self) -> i32 {
+        (self.viewport_height as i32 - 9).max(3)
+    }
+
     /// Pane weiter schalten (`Tab`-Taste).
     pub fn cycle_pane(&mut self) {
         self.pane = match self.pane {
@@ -36,6 +48,28 @@ impl<'a> AppState<'a> {
             Pane::Middle => Pane::Right,
             Pane::Right => Pane::Left,
         };
+        if self.pane == Pane::Right {
+            self.activate_right_target();
+        }
+    }
+
+    pub fn activate_right_target(&mut self) {
+        if self.right_target_selected.is_none() && !self.right_targets.is_empty() {
+            self.right_target_selected = Some(0);
+        }
+        self.preview_cut_for_selected_right_target();
+    }
+
+    pub fn preview_cut_for_selected_right_target(&mut self) {
+        let Some(target) = self.selected_right_target().map(str::to_string) else {
+            return;
+        };
+        if let Some(cached) = self.cut_cache.get(&target) {
+            self.cut_plan = Some(cached.clone());
+            self.cut_loading = false;
+        } else {
+            self.cut_loading = true;
+        }
     }
 
     /// Linken Eintrag direkt waehlen (Mitte wird neu berechnet).
@@ -47,14 +81,13 @@ impl<'a> AppState<'a> {
         self.rebuild_middle()
     }
 
-    /// Selektion bewegen (Listen-Laenge beachten, Wrap-around).
+    /// Selektion bewegen (Listen-Laenge beachten, Clamping).
     pub fn move_selection(&mut self, delta: i32) {
         if self.tab == Tab::BigLevers {
             if self.levers.is_empty() {
                 return;
             }
-            let len = self.levers.len() as i32;
-            self.lever_selected = (self.lever_selected as i32 + delta).rem_euclid(len) as usize;
+            self.lever_selected = Self::move_clamped(self.lever_selected, delta, self.levers.len());
             self.lever_table_state.select(Some(self.lever_selected));
             return;
         }
@@ -63,10 +96,10 @@ impl<'a> AppState<'a> {
                 if self.left.is_empty() {
                     return;
                 }
-                let len = self.left.len() as i32;
-                self.left_selected = (self.left_selected as i32 + delta).rem_euclid(len) as usize;
-                self.left_list_state.select(Some(self.left_selected));
-                self.select_left_fast(self.left_selected);
+                let next = Self::move_clamped(self.left_selected, delta, self.left.len());
+                if next != self.left_selected || self.flag_deltas.is_empty() {
+                    self.select_left_fast(next);
+                }
             }
             Pane::Middle => {
                 let len = self.middle_len();
@@ -74,13 +107,66 @@ impl<'a> AppState<'a> {
                     return;
                 }
                 self.middle_selected =
-                    (self.middle_selected as i32 + delta).rem_euclid(len as i32) as usize;
+                    Self::move_clamped(self.middle_selected, delta, len);
+                self.rebuild_right_targets();
+                self.cut_plan = None;
+                self.right_scroll = 0;
             }
             Pane::Right => {
-                if delta < 0 {
+                if !self.right_targets.is_empty() && delta.abs() == 1 {
+                    let cur = self.right_target_selected.unwrap_or(0);
+                    let next = Self::move_clamped(cur, delta, self.right_targets.len());
+                    self.right_target_selected = Some(next);
+                    self.preview_cut_for_selected_right_target();
+                } else if delta < 0 {
                     self.right_scroll = self.right_scroll.saturating_sub((-delta) as u16);
                 } else {
                     self.right_scroll = self.right_scroll.saturating_add(delta as u16);
+                }
+            }
+        }
+    }
+
+    pub fn move_to_edge(&mut self, to_end: bool) {
+        if self.tab == Tab::BigLevers {
+            if self.levers.is_empty() {
+                return;
+            }
+            self.lever_selected = if to_end { self.levers.len() - 1 } else { 0 };
+            self.lever_table_state.select(Some(self.lever_selected));
+            return;
+        }
+        match self.pane {
+            Pane::Left => {
+                if self.left.is_empty() {
+                    return;
+                }
+                let target_idx = if to_end { self.left.len() - 1 } else { 0 };
+                self.select_left_fast(target_idx);
+            }
+            Pane::Middle => {
+                let len = self.middle_len();
+                if len == 0 {
+                    return;
+                }
+                self.middle_selected = if to_end { len - 1 } else { 0 };
+                self.rebuild_right_targets();
+                self.cut_plan = None;
+                self.right_scroll = 0;
+            }
+            Pane::Right => {
+                if !self.right_targets.is_empty() {
+                    let target_idx = if to_end {
+                        self.right_targets.len() - 1
+                    } else {
+                        0
+                    };
+                    self.right_target_selected = Some(target_idx);
+                    self.preview_cut_for_selected_right_target();
+                } else if to_end {
+                    self.right_scroll = u16::MAX / 2;
+                } else {
+                    self.right_scroll = 0;
                 }
             }
         }
@@ -93,6 +179,9 @@ impl<'a> AppState<'a> {
             self.deltas_loading = false;
             self.middle_selected = 0;
             self.right_scroll = 0;
+            self.middle_scroll.set(0);
+            self.cut_plan = None;
+            self.rebuild_right_targets();
             return;
         }
         self.left_selected = idx.min(self.left.len() - 1);
@@ -117,6 +206,9 @@ impl<'a> AppState<'a> {
         }
         self.middle_selected = 0;
         self.right_scroll = 0;
+        self.middle_scroll.set(0);
+        self.cut_plan = None;
+        self.rebuild_right_targets();
     }
 
     /// Laenge der mittleren Liste (Flags oder `||`-Kandidaten).
@@ -332,7 +424,7 @@ impl<'a> AppState<'a> {
             | Some(Modal::SimulatedConflict { selected, .. }) => selected,
             Some(Modal::Help) | None => return,
         };
-        *selected = (*selected as i32 + delta).rem_euclid(len as i32) as usize;
+        *selected = Self::move_clamped(*selected, delta, len);
     }
 
     /// Blame-Ketten des selektierten Pakets.

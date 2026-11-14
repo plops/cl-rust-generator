@@ -246,9 +246,9 @@ pub fn read_atom_lines(path: &Path) -> Vec<String> {
     out
 }
 
-/// Liest `package.use` (Datei oder Verzeichnis): `atom flag1 -flag2`.
-pub fn read_package_use(path: &Path) -> EngineResult<HashMap<String, Vec<String>>> {
-    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+/// Liest `package.use` in exakter Datei- und Zeilenreihenfolge.
+pub fn read_package_use_lines(path: &Path) -> EngineResult<Vec<(String, Vec<String>)>> {
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
     let mut files = Vec::new();
     if path.is_dir() {
         let mut entries: Vec<PathBuf> = std::fs::read_dir(path)
@@ -276,9 +276,18 @@ pub fn read_package_use(path: &Path) -> EngineResult<HashMap<String, Vec<String>
             let mut parts = line.split_whitespace();
             if let Some(atom) = parts.next() {
                 let flags: Vec<String> = parts.map(str::to_string).collect();
-                out.entry(atom.to_string()).or_default().extend(flags);
+                out.push((atom.to_string(), flags));
             }
         }
+    }
+    Ok(out)
+}
+
+/// Liest `package.use` (Datei oder Verzeichnis): `atom flag1 -flag2`.
+pub fn read_package_use(path: &Path) -> EngineResult<HashMap<String, Vec<String>>> {
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for (atom, flags) in read_package_use_lines(path)? {
+        out.entry(atom).or_default().extend(flags);
     }
     Ok(out)
 }

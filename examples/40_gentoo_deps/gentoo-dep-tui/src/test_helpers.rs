@@ -51,6 +51,12 @@ impl PkgFixture {
         self
     }
 
+    /// Slot setzen.
+    pub fn slot(mut self, slot: &str) -> Self {
+        self.slot = slot.to_string();
+        self
+    }
+
     /// `KEYWORDS`-Zeile setzen.
     pub fn keywords(mut self, keywords: &str) -> Self {
         self.keywords = keywords.to_string();

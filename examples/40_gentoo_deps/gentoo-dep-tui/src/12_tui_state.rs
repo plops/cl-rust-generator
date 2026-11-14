@@ -14,7 +14,6 @@ use crate::mod_05_repo_index::RepoIndex;
 use crate::mod_06_graph::{Engine, NodeCost, ResolvedGraph, UseOverrides};
 use crate::mod_07_cascade::CascadeOutcome;
 use crate::mod_07_cascade::resolve_with_cascade;
-use crate::mod_08_delta::SharedRemovalImpact;
 use crate::mod_08_delta::{
     big_levers, big_levers_with_base, package_deltas, package_deltas_with_base,
 };
@@ -98,10 +97,18 @@ pub struct AppState<'a> {
     pub conflicts: Vec<ConflictInfo>,
     /// Letzte Kaskaden-Baseline.
     pub last_outcome: Option<CascadeOutcome>,
-    /// Voll-Ersparnis-Analyse zum aktuell selektierten Flag (on demand).
-    pub shared_impact: Option<SharedRemovalImpact>,
-    /// Cache-Schluessel zu `shared_impact` (Paket, Flag, Overrides-Fingerprint).
-    pub shared_impact_key: Option<(String, String, String)>,
+    /// Paket-Ziele in der rechten Pane (Blame / Bewirkt / Geteilte Deps).
+    pub right_targets: Vec<String>,
+    /// Aktuell ausgewaehltes Paket-Ziel in der rechten Pane.
+    pub right_target_selected: Option<usize>,
+    /// Cache fuer Cut-Analysen (`target_cpn -> CutPlan`), geleert bei `refresh()`.
+    pub cut_cache: HashMap<String, CutPlan>,
+    /// Cut-Analyse fuer `right_target_selected` ausstehend.
+    pub cut_loading: bool,
+    /// Terminal-Hoehe fuer `PageUp`/`PageDown` (Default 24).
+    pub viewport_height: u16,
+    /// Persistenter Scroll-Offset der mittleren Pane (Viewport-Erhalt).
+    pub middle_scroll: std::cell::Cell<u16>,
     /// Exklusive Kosten je Paket (einmal pro `refresh()`).
     pub node_costs: HashMap<String, NodeCost>,
     /// Sortiermodus links.
@@ -162,8 +169,12 @@ impl<'a> AppState<'a> {
             graph: ResolvedGraph::default(),
             conflicts: Vec::new(),
             last_outcome: None,
-            shared_impact: None,
-            shared_impact_key: None,
+            right_targets: Vec::new(),
+            right_target_selected: None,
+            cut_cache: HashMap::new(),
+            cut_loading: false,
+            viewport_height: 24,
+            middle_scroll: std::cell::Cell::new(0),
             node_costs: HashMap::new(),
             left_sort: LeftSort::Default,
             cut_plan: None,
@@ -214,6 +225,7 @@ impl<'a> AppState<'a> {
 
     /// Neu aufloesen + Listen/Deltas aktualisieren (Levers lazy).
     pub fn refresh(&mut self) -> EngineResult<()> {
+        let prev_entry = self.left.get(self.left_selected).cloned();
         let outcome = resolve_with_cascade(&mut self.engine, &self.world)?;
         let levers = if self.tab == Tab::BigLevers {
             Some(big_levers_with_base(&self.engine, &self.world, &outcome).unwrap_or_default())
@@ -225,9 +237,15 @@ impl<'a> AppState<'a> {
         self.conflicts = outcome.conflicts;
         self.node_costs = self.graph.node_costs();
         self.cut_plan = None;
+        self.cut_cache.clear();
+        self.cut_loading = false;
         self.delta_cache.clear();
-        self.rebuild_left();
+        if self.status.starts_with("package.use geschrieben:") {
+            self.status.clear();
+        }
+        self.rebuild_left_preserving(prev_entry.as_ref());
         self.rebuild_middle()?;
+        self.rebuild_right_targets();
         match levers {
             Some(levers) => {
                 self.levers = levers;
@@ -262,13 +280,17 @@ impl<'a> AppState<'a> {
 
     /// Linke Liste aufbauen (Sortiermodus beachten, kein Resolve!).
     fn rebuild_left(&mut self) {
+        let prev = self.left.get(self.left_selected).cloned();
+        self.rebuild_left_preserving(prev.as_ref());
+    }
+
+    fn rebuild_left_preserving(&mut self, prev_entry: Option<&LeftEntry>) {
         let mut world_entries: Vec<LeftEntry> = Vec::new();
         let mut seen = HashSet::new();
         for atom in &self.world {
             let cpn = atom_cpn(atom);
-            if self.graph.nodes.contains_key(&cpn) {
-                world_entries.push(LeftEntry::WorldPkg(cpn.clone()));
-                seen.insert(cpn);
+            if self.graph.nodes.contains_key(&cpn) && seen.insert(cpn.clone()) {
+                world_entries.push(LeftEntry::WorldPkg(cpn));
             }
         }
         let mut or_entries: Vec<LeftEntry> = self
@@ -359,7 +381,13 @@ impl<'a> AppState<'a> {
             left.retain(|e| left_label(e).to_lowercase().contains(&f));
         }
         self.left = left;
-        self.left_selected = self.left_selected.min(self.left.len().saturating_sub(1));
+        if let Some(prev) = prev_entry
+            && let Some(pos) = self.left.iter().position(|e| e == prev)
+        {
+            self.left_selected = pos;
+        } else {
+            self.left_selected = self.left_selected.min(self.left.len().saturating_sub(1));
+        }
         self.left_list_state.select(Some(self.left_selected));
     }
 
@@ -374,9 +402,12 @@ impl<'a> AppState<'a> {
     }
 
     /// Nur Filter anwenden: kein Resolve, keine Deltas, kein Big-Levers.
+    ///
+    /// Der Filter aendert die sichtbare Menge: Restore per Index (Clamp),
+    /// nicht per Paket — `refresh()`/Sortierung restaurieren per Paket.
     pub fn apply_filter_only(&mut self) {
         let prev = self.selected_package();
-        self.rebuild_left();
+        self.rebuild_left_preserving(None);
         if self.selected_package() != prev {
             self.select_left_fast(self.left_selected);
             return;
@@ -429,8 +460,59 @@ impl<'a> AppState<'a> {
         }
         if self.selected_package() != prev_pkg {
             self.right_scroll = 0;
+            self.middle_scroll.set(0);
         }
+        self.rebuild_right_targets();
         Ok(())
+    }
+
+    /// Sammelt alle in der rechten Pane sichtbaren Zielpakete in Anzeigereihenfolge.
+    pub fn rebuild_right_targets(&mut self) {
+        self.right_targets.clear();
+        self.right_target_selected = None;
+        self.cut_loading = false;
+        let mut seen = HashSet::new();
+        for chain in self.selected_blame().iter().take(4) {
+            for link in chain {
+                if seen.insert(link.required_by.clone()) {
+                    self.right_targets.push(link.required_by.clone());
+                }
+            }
+        }
+        if let Some(delta) = self.flag_deltas.get(self.middle_selected) {
+            for p in delta.added_packages.iter().take(8) {
+                if seen.insert(p.clone()) {
+                    self.right_targets.push(p.clone());
+                }
+            }
+            for p in delta.removed_packages.iter().take(8) {
+                if seen.insert(p.clone()) {
+                    self.right_targets.push(p.clone());
+                }
+            }
+            if let Some(pkg) = self.selected_package() {
+                for (dep_cpn, others) in
+                    crate::mod_08_delta::shared_flag_deps(&self.engine, &self.graph, &pkg, &delta.flag)
+                        .into_iter()
+                        .take(8)
+                {
+                    if seen.insert(dep_cpn.clone()) {
+                        self.right_targets.push(dep_cpn);
+                    }
+                    for o in others.into_iter().take(4) {
+                        if seen.insert(o.clone()) {
+                            self.right_targets.push(o);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn selected_right_target(&self) -> Option<&str> {
+        self.right_target_selected
+            .and_then(|i| self.right_targets.get(i))
+            .map(String::as_str)
     }
 
     /// Ausstehende Deltas nachladen (Idle-Recompute nach Cache-Miss).
@@ -438,8 +520,31 @@ impl<'a> AppState<'a> {
         if self.deltas_loading {
             self.rebuild_middle()?;
         }
-        self.ensure_shared_impact()?;
+        if self.cut_loading {
+            self.cut_loading = false;
+            if let Some(target) = self.selected_right_target().map(str::to_string) {
+                self.load_cut_for_target(&target)?;
+            }
+        }
         Ok(())
+    }
+
+    pub fn load_cut_for_target(&mut self, target: &str) -> EngineResult<bool> {
+        if let Some(cached) = self.cut_cache.get(target) {
+            self.cut_plan = Some(cached.clone());
+            return Ok(true);
+        }
+        let Some(base) = &self.last_outcome else {
+            return Ok(false);
+        };
+        if let Some(plan) =
+            crate::mod_08_delta::cut_package(&self.engine, &self.world, base, target)?
+        {
+            self.cut_cache.insert(target.to_string(), plan.clone());
+            self.cut_plan = Some(plan);
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     /// Aktuell selektiertes Middle-Flag.
@@ -449,54 +554,20 @@ impl<'a> AppState<'a> {
             .map(|d| d.flag.clone())
     }
 
-    /// Voll-Ersparnis-Analyse zum aktuellen Flag nachladen (on demand, gecacht).
-    pub fn ensure_shared_impact(&mut self) -> EngineResult<()> {
-        let (package, flag) = match (self.selected_package(), self.selected_flag()) {
-            (Some(p), Some(f)) => (p, f),
-            _ => {
-                self.shared_impact = None;
-                self.shared_impact_key = None;
-                return Ok(());
-            }
-        };
-        if self.tab != Tab::Packages {
-            return Ok(());
-        }
-        let key = (
-            package.clone(),
-            flag.clone(),
-            overrides_fingerprint(&self.engine),
-        );
-        if self.shared_impact_key.as_ref() == Some(&key) {
-            return Ok(());
-        }
-        let impact = match &self.last_outcome {
-            Some(outcome) => crate::mod_08_delta::shared_removal_impact(
-                &self.engine,
-                &self.world,
-                outcome,
-                &package,
-                &flag,
-            )?,
-            None => None,
-        };
-        self.shared_impact = impact;
-        self.shared_impact_key = Some(key);
-        Ok(())
-    }
-
     /// Cut-Analyse fuers selektierte Paket berechnen (`x`).
     pub fn compute_cut_plan(&mut self) -> EngineResult<bool> {
-        let Some(pkg) = self.selected_package() else {
+        let target = if self.pane == Pane::Right {
+            self.selected_right_target()
+                .map(str::to_string)
+                .or_else(|| self.selected_package())
+        } else {
+            self.selected_package()
+        };
+        let Some(pkg) = target else {
             return Ok(false);
         };
-        let base = match &self.last_outcome {
-            Some(o) => o.clone(),
-            None => return Ok(false),
-        };
-        self.cut_plan = crate::mod_08_delta::cut_package(&self.engine, &self.world, &base, &pkg)?;
         self.right_scroll = 0;
-        Ok(self.cut_plan.is_some())
+        self.load_cut_for_target(&pkg)
     }
 
     /// Alle Flag-Blocker des Cut-Plans anwenden (`a`).
@@ -526,24 +597,55 @@ impl<'a> AppState<'a> {
         cpns.sort();
         let mut lines = Vec::new();
         for cpn in cpns {
-            let mut tokens: Vec<String> = self.engine.overrides[cpn]
-                .iter()
-                .map(|(flag, on)| {
-                    if *on {
-                        flag.clone()
+            let pkg = self
+                .graph
+                .nodes
+                .get(cpn)
+                .and_then(|n| self.engine.index.select_cpv(cpn, &n.cpv))
+                .or_else(|| self.engine.index.select(cpn));
+            let Some(pkg) = pkg else {
+                continue;
+            };
+            let profile_only = self
+                .engine
+                .profile
+                .effective_defaults_without_package_use(&pkg.iuse_defaults);
+            let final_active = self.engine.effective_use(pkg);
+            let mut flags: Vec<&String> = pkg.iuse_defaults.keys().collect();
+            flags.sort();
+            let mut tokens = Vec::new();
+            for flag in flags {
+                if self.engine.profile.is_masked(flag)
+                    || self.engine.profile.is_forced(flag)
+                    || crate::mod_08_delta::is_platform_flag(self.engine.profile, flag)
+                    || crate::mod_08_delta::is_hidden_expand_flag(self.engine.profile, flag)
+                {
+                    continue;
+                }
+                let want = final_active.contains(flag);
+                let base = profile_only.contains(flag);
+                if want != base {
+                    tokens.push(if want {
+                        (*flag).clone()
                     } else {
                         format!("-{flag}")
-                    }
-                })
-                .collect();
-            tokens.sort();
-            lines.push(format!("{} {}", cpn, tokens.join(" ")));
+                    });
+                }
+            }
+            if !tokens.is_empty() {
+                lines.push(format!("{cpn} {}", tokens.join(" ")));
+            }
         }
-        std::fs::write(path, lines.join("\n") + if lines.is_empty() { "" } else { "\n" })
-            .map_err(|e| crate::mod_01_types::EngineError::Io {
-                path: path.display().to_string(),
-                source: e,
-            })?;
+        let body = if lines.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n", lines.join("\n"))
+        };
+        std::fs::write(path, body).map_err(|e| crate::mod_01_types::EngineError::Io {
+            path: path.display().to_string(),
+            source: e,
+        })?;
+        self.dirty = false;
         self.status = format!("package.use geschrieben: {}", path.display());
         Ok(())
     }

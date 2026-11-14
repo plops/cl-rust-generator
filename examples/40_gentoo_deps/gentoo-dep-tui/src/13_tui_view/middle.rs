@@ -103,11 +103,18 @@ pub(super) fn render_middle(frame: &mut Frame, state: &AppState, area: Rect) {
     let inner_height = area.height.saturating_sub(2) as usize;
     let header = 2 + usize::from(state.deltas_loading);
     let selected_line = state.middle_selected + header;
-    let offset = if inner_height == 0 {
-        0
+    let mut offset = state.middle_scroll.get() as usize;
+    if inner_height > 0 {
+        if selected_line < offset {
+            offset = selected_line;
+        } else if selected_line >= offset + inner_height {
+            offset = selected_line - inner_height + 1;
+        }
     } else {
-        selected_line.saturating_sub(inner_height.saturating_sub(1))
-    } as u16;
+        offset = 0;
+    }
+    state.middle_scroll.set(offset as u16);
+    let offset = offset as u16;
     let para = Paragraph::new(Text::from(lines))
         .block(
             Block::default()

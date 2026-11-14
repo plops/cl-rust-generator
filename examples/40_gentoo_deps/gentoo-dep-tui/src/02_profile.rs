@@ -38,6 +38,8 @@ pub struct Profile {
     pub global_use: HashSet<String>,
     /// Paket-spezifische USE-Flags aus `package.use` (`atom -> {flags}`).
     pub package_use: HashMap<String, Vec<String>>,
+    /// `package.use`-Regeln in Datei-/Zeilenreihenfolge (hat Vorrang vor `package_use`-Map).
+    pub package_use_lines: Vec<(String, Vec<String>)>,
     /// USE_EXPAND-Variablen (`PYTHON_TARGETS` → Werte, z. B. `["python3_14"]`).
     pub expand_defaults: HashMap<String, Vec<String>>,
     /// Bekannte USE_EXPAND-Namen (auch ohne Defaults, z. B. nur in `make.conf`).
@@ -132,17 +134,22 @@ impl Profile {
     ///
     /// Muss nach jeder direkten Mutation der Roh-Felder aufgerufen werden.
     pub fn sync_pattern_caches(&mut self) {
-        // `package.use`: Atome sortiert sammeln (deterministische
-        // Token-Reihenfolge wie frueher, sonst wuerde `-x`/`x` kippen).
-        let mut atoms: Vec<String> = self.package_use.keys().cloned().collect();
-        atoms.sort();
+        let rules_source: Vec<(String, Vec<String>)> = if !self.package_use_lines.is_empty() {
+            self.package_use_lines.clone()
+        } else {
+            let mut atoms: Vec<String> = self.package_use.keys().cloned().collect();
+            atoms.sort();
+            atoms
+                .into_iter()
+                .map(|a| (a.clone(), self.package_use[&a].clone()))
+                .collect()
+        };
         let mut index: HashMap<String, Vec<UseRule>> = HashMap::new();
-        for atom in atoms {
-            let tokens = self.package_use[&atom].clone();
+        for (atom, tokens) in rules_source {
             crate::mod_00_perf::perf_count_dep_parse();
             let (key, dep) = match Dep::parse(&atom) {
                 Ok(dep) => (dep.cpn.to_string(), Some(dep)),
-                Err(_) => (atom.clone(), None),
+                Err(_) => (atom, None),
             };
             index.entry(key).or_default().push(UseRule { dep, tokens });
         }
@@ -226,6 +233,25 @@ impl Profile {
         version_str: &str,
         slot: &str,
     ) -> HashSet<String> {
+        self.effective_defaults_inner(iuse_defaults, cpn, version_str, slot, true)
+    }
+
+    /// Profil-Defaults ohne `package.use` (fuer Diff-Berechnung beim Export).
+    pub fn effective_defaults_without_package_use(
+        &self,
+        iuse_defaults: &HashMap<String, bool>,
+    ) -> HashSet<String> {
+        self.effective_defaults_inner(iuse_defaults, "", "", "", false)
+    }
+
+    fn effective_defaults_inner(
+        &self,
+        iuse_defaults: &HashMap<String, bool>,
+        cpn: &str,
+        version_str: &str,
+        slot: &str,
+        include_package_use: bool,
+    ) -> HashSet<String> {
         crate::mod_00_perf::perf_count_effective_use();
         let _timer = crate::mod_00_perf::ScopeTimer::effective_use();
         let mut active: HashSet<String> = iuse_defaults
@@ -261,9 +287,11 @@ impl Profile {
                 apply_use_token(&mut active, token);
             }
         }
-        for token in self.package_use_for(cpn, version_str, slot) {
-            if Self::token_in_iuse(iuse_defaults, &token) {
-                apply_use_token(&mut active, &token);
+        if include_package_use {
+            for token in self.package_use_for(cpn, version_str, slot) {
+                if Self::token_in_iuse(iuse_defaults, &token) {
+                    apply_use_token(&mut active, &token);
+                }
             }
         }
         // `use.force`/`use.mask` gelten nur fuer deklarierte Flags: globale
@@ -427,4 +455,5 @@ pub use parse::{parse_key_value, parse_use_tokens, read_key_value, read_world};
 pub(crate) use stack::normalize_join;
 pub use stack::{
     apply_flag_list, load_profile_stack, read_atom_lines, read_flag_list, read_package_use,
+    read_package_use_lines,
 };

@@ -7,9 +7,7 @@ use serde::Serialize;
 use crate::mod_01_types::atom_cpn;
 use crate::mod_05_repo_index::RepoIndex;
 use crate::mod_07_cascade::{resolve_with_cascade, resolve_with_cascade_opts};
-use crate::mod_08_delta::{
-    big_levers_with_opts, cut_package, package_deltas, shared_removal_impact,
-};
+use crate::mod_08_delta::{big_levers_with_opts, cut_package, package_deltas};
 
 use super::args::{
     BigLeversArgs, BlameArgs, CommonArgs, CutArgs, DeltasArgs, GraphArgs, SimulateArgs,
@@ -205,7 +203,7 @@ pub(super) fn cmd_blame(args: &BlameArgs) -> anyhow::Result<()> {
 
 pub(super) fn cmd_deltas(args: &DeltasArgs) -> anyhow::Result<()> {
     let ctx = load_context(&args.common)?;
-    let mut engine = ctx.engine();
+    let engine = ctx.engine();
     let deltas = package_deltas(&engine, &ctx.world, &args.package)?;
     if args.common.json {
         #[derive(Serialize)]
@@ -268,74 +266,7 @@ pub(super) fn cmd_deltas(args: &DeltasArgs) -> anyhow::Result<()> {
             );
         }
     }
-    if args.deep {
-        cmd_deltas_deep(
-            &mut engine,
-            &ctx.world,
-            &args.package,
-            args.common.json,
-        )?;
-    }
     maybe_perf_report(&args.common);
-    Ok(())
-}
-
-/// Shared-Blocker-Bericht je Flag (`deltas --deep`).
-fn cmd_deltas_deep(
-    engine: &mut crate::mod_06_graph::Engine<'_>,
-    world: &[String],
-    package: &str,
-    as_json: bool,
-) -> anyhow::Result<()> {
-    let base = resolve_with_cascade(engine, world)?;
-    if as_json {
-        let mut out = Vec::new();
-        for d in package_deltas(engine, world, package)? {
-            if let Some(impact) = shared_removal_impact(engine, world, &base, package, &d.flag)?
-                && (!impact.flag_blockers.is_empty() || !impact.world_blockers.is_empty())
-            {
-                out.push(impact);
-            }
-        }
-        print_json(&out)?;
-        return Ok(());
-    }
-    for d in package_deltas(engine, world, package)? {
-        let impact = shared_removal_impact(engine, world, &base, package, &d.flag)?;
-        let Some(impact) = impact else { continue };
-        if impact.flag_blockers.is_empty() && impact.world_blockers.is_empty() {
-            continue;
-        }
-        println!("  deep {} [{}]:", impact.flag, impact.package);
-        println!(
-            "    ohne Flag-Blocker: {} B bin / {} B dl (-{} pkg)",
-            impact.without_flag_blockers.metrics.binpkg_bytes,
-            impact.without_flag_blockers.metrics.download_bytes,
-            impact.without_flag_blockers.removed_packages.len()
-        );
-        if !impact.flag_blockers.is_empty() {
-            let blockers: Vec<String> = impact
-                .flag_blockers
-                .iter()
-                .map(|b| {
-                    if b.want_on {
-                        format!("{} [+{}]", b.package, b.flag)
-                    } else {
-                        format!("{} [-{}]", b.package, b.flag)
-                    }
-                })
-                .collect();
-            println!("    Flag aus bei: {}", blockers.join(", "));
-        }
-        println!(
-            "    inkl. world-Entfernung: {} B bin (-{} pkg)",
-            impact.without_all_blockers.metrics.binpkg_bytes,
-            impact.without_all_blockers.removed_packages.len()
-        );
-        if !impact.world_blockers.is_empty() {
-            println!("    world entfernen: {}", impact.world_blockers.join(", "));
-        }
-    }
     Ok(())
 }
 

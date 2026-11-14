@@ -54,8 +54,16 @@ pub fn load_profile(args: &CommonArgs) -> anyhow::Result<Profile> {
         }
     }
     let portage_dir = args.eff_portage_dir();
-    profile.package_use =
-        mod_02_profile::read_package_use(&args.eff_package_use()).unwrap_or_default();
+    profile.package_use_lines =
+        mod_02_profile::read_package_use_lines(&args.eff_package_use()).unwrap_or_default();
+    profile.package_use.clear();
+    for (atom, flags) in &profile.package_use_lines {
+        profile
+            .package_use
+            .entry(atom.clone())
+            .or_default()
+            .extend(flags.iter().cloned());
+    }
     let mask_path = portage_dir.join("package.mask");
     let unmask_path = portage_dir.join("package.unmask");
     let mut extra_mask = mod_02_profile::read_atom_lines(&mask_path);

@@ -64,7 +64,45 @@ pub fn dispatch_key(
 ) -> anyhow::Result<LoopAction> {
     if state.filtering {
         match key.code {
-            KeyCode::Esc | KeyCode::Enter => state.filtering = false,
+            KeyCode::Esc => {
+                state.filtering = false;
+                state.filter.clear();
+                state.apply_filter_only();
+            }
+            KeyCode::Enter => {
+                state.filtering = false;
+            }
+            KeyCode::Tab => {
+                state.filtering = false;
+                state.pane = Pane::Middle;
+                state.ensure_deltas()?;
+            }
+            KeyCode::Up => {
+                state.pane = Pane::Left;
+                state.move_selection(-1);
+            }
+            KeyCode::Down => {
+                state.pane = Pane::Left;
+                state.move_selection(1);
+            }
+            KeyCode::PageUp => {
+                state.pane = Pane::Left;
+                let step = state.page_step();
+                state.move_selection(-step);
+            }
+            KeyCode::PageDown => {
+                state.pane = Pane::Left;
+                let step = state.page_step();
+                state.move_selection(step);
+            }
+            KeyCode::Home => {
+                state.pane = Pane::Left;
+                state.move_to_edge(false);
+            }
+            KeyCode::End => {
+                state.pane = Pane::Left;
+                state.move_to_edge(true);
+            }
             KeyCode::Backspace => {
                 state.filter.pop();
                 state.apply_filter_only();
@@ -113,11 +151,27 @@ pub fn dispatch_key(
         KeyCode::Down | KeyCode::Char('j') => {
             state.move_selection(1);
         }
+        KeyCode::PageUp => {
+            let step = state.page_step();
+            state.move_selection(-step);
+        }
+        KeyCode::PageDown => {
+            let step = state.page_step();
+            state.move_selection(step);
+        }
+        KeyCode::Home => {
+            state.move_to_edge(false);
+        }
+        KeyCode::End => {
+            state.move_to_edge(true);
+        }
         KeyCode::Char(' ') => {
             if state.tab == Tab::BigLevers {
                 state.toggle_big_lever()?;
-            } else {
+            } else if state.pane == Pane::Left {
                 state.pane = Pane::Middle;
+                state.ensure_deltas()?;
+            } else if state.pane == Pane::Middle {
                 state.toggle_selected_flag()?;
             }
         }
@@ -183,6 +237,9 @@ fn event_loop(
 ) -> anyhow::Result<()> {
     let mut ctx = RunnerContext { args };
     loop {
+        if let Ok(size) = terminal.size() {
+            state.viewport_height = size.height;
+        }
         terminal.draw(|frame| render(frame, &state))?;
         // Idle-Entprellung: erst rechnen, wenn kein weiteres Event ansteht
         // (~80 ms), damit schnelles j/k-Scrollen fluessig bleibt.
@@ -263,6 +320,137 @@ mod tests {
             }
             _ => panic!("falsches Subcommand"),
         }
+    }
+
+    fn test_state<'x>(
+        index: &'x RepoIndex,
+        profile: &'x crate::mod_02_profile::Profile,
+        world: Vec<String>,
+    ) -> (AppState<'x>, TuiArgs) {
+        let state = AppState::new(index, profile, world).unwrap();
+        let args = TuiArgs {
+            common: CommonArgs {
+                repo: std::path::PathBuf::from("/nonexistent"),
+                profile_dir: None,
+                profile: None,
+                world: std::path::PathBuf::from("/nonexistent"),
+                binhost: None,
+                make_conf: None,
+                package_use: None,
+                portage_dir: std::path::PathBuf::from("/nonexistent"),
+                snapshot: None,
+                json: false,
+                perf_report: false,
+            },
+            out_use: std::path::PathBuf::from("/tmp/gentoo-dep-tui-test.package.use"),
+        };
+        (state, args)
+    }
+
+    fn two_pkg_index() -> (RepoIndex, crate::mod_02_profile::Profile) {
+        let index = crate::test_helpers::repo_index(vec![
+            crate::test_helpers::PkgFixture::new("app/a")
+                .iuse("+ssl")
+                .rdepend("ssl? ( dev-libs/openssl )")
+                .binpkg(Some(100))
+                .build(),
+            crate::test_helpers::PkgFixture::new("app/b").binpkg(Some(50)).build(),
+            crate::test_helpers::PkgFixture::new("dev-libs/openssl")
+                .binpkg(Some(800))
+                .build(),
+        ]);
+        (index, crate::mod_02_profile::Profile::test_default())
+    }
+
+    fn press(state: &mut AppState<'_>, args: &TuiArgs, code: KeyCode) {
+        let key = crossterm::event::KeyEvent::new(code, KeyModifiers::NONE);
+        let mut ctx = RunnerContext { args };
+        dispatch_key(state, key, &mut ctx).unwrap();
+    }
+
+    #[test]
+    fn filter_allows_navigation_tab_and_esc_clear() {
+        let (index, profile) = two_pkg_index();
+        let (mut state, args) = test_state(
+            &index,
+            &profile,
+            vec!["app/a".to_string(), "app/b".to_string()],
+        );
+        state.filtering = true;
+        state.filter = "app".to_string();
+        state.apply_filter_only();
+        assert_eq!(state.left_selected, 0);
+        // Down/Up bewegen die linke Selektion im Filter-Modus.
+        press(&mut state, &args, KeyCode::Down);
+        assert_eq!(state.pane, Pane::Left);
+        assert_eq!(state.left_selected, 1);
+        press(&mut state, &args, KeyCode::Up);
+        assert_eq!(state.left_selected, 0);
+        // PageDown klemmt am Ende (kein Wrap).
+        press(&mut state, &args, KeyCode::PageDown);
+        assert_eq!(state.left_selected, 1);
+        // Tab springt direkt in Pane::Middle.
+        press(&mut state, &args, KeyCode::Tab);
+        assert!(!state.filtering);
+        assert_eq!(state.pane, Pane::Middle);
+        // Esc im Filter-Modus leert den Filter komplett.
+        state.filtering = true;
+        state.filter = "app".to_string();
+        press(&mut state, &args, KeyCode::Esc);
+        assert!(!state.filtering);
+        assert!(state.filter.is_empty());
+        assert_eq!(state.left.len(), 3);
+    }
+
+    #[test]
+    fn space_on_left_focuses_middle_without_toggling() {
+        let (index, profile) = two_pkg_index();
+        let (mut state, args) = test_state(
+            &index,
+            &profile,
+            vec!["app/a".to_string(), "app/b".to_string()],
+        );
+        assert_eq!(state.pane, Pane::Left);
+        let before = state.engine.overrides.clone();
+        press(&mut state, &args, KeyCode::Char(' '));
+        assert_eq!(state.pane, Pane::Middle);
+        assert_eq!(state.engine.overrides, before);
+        assert!(!state.dirty);
+    }
+
+    #[test]
+    fn page_up_down_clamps_without_wrap() {
+        let (index, profile) = two_pkg_index();
+        let (mut state, args) = test_state(
+            &index,
+            &profile,
+            vec!["app/a".to_string(), "app/b".to_string()],
+        );
+        state.viewport_height = 24;
+        // Links: PageDown am Ende bleibt am letzten Element.
+        // (`app/a`, `app/b`, transitiv `dev-libs/openssl`.)
+        press(&mut state, &args, KeyCode::End);
+        assert_eq!(state.left_selected, 2);
+        press(&mut state, &args, KeyCode::PageDown);
+        assert_eq!(state.left_selected, 2);
+        press(&mut state, &args, KeyCode::Down);
+        assert_eq!(state.left_selected, 2);
+        // Home/PageUp am Anfang bleibt bei 0.
+        press(&mut state, &args, KeyCode::Home);
+        assert_eq!(state.left_selected, 0);
+        press(&mut state, &args, KeyCode::PageUp);
+        assert_eq!(state.left_selected, 0);
+        press(&mut state, &args, KeyCode::Up);
+        assert_eq!(state.left_selected, 0);
+        // Big-Levers klemmen ebenfalls.
+        state.set_tab(Tab::BigLevers).unwrap();
+        let last = state.levers.len().saturating_sub(1);
+        press(&mut state, &args, KeyCode::End);
+        assert_eq!(state.lever_selected, last);
+        press(&mut state, &args, KeyCode::Down);
+        assert_eq!(state.lever_selected, last);
+        press(&mut state, &args, KeyCode::Home);
+        assert_eq!(state.lever_selected, 0);
     }
 
     #[test]
