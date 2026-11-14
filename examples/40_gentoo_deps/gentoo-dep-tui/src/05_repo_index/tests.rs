@@ -125,6 +125,19 @@ fn version_operators_match() {
 }
 
 #[test]
+fn manifest_gz_files_are_ignored() {
+    // Kategorie-`Manifest.gz` ist kein Ebuild: still ignorieren, nicht warnen.
+    let d = tempfile::tempdir().unwrap();
+    let repo = d.path();
+    write_cache(repo, "app-misc", "jq-1.8.0", ENTRY);
+    let dir = repo.join("metadata").join("md5-cache").join("app-misc");
+    std::fs::write(dir.join("Manifest.gz"), "Manifest\n").unwrap();
+    let idx = RepoIndex::load(repo, None, &test_profile()).unwrap();
+    assert_eq!(idx.cache_files, 1);
+    assert_eq!(idx.select("app-misc/jq").unwrap().version_str, "1.8.0");
+}
+
+#[test]
 fn empty_keywords_are_filtered() {
     // `KEYWORDS=""` (unkeyworded) darf nie still akzeptiert werden.
     let d = tempfile::tempdir().unwrap();

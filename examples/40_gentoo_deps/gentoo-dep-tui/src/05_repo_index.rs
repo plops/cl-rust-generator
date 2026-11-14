@@ -70,7 +70,14 @@ impl RepoIndex {
             .into_iter()
             .filter_map(|e| e.ok())
             .map(|e| e.into_path())
-            .filter(|p| p.is_file())
+            // Nur Ebuild-Eintraege: Kategorie-`Manifest*`-Dateien sind keine
+            // Versionen und wuerden sonst als Warnung enden.
+            .filter(|p| {
+                p.is_file()
+                    && !p
+                        .file_name()
+                        .is_some_and(|n| n.to_string_lossy().starts_with("Manifest"))
+            })
             .collect();
         files.sort();
         let cache_files = files.len();

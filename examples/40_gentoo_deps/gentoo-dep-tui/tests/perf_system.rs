@@ -295,6 +295,13 @@ fn sys_perf_hil_snapshot() {
         );
         return;
     }
+    // Dasselbe Basis-Layout wie `hil_regression` akzeptieren (`<base>/repo`).
+    let nested = repo.join("repo");
+    let repo = if nested.join("metadata").join("md5-cache").is_dir() {
+        nested
+    } else {
+        repo
+    };
     let profile = Profile::test_default();
     let start = Instant::now();
     let index = RepoIndex::load(&repo, None, &profile).unwrap();

@@ -234,16 +234,45 @@ SSH als `kiel` auf `hpz6` (`10.60.120.93`) mit dem Key
 `cl-rust-generator/id_lenovo_to_hpz6`; das Projektverzeichnis ist per
 Bind-Mount identisch (`~/stage/…` ↔ `/workspace/src/…`), separater
 Target-Dir pro Seite (`CARGO_TARGET_DIR=/tmp/gdt-target`) vermeidet
-Lock-Konflikte beim parallelen Bauen. HIL-Tests mit echtem Datensatz
-brauchen `GENTOO_HIL_REPO=/pfad/zum/snapshot` — ohne die Variable laufen
-sie als SKIP durch (eingebautes Verhalten, kein Fehler).
+Lock-Konflikte beim parallelen Bauen.
+
+**HIL auf echten Daten (läuft, 4/4 grün).** Der Snapshot wird aus dem
+live System gebaut — Profile (4,5 MB) + `md5-cache` (~80 MB) +
+`make.conf` + `package.use`-Verzeichnis + `world` (Manifests braucht es
+nicht: fehlende werden als leer gewertet):
+
+```bash
+rm -rf /tmp/gentoo-hil && mkdir -p /tmp/gentoo-hil/repo/metadata
+cp -r /var/db/repos/gentoo/profiles /tmp/gentoo-hil/repo/profiles
+cp -r /var/db/repos/gentoo/metadata/md5-cache /tmp/gentoo-hil/repo/metadata/md5-cache
+cp /etc/portage/make.conf /tmp/gentoo-hil/make.conf
+cp -r /etc/portage/package.use /tmp/gentoo-hil/package.use
+cp /var/lib/portage/world /tmp/gentoo-hil/world
+export GENTOO_HIL_REPO=/tmp/gentoo-hil
+cargo test --release --test hil_regression -- --nocapture
+cargo test --release --test perf_system -- --nocapture
+```
+
+Ergebnis auf dem Host: Index mit 168 Kategorien / 13.696 Paketen in
+~400 ms, Welt-Graph mit ~600 Knoten, Big Levers und TUI-Toggle +
+Export gegen echte Daten grün, `sys_perf_hil_snapshot` mit
+ffmpeg-Graph (83 Knoten). Ein Pfad (`/tmp/gentoo-hil`) bedient beide
+Suiten: `hil_regression` nutzt das Basis-Layout direkt,
+`sys_perf_hil_snapshot` fällt auf `<base>/repo` zurück. Ohne die
+Variable laufen beide Suiten als SKIP durch (eingebautes Verhalten,
+kein Fehler).
+
+Zwei HIL-getriebene Nachbesserungen stecken schon im Code: Kategorie-
+`Manifest.gz`-Dateien in `md5-cache` werden beim Einlesen übersprungen
+(statt als Warnung zu enden), und echte I/O-/Parse-Fehler werden
+sichtbar geloggt statt mit `.ok()` verschluckt.
 
 ## 9. Bewusst nicht gemacht
 
 - `PkgId`/`FlagId`-Integer-Graph: als Follow-up skizziert, nicht
   umgebaut (Schnittstellenänderung ohne akuten Nutzen).
-- HIL-Datensatz: kein Snapshot verfügbar — `hil_regression` und
-  `sys_perf_hil_snapshot` bleiben SKIP-geschützt.
+- HIL-Datensatz: Snapshot-Rezept siehe Abschnitt 8 (live gebaut,
+  ohne Variable weiter SKIP-geschützt).
 - `tests/`-Integrations-Helfer (`entry`/`write_pkg`): dupliziert, aber
   klein und bewusst nicht in die Lib gezogen (kein Testcode im
   Lieferumfang).
