@@ -202,6 +202,132 @@ fn renders_big_levers_and_conflict_modal() {
     }
 }
 
+/// Rechte Pane zeigt Shared-Blocker-Analyse + Flag-Doku (review3 Task 4.1/4.2).
+#[test]
+fn renders_shared_impact_and_flag_docs() {
+    use crate::mod_02_profile::UseDescriptions;
+    let index = repo_index(vec![
+        PkgFixture::new("app/a")
+            .iuse("+ssl")
+            .rdepend("ssl? ( dev-libs/openssl )")
+            .binpkg(Some(100))
+            .build(),
+        PkgFixture::new("app/b")
+            .iuse("+ssl")
+            .rdepend("ssl? ( dev-libs/openssl )")
+            .binpkg(Some(100))
+            .build(),
+        PkgFixture::new("app/c")
+            .rdepend("dev-libs/openssl")
+            .binpkg(Some(100))
+            .build(),
+        PkgFixture::new("dev-libs/openssl")
+            .binpkg(Some(800))
+            .build(),
+    ]);
+    let profile = Profile::test_default();
+    let mut state = AppState::new(
+        &index,
+        &profile,
+        vec![
+            "app/a".to_string(),
+            "app/b".to_string(),
+            "app/c".to_string(),
+        ],
+        Plan::default(),
+        None,
+    )
+    .unwrap();
+    // Flag-Doku einspeisen (offline, wie `use.desc`).
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("use.desc"), "ssl - Secure Sockets Layer\n").unwrap();
+    state.use_descriptions = UseDescriptions::load(dir.path());
+    state.ensure_deltas().unwrap();
+    assert!(
+        state.shared_impact.is_some(),
+        "Shared-Analyse fehlt (openssl wird gehalten)"
+    );
+    let text = render_to(140, 36, &state).join("\n");
+    assert!(text.contains("Voll-Ersparnis"), "Impact-Titel fehlt");
+    assert!(text.contains("Flag aus bei:"), "Flag-Blocker fehlen");
+    assert!(text.contains("app/b [ssl]"), "Blocker app/b fehlt");
+    assert!(text.contains("world entfernen:"), "World-Blocker fehlen");
+    assert!(text.contains("app/c"), "Blocker app/c fehlt");
+    assert!(text.contains("Secure Sockets Layer"), "Flag-Doku fehlt");
+}
+
+/// Tab 2 zeigt Detailbox zum selektierten Hebel (review3 Task 4.3).
+#[test]
+fn renders_lever_details() {
+    let index = repo_index(vec![
+        PkgFixture::new("app/a")
+            .iuse("+ssl")
+            .rdepend("ssl? ( dev-libs/openssl )")
+            .binpkg(Some(100))
+            .build(),
+        PkgFixture::new("dev-libs/openssl")
+            .binpkg(Some(800))
+            .build(),
+    ]);
+    let profile = Profile::test_default();
+    let mut state = AppState::new(
+        &index,
+        &profile,
+        vec!["app/a".to_string()],
+        Plan::default(),
+        None,
+    )
+    .unwrap();
+    state.set_tab(Tab::BigLevers).unwrap();
+    assert!(!state.levers.is_empty());
+    let text = render_to(120, 40, &state).join("\n");
+    assert!(text.contains("Hebel-Details"), "Detailbox fehlt");
+    assert!(text.contains("Betroffene Pakete"), "Paketliste fehlt");
+    assert!(text.contains("Entfernt:"), "Entfernt-Liste fehlt");
+    assert!(text.contains("dev-libs/openssl"), "Paketname fehlt");
+}
+
+/// Footer zeigt neue Labels + Tastenhinweise ohne Clipping (review3 Task 5.1).
+#[test]
+fn footer_labels_and_hints() {
+    let index = test_index();
+    let profile = Profile::test_default();
+    let state = test_state(&index, &profile, Plan::default());
+    for (w, h) in [(120u16, 40u16), (80u16, 24u16)] {
+        let text = render_to(w, h, &state).join("\n");
+        assert!(text.contains("Binpkg"), "Binpkg fehlt ({w}x{h})");
+        assert!(text.contains("Quell-DL"), "Quell-DL fehlt ({w}x{h})");
+        assert!(text.contains("Build-Only"), "Build-Only fehlt ({w}x{h})");
+        assert!(text.contains("[/]"), "Suche-Hinweis fehlt ({w}x{h})");
+        assert!(text.contains("[?]"), "Hilfe-Hinweis fehlt ({w}x{h})");
+        assert!(!text.contains("Subgraph-DL"), "altes Label ({w}x{h})");
+        assert!(!text.contains("BDEPEND"), "altes Label ({w}x{h})");
+    }
+}
+
+/// Hilfe-Modal rendert Inhalt und schliesst per Esc (review3 Task 5.2).
+#[test]
+fn help_modal_renders_and_closes() {
+    let index = test_index();
+    let profile = Profile::test_default();
+    let mut state = test_state(&index, &profile, Plan::default());
+    state.modal = Some(Modal::Help);
+    for (w, h) in [(120u16, 40u16), (80u16, 24u16)] {
+        let text = render_to(w, h, &state).join("\n");
+        assert!(text.contains("Hilfe"), "Hilfe-Titel fehlt ({w}x{h})");
+        assert!(
+            text.contains("Quell-DL"),
+            "Metrik-Erklaerung fehlt ({w}x{h})"
+        );
+        assert!(
+            text.contains("[Esc]/[?]/[q]"),
+            "Schliess-Hinweis fehlt ({w}x{h})"
+        );
+    }
+    state.modal = None;
+    assert!(state.modal.is_none());
+}
+
 /// Rechte Pane hebt Fokus hervor, zeigt Konflikte, Filter zeigt `/`-Prompt.
 #[test]
 fn right_pane_focus_conflicts_and_filter_prompt() {

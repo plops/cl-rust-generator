@@ -1,7 +1,9 @@
 //! 10_export_verify — Portage-Export und `emerge --pretend`-Verifikation.
 //!
 //! Genau eine Zustaendigkeit: aus Plan-Zustand gueltige Portage-Dateien
-//! schreiben und das echte Portage-Orakel (`emerge -p`) parsen.
+//! schreiben und das echte Portage-Orakel (`emerge -p`) parsen. Der Export
+//! ergaenzt Host-Konfiguration (`supplement_host_portage_config`), Verify
+//! prueft Configroot/`emerge` vorab (kein `ENOENT` mehr).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -121,6 +123,23 @@ pub fn write_export_files(
     })
 }
 
+/// Ob der Befehl ein lokales `emerge` ist (HIL-ssh-Prefixe ausgenommen).
+fn is_local_emerge_command(command: &str) -> bool {
+    command.trim_start().starts_with("emerge")
+}
+
+/// Ob `emerge` im `PATH` liegt.
+fn emerge_in_path() -> bool {
+    std::env::var_os("PATH")
+        .as_deref()
+        .is_some_and(find_emerge_in)
+}
+
+/// `emerge`-Binary in einer `PATH`-Liste suchen (testbar, review3 Task 5.3).
+fn find_emerge_in(paths: &std::ffi::OsStr) -> bool {
+    std::env::split_paths(paths).any(|dir| dir.join("emerge").is_file())
+}
+
 /// Ergebnis eines `emerge --pretend`-Laufs.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VerifyOutcome {
@@ -180,6 +199,79 @@ pub struct VerifyRunner {
     pub workdir: PathBuf,
 }
 
+/// Host-Portage-Anbindung fuer `emerge --config-root` (review3 Task 5.3).
+///
+/// Ergaenzt `make.profile`, `make.conf` und `repos.conf` in
+/// `<out>/etc/portage/` aus dem laufenden System, sofern dort vorhanden und
+/// im Export noch nicht enthalten. Ausserhalb von Gentoo no-op. Generierte
+/// Dateien (insb. `package.use`) werden nie ueberschrieben, sodass
+/// `emerge --root <out> --config-root <out> @world` auf einem Gentoo-Host
+/// direkt gegen die laufenden Paketdefinitionen funktioniert.
+pub fn supplement_host_portage_config(out_dir: &Path) -> EngineResult<()> {
+    supplement_from(Path::new("/etc/portage"), &out_dir.join("etc/portage"))
+}
+
+/// Wie `supplement_host_portage_config`, aber mit explizitem Quellverzeichnis
+/// (testbar ohne Host-Dateien).
+pub fn supplement_from(host_etc: &Path, out_etc: &Path) -> EngineResult<()> {
+    for name in ["make.profile", "make.conf", "repos.conf"] {
+        let (src, dst) = (host_etc.join(name), out_etc.join(name));
+        if dst.exists() {
+            continue;
+        }
+        copy_path_if_present(&src, &dst)?;
+    }
+    Ok(())
+}
+
+/// Datei, Symlink oder Verzeichnis kopieren (fehlende Quelle = no-op).
+fn copy_path_if_present(src: &Path, dst: &Path) -> EngineResult<()> {
+    let meta = match std::fs::symlink_metadata(src) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(EngineError::Io {
+                path: src.display().to_string(),
+                source: e,
+            });
+        }
+    };
+    let io = |e: std::io::Error| EngineError::Io {
+        path: src.display().to_string(),
+        source: e,
+    };
+    if meta.file_type().is_symlink() {
+        let target = std::fs::read_link(src).map_err(io)?;
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent).map_err(io)?;
+        }
+        std::os::unix::fs::symlink(&target, dst).map_err(io)?;
+    } else if meta.is_dir() {
+        copy_dir_all(src, dst).map_err(io)?;
+    } else if meta.is_file() {
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent).map_err(io)?;
+        }
+        std::fs::copy(src, dst).map_err(io)?;
+    }
+    Ok(())
+}
+
+/// Verzeichnis rekursiv kopieren (fuer `repos.conf/` u. ae.).
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let (s, d) = (entry.path(), dst.join(entry.file_name()));
+        if entry.file_type()?.is_dir() {
+            copy_dir_all(&s, &d)?;
+        } else {
+            std::fs::copy(&s, &d)?;
+        }
+    }
+    Ok(())
+}
+
 impl VerifyRunner {
     /// Standard-Runner gegen ein Export-Verzeichnis.
     ///
@@ -200,7 +292,25 @@ impl VerifyRunner {
     }
 
     /// Ausfuehren und parsen (Timeout: Portage-Aufruf, kein harter Abbruch).
+    ///
+    /// Vorab: Configroot muss existieren (sonst zuerst `[E] Export`), und
+    /// lokale `emerge`-Befehle brauchen `emerge` im `PATH` (HIL-Befehle via
+    /// ssh-Prefix sind ausgenommen, review3 Task 5.3).
     pub fn run(&self) -> EngineResult<VerifyOutcome> {
+        if !self.workdir.is_dir() {
+            return Err(EngineError::Config(format!(
+                "Configroot fehlt: {} — zuerst [E] Export ausfuehren \
+                 (oder `gentoo-dep-tui export`), siehe README",
+                self.workdir.display()
+            )));
+        }
+        if is_local_emerge_command(&self.command) && !emerge_in_path() {
+            return Err(EngineError::Config(
+                "emerge nicht im PATH — Verify braucht ein Gentoo-System \
+                 (oder HIL-Befehl via --command)"
+                    .into(),
+            ));
+        }
         let out = Command::new("sh")
             .arg("-c")
             .arg(&self.command)
@@ -253,6 +363,76 @@ These are the packages that would be merged:\n\
         let o = parse_emerge_pretend(CONFLICT);
         assert!(!o.success);
         assert!(o.problems.len() >= 2);
+    }
+
+    #[test]
+    fn verify_fails_without_configroot() {
+        // Fehlendes Verzeichnis → klare Meldung statt `ENOENT` (review3 5.3).
+        let missing = PathBuf::from("/tmp/gentoo-dep-tui-definitiv-nicht-da-12345");
+        let _ = std::fs::remove_dir_all(&missing);
+        let err = VerifyRunner::against_configroot(&missing)
+            .run()
+            .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("Export"),
+            "Hinweis fehlt: {err:#}"
+        );
+    }
+
+    #[test]
+    fn verify_rejects_missing_emerge() {
+        // Existierender Configroot + lokales emerge ohne emerge im Suchpfad
+        // → Hinweis statt spaetem emerge-Fehler (helperweise, ohne PATH).
+        assert!(!find_emerge_in(std::ffi::OsStr::new(
+            "/tmp/gentoo-dep-tui-leer-12345"
+        )));
+        let d = tempfile::tempdir().unwrap();
+        let bin = d.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        std::fs::write(bin.join("emerge"), "#!/bin/sh\n").unwrap();
+        assert!(find_emerge_in(bin.as_os_str()));
+        assert!(is_local_emerge_command("emerge --pretend @world"));
+        assert!(!is_local_emerge_command("ssh hil emerge --pretend @world"));
+    }
+
+    #[test]
+    fn supplement_copies_host_config_without_touching_package_use() {
+        // Fake-Host: Symlink-Profil, Datei-conf, Verzeichnis-repos.
+        let host = tempfile::tempdir().unwrap();
+        std::fs::create_dir(host.path().join("real-profile")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("real-profile", host.path().join("make.profile")).unwrap();
+        std::fs::write(host.path().join("make.conf"), "USE=\"ssl\"\n").unwrap();
+        let repos = host.path().join("repos.conf");
+        std::fs::create_dir(&repos).unwrap();
+        std::fs::write(repos.join("gentoo.conf"), "[gentoo]\n").unwrap();
+        // Export mit vorhandenem package.use (darf nicht angefasst werden).
+        let out = tempfile::tempdir().unwrap();
+        let etc = out.path().join("etc/portage");
+        std::fs::create_dir_all(&etc).unwrap();
+        std::fs::write(etc.join("package.use"), "a/b x\n").unwrap();
+        supplement_from(host.path(), &etc).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(etc.join("package.use")).unwrap(),
+            "a/b x\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(etc.join("make.conf")).unwrap(),
+            "USE=\"ssl\"\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(etc.join("repos.conf/gentoo.conf")).unwrap(),
+            "[gentoo]\n"
+        );
+        #[cfg(unix)]
+        assert!(
+            std::fs::symlink_metadata(etc.join("make.profile"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        // Fehlende Quelle = no-op, kein Fehler.
+        supplement_from(&PathBuf::from("/tmp/gentoo-dep-tui-nichts-12345"), &etc).unwrap();
     }
 
     #[test]

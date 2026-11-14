@@ -117,9 +117,50 @@ fn save_resets_dirty() {
 }
 
 #[test]
-fn world_atom_cpn_strips_version() {
-    assert_eq!(world_atom_cpn(">=dev-libs/openssl-3.0"), "dev-libs/openssl");
-    assert_eq!(world_atom_cpn("app-misc/jq"), "app-misc/jq");
+fn atom_cpn_strips_version_slot_and_use() {
+    use crate::mod_01_types::atom_cpn;
+    assert_eq!(atom_cpn(">=dev-libs/openssl-3.0"), "dev-libs/openssl");
+    assert_eq!(atom_cpn("app-misc/jq"), "app-misc/jq");
+    assert_eq!(atom_cpn("app-editors/emacs:0"), "app-editors/emacs");
+    assert_eq!(atom_cpn("dev-libs/libx[foo]"), "dev-libs/libx");
+}
+
+#[test]
+fn filter_switch_selection_reloads_middle() {
+    // Review3-Bug: vor `/`-Filter war A selektiert, nach Filter steht nur
+    // noch B in der Liste — die Mitte muss B-Flags zeigen, keine A-Flags.
+    let index = test_index();
+    let profile = Profile::test_default();
+    let mut st = fixture(&index, &profile);
+    assert_eq!(st.selected_package().as_deref(), Some("app/a"));
+    assert!(st.flag_deltas.iter().any(|d| d.package == "app/a"));
+    st.filter = "openssl".to_string();
+    st.apply_filter_only();
+    assert_eq!(st.selected_package().as_deref(), Some("dev-libs/openssl"));
+    // Cache-Miss → Idle-Recompute laden, dann B-Flags pruefen.
+    st.ensure_deltas().unwrap();
+    assert!(!st.deltas_loading);
+    assert!(!st.flag_deltas.is_empty());
+    assert!(
+        st.flag_deltas
+            .iter()
+            .all(|d| d.package == "dev-libs/openssl")
+    );
+    // Filter leeren stellt A wieder her.
+    st.filter.clear();
+    st.apply_filter_only();
+    st.ensure_deltas().unwrap();
+    assert_eq!(st.selected_package().as_deref(), Some("app/a"));
+}
+
+#[test]
+fn right_scroll_resets_on_package_change() {
+    let index = test_index();
+    let profile = Profile::test_default();
+    let mut st = fixture(&index, &profile);
+    st.right_scroll = 7;
+    st.select_left_fast(1);
+    assert_eq!(st.right_scroll, 0);
 }
 
 #[test]

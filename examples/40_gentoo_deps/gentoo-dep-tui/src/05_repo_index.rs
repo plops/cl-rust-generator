@@ -2,7 +2,9 @@
 //!
 //! Genau eine Zustaendigkeit: md5-cache einlesen, Versionen waehlen,
 //! Manifest-/Binhost-Groessen zuordnen. Reine Daten-Pipeline, kein Solver.
-//! Paralleles Einlesen via `rayon` + `walkdir`.
+//! Paralleles Einlesen via `rayon` + `walkdir`; Manifeste werden vorab
+//! lock-frei geladen (`preload_manifests`), `package.mask`-Treffer laufen
+//! ueber den vorberechneten Profil-Index (kein `Dep::parse` pro Datei).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -57,6 +59,7 @@ impl RepoIndex {
     /// und `<repo>/<kat>/<pkg>/Manifest`. Filter: `KEYWORDS` (`profile.arch`,
     /// `ACCEPT_KEYWORDS`), `package.mask`, keine `9999`-Live-Ebuilds.
     pub fn load(repo_root: &Path, binhost: Option<&Path>, profile: &Profile) -> EngineResult<Self> {
+        let _timer = crate::mod_00_perf::ScopeTimer::index_load();
         let start = Instant::now();
         let cache_dir = repo_root.join("metadata").join("md5-cache");
         let binhost_index = match binhost {
@@ -82,10 +85,10 @@ impl RepoIndex {
         files.sort();
         let cache_files = files.len();
 
-        // Manifest-Cache: ein `Manifest` pro `(kategorie, paket)` wird nur
-        // einmal von Platte gelesen (T03), nicht pro Ebuild-Version.
-        let manifest_cache: std::sync::Mutex<HashMap<String, crate::mod_03_manifest::Manifest>> =
-            std::sync::Mutex::new(HashMap::new());
+        // Manifeste vorab parallel einlesen (ein `Manifest` pro
+        // `(kategorie, paket)`, T03): danach read-only ohne `Mutex`
+        // an `parse_cache_file` uebergeben (review3 Task 3.2).
+        let manifests = preload_manifests(repo_root, &cache_dir, &files);
         let parsed: Vec<(String, PkgVersion)> = files
             .par_iter()
             .filter_map(|path| {
@@ -95,7 +98,7 @@ impl RepoIndex {
                     path,
                     &binhost_index,
                     profile,
-                    &manifest_cache,
+                    &manifests,
                 ) {
                     Ok(Some(v)) => Some(v),
                     Ok(None) => None,
@@ -191,6 +194,60 @@ impl RepoIndex {
     }
 }
 
+/// `<paket>-<version>` am letzten `-` mit Ziffer dahinter trennen
+/// (Paketnamen enthalten nie eine solche Endung, Versionen immer).
+fn split_pf(pf: &str) -> Option<(&str, &str)> {
+    let split = pf
+        .rmatch_indices('-')
+        .map(|(i, _)| i)
+        .find(|i| pf[i + 1..].starts_with(|c: char| c.is_ascii_digit()))?;
+    Some((&pf[..split], &pf[split + 1..]))
+}
+
+/// Manifeste fuer alle eindeutigen `(kategorie, paket)`-Paare vorab parallel
+/// einlesen (lock-frei, review3 Task 3.2).
+///
+/// Fehlende/fehlerhafte Manifeste fehlen in der Map: `parse_cache_file`
+/// laedt sie dann einzeln nach (identisches Fehlerverhalten wie frueher).
+fn preload_manifests(
+    repo_root: &Path,
+    cache_dir: &Path,
+    files: &[PathBuf],
+) -> HashMap<String, crate::mod_03_manifest::Manifest> {
+    let mut pairs: Vec<(String, PathBuf)> = Vec::new();
+    for path in files {
+        let rel = match path.strip_prefix(cache_dir) {
+            Ok(rel) => rel,
+            Err(_) => continue,
+        };
+        let mut parts = rel.components();
+        let category = parts
+            .next()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned());
+        let pf = path.file_name().map(|n| n.to_string_lossy().into_owned());
+        let (Some(category), Some(pf)) = (category, pf) else {
+            continue;
+        };
+        let Some((package, _)) = split_pf(&pf) else {
+            continue;
+        };
+        pairs.push((
+            format!("{category}/{package}"),
+            repo_root.join(&category).join(package),
+        ));
+    }
+    pairs.sort();
+    pairs.dedup();
+    pairs
+        .into_par_iter()
+        .filter_map(|(key, dir)| {
+            load_manifest_file(&dir)
+                .ok()
+                .map(|manifest| (key, manifest))
+        })
+        .collect()
+}
+
 /// Eine einzelne Cache-Datei parsen (+ Manifest + Binhost zuordnen).
 ///
 /// `Ok(None)`: gefilterte Version (live/maskiert/unkeyworded, kein Fehler).
@@ -201,7 +258,7 @@ fn parse_cache_file(
     path: &Path,
     binhost: &BinpkgIndex,
     profile: &Profile,
-    manifest_cache: &std::sync::Mutex<HashMap<String, crate::mod_03_manifest::Manifest>>,
+    manifests: &HashMap<String, crate::mod_03_manifest::Manifest>,
 ) -> EngineResult<Option<(String, PkgVersion)>> {
     let rel = path
         .strip_prefix(cache_dir)
@@ -219,13 +276,10 @@ fn parse_cache_file(
         .map(|c| c.as_os_str().to_string_lossy().into_owned())
         .unwrap_or_default();
     // `<paket>-<version>` am letzten `-` mit Ziffer dahinter trennen
-    // (Paketnamen enthalten nie eine solche Endung, Versionen immer).
-    let split = pf
-        .rmatch_indices('-')
-        .map(|(i, _)| i)
-        .find(|i| pf[i + 1..].starts_with(|c: char| c.is_ascii_digit()));
-    let (package, version_str) = match split {
-        Some(i) => (pf[..i].to_string(), pf[i + 1..].to_string()),
+    // (Paketnamen enthalten nie eine solche Endung, Versionen immer;
+    // siehe `split_pf`).
+    let (package, version_str) = match split_pf(&pf) {
+        Some((package, version_str)) => (package.to_string(), version_str.to_string()),
         None => {
             return Err(EngineError::Parse {
                 context: path.display().to_string(),
@@ -262,17 +316,11 @@ fn parse_cache_file(
         iuse_defaults.insert(flag.name().to_string(), flag.is_enabled_default());
     }
     let cache_key = format!("{category}/{package}");
-    let manifest = {
-        let guard = manifest_cache.lock().unwrap();
-        guard.get(&cache_key).cloned()
-    };
-    let manifest = match manifest {
-        Some(m) => m,
-        None => {
-            let m = load_manifest_file(&repo_root.join(&category).join(&package))?;
-            manifest_cache.lock().unwrap().insert(cache_key, m.clone());
-            m
-        }
+    // Vorab geladen (lock-frei); fehlt der Eintrag (defektes/fehlendes
+    // Manifest), einzeln nachladen wie frueher.
+    let manifest = match manifests.get(&cache_key) {
+        Some(m) => m.clone(),
+        None => load_manifest_file(&repo_root.join(&category).join(&package))?,
     };
     let binhost_size = binhost.get(&cpv).map(|e| e.size);
 
@@ -293,7 +341,12 @@ fn parse_cache_file(
 }
 
 /// `package.mask`-Treffer (Atome mit/ohne Versionsoperator).
+///
+/// Nutzt `package_mask_index` (`sync_pattern_caches`): Zeilenreihenfolge
+/// bleibt (letzte passende Zeile gewinnt), aber kein `Dep::parse` mehr
+/// pro Cache-Datei (review3 Task 3.1).
 fn is_masked(cpn: &str, version_str: &str, entry: &CacheEntry, profile: &Profile) -> bool {
+    crate::mod_00_perf::perf_count_mask_check();
     let version = match portage_atom::Version::parse(version_str) {
         Ok(v) => v,
         Err(_) => return false,
@@ -302,19 +355,11 @@ fn is_masked(cpn: &str, version_str: &str, entry: &CacheEntry, profile: &Profile
     // Portage-Semantik: `-atom`-Zeilen entmaskieren fruehere Masken
     // (Profilstapel-Reihenfolge, letzte passende Zeile gewinnt).
     let mut masked = false;
-    for line in &profile.package_mask {
-        let raw = line.split_whitespace().next().unwrap_or("");
-        if raw.is_empty() {
-            continue;
-        }
-        let (atom, unmask) = match raw.strip_prefix('-') {
-            Some(rest) if !rest.is_empty() => (rest, true),
-            _ => (raw, false),
-        };
-        let Ok(dep) = Dep::parse(atom) else {
+    for rule in &profile.package_mask_index {
+        let Some(dep) = &rule.dep else {
             continue;
         };
-        if dep.cpn.to_string() != cpn {
+        if rule.cpn != cpn {
             continue;
         }
         let probe = PkgVersionProbe {
@@ -322,8 +367,8 @@ fn is_masked(cpn: &str, version_str: &str, entry: &CacheEntry, profile: &Profile
             version_str,
             slot: &slot,
         };
-        if mask_dep_matches(&dep, probe) {
-            masked = !unmask;
+        if mask_dep_matches(dep, probe) {
+            masked = !rule.unmask;
         }
     }
     masked

@@ -32,6 +32,9 @@ pub struct CommonArgs {
     /// `package.use` (Datei oder Verzeichnis).
     #[arg(long, default_value = "/etc/portage/package.use")]
     pub package_use: PathBuf,
+    /// Phasen-Report der Perf-Metriken ausgeben (braucht `--features perf-metrics`).
+    #[arg(long, default_value_t = false)]
+    pub perf_report: bool,
 }
 
 /// CLI-Wurzel.
@@ -81,6 +84,10 @@ pub struct DeltasArgs {
     pub common: CommonArgs,
     /// Zielpaket (`cat/pkg`).
     pub package: String,
+    /// Zusaetzlich Shared-Blocker-/Voll-Ersparnis-Analyse je Flag
+    /// (teuer: je Flag bis zu drei Kaskadenlaeufe, review3 Task 4.1).
+    #[arg(long, default_value_t = false)]
+    pub deep: bool,
 }
 
 /// `init`-Argumente.

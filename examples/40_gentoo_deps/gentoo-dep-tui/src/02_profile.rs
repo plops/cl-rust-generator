@@ -3,9 +3,13 @@
 //! Genau eine Zustaendigkeit: alles Einlesen von *Konfiguration*
 //! (kein Ebuild-Parsing). Reihenfolge nach `pkgcore/domain`:
 //! Profil-Defaults → `use.mask`/`use.force` → globale `USE` → `package.use`.
+//! `package.mask`/`package.use`-Atome werden einmalig in
+//! `sync_pattern_caches` geparst (Hot Loops nutzen nur die Indexe).
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+
+use portage_atom::Dep;
 
 /// Ausgewaehlte Architektur-/Keyword-Konfiguration.
 #[derive(Debug, Clone, Default)]
@@ -24,6 +28,12 @@ pub struct Profile {
     pub use_force: HashSet<String>,
     /// Maskierte Paket-Atome (eine Zeile pro Eintrag, Kommentare entfernt).
     pub package_mask: Vec<String>,
+    /// Einmal geparste `package.mask`-Regeln (via `sync_pattern_caches`;
+    /// Hot Loops parsen nie, review3 Task 3.1).
+    pub package_mask_index: Vec<MaskRule>,
+    /// Einmal geparste `package.use`-Regeln je `cat/pkg` (via
+    /// `sync_pattern_caches`; Hot Loops parsen nie, review3 Task 3.1).
+    pub package_use_index: HashMap<String, Vec<UseRule>>,
     /// Globale USE-Flags aus `make.conf` (mit `-`-Negation).
     pub global_use: HashSet<String>,
     /// Paket-spezifische USE-Flags aus `package.use` (`atom -> {flags}`).
@@ -32,10 +42,33 @@ pub struct Profile {
     pub expand_defaults: HashMap<String, Vec<String>>,
     /// Bekannte USE_EXPAND-Namen (auch ohne Defaults, z. B. nur in `make.conf`).
     pub use_expand: HashSet<String>,
+    /// Versteckte USE_EXPAND-Prefixe aus `make.defaults` (`USE_EXPAND_HIDDEN`,
+    /// z. B. `ABI_X86`, `ELIBC`, `KERNEL`): keine schaltbaren Hebel (review3).
+    pub use_expand_hidden: HashSet<String>,
     /// ELIBC-Wert (`glibc` → Flag `elibc_glibc`).
     pub elibc: String,
     /// KERNEL-Wert (`linux` → Flag `kernel_linux`).
     pub kernel: String,
+}
+
+/// Einmal geparste `package.use`-Regel (Task 3.1).
+#[derive(Debug, Clone)]
+pub struct UseRule {
+    /// Geparstes Atom (`None` = unparsbar, nur exakter `cpn`-Schluessel).
+    pub dep: Option<Dep>,
+    /// USE-Tokens der Regel (in Datei-Reihenfolge).
+    pub tokens: Vec<String>,
+}
+
+/// Einmal geparste `package.mask`-Zeile (Task 3.1).
+#[derive(Debug, Clone)]
+pub struct MaskRule {
+    /// `cat/pkg` des Atoms (Index-Schluessel, ohne Operator/Slot).
+    pub cpn: String,
+    /// `-atom`-Zeile: entmaskiert fruehere Masken.
+    pub unmask: bool,
+    /// Geparstes Atom (`None` = unparsbar, Zeile wird ignoriert).
+    pub dep: Option<Dep>,
 }
 
 impl Profile {
@@ -60,40 +93,73 @@ impl Profile {
 
     /// Alle `package.use`-Tokens, die auf ein konkretes Paket zutreffen.
     ///
-    /// Exakte `cat/pkg`-Schluessel plus versionierte/slottierte Atome
-    /// (`>=cat/pkg-1.0`, `cat/pkg:0`), gematcht gegen Version und Slot.
+    /// Nutzt den vorberechneten `package_use_index` (`sync_pattern_caches`):
+    /// ein `HashMap::get(cpn)`-Lookup, kein `Dep::parse`/`Version::parse`
+    /// pro Regel mehr (review3 Task 3.1). Die Kandidaten-Version wird einmal
+    /// geparst, nicht je Regel.
     pub fn package_use_for(&self, cpn: &str, version_str: &str, slot: &str) -> Vec<String> {
+        crate::mod_00_perf::perf_count_package_use_match();
         let mut out = Vec::new();
-        // Sortiert: deterministische Token-Reihenfolge unabhaengig von
-        // HashMap-Iteration (sonst wuerde z. B. `-x`/`x` zufaellig gewinnen).
-        let mut atoms: Vec<&String> = self.package_use.keys().collect();
-        atoms.sort();
-        for atom in atoms {
-            let tokens = &self.package_use[atom];
-            if atom == cpn {
-                out.extend(tokens.iter().cloned());
-                continue;
+        let Some(rules) = self.package_use_index.get(cpn) else {
+            return out;
+        };
+        let have = portage_atom::Version::parse(version_str).ok();
+        for rule in rules {
+            // Unparsbares Atom: nur exakter `cpn`-Schluessel (wie frueher
+            // `atom == cpn`; der Index-Schluessel garantiert das).
+            if let Some(dep) = &rule.dep {
+                let matches = match &have {
+                    Some(h) => dep_matches_version_and_slot(dep, h, version_str, slot),
+                    None => dep.op.is_none() && dep.slot_dep.is_none(),
+                };
+                if !matches {
+                    continue;
+                }
             }
-            let Ok(dep) = portage_atom::Dep::parse(atom) else {
-                continue;
-            };
-            if dep.cpn.to_string() != cpn {
-                continue;
-            }
-            if !Self::dep_matches_version(&dep, version_str, slot) {
-                continue;
-            }
-            out.extend(tokens.iter().cloned());
+            out.extend(rule.tokens.iter().cloned());
         }
         out
     }
 
-    /// Versions-/Slot-Abgleich eines `package.use`-Atoms.
-    fn dep_matches_version(dep: &portage_atom::Dep, version_str: &str, slot: &str) -> bool {
-        let Ok(have) = portage_atom::Version::parse(version_str) else {
-            return dep.op.is_none() && dep.slot_dep.is_none();
-        };
-        dep_matches_version_and_slot(dep, &have, version_str, slot)
+    /// Roh-Felder (`package.mask`, `package.use`) in die vorberechneten
+    /// Indexe ueberfuehren (je Atom genau ein `Dep::parse`, review3 3.1).
+    ///
+    /// Muss nach jeder direkten Mutation der Roh-Felder aufgerufen werden
+    /// (Lader tun das automatisch; Tests, die `package_mask`/`package_use`
+    /// direkt belegen, rufen den Helfer explizit).
+    pub fn sync_pattern_caches(&mut self) {
+        // `package.use`: Atome sortiert sammeln (deterministische
+        // Token-Reihenfolge wie frueher, sonst wuerde `-x`/`x` kippen).
+        let mut atoms: Vec<String> = self.package_use.keys().cloned().collect();
+        atoms.sort();
+        let mut index: HashMap<String, Vec<UseRule>> = HashMap::new();
+        for atom in atoms {
+            let tokens = self.package_use[&atom].clone();
+            crate::mod_00_perf::perf_count_dep_parse();
+            let (key, dep) = match Dep::parse(&atom) {
+                Ok(dep) => (dep.cpn.to_string(), Some(dep)),
+                Err(_) => (atom.clone(), None),
+            };
+            index.entry(key).or_default().push(UseRule { dep, tokens });
+        }
+        self.package_use_index = index;
+        // `package.mask`: Zeilenreihenfolge erhalten (letzte passende Zeile
+        // gewinnt, Portage-Semantik).
+        let mut rules = Vec::with_capacity(self.package_mask.len());
+        for line in &self.package_mask {
+            let raw = line.split_whitespace().next().unwrap_or("");
+            let (atom, unmask) = match raw.strip_prefix('-') {
+                Some(rest) if !rest.is_empty() => (rest, true),
+                _ => (raw, false),
+            };
+            crate::mod_00_perf::perf_count_dep_parse();
+            let (cpn, dep) = match Dep::parse(atom) {
+                Ok(dep) => (dep.cpn.to_string(), Some(dep)),
+                Err(_) => (atom.to_string(), None),
+            };
+            rules.push(MaskRule { cpn, unmask, dep });
+        }
+        self.package_mask_index = rules;
     }
 
     /// Gespeicherte globale USE-Tokens als String (fuer `${USE}`-Expansion).
@@ -124,9 +190,9 @@ impl Profile {
     /// 1) IUSE-Defaults (`+flag`)
     /// 2) `ARCH`, `ELIBC`, `KERNEL`
     /// 3) `USE_EXPAND`-Defaults (nur Flags aus `iuse_defaults`)
-    /// 4) globale `USE`
-    /// 5) `package.use` (exakt + versioniert/slottiert, in Map-Reihenfolge)
-    /// 6) `use.force`
+    /// 4) globale `USE` (nur Flags aus `iuse_defaults`, review3 Task 1.1)
+    /// 5) `package.use` (exakt + versioniert/slottiert, nur IUSE-Flags)
+    /// 6) `use.force` (nur IUSE-Flags)
     /// 7) `use.mask` (Maske gewinnt immer)
     pub fn effective_defaults(
         &self,
@@ -135,6 +201,8 @@ impl Profile {
         version_str: &str,
         slot: &str,
     ) -> HashSet<String> {
+        crate::mod_00_perf::perf_count_effective_use();
+        let _timer = crate::mod_00_perf::ScopeTimer::effective_use();
         let mut active: HashSet<String> = iuse_defaults
             .iter()
             .filter_map(|(f, on)| if *on { Some(f.clone()) } else { None })
@@ -164,18 +232,37 @@ impl Profile {
         let mut global: Vec<&String> = self.global_use.iter().collect();
         global.sort();
         for token in global {
-            apply_use_token(&mut active, token);
+            if Self::token_in_iuse(iuse_defaults, token) {
+                apply_use_token(&mut active, token);
+            }
         }
         for token in self.package_use_for(cpn, version_str, slot) {
-            apply_use_token(&mut active, &token);
+            if Self::token_in_iuse(iuse_defaults, &token) {
+                apply_use_token(&mut active, &token);
+            }
         }
+        // `use.force`/`use.mask` gelten nur fuer deklarierte Flags: globale
+        // USE ohne IUSE-Eintrag wuerde sonst Phantom-Flags erzeugen (review3
+        // Task 1.1 — z. B. `openmp` auf Paketen ohne `openmp` in IUSE).
         for flag in &self.use_force {
-            active.insert(flag.clone());
+            if iuse_defaults.contains_key(flag) {
+                active.insert(flag.clone());
+            }
         }
         for flag in &self.use_mask {
             active.remove(flag);
         }
         active
+    }
+
+    /// Ob ein USE-Token (`flag`/`-flag`/`+flag`, auch `-*`) auf ein Paket mit
+    /// diesen `iuse_defaults` angewendet werden darf (IUSE-Gate, review3).
+    fn token_in_iuse(iuse_defaults: &HashMap<String, bool>, token: &str) -> bool {
+        let token = token.trim();
+        if token == "-*" {
+            return true;
+        }
+        iuse_defaults.contains_key(token.trim_start_matches(['-', '+']))
     }
 
     /// Wendet `USE`-Tokens inkrementell auf `global_use` an (Task 1.2).
@@ -300,6 +387,8 @@ fn apply_use_token(active: &mut HashSet<String>, token: &str) {
     }
 }
 
+#[path = "02_profile/descriptions.rs"]
+mod descriptions;
 #[path = "02_profile/parse.rs"]
 mod parse;
 #[path = "02_profile/stack.rs"]
@@ -308,6 +397,7 @@ mod stack;
 #[path = "02_profile/tests.rs"]
 mod tests;
 
+pub use descriptions::UseDescriptions;
 pub use parse::{parse_key_value, parse_use_tokens, read_key_value, read_world};
 pub(crate) use stack::normalize_join;
 pub use stack::{apply_flag_list, load_profile_stack, read_flag_list, read_package_use};

@@ -3,7 +3,7 @@
 //! Genau eine Zustaendigkeit: User-Intents gegen Profil/Graphen
 //! abgleichen, Forwards/Flips setzen, Konflikte sammeln.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::mod_01_types::{ConflictInfo, QuickSwitch};
 
@@ -19,6 +19,12 @@ pub(super) struct CascadeStep<'e, 'a, 'u, 'f> {
     pub(super) forced: &'f mut HashSet<(String, String)>,
     pub(super) changed: bool,
     pub(super) conflicts: Vec<ConflictInfo>,
+    /// Effektive Flags je Paket, pro Durchgang gecacht (review3 Task 3.3).
+    ///
+    /// `force_flag` invalidiert den Eintrag bei jeder Mutation — der Cache
+    /// liefert daher exakt die Werte einer Neuberechnung, nur ohne deren
+    /// Kosten pro Edge.
+    flag_cache: HashMap<String, HashSet<String>>,
 }
 
 impl<'e, 'a, 'u, 'f> CascadeStep<'e, 'a, 'u, 'f> {
@@ -33,7 +39,19 @@ impl<'e, 'a, 'u, 'f> CascadeStep<'e, 'a, 'u, 'f> {
             forced,
             changed: false,
             conflicts: Vec::new(),
+            flag_cache: HashMap::new(),
         }
+    }
+
+    /// Effektive Flags aus dem Cache (oder frisch + merken).
+    pub(super) fn cached_effective(&mut self, cpn: &str, cpv: &str) -> Option<HashSet<String>> {
+        if let Some(cached) = self.flag_cache.get(cpn) {
+            return Some(cached.clone());
+        }
+        let index = self.engine.index;
+        let active = self.engine.effective_use(index.select_cpv(cpn, cpv)?);
+        self.flag_cache.insert(cpn.to_string(), active.clone());
+        Some(active)
     }
 
     pub(super) fn enforce_graph(&mut self, graph: &ResolvedGraph) {
@@ -61,16 +79,17 @@ impl<'e, 'a, 'u, 'f> CascadeStep<'e, 'a, 'u, 'f> {
     }
 
     /// Aktuelle effektive Flags (Defaults + explizite Overrides).
+    ///
+    /// Kommt aus dem Runden-Cache (`cached_effective`); `force_flag`
+    /// invalidiert bei Mutation (review3 Task 3.3).
     pub(super) fn current_flags(
-        &self,
+        &mut self,
         cpn: &str,
         cpv: &str,
         fallback: &HashSet<String>,
     ) -> HashSet<String> {
-        match self.engine.index.select_cpv(cpn, cpv) {
-            Some(pkg) => self.engine.effective_use(pkg),
-            None => fallback.clone(),
-        }
+        self.cached_effective(cpn, cpv)
+            .unwrap_or_else(|| fallback.clone())
     }
 
     /// Flag erzwingen; Widerspruch → Konflikt mit zwei Optionen.
@@ -131,6 +150,8 @@ impl<'e, 'a, 'u, 'f> CascadeStep<'e, 'a, 'u, 'f> {
                 .or_default()
                 .insert(flag.to_string(), want_on);
             self.forced.insert((cpn.to_string(), flag.to_string()));
+            // Mutation: Cache-Eintrag verwerfen (Folge-Reads sehen neue Werte).
+            self.flag_cache.remove(cpn);
             self.changed = true;
         }
         let _ = reason;

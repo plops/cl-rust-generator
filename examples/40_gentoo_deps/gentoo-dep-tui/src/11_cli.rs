@@ -41,6 +41,7 @@ pub fn run() -> anyhow::Result<()> {
                 binhost: None,
                 make_conf: std::path::PathBuf::from("/etc/portage/make.conf"),
                 package_use: std::path::PathBuf::from("/etc/portage/package.use"),
+                perf_report: false,
             },
             plan: None,
         })

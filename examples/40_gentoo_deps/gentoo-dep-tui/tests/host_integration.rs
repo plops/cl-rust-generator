@@ -92,6 +92,7 @@ fn fixture() -> Fixture {
     std::fs::write(profiles.join("package.mask"), ">=dev-libs/openssl-99\n").unwrap();
     let mut profile = Profile::test_default();
     profile.package_mask = vec![">=dev-libs/openssl-99".into()];
+    profile.sync_pattern_caches();
     Fixture {
         _dir: dir,
         repo,
@@ -256,6 +257,7 @@ fn missing_world_is_an_error_with_hint() {
         binhost: None,
         make_conf: std::path::PathBuf::from("/nonexistent-make.conf"),
         package_use: std::path::PathBuf::from("/nonexistent-package.use"),
+        perf_report: false,
     };
     let err = load_world(&args).unwrap_err();
     let msg = format!("{err:#}");

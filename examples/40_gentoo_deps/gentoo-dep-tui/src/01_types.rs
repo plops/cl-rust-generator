@@ -1,20 +1,15 @@
 //! 01_types — Basis-IDs, Groessen, Fehler.
 //!
 //! Genau eine Zustaendigkeit: alle Kerndatentypen der Engine.
-//! Integer-IDs (`PkgId`, `FlagId`) statt Strings machen den Graphen
-//! evaluations-schnell (wenige Mikrosekunden pro Reachability-Lauf).
-
-use std::collections::HashMap;
+//! Die kompakte Paket-ID (`PkgId`) adressiert Engine-Vektoren ohne
+//! String-Lookups (ungenutzte `FlagId`/`IdTable` bewusst entfernt,
+//! review3 Task 3.3).
 
 use thiserror::Error;
 
 /// Kompakte Paket-ID (Index in Engine-Vektoren).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PkgId(pub u32);
-
-/// Kompakte USE-Flag-ID (Index in Engine-Vektoren).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct FlagId(pub u32);
 
 /// Groessenmetriken eines Pakets bzw. Deltas (Bytes, vorzeichenbehaftet bei Deltas).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -120,53 +115,9 @@ pub struct FlagDelta {
     pub has_binhost_data: bool,
 }
 
-/// Instrumentierungs-Zaehler fuer Systemtests (T01/T02).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct PerfStats {
-    /// Anzahl `resolve()`-Aufrufe (inkl. Kaskaden-Runden).
-    pub resolve_calls: u64,
-    /// Anzahl `resolve_build_extra()`-Laeufe.
-    pub build_extra_calls: u64,
-    /// Anzahl Kaskaden-Fixpunkt-Durchlaeufe.
-    pub cascade_rounds: u64,
-    /// Anzahl Delta-Simulationen (`flag_delta`/`big_levers`).
-    pub delta_runs: u64,
-}
-
-static PERF_RESOLVE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static PERF_BUILD_EXTRA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static PERF_CASCADE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static PERF_DELTA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// Zaehler erhoehen (no-op Kosten, `Relaxed`-Ordering reicht).
-pub fn perf_count_resolve() {
-    PERF_RESOLVE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// Zaehler erhoehen (Build-Extra-Lauf).
-pub fn perf_count_build_extra() {
-    PERF_BUILD_EXTRA.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// Zaehler erhoehen (Kaskaden-Durchlauf).
-pub fn perf_count_cascade() {
-    PERF_CASCADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// Zaehler erhoehen (Delta-Simulation).
-pub fn perf_count_delta() {
-    PERF_DELTA.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// Snapshot + Reset (fuer `tests/perf_system.rs`).
-pub fn perf_snapshot_and_reset() -> PerfStats {
-    PerfStats {
-        resolve_calls: PERF_RESOLVE.swap(0, std::sync::atomic::Ordering::Relaxed),
-        build_extra_calls: PERF_BUILD_EXTRA.swap(0, std::sync::atomic::Ordering::Relaxed),
-        cascade_rounds: PERF_CASCADE.swap(0, std::sync::atomic::Ordering::Relaxed),
-        delta_runs: PERF_DELTA.swap(0, std::sync::atomic::Ordering::Relaxed),
-    }
-}
+// Hinweis: Performance-Instrumentierung (`PerfStats`, Zaehler, `ScopeTimer`)
+// liegt zentral in `crate::mod_00_perf` (review3 Phase 2, Feature
+// `perf-metrics`); hier bleibt kein unkonditionaler Atomic zurueck.
 
 /// Aggregierter globaler Hebel ueber alle Pakete.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -175,10 +126,16 @@ pub struct BigLever {
     pub flag: String,
     /// Anzahl betroffener Pakete.
     pub packages: usize,
+    /// Betroffene Pakete (`cat/pkg`, sortiert, review3 Task 4.3).
+    pub affected_packages: Vec<String>,
     /// Gesamt-Delta bei globaler Deaktivierung.
     pub total: SizeMetrics,
     /// Anzahl dadurch entstehender Konflikte.
     pub conflicts: usize,
+    /// Neu hinzukommende Pakete (`cat/pkg`, sortiert, review3 Task 4.3).
+    pub added_packages: Vec<String>,
+    /// Entfallende Pakete (`cat/pkg`, sortiert, review3 Task 4.3).
+    pub removed_packages: Vec<String>,
 }
 
 /// Strukturierte Engine-Fehler.
@@ -217,61 +174,24 @@ pub enum EngineError {
 /// Ergebnis-Typ der Engine.
 pub type EngineResult<T> = Result<T, EngineError>;
 
-/// Bidirektionale ID-Tabelle String <-> u32 (fuer `PkgId`/`FlagId`).
-#[derive(Debug, Default)]
-pub struct IdTable {
-    to_id: HashMap<String, u32>,
-    to_name: Vec<String>,
-}
-
-impl IdTable {
-    /// Leere Tabelle.
-    pub fn new() -> Self {
-        Self::default()
+/// Welt-/Plan-Atom auf `cat/pkg` kuerzen (zentral, review3 Task 1.3).
+///
+/// `Dep::parse` versteht Operatoren (`>=`), Versionen, Slots (`:0`, `:0/1`)
+/// und USE-Abhaengigkeiten (`[foo]`); nicht parsbare Atome werden lexikalisch
+/// an Slot-/USE-Suffixen gekuerzt statt fallengelassen.
+pub fn atom_cpn(atom: &str) -> String {
+    let atom = atom.split_whitespace().next().unwrap_or(atom);
+    if let Ok(dep) = portage_atom::Dep::parse(atom) {
+        return dep.cpn.to_string();
     }
-
-    /// Gibt die ID zurueck (legt neu an bei Bedarf).
-    pub fn intern(&mut self, name: &str) -> u32 {
-        if let Some(id) = self.to_id.get(name) {
-            return *id;
-        }
-        let id = self.to_name.len() as u32;
-        self.to_name.push(name.to_string());
-        self.to_id.insert(name.to_string(), id);
-        id
-    }
-
-    /// Loest eine ID auf (`None` bei ungueltig).
-    pub fn resolve(&self, id: u32) -> Option<&str> {
-        self.to_name.get(id as usize).map(String::as_str)
-    }
-
-    /// Anzahl Eintraege.
-    pub fn len(&self) -> usize {
-        self.to_name.len()
-    }
-
-    /// Ob leer.
-    pub fn is_empty(&self) -> bool {
-        self.to_name.is_empty()
-    }
+    let base = atom.split(':').next().unwrap_or(atom);
+    let base = base.split('[').next().unwrap_or(base);
+    base.trim_start_matches(['=', '<', '>', '~']).to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn id_table_intern_resolve_roundtrip() {
-        let mut t = IdTable::new();
-        let a = t.intern("sys-kernel/linux-headers");
-        let b = t.intern("dev-libs/openssl");
-        let a2 = t.intern("sys-kernel/linux-headers");
-        assert_eq!(a, a2);
-        assert_ne!(a, b);
-        assert_eq!(t.resolve(a), Some("sys-kernel/linux-headers"));
-        assert_eq!(t.resolve(999), None);
-    }
 
     #[test]
     fn size_metrics_saturating_add() {
@@ -286,6 +206,22 @@ mod tests {
         let c = a.checked_add(b);
         assert_eq!(c.binpkg_bytes, i64::MAX);
         assert_eq!(c.download_bytes, 7);
+    }
+
+    #[test]
+    fn atom_cpn_strips_operators_versions_slots_and_use_deps() {
+        // Zentraler Kuerrzer (review3 Task 1.3).
+        assert_eq!(atom_cpn("app-misc/jq"), "app-misc/jq");
+        assert_eq!(atom_cpn(">=dev-libs/openssl-3.0"), "dev-libs/openssl");
+        assert_eq!(
+            atom_cpn("=sys-kernel/gentoo-sources-6.6.7"),
+            "sys-kernel/gentoo-sources"
+        );
+        assert_eq!(atom_cpn("app-editors/emacs:0"), "app-editors/emacs");
+        assert_eq!(atom_cpn("dev-libs/libx:0/1"), "dev-libs/libx");
+        assert_eq!(atom_cpn("dev-libs/libx[foo]"), "dev-libs/libx");
+        assert_eq!(atom_cpn("dev-libs/libx:0[foo=]"), "dev-libs/libx");
+        assert_eq!(atom_cpn("~media-video/ffmpeg-7.0"), "media-video/ffmpeg");
     }
 
     #[test]

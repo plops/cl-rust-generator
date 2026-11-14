@@ -1,7 +1,8 @@
 //! 14_tui_runner — Terminal-Lifecycle und Crossterm-Event-Loop.
 //!
 //! Genau eine Zustaendigkeit: `ratatui::run` (init/restore inkl. Panic-Hook),
-//! Tastatur-Events → `AppState`-Aktionen. Kein Rendering, keine Logik.
+//! Tastatur-Events → `AppState`-Aktionen via `dispatch_key` (dieselbe
+//! Funktion steuert Test-/Script-Driver). Kein Rendering, keine Logik.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -14,7 +15,7 @@ use crate::mod_05_repo_index::RepoIndex;
 use crate::mod_09_plan_toml::Plan;
 use crate::mod_10_export_verify::VerifyRunner;
 use crate::mod_11_cli::{CommonArgs, TuiArgs, export_plan, load_profile};
-use crate::mod_12_tui_state::{AppState, Pane, Tab, sync_plan_from_state};
+use crate::mod_12_tui_state::{AppState, Modal, Pane, Tab, sync_plan_from_state};
 use crate::mod_13_tui_view::render;
 
 /// TUI starten (aus CLI-`tui`): Engine laden, Loop bis `q`.
@@ -75,6 +76,184 @@ fn run_tui_with(
         .with_context(|| "TUI-Loop")
 }
 
+/// Ergebnis eines Tastatur-Events (Loop fortsetzen oder beenden).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoopAction {
+    /// Weiterlaufen.
+    Continue,
+    /// Beenden (`q` oder `Esc` ohne Modal/Filter).
+    Quit,
+}
+
+/// Kontext fuer `dispatch_key` (TUI-Loop und Test-/Script-Driver teilen ihn).
+pub struct RunnerContext<'a> {
+    /// CLI-Argumente (fuer `plan`-Pfad beim Speichern).
+    pub args: &'a TuiArgs,
+    /// Standard-Exportverzeichnis (`[E]`/auto-Export bei `[V]`).
+    pub export_default: &'a std::path::Path,
+}
+
+/// Synchroner Idle-Schritt fuer Tests/Scripting (wie der Idle-Pfad im Loop).
+pub fn step_idle(state: &mut AppState<'_>) -> anyhow::Result<()> {
+    state.ensure_deltas()?;
+    Ok(())
+}
+
+/// Tastatur-Event verarbeiten (reine State-Transition, terminal-unabhaengig).
+///
+/// Dieselbe Funktion steuert die echte TUI (`event_loop`) und den
+/// Test-/Script-Driver (`tests/tui_screencaps.rs`), sodass Integrationstests
+/// exakt das Tastenverhalten der TUI pruefen (review3 Task 6.1).
+pub fn dispatch_key(
+    state: &mut AppState<'_>,
+    key: crossterm::event::KeyEvent,
+    ctx: &mut RunnerContext<'_>,
+) -> anyhow::Result<LoopAction> {
+    let args = ctx.args;
+    let export_default = ctx.export_default;
+    if state.filtering {
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter => state.filtering = false,
+            KeyCode::Backspace => {
+                state.filter.pop();
+                state.apply_filter_only();
+            }
+            KeyCode::Char(c) => {
+                state.filter.push(c);
+                state.apply_filter_only();
+            }
+            _ => {}
+        }
+        return Ok(LoopAction::Continue);
+    }
+    if state.modal.is_some() {
+        // Hilfe zusaetzlich per `?`/`q` schliessen (review3 Task 5.2).
+        if matches!(state.modal, Some(Modal::Help))
+            && matches!(
+                key.code,
+                KeyCode::Char('?') | KeyCode::Char('q') | KeyCode::Char('Q')
+            )
+        {
+            state.modal = None;
+            return Ok(LoopAction::Continue);
+        }
+        match key.code {
+            KeyCode::Esc => state.modal = None,
+            KeyCode::Up | KeyCode::Char('k') => state.move_modal(-1),
+            KeyCode::Down | KeyCode::Char('j') => state.move_modal(1),
+            KeyCode::Enter => {
+                // Echte und simulierte Konflikte gleich behandeln.
+                if let Some(opt) = state.modal_selected_option() {
+                    state.apply_quick_switch(&opt)?;
+                } else {
+                    state.modal = None;
+                }
+            }
+            _ => {}
+        }
+        return Ok(LoopAction::Continue);
+    }
+    match key.code {
+        KeyCode::Char('q') => return Ok(LoopAction::Quit),
+        KeyCode::Char('1') => state.set_tab(Tab::Packages)?,
+        KeyCode::Char('2') => state.set_tab(Tab::BigLevers)?,
+        KeyCode::Tab => state.cycle_pane(),
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.move_selection(-1);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.move_selection(1);
+        }
+        KeyCode::Char(' ') => {
+            // Tab 2: Big-Lever global toggeln (T07).
+            if state.tab == Tab::BigLevers {
+                state.toggle_big_lever()?;
+            } else if state.selected_choice().is_some() {
+                state.cycle_choice_option()?;
+            } else {
+                state.pane = Pane::Middle;
+                state.toggle_selected_flag()?;
+            }
+        }
+        KeyCode::Enter => {
+            // Auf Paket mit Konflikt: Modal; auf ||: umschalten; auf Choice: Option wechseln.
+            if state.selected_or_group().is_some() {
+                state.cycle_or_decision()?;
+            } else if state.selected_choice().is_some() {
+                state.cycle_choice_option()?;
+            } else if let Some(pkg) = state.selected_package() {
+                state.open_conflict_for_package(&pkg);
+            }
+        }
+        KeyCode::Char('/') => {
+            state.filtering = true;
+            state.filter.clear();
+        }
+        // Hilfe-Overlay (review3 Task 5.2).
+        KeyCode::Char('?') | KeyCode::F(1) => {
+            state.modal = Some(Modal::Help);
+        }
+        KeyCode::Char('s' | 'S') => {
+            let path = state.plan_path.clone().unwrap_or_else(|| {
+                args.plan
+                    .clone()
+                    .unwrap_or_else(|| PathBuf::from("plan.toml"))
+            });
+            state.plan_path = Some(path);
+            state.save()?;
+        }
+        KeyCode::Char('e' | 'E') => {
+            // Vor Export synchronisieren (T07): ungespeicherte Toggles landen im Export.
+            sync_plan_from_state(&mut state.plan, &state.engine, &state.world);
+            export_plan(&state.plan, export_default)?;
+            state.dirty = false;
+            state.status = format!("Exportiert: {}", export_default.display());
+        }
+        KeyCode::Char('v' | 'V') => {
+            // Export synchron halten (dirty oder noch nie exportiert),
+            // dann verifizieren (review3 Task 5.3).
+            let exported_use = export_default.join("etc/portage/package.use");
+            if state.dirty || !exported_use.is_file() {
+                sync_plan_from_state(&mut state.plan, &state.engine, &state.world);
+                match export_plan(&state.plan, export_default) {
+                    Ok(_) => {
+                        state.dirty = false;
+                        state.status = format!("Exportiert: {}", export_default.display());
+                    }
+                    Err(e) => {
+                        state.status = format!("Export-Fehler: {e:#}");
+                        return Ok(LoopAction::Continue);
+                    }
+                }
+            }
+            let runner = VerifyRunner::against_configroot(export_default);
+            match runner.run() {
+                Ok(o) => {
+                    state.status = if o.success {
+                        format!("Verify OK: {} Pakete", o.packages.len())
+                    } else {
+                        format!("Verify FEHLER: {} Probleme", o.problems.len())
+                    };
+                }
+                Err(e) => state.status = format!("Verify-Fehler: {e:#}"),
+            }
+        }
+        KeyCode::Esc => {
+            // Erst Filter loeschen, dann Pane, dann beenden (review3 1.2).
+            if !state.filter.is_empty() {
+                state.filter.clear();
+                state.apply_filter_only();
+            } else if state.pane != Pane::Left {
+                state.pane = Pane::Left;
+            } else {
+                return Ok(LoopAction::Quit);
+            }
+        }
+        _ => {}
+    }
+    Ok(LoopAction::Continue)
+}
+
 /// Event-Loop bis Quit (`q` oder `Esc` ohne Modal/Filter).
 fn event_loop(
     terminal: &mut DefaultTerminal,
@@ -82,6 +261,10 @@ fn event_loop(
     args: &TuiArgs,
     export_default: &std::path::Path,
 ) -> anyhow::Result<()> {
+    let mut ctx = RunnerContext {
+        args,
+        export_default,
+    };
     loop {
         terminal.draw(|frame| render(frame, &state))?;
         // Idle-Recompute (T05): Bei ausstehenden Deltas schneller pollen,
@@ -104,111 +287,9 @@ fn event_loop(
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return Ok(());
         }
-        if state.filtering {
-            match key.code {
-                KeyCode::Esc | KeyCode::Enter => state.filtering = false,
-                KeyCode::Backspace => {
-                    state.filter.pop();
-                    state.apply_filter_only();
-                }
-                KeyCode::Char(c) => {
-                    state.filter.push(c);
-                    state.apply_filter_only();
-                }
-                _ => {}
-            }
-            continue;
-        }
-        if state.modal.is_some() {
-            match key.code {
-                KeyCode::Esc => state.modal = None,
-                KeyCode::Up | KeyCode::Char('k') => state.move_modal(-1),
-                KeyCode::Down | KeyCode::Char('j') => state.move_modal(1),
-                KeyCode::Enter => {
-                    // Echte und simulierte Konflikte gleich behandeln.
-                    if let Some(opt) = state.modal_selected_option() {
-                        state.apply_quick_switch(&opt)?;
-                    } else {
-                        state.modal = None;
-                    }
-                }
-                _ => {}
-            }
-            continue;
-        }
-        match key.code {
-            KeyCode::Char('q') => return Ok(()),
-            KeyCode::Char('1') => state.set_tab(Tab::Packages)?,
-            KeyCode::Char('2') => state.set_tab(Tab::BigLevers)?,
-            KeyCode::Tab => state.cycle_pane(),
-            KeyCode::Up | KeyCode::Char('k') => {
-                state.move_selection(-1);
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                state.move_selection(1);
-            }
-            KeyCode::Char(' ') => {
-                // Tab 2: Big-Lever global toggeln (T07).
-                if state.tab == Tab::BigLevers {
-                    state.toggle_big_lever()?;
-                } else if state.selected_choice().is_some() {
-                    state.cycle_choice_option()?;
-                } else {
-                    state.pane = Pane::Middle;
-                    state.toggle_selected_flag()?;
-                }
-            }
-            KeyCode::Enter => {
-                // Auf Paket mit Konflikt: Modal; auf ||: umschalten; auf Choice: Option wechseln.
-                if state.selected_or_group().is_some() {
-                    state.cycle_or_decision()?;
-                } else if state.selected_choice().is_some() {
-                    state.cycle_choice_option()?;
-                } else if let Some(pkg) = state.selected_package() {
-                    state.open_conflict_for_package(&pkg);
-                }
-            }
-            KeyCode::Char('/') => {
-                state.filtering = true;
-                state.filter.clear();
-            }
-            KeyCode::Char('s' | 'S') => {
-                let path = state.plan_path.clone().unwrap_or_else(|| {
-                    args.plan
-                        .clone()
-                        .unwrap_or_else(|| PathBuf::from("plan.toml"))
-                });
-                state.plan_path = Some(path);
-                state.save()?;
-            }
-            KeyCode::Char('e' | 'E') => {
-                // Vor Export synchronisieren (T07): ungespeicherte Toggles landen im Export.
-                sync_plan_from_state(&mut state.plan, &state.engine, &state.world);
-                export_plan(&state.plan, export_default)?;
-                state.dirty = false;
-                state.status = format!("Exportiert: {}", export_default.display());
-            }
-            KeyCode::Char('v' | 'V') => {
-                let runner = VerifyRunner::against_configroot(export_default);
-                match runner.run() {
-                    Ok(o) => {
-                        state.status = if o.success {
-                            format!("Verify OK: {} Pakete", o.packages.len())
-                        } else {
-                            format!("Verify FEHLER: {} Probleme", o.problems.len())
-                        };
-                    }
-                    Err(e) => state.status = format!("Verify-Fehler: {e:#}"),
-                }
-            }
-            KeyCode::Esc => {
-                if state.pane != Pane::Left {
-                    state.pane = Pane::Left;
-                } else {
-                    return Ok(());
-                }
-            }
-            _ => {}
+        match dispatch_key(&mut state, key, &mut ctx)? {
+            LoopAction::Continue => {}
+            LoopAction::Quit => return Ok(()),
         }
     }
 }
@@ -245,6 +326,7 @@ mod tests {
             binhost: None,
             make_conf: d.path().join("make.conf"),
             package_use: d.path().join("package.use"),
+            perf_report: false,
         };
         let world = resolve_world(&common, Some(&plan_path)).unwrap();
         assert_eq!(world, vec!["app-misc/jq".to_string()]);

@@ -100,11 +100,54 @@ fn apply_use_defaults_order() {
     let mut iuse = HashMap::new();
     iuse.insert("doc".into(), true);
     iuse.insert("ssl".into(), false);
+    iuse.insert("gui".into(), false);
     let active = p.apply_use_defaults(&iuse, "app-misc/jq");
     // Maske gewinnt ueber global USE.
     assert!(!active.contains("ssl"));
     assert!(active.contains("gui"));
     assert!(!active.contains("doc"));
+    // Force ohne IUSE-Eintrag bleibt draussen (kein Phantom-Flag, review3).
+    iuse.remove("gui");
+    let active = p.apply_use_defaults(&iuse, "app-misc/jq");
+    assert!(!active.contains("gui"));
+}
+
+#[test]
+fn global_and_package_use_are_iuse_gated() {
+    // `openmp`/`cet` global bzw. pro Paket, aber nicht in IUSE des Pakets:
+    // duerfen nicht in den effektiven Flags landen (review3 Task 1.1).
+    let mut p = Profile::test_default();
+    p.global_use = ["openmp".into(), "ssl".into()].into_iter().collect();
+    p.package_use
+        .insert("app-misc/jq".into(), vec!["cet".into(), "-ssl".into()]);
+    p.use_force = ["phantom".into()].into_iter().collect();
+    p.sync_pattern_caches();
+    let mut iuse = HashMap::new();
+    iuse.insert("ssl".into(), false);
+    let active = p.apply_use_defaults(&iuse, "app-misc/jq");
+    assert!(!active.contains("openmp"));
+    assert!(!active.contains("cet"));
+    assert!(!active.contains("phantom"));
+    // `package.use` schaltet deklarierte Flags weiterhin (`-ssl` greift).
+    assert!(!active.contains("ssl"));
+    // Plattform-Flag bleibt aktiv.
+    assert!(active.contains("amd64"));
+}
+
+#[test]
+fn use_expand_hidden_loads_from_make_defaults() {
+    let d = tmpdir();
+    let profiles = d.path().join("profiles");
+    let base = profiles.join("base");
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::write(
+        base.join("make.defaults"),
+        "ARCH=amd64\nUSE_EXPAND_HIDDEN=\"ABI_X86 ELIBC\"\n",
+    )
+    .unwrap();
+    let prof = load_profile_stack(&base, &profiles).unwrap();
+    assert!(prof.use_expand_hidden.contains("ABI_X86"));
+    assert!(prof.use_expand_hidden.contains("ELIBC"));
 }
 
 #[test]
@@ -151,6 +194,7 @@ fn package_use_matches_version_and_slot() {
     );
     p.package_use
         .insert("dev-libs/openssl:0".into(), vec!["ssl".into()]);
+    p.sync_pattern_caches();
     // Version 3.0/Slot 0: beide Atome treffen.
     let tokens = p.package_use_for("dev-libs/openssl", "3.0", "0/0");
     assert!(tokens.contains(&"tls-compression".to_string()));
@@ -227,6 +271,7 @@ fn package_use_never_beats_mask_or_force() {
     );
     p.use_mask.insert("masked_flag".into());
     p.use_force.insert("forced_flag".into());
+    p.sync_pattern_caches();
     let mut iuse = HashMap::new();
     iuse.insert("masked_flag".into(), false);
     iuse.insert("forced_flag".into(), false);

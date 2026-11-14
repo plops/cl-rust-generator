@@ -75,12 +75,44 @@ der Choice und die Paket-Differenz des selektierten Flags.
 | `1` / `2` | Tab Pakete / Big Levers (Tab 2 berechnet lazy beim ersten Besuch) |
 | `Tab` | Pane wechseln (links ↔ Mitte ↔ rechts) |
 | `↑`/`↓`, `j`/`k` | Bewegen (rechts scrollt den Blame-Text; alle Listen folgen der Selektion) |
-| `/` | Filtern (nur Liste, kein Re-Resolve — sofort) |
+| `/` | Filtern (nur Liste, kein Re-Resolve — sofort; `Esc` löscht zuerst den Filter) |
+| `?` / `F1` | Hilfe-Overlay (Metriken, Navigation, Ablauf; `Esc`/`?`/`q` schliesst) |
 | `Space` | Flag toggeln (Mitte) · Big Lever global toggeln (Tab 2) · Choice-Option wechseln |
 | `Enter` | `\|\|`-Alternative durchschalten · Choice-Option wechseln · Konflikt öffnen |
 | `S` / `E` | In `plan.toml` speichern / als Portage-Dateien exportieren (`E` synct vorher) |
-| `V` | Export gegen `emerge --pretend` verifizieren |
-| `q` / `Esc` | Beenden |
+| `V` | Export synchron halten (bei Bedarf auto-`Export`) und gegen `emerge --pretend` verifizieren |
+| `Esc` | Filter löschen → Pane links → beenden |
+| `q` | Beenden |
+
+## Zahlen & Metriken richtig lesen
+
+Fußzeile: `Binpkg <X> (<hits>/<total> Hits)` summiert komprimierte
+Binhost-`SIZE`-Werte über alle Runtime-Pakete — Pakete **ohne** Treffer im
+Binhost-Index zählen mit `0 B` (die echte Größe wird dann unterschätzt;
+Trefferquote beachten, ohne `--binhost` steht `n/a`). `Quell-DL` enthält
+ausschließlich Quell-Tarballs (`Manifest`-`DIST`-Summen), **keine**
+Binärpakete. `Build-Only` fasst Buildzeit-Pakete
+(`DEPEND`/`BDEPEND`/`IDEPEND`) als `bin`/`src` zusammen.
+
+Mitte: `Pkg-Quell-DL` ist der Quell-Tarball des Pakets **selbst** — nicht der
+ganze Subgraph. `0 B`-Deltas sind normal bei geteilten Abhängigkeiten
+(z. B. bleibt `gtk+` über `firefox-bin` im Graphen, Refcount ≥ 2) oder bei
+reinen Compile-Features ohne neue Pakete/Distfiles.
+
+Rechte Pane: `Flag <x> zieht:` listet hinzukommende/entfallende Pakete. Wird
+eine gezogene Abhängigkeit von anderen gehalten, zeigt **Voll-Ersparnis**,
+was das Abschalten *überall* (`Flag aus bei: …`) bzw. zusätzlich mit
+Entfernen von Welt-Paketen (`world entfernen: …`) sparen würde —
+`deltas <pkg> --deep` gibt denselben Bericht auf der Konsole.
+
+Tab 2 (`Big Levers`): globales Abschalten je Flag, sortiert nach Ersparnis;
+die Detailbox unten nennt Beschreibung, betroffene Pakete und
+hinzu/entfernte Pakete. Hinweis: `dl` kann beim Abschalten *steigen*
+(`!flag?`-Bedingungen ziehen dann Fallback-Quellen) — korrekt, kein Bug.
+
+USE-Flag-Bedeutungen stehen offline in der TUI (rechte Pane): lokale
+Beschreibung aus `<repo>/profiles/use.local.desc` vor globaler aus
+`profiles/use.desc` bzw. `profiles/desc/*.desc`.
 
 ## Drei Anwendungsfälle Schritt für Schritt
 
@@ -132,8 +164,25 @@ in der Runtime.
 
 `index-check` (Repo-Statistik) · `graph` (Gesamtgrößen + Paketliste) ·
 `blame <pkg>` (Abhängigkeitsketten) · `deltas <pkg>` (Flag-Deltas mit
-Paket-Diff) · `big-levers` (systemweite Hebel, multi-core) · `init`
+Paket-Diff; `--deep` zusätzlich mit Shared-Blocker-Bericht) ·
+`big-levers` (systemweite Hebel, multi-core) · `init`
 (`world` → `plan.toml`) · `export` · `verify` · `tui` (Default).
+
+Alle Lese-Subcommands (`index-check`, `graph`, `deltas`, `big-levers`)
+kennen `--perf-report` (Phasen-Report; misst nur mit
+`--features perf-metrics`, sonst Hinweis).
+
+### Verify-Reihenfolge: `[S]`/`[E]` → `[V]`
+
+`verify` braucht einen Export als Configroot. Fehlt das Verzeichnis, gibt es
+eine klare Meldung statt `ENOENT` (zuerst `[E]` bzw. `gentoo-dep-tui
+export`). Beim Export ergänzt das Tool `make.profile`, `make.conf` und
+`repos.conf` aus dem laufenden `/etc/portage` (nur falls dort vorhanden und
+im Export fehlend), sodass `emerge --root <out> --config-root <out> @world`
+auf einem Gentoo-Host direkt gegen die laufenden Paketdefinitionen läuft.
+Außerhalb von Gentoo ist das ein No-Op. In der TUI hält `[V]` den Export
+selbst synchron (bei `dirty` oder fehlendem Export erst Export, dann
+Verify).
 
 ## Performance (gemessen, `tests/perf_system.rs`)
 
@@ -153,6 +202,18 @@ Latenz-Budgets stehen als Tests in `tests/perf_system.rs`
 (`cargo test --release --test perf_system -- --nocapture`).
 HIL-Abgleich auf echtem Snapshot: `GENTOO_HIL_REPO=/tmp/gentoo-hil cargo test
 --release` (hier nicht verfügbar, Test skippt sauber).
+
+Detaillierte Phasen-Zeiten und Counter gibt es mit
+`cargo test --release --features perf-metrics --test perf_system --
+--nocapture` (Feature `perf-metrics`: null Overhead im Standard-Build;
+`--perf-report` an den Lese-Subcommands druckt denselben Report).
+
+Skriptbare TUI-Tests mit Text-Screenshots: `cargo test --test tui_screencaps`
+fährt das Review-Szenario (Suche, Shared-Blocker, Big Levers, Hilfe,
+Konflikt) gegen `ratatui::TestBackend` und sichert alle Frames nach
+`target/screencaps/review_screencaps.md` (Ablage via
+`GENTOO_SCREENCAP_OUT=<pfad>` wählbar); gegen echten Snapshot optional mit
+`GENTOO_HIL_REPO=…` (`hil_screencaps.md`).
 
 **Echte Messung auf dem Gentoo-Host** (32 Kerne, 13.700 Pakete im Index,
 156 `world`-Einträge → 570 Knoten im Graphen; Stand 2026-11-13):

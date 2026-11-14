@@ -81,6 +81,7 @@ fn hil_full_setup(
     profile.package_use =
         gentoo_dep_tui::mod_02_profile::read_package_use(&base.join("package.use"))
             .unwrap_or_default();
+    profile.sync_pattern_caches();
     let index = gentoo_dep_tui::mod_05_repo_index::RepoIndex::load(&root, None, &profile).unwrap();
     Some((profile, index, world))
 }

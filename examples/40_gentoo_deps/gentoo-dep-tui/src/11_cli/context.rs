@@ -63,6 +63,7 @@ pub fn load_profile(args: &CommonArgs) -> anyhow::Result<Profile> {
     // Hinweis: `load_profile_stack` laedt bereits den kompletten Stapel
     // (`use.mask`/`use.force`/`package.mask`); kein Nachladen noetig.
     profile.package_use = mod_02_profile::read_package_use(&args.package_use).unwrap_or_default();
+    profile.sync_pattern_caches();
     Ok(profile)
 }
 

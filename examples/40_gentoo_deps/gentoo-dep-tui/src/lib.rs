@@ -5,6 +5,8 @@
 //! aus `prompt.txt`, sinngemaess): Typen → Profil → Manifest → Binhost →
 //! Repo-Index → Graph → Kaskade → Delta → plan.toml → Export/Verify → CLI → TUI.
 
+#[path = "00_perf.rs"]
+pub mod mod_00_perf;
 #[path = "01_types.rs"]
 pub mod mod_01_types;
 #[path = "02_profile.rs"]

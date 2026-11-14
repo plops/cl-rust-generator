@@ -18,12 +18,8 @@ pub fn render(frame: &mut Frame, state: &AppState) {
         frame.render_widget(Paragraph::new("Terminal zu klein"), area);
         return;
     }
-    // Footer waechst bei Status/Dirty (sonst clippt er bei 80x24, Task 4.2).
-    let footer_len = if state.status.is_empty() && !state.dirty {
-        3
-    } else {
-        4
-    };
+    // Footer-Hoehe aus Inhalt und Breite (kein Clipping bei 80x24, review3 5.1).
+    let footer_len = footer_height(state, frame.area().width);
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -46,6 +42,9 @@ pub fn render(frame: &mut Frame, state: &AppState) {
         }
         Some(Modal::SimulatedConflict { conflict, selected }) => {
             render_conflict_modal(frame, area, conflict, *selected);
+        }
+        Some(Modal::Help) => {
+            render_help_modal(frame, area);
         }
         None => {}
     }
@@ -137,6 +136,8 @@ mod right;
 mod tests;
 
 use bottom::border_style;
-use bottom::{render_conflict_modal, render_footer, render_levers};
+use bottom::{
+    footer_height, render_conflict_modal, render_footer, render_help_modal, render_levers,
+};
 use middle::render_middle;
 use right::render_right;

@@ -2,12 +2,19 @@
 
 use crate::mod_05_repo_index::RepoIndex;
 use crate::mod_07_cascade::resolve_with_cascade;
-use crate::mod_08_delta::{big_levers, package_deltas};
+use crate::mod_08_delta::{big_levers, package_deltas, shared_removal_impact};
 use crate::mod_09_plan_toml::Plan;
 use crate::mod_10_export_verify::{Exported, VerifyRunner};
 
 use super::args::{BlameArgs, CommonArgs, DeltasArgs, ExportArgs, InitArgs, VerifyArgs};
 use super::{load_context, load_profile};
+
+/// `--perf-report` am Ende eines Subcommands ausgeben (mit/ohne Feature).
+fn maybe_perf_report(args: &CommonArgs) {
+    if args.perf_report {
+        println!("{}", crate::mod_00_perf::perf_report());
+    }
+}
 
 pub(super) fn cmd_index_check(args: &CommonArgs) -> anyhow::Result<()> {
     let profile = load_profile(args)?;
@@ -17,6 +24,7 @@ pub(super) fn cmd_index_check(args: &CommonArgs) -> anyhow::Result<()> {
     println!("Cache-Dateien: {}", index.cache_files);
     println!("Ladezeit   : {} ms", index.load_ms);
     println!("Binhost-Treffer: {:.1} %", index.binhost_hit_rate() * 100.0);
+    maybe_perf_report(args);
     Ok(())
 }
 
@@ -50,6 +58,7 @@ pub(super) fn cmd_graph(args: &CommonArgs) -> anyhow::Result<()> {
     for cpv in cpvs {
         println!("  {cpv}");
     }
+    maybe_perf_report(args);
     Ok(())
 }
 
@@ -78,7 +87,7 @@ pub(super) fn cmd_blame(args: &BlameArgs) -> anyhow::Result<()> {
 
 pub(super) fn cmd_deltas(args: &DeltasArgs) -> anyhow::Result<()> {
     let ctx = load_context(&args.common)?;
-    let engine = ctx.engine();
+    let mut engine = ctx.engine();
     let any_binhost = engine.index.has_any_binhost();
     for d in package_deltas(&engine, &ctx.world, &args.package)? {
         let sign = if d.delta.binpkg_bytes <= 0 { "" } else { "+" };
@@ -122,6 +131,53 @@ pub(super) fn cmd_deltas(args: &DeltasArgs) -> anyhow::Result<()> {
             d.conflict.map(|_| " CONFLICT").unwrap_or("")
         );
     }
+    if args.deep {
+        cmd_deltas_deep(&mut engine, &ctx.world, &args.package)?;
+    }
+    maybe_perf_report(&args.common);
+    Ok(())
+}
+
+/// Shared-Blocker-Bericht je Flag (`deltas --deep`, review3 Task 4.1).
+///
+/// Nur Flags mit Mit-Blockern werden gezeigt (stille Flags erzaehlen
+/// nichts Neues gegenueber dem Marginal-Delta).
+fn cmd_deltas_deep(
+    engine: &mut crate::mod_06_graph::Engine<'_>,
+    world: &[String],
+    package: &str,
+) -> anyhow::Result<()> {
+    let base = resolve_with_cascade(engine, world)?;
+    for d in package_deltas(engine, world, package)? {
+        let impact = shared_removal_impact(engine, world, &base, package, &d.flag)?;
+        let Some(impact) = impact else { continue };
+        if impact.flag_blockers.is_empty() && impact.world_blockers.is_empty() {
+            continue;
+        }
+        println!("  deep {} [{}]:", impact.flag, impact.package);
+        println!(
+            "    ohne Flag-Blocker: {} B bin / {} B dl (-{} pkg)",
+            impact.without_flag_blockers.metrics.binpkg_bytes,
+            impact.without_flag_blockers.metrics.download_bytes,
+            impact.without_flag_blockers.removed_packages.len()
+        );
+        if !impact.flag_blockers.is_empty() {
+            let blockers: Vec<String> = impact
+                .flag_blockers
+                .iter()
+                .map(|(p, f)| format!("{p} [{f}]"))
+                .collect();
+            println!("    Flag aus bei: {}", blockers.join(", "));
+        }
+        println!(
+            "    inkl. world-Entfernung: {} B bin (-{} pkg)",
+            impact.without_all_blockers.metrics.binpkg_bytes,
+            impact.without_all_blockers.removed_packages.len()
+        );
+        if !impact.world_blockers.is_empty() {
+            println!("    world entfernen: {}", impact.world_blockers.join(", "));
+        }
+    }
     Ok(())
 }
 
@@ -142,6 +198,7 @@ pub(super) fn cmd_big_levers(args: &CommonArgs) -> anyhow::Result<()> {
             lever.conflicts
         );
     }
+    maybe_perf_report(args);
     Ok(())
 }
 
@@ -205,5 +262,9 @@ pub fn export_plan(plan: &Plan, out_dir: &std::path::Path) -> anyhow::Result<Exp
             use_lines.push(format!("{} {}", opt.atom, opt.suggested_use.join(" ")));
         }
     }
-    crate::mod_10_export_verify::write_export_files(out_dir, world, use_lines)
+    let exported = crate::mod_10_export_verify::write_export_files(out_dir, world, use_lines)?;
+    // Host-Anbindung (make.profile/make.conf/repos.conf), damit Verify auf
+    // einem Gentoo-Host direkt funktioniert (review3 Task 5.3).
+    crate::mod_10_export_verify::supplement_host_portage_config(out_dir)?;
+    Ok(exported)
 }

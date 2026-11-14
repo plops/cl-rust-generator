@@ -19,7 +19,7 @@
 use std::io::Write;
 use std::time::Instant;
 
-use gentoo_dep_tui::mod_01_types::perf_snapshot_and_reset;
+use gentoo_dep_tui::mod_00_perf::{perf_format, perf_snapshot_and_reset};
 use gentoo_dep_tui::mod_02_profile::Profile;
 use gentoo_dep_tui::mod_05_repo_index::RepoIndex;
 use gentoo_dep_tui::mod_06_graph::Engine;
@@ -148,8 +148,12 @@ fn sys_perf_index_load() {
     let ms = start.elapsed().as_millis();
     let stats = perf_snapshot_and_reset();
     println!(
-        "sys_perf_index_load: {ms} ms, cache_files={}, resolve_calls={}",
-        index.cache_files, stats.resolve_calls
+        "sys_perf_index_load: {ms} ms, cache_files={}, resolve_calls={}, mask_checks={}, dep_parses={}\n{}",
+        index.cache_files,
+        stats.resolve_calls,
+        stats.index_mask_checks,
+        stats.index_dep_parses,
+        perf_format(&stats),
     );
     assert!(index.packages() >= 120, "Pakete: {}", index.packages());
 }
@@ -167,13 +171,21 @@ fn sys_perf_package_deltas() {
     let ms = start.elapsed().as_millis();
     let stats = perf_snapshot_and_reset();
     println!(
-        "sys_perf_package_deltas: {ms} ms, flags={}, resolve_calls={}, build_extra_calls={}, delta_runs={}",
+        "sys_perf_package_deltas: {ms} ms, flags={}, resolve_calls={}, build_extra_calls={}, delta_runs={}, effective_use_calls={}, noop_skips={}\n{}",
         deltas.len(),
         stats.resolve_calls,
         stats.build_extra_calls,
-        stats.delta_runs
+        stats.delta_runs,
+        stats.effective_use_calls,
+        stats.delta_noop_skips,
+        perf_format(&stats),
     );
     assert_eq!(deltas.len(), 60);
+    // Mit Feature muessen die neuen Zaehler laufen (ohne bleiben sie 0).
+    if gentoo_dep_tui::mod_00_perf::perf_enabled() {
+        assert!(stats.effective_use_calls > 0);
+        assert_eq!(stats.delta_runs, 60);
+    }
     // Simulationen sind Runtime-only: kein BDEPEND-Lauf.
     assert_eq!(stats.build_extra_calls, 0);
     // svt-av1 zieht svt-av1 (REQUIRED_USE-Kaskade `svt-av1? ( aom )`
@@ -208,11 +220,18 @@ fn sys_perf_big_levers() {
     let ms_all = t2.elapsed().as_millis();
     let calls_all = perf_snapshot_and_reset();
     println!(
-        "sys_perf_big_levers: 1 Thread {ms1} ms (resolves={}), Pool {ms_all} ms (resolves={}), levers={}",
+        "sys_perf_big_levers: 1 Thread {ms1} ms (resolves={}, runs={}), Pool {ms_all} ms (resolves={}, runs={}), levers={}\n{}",
         calls1.resolve_calls,
+        calls1.big_levers_runs,
         calls_all.resolve_calls,
-        all.len()
+        calls_all.big_levers_runs,
+        all.len(),
+        perf_format(&calls_all),
     );
+    if gentoo_dep_tui::mod_00_perf::perf_enabled() {
+        assert_eq!(calls1.big_levers_runs, 1);
+        assert_eq!(calls_all.big_levers_runs, 1);
+    }
     assert_eq!(one, all, "1 Thread vs. Pool muessen identisch sein");
     assert!(!all.is_empty());
 }
@@ -267,9 +286,11 @@ fn sys_perf_tui_workflow() {
     let levers_ms = t5.elapsed().as_millis();
     let stats = perf_snapshot_and_reset();
     println!(
-        "sys_perf_tui_workflow: init={init_ms}ms moves10={moves_ms}ms ensure={ensure_ms}ms filter5={filter_ms}ms toggle3={toggle_ms}ms levers={levers_ms}ms levers_n={} resolves={}",
+        "sys_perf_tui_workflow: init={init_ms}ms moves10={moves_ms}ms ensure={ensure_ms}ms filter5={filter_ms}ms toggle3={toggle_ms}ms levers={levers_ms}ms levers_n={} resolves={} cache_hits={} cache_misses={}",
         state.levers.len(),
-        stats.resolve_calls
+        stats.resolve_calls,
+        stats.delta_cache_hits,
+        stats.delta_cache_misses,
     );
     // Harte Budgets: Navigation + Filter duerfen nie blockieren.
     assert!(moves_ms < 1000, "10x Cursor zu langsam: {moves_ms}ms");

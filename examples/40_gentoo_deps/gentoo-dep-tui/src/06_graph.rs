@@ -56,6 +56,10 @@ impl<'a> Engine<'a> {
     }
 
     /// Effektive USE-Flags: Profil-Defaults, explizite Overrides obendrauf.
+    ///
+    /// Maske und Force behalten Vorrang vor Overrides (review3 Task 1.1):
+    /// ein Override kann kein maskiertes Flag einschalten und kein
+    /// erzwungenes (deklariertes) Flag abschalten.
     pub fn effective_use(&self, pkg: &PkgVersion) -> HashSet<String> {
         let mut active = self.profile.effective_defaults(
             &pkg.iuse_defaults,
@@ -70,6 +74,12 @@ impl<'a> Engine<'a> {
                 } else {
                     active.remove(flag);
                 }
+            }
+        }
+        active.retain(|f| !self.profile.use_mask.contains(f));
+        for flag in &self.profile.use_force {
+            if pkg.iuse_defaults.contains_key(flag) {
+                active.insert(flag.clone());
             }
         }
         active

@@ -112,6 +112,13 @@ pub fn load_profile_stack(profile_path: &Path, profiles_dir: &Path) -> EngineRes
                 profile.use_expand.extend(vars.iter().cloned());
                 expand_vars.extend(vars);
             }
+            // Versteckte Expand-Prefixe (review3 Task 1.1): z. B.
+            // `USE_EXPAND_HIDDEN="ABI_X86 ELIBC KERNEL"`.
+            if let Some(hidden) = kv.get("USE_EXPAND_HIDDEN") {
+                profile
+                    .use_expand_hidden
+                    .extend(hidden.split_whitespace().map(str::to_string));
+            }
         }
     }
     // Zweiter Durchgang: Werte je Variable (Kind ueberschreibt Eltern).
@@ -135,6 +142,8 @@ pub fn load_profile_stack(profile_path: &Path, profiles_dir: &Path) -> EngineRes
     if profile.accept_keywords.remove("~${ARCH}") {
         profile.accept_keywords.insert(format!("~{}", profile.arch));
     }
+    // Mask-/Use-Regeln einmal parsen (Hot Loops nutzen nur den Index).
+    profile.sync_pattern_caches();
     Ok(profile)
 }
 

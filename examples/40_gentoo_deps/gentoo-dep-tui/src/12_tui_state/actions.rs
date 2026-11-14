@@ -109,6 +109,13 @@ impl<'a> AppState<'a> {
     /// Schnellauswahl links (T05): Selektion + Cache-Hit sofort, Miss → `deltas_loading`.
     pub fn select_left_fast(&mut self, idx: usize) {
         if self.left.is_empty() {
+            // Nichts selektierbar (z. B. Filter ohne Treffer): keine stale
+            // Mitte/rechts zeigen (review3 Task 1.2).
+            self.flag_deltas.clear();
+            self.deltas_loading = false;
+            self.middle_selected = 0;
+            self.middle_scroll = 0;
+            self.right_scroll = 0;
             return;
         }
         self.left_selected = idx.min(self.left.len() - 1);
@@ -119,21 +126,23 @@ impl<'a> AppState<'a> {
                 if let Some(cached) = self.delta_cache.get(&key) {
                     self.flag_deltas = cached.clone();
                     self.deltas_loading = false;
+                    crate::mod_00_perf::perf_count_cache_hit();
                 } else {
                     // Miss: alte Flags nicht weiter anzeigen (Idle-Recompute folgt).
                     self.flag_deltas.clear();
                     self.deltas_loading = true;
+                    crate::mod_00_perf::perf_count_cache_miss();
                 }
-                self.middle_selected = 0;
-                self.middle_scroll = 0;
             }
             _ => {
                 self.flag_deltas.clear();
                 self.deltas_loading = false;
-                self.middle_selected = 0;
-                self.middle_scroll = 0;
             }
         }
+        // Paketwechsel: Mitte und rechts von vorn (review3 Task 1.2).
+        self.middle_selected = 0;
+        self.middle_scroll = 0;
+        self.right_scroll = 0;
     }
 
     /// Laenge der mittleren Liste (Flags, Kandidaten oder Choice-Optionen).
@@ -389,7 +398,7 @@ impl<'a> AppState<'a> {
             Some(Modal::SimulatedConflict { conflict, selected }) => {
                 conflict.options.get(*selected).cloned()
             }
-            None => None,
+            Some(Modal::Help) | None => None,
         }
     }
 
@@ -424,12 +433,12 @@ impl<'a> AppState<'a> {
                 .map(|c| c.options.len().max(1))
                 .unwrap_or(1),
             Some(Modal::SimulatedConflict { conflict, .. }) => conflict.options.len().max(1),
-            None => return,
+            Some(Modal::Help) | None => return,
         };
         let selected = match &mut self.modal {
             Some(Modal::Conflict { selected, .. })
             | Some(Modal::SimulatedConflict { selected, .. }) => selected,
-            None => return,
+            Some(Modal::Help) | None => return,
         };
         *selected = (*selected as i32 + delta).rem_euclid(len as i32) as usize;
     }

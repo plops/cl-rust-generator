@@ -9,12 +9,16 @@ use std::path::PathBuf;
 
 use ratatui::widgets::{ListState, TableState};
 
-use crate::mod_01_types::{BigLever, ConflictInfo, EngineResult, FlagDelta};
-use crate::mod_02_profile::Profile;
+use crate::mod_01_types::{BigLever, ConflictInfo, EngineResult, FlagDelta, atom_cpn};
+use crate::mod_02_profile::{Profile, UseDescriptions};
 use crate::mod_05_repo_index::RepoIndex;
 use crate::mod_06_graph::{Engine, ResolvedGraph};
+use crate::mod_07_cascade::CascadeOutcome;
 use crate::mod_07_cascade::resolve_with_cascade;
-use crate::mod_08_delta::{big_levers, big_levers_with_base, package_deltas};
+use crate::mod_08_delta::SharedRemovalImpact;
+use crate::mod_08_delta::{
+    big_levers, big_levers_with_base, package_deltas, package_deltas_with_base,
+};
 use crate::mod_09_plan_toml::Plan;
 
 /// Haupttab.
@@ -70,6 +74,8 @@ pub enum Modal {
         /// Selektierte Option.
         selected: usize,
     },
+    /// Hilfe-Overlay (`?`/`F1` oeffnet, `Esc`/`?`/`q` schliesst, review3 5.2).
+    Help,
 }
 
 /// Applikationszustand (Engine-Bundle + UI-Selektion).
@@ -86,6 +92,16 @@ pub struct AppState<'a> {
     pub graph: ResolvedGraph,
     /// Aktuelle Konflikte.
     pub conflicts: Vec<ConflictInfo>,
+    /// Letzte Kaskaden-Baseline (fuer Delta-/Lever-Simulationen ohne
+    /// Doppel-Resolve, review3 Task 3.4).
+    pub last_outcome: Option<CascadeOutcome>,
+    /// Voll-Ersparnis-Analyse zum aktuell selektierten Flag (on demand,
+    /// review3 Task 4.1).
+    pub shared_impact: Option<SharedRemovalImpact>,
+    /// Cache-Schluessel zu `shared_impact` (Paket, Flag, Overrides-Fingerprint).
+    pub shared_impact_key: Option<(String, String, String)>,
+    /// Offline-USE-Flag-Beschreibungen (`use.desc` & Co., review3 Task 4.2).
+    pub use_descriptions: UseDescriptions,
     /// Aktiver Tab / Fokus.
     pub tab: Tab,
     /// Aktive Pane.
@@ -149,6 +165,10 @@ impl<'a> AppState<'a> {
             plan_path,
             graph: ResolvedGraph::default(),
             conflicts: Vec::new(),
+            last_outcome: None,
+            shared_impact: None,
+            shared_impact_key: None,
+            use_descriptions: UseDescriptions::load(&profile.profiles_dir),
             tab: Tab::Packages,
             pane: Pane::Left,
             left: Vec::new(),
@@ -184,6 +204,9 @@ impl<'a> AppState<'a> {
         } else {
             None
         };
+        // Baseline fuer Delta-/Lever-Simulationen behalten (ein Klon pro
+        // Refresh spart je Paketbesuch einen vollen Kaskadenlauf, 3.4).
+        self.last_outcome = Some(outcome.clone());
         self.graph = outcome.graph;
         self.conflicts = outcome.conflicts;
         self.delta_cache.clear();
@@ -203,7 +226,12 @@ impl<'a> AppState<'a> {
     /// Big Levers bei Bedarf (nach-)berechnen (T05: lazy beim Tab-2-Besuch).
     pub(super) fn ensure_levers(&mut self) -> EngineResult<()> {
         if self.levers_dirty {
-            self.levers = big_levers(&self.engine, &self.world).unwrap_or_default();
+            self.levers = match &self.last_outcome {
+                Some(base) => {
+                    big_levers_with_base(&self.engine, &self.world, base).unwrap_or_default()
+                }
+                None => big_levers(&self.engine, &self.world).unwrap_or_default(),
+            };
             self.levers_dirty = false;
             self.sync_table_states();
         }
@@ -222,7 +250,7 @@ impl<'a> AppState<'a> {
         let mut seen = HashSet::new();
         for atom in &self.world {
             // Welt-Atom auf cpn kuerzen (Version/Slot-Anteile abstreifen).
-            let cpn = world_atom_cpn(atom);
+            let cpn = atom_cpn(atom);
             if self.graph.nodes.contains_key(&cpn) {
                 left.push(LeftEntry::WorldPkg(cpn.clone()));
                 seen.insert(cpn);
@@ -256,7 +284,15 @@ impl<'a> AppState<'a> {
 
     /// Nur Filter anwenden (T05): kein Resolve, keine Deltas, kein Big-Levers.
     pub fn apply_filter_only(&mut self) {
+        let prev = self.selected_package();
         self.rebuild_left();
+        // Hat der Filter die Selektion geaendert (klassischer Fall: vor dem
+        // Tippen war ein anderes Paket selektiert), Mitte sofort auf das neue
+        // Paket umstellen statt stale Flags zu zeigen (review3 Task 1.2).
+        if self.selected_package() != prev {
+            self.select_left_fast(self.left_selected);
+            return;
+        }
         // Selektion erhalten, falls Paket noch sichtbar; Mitte unangetastet.
         self.middle_selected = self
             .middle_selected
@@ -281,9 +317,17 @@ impl<'a> AppState<'a> {
                 if let Some(cached) = self.delta_cache.get(&key) {
                     self.flag_deltas = cached.clone();
                     self.deltas_loading = false;
+                    crate::mod_00_perf::perf_count_cache_hit();
                 } else {
                     self.deltas_loading = true;
-                    let deltas = package_deltas(&self.engine, &self.world, &cpn)?;
+                    crate::mod_00_perf::perf_count_cache_miss();
+                    // Baseline wiederverwenden statt neu aufloesen (3.4).
+                    let deltas = match &self.last_outcome {
+                        Some(base) => {
+                            package_deltas_with_base(&self.engine, &self.world, &cpn, base)?
+                        }
+                        None => package_deltas(&self.engine, &self.world, &cpn)?,
+                    };
                     self.delta_cache.insert(key, deltas.clone());
                     self.flag_deltas = deltas;
                     self.deltas_loading = false;
@@ -303,6 +347,10 @@ impl<'a> AppState<'a> {
             self.middle_selected = 0;
         }
         self.middle_scroll = 0;
+        // Paketwechsel: rechte Pane von vorn (review3 Task 1.2).
+        if self.selected_package() != prev_pkg {
+            self.right_scroll = 0;
+        }
         Ok(())
     }
 
@@ -311,6 +359,51 @@ impl<'a> AppState<'a> {
         if self.deltas_loading {
             self.rebuild_middle()?;
         }
+        self.ensure_shared_impact()?;
+        Ok(())
+    }
+
+    /// Aktuell selektiertes Middle-Flag (fuer Doku + Shared-Analyse).
+    pub fn selected_flag(&self) -> Option<String> {
+        self.flag_deltas
+            .get(self.middle_selected)
+            .map(|d| d.flag.clone())
+    }
+
+    /// Voll-Ersparnis-Analyse zum aktuellen Flag nachladen (on demand,
+    /// Ergebnis im State gecacht, review3 Task 4.1).
+    pub fn ensure_shared_impact(&mut self) -> EngineResult<()> {
+        let (package, flag) = match (self.selected_package(), self.selected_flag()) {
+            (Some(p), Some(f)) => (p, f),
+            _ => {
+                self.shared_impact = None;
+                self.shared_impact_key = None;
+                return Ok(());
+            }
+        };
+        if self.tab != Tab::Packages {
+            return Ok(());
+        }
+        let key = (
+            package.clone(),
+            flag.clone(),
+            overrides_fingerprint(&self.engine),
+        );
+        if self.shared_impact_key.as_ref() == Some(&key) {
+            return Ok(());
+        }
+        let impact = match &self.last_outcome {
+            Some(outcome) => crate::mod_08_delta::shared_removal_impact(
+                &self.engine,
+                &self.world,
+                outcome,
+                &package,
+                &flag,
+            )?,
+            None => None,
+        };
+        self.shared_impact = impact;
+        self.shared_impact_key = Some(key);
         Ok(())
     }
 }
@@ -323,34 +416,8 @@ pub(super) fn current_set(engine: &Engine<'_>, package: &str) -> HashSet<String>
     }
 }
 
-/// Welt-Atom auf `cat/pkg` kuerzen (Version nach letztem `-` mit Ziffer).
-fn world_atom_cpn(atom: &str) -> String {
-    let atom = atom.split_whitespace().next().unwrap_or(atom);
-    let atom = atom.trim_start_matches(['=', '<', '>', '~']);
-    match atom.find('/') {
-        Some(slash) => {
-            let (cat, rest) = atom.split_at(slash);
-            let pkg = &rest[1..];
-            // `name-version`: letzter `-`, wonach eine Ziffer folgt.
-            let mut cut = None;
-            for (i, c) in pkg.char_indices() {
-                if c == '-'
-                    && pkg[i + 1..]
-                        .chars()
-                        .next()
-                        .is_some_and(|d| d.is_ascii_digit())
-                {
-                    cut = Some(i);
-                }
-            }
-            match cut {
-                Some(i) => format!("{cat}/{}", &pkg[..i]),
-                None => atom.to_string(),
-            }
-        }
-        None => atom.to_string(),
-    }
-}
+// Hinweis: Welt-Atome werden zentral via `crate::mod_01_types::atom_cpn`
+// gekuerzt (review3 Task 1.3); kein lokales Duplikat mehr.
 
 /// Overrides-Fingerabdruck fuer den Delta-Cache (T05).
 pub(super) fn overrides_fingerprint(engine: &Engine<'_>) -> String {

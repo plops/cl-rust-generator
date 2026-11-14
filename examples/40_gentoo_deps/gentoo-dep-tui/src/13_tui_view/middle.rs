@@ -18,7 +18,7 @@ pub(super) fn render_middle(frame: &mut Frame, state: &AppState, area: Rect) {
                 lines.push(Line::from(vec![
                     Span::styled(cpn.clone(), Style::default().add_modifier(Modifier::BOLD)),
                     Span::raw(format!(
-                        "  Binpkg: {}  Subgraph-DL: {}",
+                        "  Binpkg: {}  Pkg-Quell-DL: {}",
                         fmt_bytes(node.binpkg as i64),
                         fmt_bytes(node.download as i64)
                     )),
@@ -44,7 +44,10 @@ pub(super) fn render_middle(frame: &mut Frame, state: &AppState, area: Rect) {
                         bin,
                         Style::default().fg(delta_color(delta.delta.binpkg_bytes)),
                     ),
-                    Span::raw(format!(" / {} dl", fmt_bytes(delta.delta.download_bytes))),
+                    Span::raw(format!(
+                        " / {}",
+                        fmt_delta(delta.delta.download_bytes, "dl")
+                    )),
                 ];
                 // Paket-Differenz kurz anzeigen (T08).
                 if !delta.added_packages.is_empty() || !delta.removed_packages.is_empty() {

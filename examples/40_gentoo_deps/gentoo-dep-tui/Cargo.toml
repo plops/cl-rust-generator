@@ -18,5 +18,9 @@ walkdir = "2"
 ratatui = "0.30"
 crossterm = "0.29"
 
+[features]
+default = []
+perf-metrics = []
+
 [dev-dependencies]
 tempfile = "3"

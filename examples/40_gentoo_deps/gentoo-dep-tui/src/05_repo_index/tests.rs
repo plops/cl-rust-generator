@@ -43,11 +43,13 @@ fn mask_and_keywords_filter() {
     write_cache(repo, "app-misc", "jq-1.9.0", &unstable);
     let mut prof = test_profile();
     prof.package_mask = vec!["=app-misc/jq-1.8.0".into()];
+    prof.sync_pattern_caches();
     let idx = RepoIndex::load(repo, None, &prof).unwrap();
     // 1.9.0 Testing ohne ~amd64 raus, 1.8.0 maskiert → nichts waehlbar.
     assert!(idx.select("app-misc/jq").is_none());
     prof.accept_keywords.insert("~amd64".into());
     prof.package_mask.clear();
+    prof.sync_pattern_caches();
     let idx = RepoIndex::load(repo, None, &prof).unwrap();
     assert_eq!(idx.select("app-misc/jq").unwrap().version_str, "1.9.0");
 }
@@ -65,9 +67,11 @@ fn dash_unmask_reverts_earlier_mask() {
     );
     let mut prof = test_profile();
     prof.package_mask = vec!["sys-libs/libseccomp".into(), "-sys-libs/libseccomp".into()];
+    prof.sync_pattern_caches();
     let idx = RepoIndex::load(repo, None, &prof).unwrap();
     assert!(idx.select("sys-libs/libseccomp").is_some());
     prof.package_mask = vec!["sys-libs/libseccomp".into()];
+    prof.sync_pattern_caches();
     let idx = RepoIndex::load(repo, None, &prof).unwrap();
     assert!(idx.select("sys-libs/libseccomp").is_none());
 }
@@ -83,6 +87,7 @@ fn slot_subslot_matches_exactly() {
     write_cache(repo, "virtual", "libcrypt-1-r2", &slot1);
     let mut prof = test_profile();
     prof.package_mask = vec!["virtual/libcrypt:0/1".into()];
+    prof.sync_pattern_caches();
     let idx = RepoIndex::load(repo, None, &prof).unwrap();
     let sel = idx.select("virtual/libcrypt").unwrap();
     assert_eq!(sel.version_str, "2");

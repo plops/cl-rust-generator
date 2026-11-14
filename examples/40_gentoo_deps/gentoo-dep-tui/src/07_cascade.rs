@@ -34,16 +34,19 @@ pub fn resolve_with_cascade(
     engine: &mut Engine<'_>,
     world: &[String],
 ) -> EngineResult<CascadeOutcome> {
-    resolve_with_cascade_opts(engine, world, true)
+    resolve_with_cascade_opts(engine, world, true, true)
 }
 
-/// Wie `resolve_with_cascade`, aber `include_build` steuerbar (Sims: `false`).
+/// Wie `resolve_with_cascade`, aber `include_build` und Blame-Sammlung
+/// steuerbar (Simulationen: `false, false`, review3 Task 3.3).
 pub fn resolve_with_cascade_opts(
     engine: &mut Engine<'_>,
     world: &[String],
     include_build: bool,
+    collect_blame: bool,
 ) -> EngineResult<CascadeOutcome> {
-    crate::mod_01_types::perf_count_cascade();
+    crate::mod_00_perf::perf_count_cascade();
+    let _timer = crate::mod_00_perf::ScopeTimer::cascade();
     // User-Intents klonen und auf einer Arbeitskopie (`sim`) kaskadieren:
     // `engine.overrides` bleibt unveraendert (nur explizite User-Intents),
     // Kaskaden-Forces landen in `sim.overrides` (`effective_overrides`).
@@ -54,7 +57,8 @@ pub fn resolve_with_cascade_opts(
     let mut conflicts: Vec<ConflictInfo>;
     let mut rounds = 0u8;
     loop {
-        let graph = crate::mod_06_graph::resolve_with_options(&sim, world, include_build)?;
+        let graph =
+            crate::mod_06_graph::resolve_with_options(&sim, world, include_build, collect_blame)?;
         // Schritt-Scope: `step` leiht `sim` mutabel, danach ist es frei.
         // `forced` ueberlebt Runden (Ping-Pong-Schutz bei harten Widerspruechen).
         let (changed, step_conflicts) = {
@@ -63,6 +67,7 @@ pub fn resolve_with_cascade_opts(
             (step.changed, step.conflicts)
         };
         rounds += 1;
+        crate::mod_00_perf::perf_count_cascade_round();
         // Nur ungeloeste Konflikte der Finalrunde berichten (transiente
         // Zwischenstaende konvergieren weg und sind keine User-Befunde).
         conflicts = step_conflicts;
@@ -74,19 +79,32 @@ pub fn resolve_with_cascade_opts(
                 effective_overrides: sim.overrides.clone(),
             });
         }
-        if !changed || rounds >= MAX_ROUNDS {
-            let graph = crate::mod_06_graph::resolve_with_options(&sim, world, include_build)?;
+        if !changed {
+            // Overrides unveraendert: der eben aufgeloeste Graph ist final —
+            // kein redundanter Extra-`resolve` (review3 Task 3.3).
+            return Ok(CascadeOutcome {
+                graph,
+                conflicts,
+                rounds,
+                effective_overrides: sim.overrides.clone(),
+            });
+        }
+        if rounds >= MAX_ROUNDS {
+            let graph = crate::mod_06_graph::resolve_with_options(
+                &sim,
+                world,
+                include_build,
+                collect_blame,
+            )?;
             let mut out_conflicts = conflicts;
-            if changed {
-                out_conflicts.push(ConflictInfo {
-                    package: "(kaskade)".into(),
-                    message: format!(
-                        "Fixpunkt konvergiert nicht nach {rounds} Runden (oszillierende Constraints)"
-                    ),
-                    caused_by: Vec::new(),
-                    options: vec![],
-                });
-            }
+            out_conflicts.push(ConflictInfo {
+                package: "(kaskade)".into(),
+                message: format!(
+                    "Fixpunkt konvergiert nicht nach {rounds} Runden (oszillierende Constraints)"
+                ),
+                caused_by: Vec::new(),
+                options: vec![],
+            });
             return Ok(CascadeOutcome {
                 graph,
                 conflicts: out_conflicts,

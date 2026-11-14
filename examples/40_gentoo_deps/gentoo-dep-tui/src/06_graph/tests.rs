@@ -422,3 +422,39 @@ fn any_of_records_alternative() {
     assert_eq!(graph.alternatives.len(), 1);
     assert_eq!(graph.alternatives[0].candidates.len(), 2);
 }
+
+#[test]
+fn overrides_do_not_beat_mask_or_force() {
+    // Maske/Force behalten Vorrang vor expliziten Overrides (review3 1.1).
+    let index = repo_index(vec![
+        PkgFixture::new("app/a")
+            .iuse("masked forced plain")
+            .rdepend("")
+            .binpkg(Some(10))
+            .build(),
+    ]);
+    let mut profile = Profile::test_default();
+    profile.use_mask.insert("masked".into());
+    profile.use_force.insert("forced".into());
+    profile.use_force.insert("undeclared".into());
+    let mut engine = Engine::new(&index, &profile);
+    engine.overrides.insert(
+        "app/a".into(),
+        [
+            ("masked".to_string(), true),
+            ("forced".to_string(), false),
+            ("plain".to_string(), true),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    let pkg = index.select("app/a").unwrap();
+    let active = engine.effective_use(pkg);
+    // Override `masked=an` scheitert an der Maske ...
+    assert!(!active.contains("masked"));
+    // ... Override `forced=aus` scheitert an Force ...
+    assert!(active.contains("forced"));
+    // ... gewoehnliche Overrides wirken, Force ohne IUSE bleibt draussen.
+    assert!(active.contains("plain"));
+    assert!(!active.contains("undeclared"));
+}

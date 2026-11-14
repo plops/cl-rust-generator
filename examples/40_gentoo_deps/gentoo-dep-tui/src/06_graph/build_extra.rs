@@ -53,7 +53,8 @@ pub(super) fn resolve_build_extra(
     engine: &Engine<'_>,
     graph: &mut ResolvedGraph,
 ) -> EngineResult<()> {
-    crate::mod_01_types::perf_count_build_extra();
+    crate::mod_00_perf::perf_count_build_extra();
+    let _timer = crate::mod_00_perf::ScopeTimer::build_extra();
     let runtime: HashSet<String> = graph.nodes.keys().cloned().collect();
     // cpn → (cpv, Binpkg-Groesse).
     let mut build: HashMap<String, (String, u64)> = HashMap::new();

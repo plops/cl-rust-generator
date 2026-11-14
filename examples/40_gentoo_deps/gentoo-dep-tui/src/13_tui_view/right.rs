@@ -7,9 +7,10 @@ use ratatui::text::{Line, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::mod_01_types::ConflictInfo;
+use crate::mod_08_delta::SharedRemovalImpact;
 use crate::mod_12_tui_state::{AppState, Pane};
 
-use super::bottom::border_style;
+use super::bottom::{border_style, fmt_bytes};
 
 pub(super) fn render_right(frame: &mut Frame, state: &AppState, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
@@ -101,6 +102,22 @@ pub(super) fn render_right(frame: &mut Frame, state: &AppState, area: Rect) {
                 lines.push(Line::from("bin: n/a (ohne --binhost)"));
             }
         }
+        // Offline-USE-Flag-Doku (`use.desc`/`use.local.desc`, lokal zuerst).
+        if let (Some(pkg), Some(delta)) = (
+            state.selected_package(),
+            state.flag_deltas.get(state.middle_selected),
+        ) && let Some(text) = state.use_descriptions.describe(Some(&pkg), &delta.flag)
+        {
+            lines.push(Line::from(""));
+            lines.push(Line::from(format!("{}: {text}", delta.flag)));
+        }
+        // Shared-Blocker-/Voll-Ersparnis-Analyse (nur passend zur Selektion).
+        if let Some(impact) = &state.shared_impact
+            && state.selected_package().as_deref() == Some(impact.package.as_str())
+            && state.selected_flag().as_deref() == Some(impact.flag.as_str())
+        {
+            render_shared_impact(&mut lines, impact);
+        }
     }
     let para = Paragraph::new(Text::from(lines))
         .block(
@@ -112,4 +129,45 @@ pub(super) fn render_right(frame: &mut Frame, state: &AppState, area: Rect) {
         .scroll((state.right_scroll, 0))
         .wrap(Wrap { trim: true });
     frame.render_widget(para, area);
+}
+
+/// Voll-Ersparnis-Abschnitt: was spart das Flag, wenn Mit-Blocker
+/// ebenfalls abgeschaltet bzw. Welt-Pakete entfernt werden.
+fn render_shared_impact(lines: &mut Vec<Line>, impact: &SharedRemovalImpact) {
+    lines.push(Line::from(""));
+    lines.push(Line::styled(
+        format!("Voll-Ersparnis {} [{}]:", impact.flag, impact.package),
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
+    let wfb = &impact.without_flag_blockers;
+    lines.push(Line::from(format!(
+        "ohne Flag-Blocker: {} bin / {} dl (-{} pkg)",
+        fmt_bytes(wfb.metrics.binpkg_bytes),
+        fmt_bytes(wfb.metrics.download_bytes),
+        wfb.removed_packages.len()
+    )));
+    if !impact.flag_blockers.is_empty() {
+        lines.push(Line::from("Flag aus bei:"));
+        for (cpn, flag) in impact.flag_blockers.iter().take(8) {
+            lines.push(Line::from(format!("  {cpn} [{flag}]")));
+        }
+        if impact.flag_blockers.len() > 8 {
+            lines.push(Line::from("  (...)"));
+        }
+    }
+    let wab = &impact.without_all_blockers;
+    lines.push(Line::from(format!(
+        "inkl. world-Entfernung: {} bin (-{} pkg)",
+        fmt_bytes(wab.metrics.binpkg_bytes),
+        wab.removed_packages.len()
+    )));
+    if !impact.world_blockers.is_empty() {
+        lines.push(Line::from("world entfernen:"));
+        for w in impact.world_blockers.iter().take(8) {
+            lines.push(Line::from(format!("  {w}")));
+        }
+        if impact.world_blockers.len() > 8 {
+            lines.push(Line::from("  (...)"));
+        }
+    }
 }

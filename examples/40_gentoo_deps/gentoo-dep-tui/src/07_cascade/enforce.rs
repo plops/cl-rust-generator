@@ -167,12 +167,9 @@ impl<'e, 'a, 'u, 'f> CascadeStep<'e, 'a, 'u, 'f> {
     }
 
     /// Aktuell gespeicherter Ziel-Zustand (Override oder Fallback).
-    fn dep_fixed(&self, target: &str, target_cpv: &str, flag: &str) -> bool {
-        self.engine
-            .index
-            .select_cpv(target, target_cpv)
-            .map(|pkg| self.engine.effective_use(pkg).contains(flag))
-            .unwrap_or(false)
+    fn dep_fixed(&mut self, target: &str, target_cpv: &str, flag: &str) -> bool {
+        self.cached_effective(target, target_cpv)
+            .is_some_and(|active| active.contains(flag))
     }
 
     /// Ob das Ziel das Flag in IUSE kennt (exakte aufgeloeste Version).
@@ -348,11 +345,8 @@ impl<'e, 'a, 'u, 'f> CascadeStep<'e, 'a, 'u, 'f> {
             return false; // Selbst-Constraint: kein Ausweg.
         }
         let current_on = self
-            .engine
-            .index
-            .select_cpv(parent, parent_cpv)
-            .map(|pkg| self.engine.effective_use(pkg).contains(flag))
-            .unwrap_or(false);
+            .cached_effective(parent, parent_cpv)
+            .is_some_and(|active| active.contains(flag));
         if current_on == need_on {
             return true; // Bereits passend (Fixpunkt klaert den Rest).
         }

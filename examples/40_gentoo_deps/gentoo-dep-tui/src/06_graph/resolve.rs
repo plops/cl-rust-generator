@@ -15,25 +15,32 @@ use super::{Engine, ResolvedGraph, ResolvedNode};
 
 /// Welt-Atome → `ResolvedGraph` (ohne Kaskaden, siehe `07_cascade`).
 pub fn resolve(engine: &Engine<'_>, world: &[String]) -> EngineResult<ResolvedGraph> {
-    resolve_with_options(engine, world, true)
+    resolve_with_options(engine, world, true, true)
 }
 
-/// Wie `resolve`, aber `BDEPEND`-Extra optional (Simulationen: `false`).
+/// Wie `resolve`, aber `BDEPEND`-Extra und Blame-Sammlung steuerbar.
+///
+/// `collect_blame = false` (Delta-/Big-Lever-Simulationen): `reverse`,
+/// `refcounts`, `alternatives` und `via_map` entfallen — `out_edges`,
+/// Knoten und Diagnosen bleiben vollstaendig (review3 Task 3.3).
 pub fn resolve_with_options(
     engine: &Engine<'_>,
     world: &[String],
     include_build: bool,
+    collect_blame: bool,
 ) -> EngineResult<ResolvedGraph> {
-    crate::mod_01_types::perf_count_resolve();
+    crate::mod_00_perf::perf_count_resolve();
+    let _timer = crate::mod_00_perf::ScopeTimer::resolve();
     let mut graph = ResolvedGraph {
         world: world.to_vec(),
         ..ResolvedGraph::default()
     };
-    // Queue: (cpn, waehlendes Atom). Das Atom transportiert die exakte
-    // Versions-/Slot-Restriktion, sodass `resolve_target` dieselbe Version
-    // waehlt wie `select_for_dep` am Fundort (kein stiller Fallback auf
-    // die neueste Version, Task 2.1).
-    let mut queue: VecDeque<(String, String)> = VecDeque::new();
+    // Queue: (cpn, geparstes waehlendes Atom). Das Atom transportiert die
+    // exakte Versions-/Slot-Restriktion, sodass `resolve_target` dieselbe
+    // Version waehlt wie `select_for_dep` am Fundort (kein stiller Fallback
+    // auf die neueste Version, Task 2.1). Geparst statt String: kein
+    // `to_string()` + `Dep::parse()` pro BFS-Knoten (review3 Task 3.3).
+    let mut queue: VecDeque<(String, Dep)> = VecDeque::new();
 
     for atom in world {
         let dep = Dep::parse(atom).map_err(|e| EngineError::Parse {
@@ -44,7 +51,7 @@ pub fn resolve_with_options(
             continue;
         }
         match engine.index.select_for_dep(&dep) {
-            Some(pkg) => queue.push_back((pkg.cpn.clone(), atom.clone())),
+            Some(pkg) => queue.push_back((pkg.cpn.clone(), dep)),
             None => {
                 // Z. B. veralteter Slot-Pin in world: warnen, Rest aufloesen.
                 graph.skipped.push(SkippedDep {
@@ -78,37 +85,50 @@ pub fn resolve_with_options(
 
         // Via-Flags aus dem *rohen* Baum einsammeln (evaluate_use loescht sie).
         // `RDEPEND` + `PDEPEND` bilden gemeinsam die Runtime (Task 2.1).
+        // Ohne Blame-Bedarf entfaellt das (Simulationen, review3 Task 3.3).
         let mut via_map: HashMap<String, (usize, Option<String>)> = HashMap::new();
-        collect_via_flags(
-            pkg.entry.metadata.rdepend.list(),
-            &active,
-            &mut via_map,
-            None,
-            0,
-        );
-        collect_via_flags(
-            pkg.entry.metadata.pdepend.list(),
-            &active,
-            &mut via_map,
-            None,
-            0,
-        );
+        if collect_blame {
+            collect_via_flags(
+                pkg.entry.metadata.rdepend.list(),
+                &active,
+                &mut via_map,
+                None,
+                0,
+            );
+            collect_via_flags(
+                pkg.entry.metadata.pdepend.list(),
+                &active,
+                &mut via_map,
+                None,
+                0,
+            );
+        }
 
         let mut evaluated = DepEntry::evaluate_use(pkg.entry.metadata.rdepend.list(), &active);
         evaluated.extend(DepEntry::evaluate_use(
             pkg.entry.metadata.pdepend.list(),
             &active,
         ));
-        descend_runtime(engine, &evaluated, &cpn, &mut graph, &mut queue, &via_map)?;
+        descend_runtime(
+            engine,
+            &evaluated,
+            &cpn,
+            &mut graph,
+            &mut queue,
+            &via_map,
+            collect_blame,
+        )?;
     }
 
-    // Reference-Counts aus Rueckwaertskanten.
-    for (child, parents) in &graph.reverse {
-        let mut distinct = HashSet::new();
-        for (parent, _) in parents {
-            distinct.insert(parent.clone());
+    // Reference-Counts aus Rueckwaertskanten (nur mit Blame-Daten).
+    if collect_blame {
+        for (child, parents) in &graph.reverse {
+            let mut distinct = HashSet::new();
+            for (parent, _) in parents {
+                distinct.insert(parent.clone());
+            }
+            graph.refcounts.insert(child.clone(), distinct.len());
         }
-        graph.refcounts.insert(child.clone(), distinct.len());
     }
 
     if include_build {
@@ -121,12 +141,11 @@ pub fn resolve_with_options(
 fn resolve_target<'b>(
     engine: &'b Engine<'b>,
     cpn: &str,
-    required_by: &str,
+    required_by: &Dep,
 ) -> EngineResult<&'b PkgVersion> {
-    if let Ok(dep) = Dep::parse(required_by)
-        && dep.cpn.to_string() == cpn
-        && dep.version.is_some()
-        && let Some(pkg) = engine.index.select_for_dep(&dep)
+    if required_by.cpn.to_string() == cpn
+        && required_by.version.is_some()
+        && let Some(pkg) = engine.index.select_for_dep(required_by)
     {
         return Ok(pkg);
     }
@@ -140,13 +159,15 @@ fn resolve_target<'b>(
 }
 
 /// Evaluierte Runtime-Eintraege absteigen (rekursiv, zyklenfest via `nodes`).
+#[allow(clippy::too_many_arguments)]
 fn descend_runtime(
     engine: &Engine<'_>,
     entries: &[DepEntry],
     owner: &str,
     graph: &mut ResolvedGraph,
-    queue: &mut VecDeque<(String, String)>,
+    queue: &mut VecDeque<(String, Dep)>,
     via_map: &HashMap<String, (usize, Option<String>)>,
+    collect_blame: bool,
 ) -> EngineResult<()> {
     for entry in entries {
         match entry {
@@ -165,24 +186,50 @@ fn descend_runtime(
                     });
                     continue;
                 };
-                let via = via_map.get(&pkg.cpn).and_then(|(_, v)| v.clone());
-                push_reverse(graph, &pkg.cpn, owner, via);
+                if collect_blame {
+                    let via = via_map.get(&pkg.cpn).and_then(|(_, v)| v.clone());
+                    push_reverse(graph, &pkg.cpn, owner, via);
+                }
                 if !graph.nodes.contains_key(&pkg.cpn) {
                     // Das waehlende Atom weiterreichen (Version/Slot bleiben
                     // erhalten, Task 2.1) statt nacktem cpn.
-                    queue.push_back((pkg.cpn.clone(), dep.to_string()));
+                    queue.push_back((pkg.cpn.clone(), dep.clone()));
                 }
             }
             DepEntry::AllOf(children) => {
-                descend_runtime(engine, children, owner, graph, queue, via_map)?;
+                descend_runtime(
+                    engine,
+                    children,
+                    owner,
+                    graph,
+                    queue,
+                    via_map,
+                    collect_blame,
+                )?;
             }
             DepEntry::AnyOf(children) => {
-                descend_any_of(engine, children, owner, graph, queue, via_map)?;
+                descend_any_of(
+                    engine,
+                    children,
+                    owner,
+                    graph,
+                    queue,
+                    via_map,
+                    collect_blame,
+                )?;
             }
             DepEntry::ExactlyOneOf(children) | DepEntry::AtMostOneOf(children) => {
                 // Aufloesung wie `||` (Validierung in `07_cascade`); keine
                 // Alternative im engeren Sinne (`||`-Task T06).
-                pick_first(engine, children, owner, graph, queue, via_map)?;
+                pick_first(
+                    engine,
+                    children,
+                    owner,
+                    graph,
+                    queue,
+                    via_map,
+                    collect_blame,
+                )?;
             }
             DepEntry::UseConditional { .. } => {
                 // Nach evaluate_use unerwartet: defensiv ignorieren.
@@ -193,13 +240,15 @@ fn descend_runtime(
 }
 
 /// `||`-Gruppe: erste gueltige Option (oder gespeicherte Entscheidung).
+#[allow(clippy::too_many_arguments)]
 fn descend_any_of(
     engine: &Engine<'_>,
     children: &[DepEntry],
     owner: &str,
     graph: &mut ResolvedGraph,
-    queue: &mut VecDeque<(String, String)>,
+    queue: &mut VecDeque<(String, Dep)>,
     via_map: &HashMap<String, (usize, Option<String>)>,
+    collect_blame: bool,
 ) -> EngineResult<()> {
     let mut candidates: Vec<String> = Vec::new();
     let mut selectable: Vec<(usize, String, Dep)> = Vec::new();
@@ -235,29 +284,33 @@ fn descend_any_of(
         .cloned()
         .unwrap();
     push_edge(graph, owner, &sel_atom);
-    graph.alternatives.push(AlternativeChoice {
-        group_id,
-        owner: owner.to_string(),
-        candidates,
-        selected: sel_idx,
-    });
-    let via = via_map.get(&sel_cpn).and_then(|(_, v)| v.clone());
-    push_reverse(graph, &sel_cpn, owner, via);
+    if collect_blame {
+        graph.alternatives.push(AlternativeChoice {
+            group_id,
+            owner: owner.to_string(),
+            candidates,
+            selected: sel_idx,
+        });
+        let via = via_map.get(&sel_cpn).and_then(|(_, v)| v.clone());
+        push_reverse(graph, &sel_cpn, owner, via);
+    }
     if !graph.nodes.contains_key(&sel_cpn) {
         // Waehlendes `||`-Atom weiterreichen (Version/Slot, Task 2.1).
-        queue.push_back((sel_cpn, sel_atom.to_string()));
+        queue.push_back((sel_cpn, sel_atom));
     }
     Ok(())
 }
 
 /// Erste gueltige Option ohne Alternativen-Eintrag.
+#[allow(clippy::too_many_arguments)]
 fn pick_first(
     engine: &Engine<'_>,
     children: &[DepEntry],
     owner: &str,
     graph: &mut ResolvedGraph,
-    queue: &mut VecDeque<(String, String)>,
+    queue: &mut VecDeque<(String, Dep)>,
     via_map: &HashMap<String, (usize, Option<String>)>,
+    collect_blame: bool,
 ) -> EngineResult<()> {
     let mut atoms = Vec::new();
     DepEntry::walk_atoms(children, &mut |d| atoms.push(d.clone()));
@@ -268,10 +321,12 @@ fn pick_first(
         }
         if let Some(pkg) = engine.index.select_for_dep(&atom) {
             push_edge(graph, owner, &atom);
-            let via = via_map.get(&pkg.cpn).and_then(|(_, v)| v.clone());
-            push_reverse(graph, &pkg.cpn, owner, via);
+            if collect_blame {
+                let via = via_map.get(&pkg.cpn).and_then(|(_, v)| v.clone());
+                push_reverse(graph, &pkg.cpn, owner, via);
+            }
             if !graph.nodes.contains_key(&pkg.cpn) {
-                queue.push_back((pkg.cpn.clone(), atom.to_string()));
+                queue.push_back((pkg.cpn.clone(), atom));
             }
             return Ok(());
         }

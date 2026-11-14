@@ -5,9 +5,7 @@
 
 use std::collections::HashSet;
 
-use portage_atom::Dep;
-
-use crate::mod_01_types::BlameLink;
+use crate::mod_01_types::{BlameLink, atom_cpn};
 
 use super::ResolvedGraph;
 
@@ -19,7 +17,7 @@ impl ResolvedGraph {
     /// Welt-Pakete sind gueltige Wurzeln (auch bei Zyklen zwischen ihnen,
     /// Task 2.2) — statt `[]` liefert ein Welt-Zyklus echte Ketten.
     pub fn blame(&self, target: &str) -> Vec<Vec<BlameLink>> {
-        let world: HashSet<String> = self.world.iter().map(|w| world_cpn(w)).collect();
+        let world: HashSet<String> = self.world.iter().map(|w| atom_cpn(w)).collect();
         let mut chains = Vec::new();
         let mut path = vec![target.to_string()];
         self.blame_dfs(&world, target, &mut path, &mut chains, 0);
@@ -80,10 +78,5 @@ impl ResolvedGraph {
     }
 }
 
-/// Welt-Atom auf `cat/pkg` kuerzen (fuer Blame-Wurzeln, Task 2.2).
-fn world_cpn(atom: &str) -> String {
-    if let Ok(dep) = Dep::parse(atom) {
-        return dep.cpn.to_string();
-    }
-    atom.split(':').next().unwrap_or(atom).to_string()
-}
+// Hinweis: Welt-Atome werden zentral via `crate::mod_01_types::atom_cpn`
+// gekuerzt (review3 Task 1.3); kein lokales Duplikat mehr.
