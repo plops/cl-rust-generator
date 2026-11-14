@@ -25,15 +25,14 @@ pub fn flag_delta(
     flag: &str,
 ) -> EngineResult<FlagDelta> {
     perf_count_delta();
+    let before_outcome = resolve_with_cascade_opts(&mut engine.fork(), world, false)?;
+    // Toggle gegen Post-Kaskaden-Stand (nicht gegen reine Defaults).
+    let toggled_on = !current_from_base(&before_outcome, engine, package).contains(flag);
     let mut sim = engine.fork();
     sim.overrides
         .entry(package.to_string())
         .or_default()
-        .insert(
-            flag.to_string(),
-            !current_flags(engine, package).contains(flag),
-        );
-    let before_outcome = resolve_with_cascade_opts(&mut engine.fork(), world, false)?;
+        .insert(flag.to_string(), toggled_on);
     let outcome = resolve_with_cascade_opts(&mut sim, world, false)?;
     Ok(build_delta(engine, package, flag, &before_outcome, outcome))
 }
@@ -47,8 +46,7 @@ pub fn flag_delta_with_base(
     before: &CascadeOutcome,
 ) -> EngineResult<FlagDelta> {
     perf_count_delta();
-    let current = current_flags(engine, package);
-    let toggled_on = !current.contains(flag);
+    let toggled_on = !current_from_base(before, engine, package).contains(flag);
     let mut sim = engine.fork();
     sim.overrides
         .entry(package.to_string())
@@ -66,7 +64,7 @@ fn build_delta(
     before: &CascadeOutcome,
     outcome: CascadeOutcome,
 ) -> FlagDelta {
-    let current = current_flags(engine, package);
+    let current = current_from_base(before, engine, package);
     let before_totals = before.graph.totals();
     let new_totals = outcome.graph.totals();
     let (added, removed) = diff_packages(&before.graph, &outcome.graph);
@@ -78,17 +76,26 @@ fn build_delta(
             binpkg_bytes: new_totals.binpkg_bytes - before_totals.binpkg_bytes,
             download_bytes: new_totals.download_bytes - before_totals.download_bytes,
         },
-        cascade_note: cascade_note(
-            engine,
-            package,
-            flag,
-            !current_flags(engine, package).contains(flag),
-        ),
+        cascade_note: cascade_note(engine, package, flag, !current.contains(flag)),
         conflict: outcome.conflicts.into_iter().next(),
         added_packages: added,
         removed_packages: removed,
         has_binhost_data: outcome.graph.nodes.values().any(|n| n.binpkg > 0)
             || before.graph.nodes.values().any(|n| n.binpkg > 0),
+    }
+}
+
+/// Post-Kaskaden-Stand aus der Baseline (fällt auf Defaults + Overrides
+/// zurueck, wenn das Paket fehlt). Kaskaden-erzwungene Flags zeigen hier
+/// `[x]` statt fälschlich `[ ]` (Task 3.1).
+fn current_from_base(
+    before: &CascadeOutcome,
+    engine: &Engine<'_>,
+    package: &str,
+) -> HashSet<String> {
+    match before.graph.nodes.get(package) {
+        Some(node) => node.use_flags.clone(),
+        None => current_flags(engine, package),
     }
 }
 
@@ -112,7 +119,7 @@ fn diff_packages(before: &ResolvedGraph, after: &ResolvedGraph) -> (Vec<String>,
 }
 
 /// Ob ein Flag ein Plattform-Fakt ist (ARCH/ELIBC/KERNEL, nicht toggelbar).
-fn is_platform_flag(profile: &crate::mod_02_profile::Profile, flag: &str) -> bool {
+pub(crate) fn is_platform_flag(profile: &crate::mod_02_profile::Profile, flag: &str) -> bool {
     flag == profile.arch.to_lowercase()
         || (!profile.elibc.is_empty() && flag == format!("elibc_{}", profile.elibc.to_lowercase()))
         || (!profile.kernel.is_empty()
@@ -154,15 +161,36 @@ fn cascade_note(
 /// Paketanzahl und Konfliktanzahl. Sortiert nach Binpkg-Ersparnis.
 pub fn big_levers(engine: &Engine<'_>, world: &[String]) -> EngineResult<Vec<BigLever>> {
     let base_outcome = resolve_with_cascade_opts(&mut engine.fork(), world, false)?;
+    big_levers_with_base(engine, world, &base_outcome)
+}
+
+/// Wie `big_levers`, nutzt aber eine vorberechnete Baseline (kein
+/// Doppel-Resolve; `AppState` reicht sein `CascadeOutcome` durch).
+pub fn big_levers_with_base(
+    engine: &Engine<'_>,
+    world: &[String],
+    base: &CascadeOutcome,
+) -> EngineResult<Vec<BigLever>> {
+    let base_outcome = base;
     let base_totals = base_outcome.graph.totals();
 
     // Alle (Paket, Flag-an)-Paare einsammeln; dazu Flags, die irgendwo
     // bekannt, aber ueberall aus sind (T07: global wieder einschaltbar).
     // Zwei Durchgaenge (erst alle aktiven sammeln!), sonst waere die
     // Aufteilung von der HashMap-Iteration (nicht-deterministisch) abhaengig.
+    // Plattform-Fakten (ARCH/ELIBC/KERNEL) sowie profil-maskierte und
+    // -erzwungene Flags sind keine toggelbaren Hebel (Task 3.1).
+    let toggleable = |flag: &str| {
+        !is_platform_flag(engine.profile, flag)
+            && !engine.profile.is_masked(flag)
+            && !engine.profile.is_forced(flag)
+    };
     let mut flag_packages: HashMap<String, Vec<String>> = HashMap::new();
     for (cpn, node) in &base_outcome.graph.nodes {
         for flag in &node.use_flags {
+            if !toggleable(flag) {
+                continue;
+            }
             flag_packages
                 .entry(flag.clone())
                 .or_default()
@@ -171,8 +199,11 @@ pub fn big_levers(engine: &Engine<'_>, world: &[String]) -> EngineResult<Vec<Big
     }
     let mut known_off: HashMap<String, Vec<String>> = HashMap::new();
     for (cpn, node) in &base_outcome.graph.nodes {
-        if let Some(pkg) = engine.index.select(cpn) {
+        if let Some(pkg) = engine.index.select_cpv(cpn, &node.cpv) {
             for flag in pkg.iuse_defaults.keys() {
+                if !toggleable(flag) {
+                    continue;
+                }
                 if !node.use_flags.contains(flag) && !flag_packages.contains_key(flag) {
                     known_off.entry(flag.clone()).or_default().push(cpn.clone());
                 }
@@ -249,19 +280,22 @@ pub fn package_deltas(
     world: &[String],
     package: &str,
 ) -> EngineResult<Vec<FlagDelta>> {
-    // Kandidaten: IUSE des Pakets + derzeit aktive Flags (sortiert, stabil).
+    // Baseline genau einmal (T04), Simulationen parallel via rayon.
+    let base = resolve_with_cascade_opts(&mut engine.fork(), world, false)?;
+    // Kandidaten aus der exakt aufgeloesten Version (IUSE) + Post-Kaskaden-
+    // Stand (aktive Flags) — sortiert, stabil (Task 3.1).
     let mut candidates: BTreeSet<String> = BTreeSet::new();
-    if let Some(pkg) = engine.index.select(package) {
+    if let Some(node) = base.graph.nodes.get(package)
+        && let Some(pkg) = engine.index.select_cpv(package, &node.cpv)
+    {
         candidates.extend(pkg.iuse_defaults.keys().cloned());
     }
-    candidates.extend(current_flags(engine, package));
+    candidates.extend(current_from_base(&base, engine, package));
     // Profil-maskierte Flags sind nie schaltbar.
     candidates.retain(|f| !engine.profile.is_masked(f));
     // Plattform-Fakten (ARCH/ELIBC/KERNEL) sind keine schaltbaren USE-Flags.
     candidates.retain(|f| !is_platform_flag(engine.profile, f));
 
-    // Baseline genau einmal (T04), Simulationen parallel via rayon.
-    let base = resolve_with_cascade_opts(&mut engine.fork(), world, false)?;
     let flags: Vec<String> = candidates.into_iter().collect();
     let deltas: EngineResult<Vec<FlagDelta>> = flags
         .into_par_iter()
@@ -278,53 +312,86 @@ pub fn package_deltas(
 mod tests {
     use super::*;
     use crate::mod_02_profile::Profile;
-    use crate::mod_03_manifest::parse_manifest;
     use crate::mod_05_repo_index::{PkgVersion, RepoIndex};
-    use portage_metadata::CacheEntry;
-    use std::collections::HashMap;
+    use crate::test_helpers::{PkgFixture, repo_index};
 
-    fn pkg(cpn: &str, version: &str, iuse: &str, rdepend: &str, binpkg: u64) -> PkgVersion {
-        let text = format!(
-            "EAPI=8\nDESCRIPTION=t\nSLOT=0\nKEYWORDS=amd64\nIUSE={iuse}\n\
-             RDEPEND={rdepend}\nSRC_URI=http://x/a.tar.gz\n"
-        );
-        let entry = CacheEntry::parse(&text).unwrap();
-        let mut iuse_defaults = HashMap::new();
-        for flag in &entry.metadata.iuse {
-            iuse_defaults.insert(flag.name().to_string(), flag.is_enabled_default());
-        }
-        PkgVersion {
-            cpn: cpn.into(),
-            cpv: format!("{cpn}-{version}"),
-            version_str: version.into(),
-            version: portage_atom::Version::parse(version).unwrap(),
-            slot: "0".into(),
-            masked: false,
-            live: false,
-            iuse_defaults,
-            entry,
-            manifest: parse_manifest("DIST a.tar.gz 1000\n"),
-            binhost_size: Some(binpkg),
-        }
+    fn ssl_pkg(cpn: &str, rdepend: &str, binpkg: u64) -> PkgVersion {
+        PkgFixture::new(cpn)
+            .iuse("+ssl")
+            .rdepend(rdepend)
+            .manifest("DIST a.tar.gz 1000\n")
+            .binpkg(Some(binpkg))
+            .build()
     }
 
     fn fixture() -> (RepoIndex, Profile) {
+        let index = repo_index(vec![
+            ssl_pkg("app/a", "ssl? ( dev-libs/openssl )", 100),
+            ssl_pkg("app/b", "ssl? ( dev-libs/openssl )", 100),
+            ssl_pkg("dev-libs/openssl", "", 800),
+        ]);
+        (index, Profile::test_default())
+    }
+
+    #[test]
+    fn cascade_enabled_flag_shows_current() {
+        // `wayland? ( egl )`, wayland an → egl ist Post-Kaskade an und
+        // meldet `current == true` (kein `0 B`-Geistertoggle).
         let mut map: HashMap<String, Vec<PkgVersion>> = HashMap::new();
-        for p in [
-            pkg("app/a", "1.0", "+ssl", "ssl? ( dev-libs/openssl )", 100),
-            pkg("app/b", "1.0", "+ssl", "ssl? ( dev-libs/openssl )", 100),
-            pkg("dev-libs/openssl", "1.0", "+ssl", "", 800),
-        ] {
-            map.entry(p.cpn.clone()).or_default().push(p);
+        let p = PkgFixture::new("gui/app")
+            .version("1.0")
+            .iuse("wayland egl")
+            .required_use("wayland? ( egl )")
+            .manifest("DIST a.tar.gz 1000\n")
+            .binpkg(Some(100))
+            .build();
+        map.entry(p.cpn.clone()).or_default().push(p);
+        let index = RepoIndex {
+            versions: map,
+            cache_files: 1,
+            load_ms: 0,
+        };
+        let profile = Profile::test_default();
+        let mut engine = Engine::new(&index, &profile);
+        engine.overrides.insert(
+            "gui/app".into(),
+            [("wayland".to_string(), true)].into_iter().collect(),
+        );
+        let world = vec!["gui/app".to_string()];
+        let deltas = package_deltas(&engine, &world, "gui/app").unwrap();
+        let egl = deltas.iter().find(|d| d.flag == "egl").unwrap();
+        assert!(egl.current);
+    }
+
+    #[test]
+    fn big_levers_skip_platform_mask_force() {
+        // Kein Hebel fuer Plattform-Fakten, Masken oder Forces.
+        let index = repo_index(vec![
+            PkgFixture::new("app/a")
+                .version("1.0")
+                .iuse("+ssl masked forced elibc_glibc kernel_linux")
+                .manifest("DIST a.tar.gz 1000\n")
+                .binpkg(Some(100))
+                .build(),
+        ]);
+        let mut profile = Profile::test_default();
+        profile.elibc = "glibc".into();
+        profile.kernel = "linux".into();
+        profile.use_mask.insert("masked".into());
+        profile.use_force.insert("forced".into());
+        let engine = Engine::new(&index, &profile);
+        let world = vec!["app/a".to_string()];
+        let levers = big_levers(&engine, &world).unwrap();
+        assert!(!levers.is_empty());
+        for lever in &levers {
+            assert!(
+                !["amd64", "elibc_glibc", "kernel_linux", "masked", "forced"]
+                    .contains(&lever.flag.as_str()),
+                "kein Hebel erwartet: {}",
+                lever.flag
+            );
         }
-        (
-            RepoIndex {
-                versions: map,
-                cache_files: 3,
-                load_ms: 0,
-            },
-            Profile::test_default(),
-        )
+        assert!(levers.iter().any(|l| l.flag == "ssl"));
     }
 
     #[test]
@@ -355,24 +422,18 @@ mod tests {
     #[test]
     fn flag_delta_reports_added_packages() {
         // ffmpeg-Simulator: svt-av1 zieht svt-av1-Lib rein.
-        let mut map: HashMap<String, Vec<PkgVersion>> = HashMap::new();
-        for p in [
-            pkg(
-                "media-video/ffmpeg",
-                "1.0",
-                "svt-av1",
-                "svt-av1? ( media-libs/svt-av1 )",
-                100,
-            ),
-            pkg("media-libs/svt-av1", "1.0", "", "", 500),
-        ] {
-            map.entry(p.cpn.clone()).or_default().push(p);
-        }
-        let index = RepoIndex {
-            versions: map,
-            cache_files: 2,
-            load_ms: 0,
-        };
+        let index = repo_index(vec![
+            PkgFixture::new("media-video/ffmpeg")
+                .iuse("svt-av1")
+                .rdepend("svt-av1? ( media-libs/svt-av1 )")
+                .manifest("DIST a.tar.gz 1000\n")
+                .binpkg(Some(100))
+                .build(),
+            PkgFixture::new("media-libs/svt-av1")
+                .manifest("DIST a.tar.gz 1000\n")
+                .binpkg(Some(500))
+                .build(),
+        ]);
         let profile = Profile::test_default();
         let engine = Engine::new(&index, &profile);
         let world = vec!["media-video/ffmpeg".to_string()];

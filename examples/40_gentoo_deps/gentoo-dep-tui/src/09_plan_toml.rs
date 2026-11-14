@@ -176,14 +176,15 @@ impl Plan {
             }
         }
         let mut out = HashMap::new();
-        for pkg in &self.package {
-            apply(&mut out, &pkg.atom, &pkg.use_flags);
-        }
-        // `suggested_use` gewaehlter Optionen einmischen.
+        // `suggested_use` gewaehlter Optionen zuerst (Defaults), ...
         for choice in &self.choice {
             if let Some(opt) = choice.option.get(choice.selected) {
                 apply(&mut out, &opt.atom, &opt.suggested_use);
             }
+        }
+        // ... explizite `[[package]]`-Toggles danach (User gewinnt immer).
+        for pkg in &self.package {
+            apply(&mut out, &pkg.atom, &pkg.use_flags);
         }
         out
     }
@@ -193,6 +194,32 @@ impl Plan {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn package_overrides_beat_suggested_use() {
+        let mut plan = Plan::default();
+        plan.choice.push(PlanChoice {
+            id: "web".into(),
+            required: false,
+            description: "proxy".into(),
+            selected: 0,
+            option: vec![ChoiceOption {
+                atom: "www-servers/nginx".into(),
+                pros: String::new(),
+                cons: String::new(),
+                suggested_use: vec!["ssl".into()],
+            }],
+        });
+        plan.package.push(PlanPackage {
+            atom: "www-servers/nginx".into(),
+            use_flags: vec!["-ssl".into()],
+        });
+        let ov = plan.package_overrides();
+        assert_eq!(
+            ov.get("www-servers/nginx").unwrap().get("ssl"),
+            Some(&false)
+        );
+    }
 
     #[test]
     fn roundtrip_preserves_pros_cons() {

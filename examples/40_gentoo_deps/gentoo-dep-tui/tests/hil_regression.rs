@@ -58,16 +58,20 @@ fn hil_full_setup(
     let make_conf = base.join("make.conf");
     if let Ok(kv) = gentoo_dep_tui::mod_02_profile::read_key_value(&make_conf) {
         if let Some(u) = kv.get("USE") {
-            profile.global_use = gentoo_dep_tui::mod_02_profile::parse_use_tokens(u);
+            profile.apply_use_tokens(&u.replace("${USE}", ""));
         }
         if let Some(k) = kv.get("ACCEPT_KEYWORDS") {
             profile
                 .accept_keywords
                 .extend(gentoo_dep_tui::mod_02_profile::parse_use_tokens(k));
         }
-        let vars: Vec<String> = profile.expand_defaults.keys().cloned().collect();
+        let mut vars: Vec<String> = profile.use_expand.iter().cloned().collect();
+        vars.extend(profile.expand_defaults.keys().cloned());
+        vars.sort();
+        vars.dedup();
         for var in vars {
             if let Some(line) = kv.get(&var) {
+                profile.use_expand.insert(var.clone());
                 profile
                     .expand_defaults
                     .insert(var, line.split_whitespace().map(str::to_string).collect());

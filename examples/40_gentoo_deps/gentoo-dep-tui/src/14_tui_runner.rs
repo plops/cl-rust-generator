@@ -13,20 +13,44 @@ use ratatui::DefaultTerminal;
 use crate::mod_05_repo_index::RepoIndex;
 use crate::mod_09_plan_toml::Plan;
 use crate::mod_10_export_verify::VerifyRunner;
-use crate::mod_11_cli::{TuiArgs, export_plan, load_engine};
-use crate::mod_12_tui_state::{AppState, Modal, Pane, Tab, sync_plan_from_state};
+use crate::mod_11_cli::{CommonArgs, TuiArgs, export_plan, load_profile};
+use crate::mod_12_tui_state::{AppState, Pane, Tab, sync_plan_from_state};
 use crate::mod_13_tui_view::render;
 
 /// TUI starten (aus CLI-`tui`): Engine laden, Loop bis `q`.
+///
+/// Fehlt `--world` auf Platte, aber `--plan` liefert `baseline.world`,
+/// startet die TUI trotzdem mit der Plan-Welt (Task 4.3).
 pub fn run_tui(args: &TuiArgs) -> anyhow::Result<()> {
-    let (engine, world, _lease) = load_engine(&args.common)?;
-    // HIL-Ersatz: Boxen sind 'static-geleakt (siehe 11_cli) — hier direkt nutzen.
+    let profile = load_profile(&args.common)?;
+    let index = RepoIndex::load(&args.common.repo, args.common.binhost.as_deref(), &profile)
+        .with_context(|| "Repo-Index laden")?;
+    let world = resolve_world(&args.common, args.plan.as_ref())?;
+    let engine = crate::mod_06_graph::Engine::new(&index, &profile);
     run_tui_with(engine, world, args)
+}
+
+/// Welt bestimmen: `--world`-Datei, notfalls `baseline.world` aus `--plan`
+/// (Test-Haelle fuer den Task-4.3-Fallback ohne Terminal).
+fn resolve_world(common: &CommonArgs, plan: Option<&PathBuf>) -> anyhow::Result<Vec<String>> {
+    match crate::mod_11_cli::load_world(common) {
+        Ok(world) => Ok(world),
+        Err(e) => {
+            let Some(path) = plan else {
+                return Err(e);
+            };
+            let plan = Plan::load(path)?;
+            if plan.baseline.world.is_empty() {
+                return Err(e);
+            }
+            Ok(plan.baseline.world.clone())
+        }
+    }
 }
 
 /// Eigentliche Loop (Engine + Welt + Args).
 fn run_tui_with(
-    engine: crate::mod_06_graph::Engine<'static>,
+    engine: crate::mod_06_graph::Engine<'_>,
     world: Vec<String>,
     args: &TuiArgs,
 ) -> anyhow::Result<()> {
@@ -54,13 +78,21 @@ fn run_tui_with(
 /// Event-Loop bis Quit (`q` oder `Esc` ohne Modal/Filter).
 fn event_loop(
     terminal: &mut DefaultTerminal,
-    mut state: AppState<'static>,
+    mut state: AppState<'_>,
     args: &TuiArgs,
     export_default: &std::path::Path,
 ) -> anyhow::Result<()> {
     loop {
         terminal.draw(|frame| render(frame, &state))?;
-        if !event::poll(Duration::from_millis(100))? {
+        // Idle-Recompute (T05): Bei ausstehenden Deltas schneller pollen,
+        // damit `(rechne Deltas...)` sofort rendert und erst in der Pause
+        // gerechnet wird — kein synchrones Nachladen beim Scrollen (4.3).
+        let timeout = if state.deltas_loading {
+            Duration::from_millis(25)
+        } else {
+            Duration::from_millis(100)
+        };
+        if !event::poll(timeout)? {
             // Idle: ausstehende Deltas nach Cache-Miss nachladen (T05).
             state.ensure_deltas()?;
             continue;
@@ -93,17 +125,11 @@ fn event_loop(
                 KeyCode::Up | KeyCode::Char('k') => state.move_modal(-1),
                 KeyCode::Down | KeyCode::Char('j') => state.move_modal(1),
                 KeyCode::Enter => {
-                    if let Some(Modal::Conflict { conflict, selected }) = &state.modal {
-                        if let Some(opt) = state
-                            .conflicts
-                            .get(*conflict)
-                            .and_then(|c| c.options.get(*selected))
-                            .cloned()
-                        {
-                            state.apply_quick_switch(&opt)?;
-                        } else {
-                            state.modal = None;
-                        }
+                    // Echte und simulierte Konflikte gleich behandeln.
+                    if let Some(opt) = state.modal_selected_option() {
+                        state.apply_quick_switch(&opt)?;
+                    } else {
+                        state.modal = None;
                     }
                 }
                 _ => {}
@@ -117,12 +143,9 @@ fn event_loop(
             KeyCode::Tab => state.cycle_pane(),
             KeyCode::Up | KeyCode::Char('k') => {
                 state.move_selection(-1);
-                state.ensure_deltas()?;
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 state.move_selection(1);
-                // Erster Besuch: sofort nachladen (Folge-Besuche aus Cache).
-                state.ensure_deltas()?;
             }
             KeyCode::Char(' ') => {
                 // Tab 2: Big-Lever global toggeln (T07).
@@ -202,6 +225,34 @@ pub fn build_state_for_smoke(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_11_cli::CommonArgs;
+
+    #[test]
+    fn plan_world_fallback_without_world_file() {
+        // Fehlende `--world`-Datei + `--plan` mit Baseline → Plan-Welt;
+        // ohne Plan (oder leere Baseline) → Fehler (Task 4.3).
+        let d = tempfile::tempdir().unwrap();
+        let missing = d.path().join("kein-world");
+        let plan_path = d.path().join("plan.toml");
+        let mut plan = Plan::default();
+        plan.baseline.world = vec!["app-misc/jq".to_string()];
+        plan.save(&plan_path).unwrap();
+        let common = CommonArgs {
+            repo: d.path().join("repo"),
+            profile_dir: None,
+            profile: None,
+            world: missing.clone(),
+            binhost: None,
+            make_conf: d.path().join("make.conf"),
+            package_use: d.path().join("package.use"),
+        };
+        let world = resolve_world(&common, Some(&plan_path)).unwrap();
+        assert_eq!(world, vec!["app-misc/jq".to_string()]);
+        assert!(resolve_world(&common, None).is_err());
+        let empty_plan = d.path().join("leer.toml");
+        Plan::default().save(&empty_plan).unwrap();
+        assert!(resolve_world(&common, Some(&empty_plan)).is_err());
+    }
 
     #[test]
     fn tui_args_parse_plan_flag() {

@@ -1,11 +1,10 @@
-//! 01_types — Basis-IDs, Groessen, USE-Zustaende, Fehler.
+//! 01_types — Basis-IDs, Groessen, Fehler.
 //!
 //! Genau eine Zustaendigkeit: alle Kerndatentypen der Engine.
 //! Integer-IDs (`PkgId`, `FlagId`) statt Strings machen den Graphen
 //! evaluations-schnell (wenige Mikrosekunden pro Reachability-Lauf).
 
 use std::collections::HashMap;
-use std::fmt;
 
 use thiserror::Error;
 
@@ -39,43 +38,6 @@ impl SizeMetrics {
             download_bytes: self.download_bytes.saturating_add(other.download_bytes),
         }
     }
-}
-
-/// Effektiver USE-Flag-Zustand eines Pakets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UseState {
-    /// Flag ist an (`+flag`).
-    On,
-    /// Flag ist aus (`-flag`).
-    Off,
-    /// Nicht explizit gesetzt (faellt auf IUSE-Default/Profil zurueck).
-    Unset,
-}
-
-/// Eindeutiger Paketschluessel `kategorie/paket`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct PkgKey(pub String);
-
-impl PkgKey {
-    /// Neuer Schluessel aus Kategorie und Paketname.
-    pub fn new(category: &str, package: &str) -> Self {
-        Self(format!("{category}/{package}"))
-    }
-}
-
-impl fmt::Display for PkgKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-/// Abhaengigkeitsklasse: Runtime vs. Buildtime (strikte Trennung!).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DepClass {
-    /// `RDEPEND` (+ `PDEPEND`): landet im finalen Container.
-    Runtime,
-    /// `BDEPEND`/`DEPEND`: nur zur Bauzeit noetig (Multi-Stage spart sie).
-    Build,
 }
 
 /// Uebersprungene Abhaengigkeit (Warnung statt Abbruch, z. B. alter Slot-Pin).
@@ -324,14 +286,6 @@ mod tests {
         let c = a.checked_add(b);
         assert_eq!(c.binpkg_bytes, i64::MAX);
         assert_eq!(c.download_bytes, 7);
-    }
-
-    #[test]
-    fn pkg_key_display() {
-        assert_eq!(
-            PkgKey::new("dev-libs", "openssl").to_string(),
-            "dev-libs/openssl"
-        );
     }
 
     #[test]

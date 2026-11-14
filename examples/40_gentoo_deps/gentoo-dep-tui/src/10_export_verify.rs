@@ -74,19 +74,51 @@ pub fn export_portage(
         }
     }
 
-    std::fs::write(out_dir.join("world"), exported.world.join("\n") + "\n").map_err(|e| {
-        EngineError::Io {
-            path: out_dir.join("world").display().to_string(),
-            source: e,
-        }
+    let written = write_export_files(out_dir, exported.world.clone(), use_lines).map_err(|e| {
+        // anyhow → EngineError zurueckfuehren (Dateiname geht verloren, egal).
+        EngineError::Config(e.to_string())
     })?;
-    std::fs::write(out_dir.join("package.use"), use_lines.join("\n") + "\n").map_err(|e| {
-        EngineError::Io {
-            path: out_dir.join("package.use").display().to_string(),
-            source: e,
-        }
-    })?;
+    exported.world = written.world;
+    exported.package_use = written.package_use;
     Ok(exported)
+}
+
+/// Export-Dateien schreiben (Top-Level + Portage-Standardlayout).
+///
+/// Schreibt `world`/`package.use` sowohl menschenlesbar auf Top-Level als
+/// auch unter `var/lib/portage/world` / `etc/portage/package.use`, sodass
+/// `VerifyRunner::against_configroot(out_dir)` direkt funktioniert.
+/// Gemeinsame Schreiblogik fuer `export_portage` und `export_plan` (Task 3.2).
+pub fn write_export_files(
+    out_dir: &Path,
+    world: Vec<String>,
+    package_use: Vec<String>,
+) -> anyhow::Result<Exported> {
+    let world_text = if world.is_empty() {
+        String::new()
+    } else {
+        world.join("\n") + "\n"
+    };
+    let use_text = if package_use.is_empty() {
+        String::new()
+    } else {
+        package_use.join("\n") + "\n"
+    };
+    std::fs::create_dir_all(out_dir)?;
+    std::fs::write(out_dir.join("world"), &world_text)?;
+    std::fs::write(out_dir.join("package.use"), &use_text)?;
+    // Portage-Standardlayout fuer `emerge --root … --config-root …`.
+    let var_lib = out_dir.join("var/lib/portage");
+    std::fs::create_dir_all(&var_lib)?;
+    std::fs::write(var_lib.join("world"), &world_text)?;
+    let etc = out_dir.join("etc/portage");
+    std::fs::create_dir_all(&etc)?;
+    std::fs::write(etc.join("package.use"), &use_text)?;
+    Ok(Exported {
+        world,
+        package_use,
+        accept_keywords: Vec::new(),
+    })
 }
 
 /// Ergebnis eines `emerge --pretend`-Laufs.
@@ -151,7 +183,8 @@ pub struct VerifyRunner {
 impl VerifyRunner {
     /// Standard-Runner gegen ein Export-Verzeichnis.
     ///
-    /// Das Verzeichnis enthaelt `world` + `package.use` (siehe `export_plan`).
+    /// Das Verzeichnis enthaelt das Portage-Standardlayout (siehe
+    /// `write_export_files`): `var/lib/portage/world` + `etc/portage/…`.
     /// `--config-root` steuert nur `/etc/portage` (package.use/make.conf),
     /// `--root` steuert das Welt- und System-Root — beide zeigen hier auf
     /// dasselbe Verzeichnis, damit `@world` dort aufgeloest wird.
