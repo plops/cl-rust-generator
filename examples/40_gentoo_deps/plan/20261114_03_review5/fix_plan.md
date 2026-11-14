@@ -1,25 +1,3 @@
-Super, deine Antworten klären alle offenen Designfragen eindeutig. Nachfolgend bekommst du:
-
-1. **Das verbindliche Architektur-Zielbild** (inkl. Einordnung zum Thema Cucumber / GUI-Tests), und
-2. **Den fertigen Umsetzungs- und Test-Auftrag für deinen AI-Agenten** — mit exakten Dateipfaden, explizitem Rust-Code, Docker/SSH/`deepwiki`-Hinweisen und einem vollständigen Test-Katalog, damit es kein Hin-und-Her mehr gibt.
-
----
-
-## 1. Architektur-Zielbild & Test-Strategie (kurz vorweg)
-
-* **Datenfluss-Architektur (`00_perf` → `14_tui_runner`) bleibt strikt erhalten** — es kommen keine neuen Schichten dazu, stattdessen schrumpft der Code um ca. 200 Zeilen:
-  * **`shared_removal_impact` + `deltas --deep` fliegen komplett raus.**
-  * **Ersatz im UI (kostenlos & gezielt):** Ein reiner AST/Graph-Lookup (`shared_flag_deps`, 0 ms, keine Simulation) listet rechts bei jedem Flag ggf. geteilte Abhängigkeiten auf. Wenn der Nutzer in `Pane::Right` (`Tab`) navigiert, kann er dort direkt über alle sichtbaren Pakete (Blame-Eltern, `bewirkt:`-Pakete, geteilte Abhängigkeiten) wandern — und die **Cut-Analyse (`cut_package`) wird automatisch** für das gerade fokussierte Paket im unteren Split der rechten Pane angezeigt (`cut_cache` + Idle-Update).
-* **Zur GUI-Test-Frage (Cucumber vs. Rust-Harness):**
-  `cucumber-rs` bringt für ein schlankes TUI-Tool unnötig viel Makro-/Async-Ballast. **Das Repo besitzt in `tests/tui_screencaps.rs` bereits ein eigenes Scenario-Harness (`Driver` mit `Step::Type`, `Step::Key`, `Step::Idle`, `Step::Capture`) gegen `ratatui::TestBackend` und exakt denselben `dispatch_key` wie die echte TUI.** Wir erweitern genau dieses Harness um BDD-ähnliche Szenarien für *alle* deine manuellen Testfälle plus echte System-Tests per SSH auf dem Gentoo-Host.
-
----
-
-## 2. Direkter Arbeitsauftrag für den KI-Agenten
-
-Den folgenden Block kannst du 1:1 an den Agenten übergeben:
-
-````markdown
 # Auftrag: Bugfixes, UX-Verbesserungen & Vereinfachung in `gentoo-dep-tui`
 
 ## Arbeitsumgebung & Werkzeuge
@@ -744,8 +722,5 @@ Führe erst nach erfolgreichem `cargo test --release` die Echtdaten-Prüfung auf
    - `gentoo-dep-tui graph --json ...` und `gentoo-dep-tui cut x11-libs/gtk+ --json ...` (valides JSON, Exit 0).
    - `cargo test --release --test tui_screencaps --test hil_regression` (oder HIL-Snapshot-Lauf gegen `/var/db/repos/gentoo` + echte `world` + `/etc/portage`), um die erzeugten Screencaps in `target/screencaps/hil_screencaps.md` auf Plausibilität zu prüfen (keine doppelten `gentoo-sources`, kein `Voll-Ersparnis`-Rauschen bei `pipewire[extra]`, funktionierender Auto-Cut in rechter Pane).
 4. Berichte am Ende die exakten Testergebnisse (Unit/Screencap-Tests + SSH-Systemtest-Befunde) ohne Platzhalter.
-````
 
----
 
-Falls du vor dem Absenden an den Agenten noch eine Kleinigkeit am Verhalten anpassen möchtest (z. B. ob `cut` in `Pane::Right` eine einzelne Zeile pro Paket oder direkt Blame+Bewirkt-Einträge ansteuern soll), sag einfach kurz Bescheid — ansonsten kannst du den Block direkt so ausführen lassen.
