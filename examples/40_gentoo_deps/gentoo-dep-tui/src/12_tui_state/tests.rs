@@ -3,14 +3,7 @@ use crate::mod_01_types::QuickSwitch;
 use crate::test_helpers::{PkgFixture, repo_index};
 
 fn fixture<'x>(index: &'x RepoIndex, profile: &'x Profile) -> AppState<'x> {
-    AppState::new(
-        index,
-        profile,
-        vec!["app/a".to_string()],
-        Plan::default(),
-        None,
-    )
-    .unwrap()
+    AppState::new(index, profile, vec!["app/a".to_string()]).unwrap()
 }
 
 fn test_index() -> RepoIndex {
@@ -52,8 +45,19 @@ fn toggle_updates_deltas_and_dirty() {
     assert!(st.toggle_selected_flag().unwrap());
     assert!(st.dirty);
     assert!(!st.graph.nodes.contains_key("dev-libs/openssl"));
-    // Zurueckschalten stellt wieder her.
     assert!(st.toggle_selected_flag().unwrap());
+    assert!(st.graph.nodes.contains_key("dev-libs/openssl"));
+}
+
+#[test]
+fn undo_restores_overrides() {
+    let index = test_index();
+    let profile = Profile::test_default();
+    let mut st = fixture(&index, &profile);
+    st.pane = Pane::Middle;
+    assert!(st.toggle_selected_flag().unwrap());
+    assert!(st.dirty);
+    assert!(st.pop_undo().unwrap());
     assert!(st.graph.nodes.contains_key("dev-libs/openssl"));
 }
 
@@ -82,11 +86,8 @@ fn quick_switch_resolves_conflict() {
         &index,
         &profile,
         vec!["app/a".to_string(), "app/c".to_string()],
-        Plan::default(),
-        None,
     )
     .unwrap();
-    // Overrides fuer bar/baz setzen (sonst keine use-dep-Constraints aktiv).
     st.engine
         .overrides
         .insert("app/a".into(), [("bar".into(), true)].into_iter().collect());
@@ -101,19 +102,19 @@ fn quick_switch_resolves_conflict() {
 }
 
 #[test]
-fn save_resets_dirty() {
+fn package_use_export_writes_overrides() {
     let index = test_index();
     let profile = Profile::test_default();
     let mut st = fixture(&index, &profile);
-    let d = tempfile::tempdir().unwrap();
-    st.plan_path = Some(d.path().join("plan.toml"));
     st.pane = Pane::Middle;
     st.toggle_selected_flag().unwrap();
-    assert!(st.dirty);
-    st.save().unwrap();
-    assert!(!st.dirty);
-    let back = Plan::load(&d.path().join("plan.toml")).unwrap();
-    assert!(!back.package.is_empty());
+    let d = tempfile::tempdir().unwrap();
+    let path = d.path().join("package.use");
+    st.export_package_use(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("app/a"));
+    assert!(text.contains("-ssl"));
+    assert!(st.status.contains("package.use"));
 }
 
 #[test]
@@ -127,8 +128,6 @@ fn atom_cpn_strips_version_slot_and_use() {
 
 #[test]
 fn filter_switch_selection_reloads_middle() {
-    // Review3-Bug: vor `/`-Filter war A selektiert, nach Filter steht nur
-    // noch B in der Liste — die Mitte muss B-Flags zeigen, keine A-Flags.
     let index = test_index();
     let profile = Profile::test_default();
     let mut st = fixture(&index, &profile);
@@ -137,7 +136,6 @@ fn filter_switch_selection_reloads_middle() {
     st.filter = "openssl".to_string();
     st.apply_filter_only();
     assert_eq!(st.selected_package().as_deref(), Some("dev-libs/openssl"));
-    // Cache-Miss → Idle-Recompute laden, dann B-Flags pruefen.
     st.ensure_deltas().unwrap();
     assert!(!st.deltas_loading);
     assert!(!st.flag_deltas.is_empty());
@@ -146,7 +144,6 @@ fn filter_switch_selection_reloads_middle() {
             .iter()
             .all(|d| d.package == "dev-libs/openssl")
     );
-    // Filter leeren stellt A wieder her.
     st.filter.clear();
     st.apply_filter_only();
     st.ensure_deltas().unwrap();
@@ -170,127 +167,130 @@ fn big_lever_toggle_disables_globally() {
     let mut st = fixture(&index, &profile);
     st.set_tab(Tab::BigLevers).unwrap();
     assert!(!st.levers.is_empty());
+    assert!(st.levers.iter().all(|l| !l.turn_on));
     let pos = st.levers.iter().position(|l| l.flag == "ssl").unwrap();
     st.lever_selected = pos;
     st.lever_table_state.select(Some(pos));
     assert!(st.toggle_big_lever().unwrap());
-    // ssl ueberall aus → openssl faellt aus dem Graphen.
     assert!(!st.graph.nodes.contains_key("dev-libs/openssl"));
-    // Zurueck: wieder einschalten stellt openssl wieder her.
-    st.set_tab(Tab::BigLevers).unwrap();
-    let pos = st.levers.iter().position(|l| l.flag == "ssl").unwrap();
-    st.lever_selected = pos;
-    assert!(st.toggle_big_lever().unwrap());
-    assert!(st.graph.nodes.contains_key("dev-libs/openssl"));
 }
 
 #[test]
-fn choice_switch_updates_world_without_baseline() {
-    use crate::mod_09_plan_toml::{ChoiceOption, PlanChoice};
+fn or_decision_cycles() {
     let versions = vec![
         PkgFixture::new("app/a")
-            .iuse("+ssl")
-            .rdepend("dev-libs/openssl")
+            .iuse("")
+            .rdepend("|| ( net-misc/openssh net-misc/dropbear )")
             .binpkg(Some(100))
             .build(),
         PkgFixture::new("net-misc/openssh")
-            .iuse("")
-            .rdepend("")
             .binpkg(Some(200))
             .build(),
         PkgFixture::new("net-misc/dropbear")
-            .iuse("")
-            .rdepend("")
             .binpkg(Some(50))
-            .build(),
-        PkgFixture::new("dev-libs/openssl")
-            .iuse("+ssl")
-            .rdepend("")
-            .binpkg(Some(800))
             .build(),
     ];
     let index = repo_index(versions);
     let profile = Profile::test_default();
-    let mut plan = Plan::default();
-    // Baseline ohne Choice-Atome (T07-Konvention): Optionen kommen aus `choice`.
-    plan.baseline.world = vec!["app/a".to_string()];
-    plan.choice.push(PlanChoice {
-        id: "ssh".into(),
-        required: true,
-        description: "ssh".into(),
-        selected: 0,
-        option: vec![
-            ChoiceOption {
-                atom: "net-misc/openssh".into(),
-                pros: "voll".into(),
-                cons: "gross".into(),
-                suggested_use: vec![],
-            },
-            ChoiceOption {
-                atom: "net-misc/dropbear".into(),
-                pros: "klein".into(),
-                cons: "weniger".into(),
-                suggested_use: vec![],
-            },
-        ],
-    });
-    let mut st = AppState::new(&index, &profile, plan.effective_world(), plan, None).unwrap();
-    assert!(
-        st.left
-            .iter()
-            .any(|e| *e == LeftEntry::PlanChoice("ssh".into()))
-    );
+    let mut st = AppState::new(&index, &profile, vec!["app/a".to_string()]).unwrap();
+    assert!(st.selected_or_group().is_none());
     let idx = st
         .left
         .iter()
-        .position(|e| *e == LeftEntry::PlanChoice("ssh".into()))
+        .position(|e| matches!(e, LeftEntry::OrDecision(_)))
         .unwrap();
     st.left_selected = idx;
-    assert!(st.cycle_choice_option().unwrap());
-    assert!(st.world.contains(&"net-misc/dropbear".to_string()));
-    assert!(!st.world.contains(&"net-misc/openssh".to_string()));
-    // Baseline darf das Choice-Atom nicht enthalten (T07).
-    sync_plan_from_state(&mut st.plan, &st.engine, &st.world);
-    assert!(
-        !st.plan
-            .baseline
-            .world
-            .contains(&"net-misc/dropbear".to_string())
-    );
-    assert!(st.plan.baseline.world.contains(&"app/a".to_string()));
+    assert!(st.selected_or_group().is_some());
+    assert!(st.cycle_or_decision().unwrap());
 }
 
 #[test]
-fn toggle_preserves_cursor_on_same_flag() {
-    // Cursor bleibt auf demselben Flag (kein Sprung auf 0 je Toggle).
-    let versions = vec![
+fn sort_cycles_without_resolve() {
+    let index = test_index();
+    let profile = Profile::test_default();
+    let mut st = fixture(&index, &profile);
+    let before = st.graph.nodes.len();
+    assert_eq!(st.left_sort, LeftSort::Default);
+    st.cycle_left_sort();
+    assert_eq!(st.left_sort, LeftSort::ExclusivePackages);
+    st.cycle_left_sort();
+    assert_eq!(st.left_sort, LeftSort::ExclusiveSize);
+    st.cycle_left_sort();
+    assert_eq!(st.left_sort, LeftSort::Default);
+    assert_eq!(st.graph.nodes.len(), before);
+}
+
+#[test]
+fn cut_plan_and_apply_and_undo() {
+    let index = test_index();
+    let profile = Profile::test_default();
+    let mut st = fixture(&index, &profile);
+    assert!(st.compute_cut_plan().unwrap());
+    let target = st.selected_package().unwrap();
+    assert_eq!(st.cut_plan.as_ref().unwrap().target, target);
+    assert!(!st.pop_undo().unwrap());
+}
+
+#[test]
+fn cut_apply_sets_flag_blockers_and_undo_restores() {
+    // Diamond: openssl wird von a/b via ssl und von c unbedingt gehalten.
+    let index = repo_index(vec![
         PkgFixture::new("app/a")
-            .iuse("+ssl foo")
+            .iuse("+ssl")
             .rdepend("ssl? ( dev-libs/openssl )")
             .binpkg(Some(100))
             .build(),
-        PkgFixture::new("dev-libs/openssl")
+        PkgFixture::new("app/b")
             .iuse("+ssl")
-            .rdepend("")
+            .rdepend("ssl? ( dev-libs/openssl )")
+            .binpkg(Some(100))
+            .build(),
+        PkgFixture::new("app/c")
+            .rdepend("dev-libs/openssl")
+            .binpkg(Some(100))
+            .build(),
+        PkgFixture::new("dev-libs/openssl")
             .binpkg(Some(800))
             .build(),
-    ];
-    let index = repo_index(versions);
+    ]);
     let profile = Profile::test_default();
-    let mut st = fixture(&index, &profile);
-    st.pane = Pane::Middle;
-    // Deltas sortiert: foo, ssl → ssl an Index 1.
-    assert_eq!(st.flag_deltas[1].flag, "ssl");
-    st.middle_selected = 1;
-    assert!(st.toggle_selected_flag().unwrap());
-    assert_eq!(st.middle_selected, 1);
-    assert_eq!(st.flag_deltas[1].flag, "ssl");
+    let mut st = AppState::new(
+        &index,
+        &profile,
+        vec![
+            "app/a".to_string(),
+            "app/b".to_string(),
+            "app/c".to_string(),
+        ],
+    )
+    .unwrap();
+    let idx = st
+        .left
+        .iter()
+        .position(|e| *e == LeftEntry::Transitive("dev-libs/openssl".into()))
+        .unwrap();
+    st.left_selected = idx;
+    assert!(st.compute_cut_plan().unwrap());
+    let plan = st.cut_plan.clone().unwrap();
+    assert_eq!(
+        plan.flag_blockers
+            .iter()
+            .map(|b| b.package.clone())
+            .collect::<Vec<_>>(),
+        vec!["app/a".to_string(), "app/b".to_string()]
+    );
+    assert!(st.apply_cut_blockers().unwrap());
+    assert_eq!(
+        st.engine.overrides.get("app/a").unwrap().get("ssl"),
+        Some(&false)
+    );
+    assert!(st.graph.nodes.contains_key("dev-libs/openssl"));
+    assert!(st.pop_undo().unwrap());
+    assert!(st.engine.overrides.is_empty());
 }
 
 #[test]
 fn toggle_trigger_cleans_cascade_effects() {
-    // Trigger an → Kaskade wirkt, User-Overrides bleiben sauber;
-    // Trigger aus → Kaskade zieht sich zurueck (auch in plan.toml).
     let index = repo_index(vec![
         PkgFixture::new("gui/app")
             .iuse("svt-av1 aom")
@@ -299,14 +299,7 @@ fn toggle_trigger_cleans_cascade_effects() {
             .build(),
     ]);
     let profile = Profile::test_default();
-    let mut st = AppState::new(
-        &index,
-        &profile,
-        vec!["gui/app".to_string()],
-        Plan::default(),
-        None,
-    )
-    .unwrap();
+    let mut st = AppState::new(&index, &profile, vec!["gui/app".to_string()]).unwrap();
     st.pane = Pane::Middle;
     let pos = st
         .flag_deltas
@@ -315,12 +308,10 @@ fn toggle_trigger_cleans_cascade_effects() {
         .unwrap();
     st.middle_selected = pos;
     assert!(st.toggle_selected_flag().unwrap());
-    // Kaskade aktiv, aber User-Overrides enthalten kein `aom`.
     assert!(st.graph.nodes["gui/app"].use_flags.contains("aom"));
     let user = st.engine.overrides.get("gui/app").unwrap();
     assert_eq!(user.get("svt-av1"), Some(&true));
     assert!(!user.contains_key("aom"));
-    // Trigger wieder aus: Kaskade weg, Overrides sauber.
     let pos = st
         .flag_deltas
         .iter()
@@ -330,18 +321,10 @@ fn toggle_trigger_cleans_cascade_effects() {
     assert!(st.toggle_selected_flag().unwrap());
     assert!(!st.graph.nodes["gui/app"].use_flags.contains("aom"));
     assert!(!st.engine.overrides["gui/app"].contains_key("aom"));
-    // plan.toml enthaelt nur den expliziten Intent.
-    let d = tempfile::tempdir().unwrap();
-    st.plan_path = Some(d.path().join("plan.toml"));
-    st.save().unwrap();
-    let back = Plan::load(&d.path().join("plan.toml")).unwrap();
-    let entry = back.package.iter().find(|p| p.atom == "gui/app").unwrap();
-    assert!(!entry.use_flags.iter().any(|t| t.contains("aom")));
 }
 
 #[test]
 fn space_on_conflict_flag_opens_modal() {
-    // `Space` auf CONFLICT-Flag oeffnet ein Modal statt still zu scheitern.
     let index = test_index();
     let profile = Profile::test_default();
     let mut st = fixture(&index, &profile);
@@ -366,7 +349,6 @@ fn space_on_conflict_flag_opens_modal() {
 
 #[test]
 fn empty_quick_switch_sets_status_not_dirty() {
-    // Leere Changes: Hinweis, kein Dirty, kein Re-Resolve.
     let index = test_index();
     let profile = Profile::test_default();
     let mut st = fixture(&index, &profile);
@@ -389,7 +371,6 @@ fn filter_only_does_not_resolve() {
     st.filtering = true;
     st.filter.push('a');
     st.apply_filter_only();
-    // Kein Resolve: Graph unveraendert, Levers unangetastet.
     assert_eq!(st.graph.nodes.len(), before);
     assert!(!st.filter.is_empty());
 }

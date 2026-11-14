@@ -136,6 +136,7 @@ impl PkgFixture {
             entry,
             manifest: parse_manifest(&self.manifest),
             binhost_size: self.binpkg,
+            base_use: std::sync::OnceLock::new(),
         }
     }
 }

@@ -3,7 +3,7 @@
 //! Nur Modul-Deklarationen, kein Verhalten.
 //! Die Dateien folgen der Datenfluss-Reihenfolge (Clock-vor-Peripherie-Prinzip
 //! aus `prompt.txt`, sinngemaess): Typen → Profil → Manifest → Binhost →
-//! Repo-Index → Graph → Kaskade → Delta → plan.toml → Export/Verify → CLI → TUI.
+//! Repo-Index → Graph → Kaskade → Delta → CLI → TUI.
 
 #[path = "00_perf.rs"]
 pub mod mod_00_perf;
@@ -23,10 +23,6 @@ pub mod mod_06_graph;
 pub mod mod_07_cascade;
 #[path = "08_delta.rs"]
 pub mod mod_08_delta;
-#[path = "09_plan_toml.rs"]
-pub mod mod_09_plan_toml;
-#[path = "10_export_verify.rs"]
-pub mod mod_10_export_verify;
 #[path = "11_cli.rs"]
 pub mod mod_11_cli;
 #[path = "12_tui_state.rs"]

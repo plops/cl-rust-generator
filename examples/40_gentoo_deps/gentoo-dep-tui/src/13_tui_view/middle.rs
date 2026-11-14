@@ -15,11 +15,18 @@ pub(super) fn render_middle(frame: &mut Frame, state: &AppState, area: Rect) {
     match state.left.get(state.left_selected) {
         Some(LeftEntry::WorldPkg(cpn)) | Some(LeftEntry::Transitive(cpn)) => {
             if let Some(node) = state.graph.nodes.get(cpn) {
+                let bin_str = if !state.engine.index.has_any_binhost() {
+                    "n/a".to_string()
+                } else if node.has_binpkg {
+                    fmt_bytes(node.binpkg as i64)
+                } else {
+                    "kein Binpkg (Source-Build)".to_string()
+                };
                 lines.push(Line::from(vec![
                     Span::styled(cpn.clone(), Style::default().add_modifier(Modifier::BOLD)),
                     Span::raw(format!(
                         "  Binpkg: {}  Pkg-Quell-DL: {}",
-                        fmt_bytes(node.binpkg as i64),
+                        bin_str,
                         fmt_bytes(node.download as i64)
                     )),
                 ]));
@@ -49,7 +56,6 @@ pub(super) fn render_middle(frame: &mut Frame, state: &AppState, area: Rect) {
                         fmt_delta(delta.delta.download_bytes, "dl")
                     )),
                 ];
-                // Paket-Differenz kurz anzeigen (T08).
                 if !delta.added_packages.is_empty() || !delta.removed_packages.is_empty() {
                     spans.push(Span::raw(format!(
                         " (+{}/-{} pkg)",
@@ -92,32 +98,8 @@ pub(super) fn render_middle(frame: &mut Frame, state: &AppState, area: Rect) {
                 }
             }
         }
-        Some(LeftEntry::PlanChoice(id)) => {
-            if let Some(choice) = state.plan.choice.iter().find(|c| &c.id == id) {
-                lines.push(Line::from(vec![Span::styled(
-                    format!("Choice: {} — {}", choice.id, choice.description),
-                    Style::default().add_modifier(Modifier::BOLD),
-                )]));
-                lines.push(Line::from("[Enter] Option wechseln"));
-                for (i, opt) in choice.option.iter().enumerate() {
-                    let marker = if i == choice.selected { ">" } else { " " };
-                    let line = Line::from(format!(
-                        "{marker} {}  (Pros: {} / Cons: {})",
-                        opt.atom, opt.pros, opt.cons
-                    ));
-                    if i == state.middle_selected && state.pane == Pane::Middle {
-                        lines.push(line.style(Style::default().bg(Color::DarkGray)));
-                    } else {
-                        lines.push(line);
-                    }
-                }
-            }
-        }
         None => lines.push(Line::from("(leer)")),
     }
-    // Scroll-Offset: selektierte Zeile immer sichtbar (T06).
-    // Kopfzeilen: Paket-Zusammenfassung + Leerzeile + optional
-    // `(rechne Deltas...)` — sonst scrollt die Selektion weg (Task 4.2).
     let inner_height = area.height.saturating_sub(2) as usize;
     let header = 2 + usize::from(state.deltas_loading);
     let selected_line = state.middle_selected + header;
@@ -134,6 +116,5 @@ pub(super) fn render_middle(frame: &mut Frame, state: &AppState, area: Rect) {
                 .border_style(border_style(state.pane == Pane::Middle)),
         )
         .scroll((offset, 0));
-    // Absichtlich kein Wrap: jede Zeile = ein Flag, Scroll-Offset bleibt exakt.
     frame.render_widget(para, area);
 }

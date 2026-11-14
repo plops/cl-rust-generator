@@ -37,8 +37,10 @@ impl ResolvedGraph {
         }
         match self.reverse.get(node) {
             None => {
-                // Wurzel erreicht (keine Eltern): Kette schliessen.
-                Self::close_chain(self, path, chains);
+                // Wurzel erreicht (keine Eltern): Kette nur bei echtem Pfad schliessen.
+                if path.len() > 1 {
+                    Self::close_chain(self, path, chains);
+                }
             }
             Some(parents) => {
                 // Welt-Paket mit geschlossenem Pfad: gueltige Wurzel, nicht
@@ -61,6 +63,9 @@ impl ResolvedGraph {
 
     /// Pfad in `BlameLink`-Kette ueberfuehren.
     fn close_chain(graph: &ResolvedGraph, path: &[String], chains: &mut Vec<Vec<BlameLink>>) {
+        if path.len() < 2 {
+            return;
+        }
         let mut links = Vec::new();
         for w in path.windows(2) {
             let via = graph
@@ -74,7 +79,9 @@ impl ResolvedGraph {
                 via_flag: via.filter(|v| !v.is_empty()),
             });
         }
-        chains.push(links);
+        if !links.is_empty() {
+            chains.push(links);
+        }
     }
 }
 

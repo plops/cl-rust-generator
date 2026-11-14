@@ -12,10 +12,9 @@ pub fn load_profile(args: &CommonArgs) -> anyhow::Result<Profile> {
     let profiles_dir = args
         .profile_dir
         .clone()
-        .unwrap_or_else(|| args.repo.join("profiles"));
-    // Ohne `--profile`: `/etc/portage/make.profile`-Symlink aufloesen (T09).
+        .unwrap_or_else(|| args.eff_repo().join("profiles"));
     let profile_name = args.profile.clone().unwrap_or_else(|| {
-        resolve_make_profile(&profiles_dir)
+        resolve_make_profile(&profiles_dir, &args.eff_portage_dir())
             .unwrap_or_else(|| "default/linux/amd64/23.0".to_string())
     });
     let mut profile =
@@ -28,11 +27,8 @@ pub fn load_profile(args: &CommonArgs) -> anyhow::Result<Profile> {
     if profile.accept_keywords.is_empty() {
         profile.accept_keywords.insert(profile.arch.clone());
     }
-    // make.conf: USE + ACCEPT_KEYWORDS einmischen (inkrementell, T09).
-    // Profil-`USE` bleibt erhalten, wenn make.conf kein `${USE}` traegt
-    // (Portage-Verhalten); `-*`/`-flag` werden via `apply_use_tokens`
-    // deterministisch aufgeloest statt als `-`-Eintraege zu lagern.
-    if let Ok(kv) = mod_02_profile::read_key_value(&args.make_conf) {
+    let make_conf = args.eff_make_conf();
+    if let Ok(kv) = mod_02_profile::read_key_value(&make_conf) {
         if let Some(use_line) = kv.get("USE") {
             profile.apply_use_tokens(&use_line.replace("${USE}", ""));
         }
@@ -44,9 +40,6 @@ pub fn load_profile(args: &CommonArgs) -> anyhow::Result<Profile> {
         if let Some(arch) = kv.get("ARCH") {
             profile.arch = arch.clone();
         }
-        // USE_EXPAND-Werte aus make.conf haben Vorrang vor Profil-Defaults.
-        // Auch Variablen ohne Profil-Defaults (nur in make.conf gesetzt,
-        // z. B. `VIDEO_CARDS`, `L10N`) werden uebernommen.
         let mut expand_vars: Vec<String> = profile.use_expand.iter().cloned().collect();
         expand_vars.extend(profile.expand_defaults.keys().cloned());
         expand_vars.sort();
@@ -60,26 +53,43 @@ pub fn load_profile(args: &CommonArgs) -> anyhow::Result<Profile> {
             }
         }
     }
-    // Hinweis: `load_profile_stack` laedt bereits den kompletten Stapel
-    // (`use.mask`/`use.force`/`package.mask`); kein Nachladen noetig.
-    profile.package_use = mod_02_profile::read_package_use(&args.package_use).unwrap_or_default();
+    let portage_dir = args.eff_portage_dir();
+    profile.package_use =
+        mod_02_profile::read_package_use(&args.eff_package_use()).unwrap_or_default();
+    let mask_path = portage_dir.join("package.mask");
+    let unmask_path = portage_dir.join("package.unmask");
+    let mut extra_mask = mod_02_profile::read_atom_lines(&mask_path);
+    for line in mod_02_profile::read_atom_lines(&unmask_path) {
+        let atom = line.split_whitespace().next().unwrap_or("").to_string();
+        if atom.is_empty() {
+            continue;
+        }
+        if atom.starts_with('-') {
+            extra_mask.push(atom);
+        } else {
+            extra_mask.push(format!("-{atom}"));
+        }
+    }
+    if !extra_mask.is_empty() {
+        // Profil-Masken bleiben zuerst (Portage-Stapelreihenfolge),
+        // Portage-Dir-Masken gewinnen danach.
+        profile.package_mask.extend(extra_mask);
+    }
+    profile.package_accept_keywords_raw =
+        mod_02_profile::read_atom_lines(&portage_dir.join("package.accept_keywords"));
     profile.sync_pattern_caches();
     Ok(profile)
 }
 
-/// `/etc/portage/make.profile`-Symlink auf Profilnamen aufloesen.
-///
-/// Gibt `None` zurueck, wenn kein Symlink existiert (Caller nutzt Fallback).
-/// Pfade innerhalb von `profiles_dir` werden relativ zurueckgegeben.
-fn resolve_make_profile(profiles_dir: &std::path::Path) -> Option<String> {
-    resolve_make_profile_from(
-        std::path::Path::new("/etc/portage/make.profile"),
-        profiles_dir,
-    )
+/// `/etc/portage`- bzw. Portage-Dir-`make.profile`-Symlink aufloesen.
+fn resolve_make_profile(
+    profiles_dir: &std::path::Path,
+    portage_dir: &std::path::Path,
+) -> Option<String> {
+    resolve_make_profile_from(&portage_dir.join("make.profile"), profiles_dir)
 }
 
-/// Testbare Kernlogik: Symlink-Ziel lexikalisch normalisieren (`..`/`./`)
-/// und relativ zu `profiles_dir` kuerzen (Task 1.4).
+/// Testbare Kernlogik: Symlink-Ziel lexikalisch normalisieren.
 pub(super) fn resolve_make_profile_from(
     link: &std::path::Path,
     profiles_dir: &std::path::Path,
@@ -92,8 +102,6 @@ pub(super) fn resolve_make_profile_from(
             .unwrap_or(std::path::Path::new("/"))
             .join(target)
     };
-    // Beide Seiten lexikalisch normalisieren (relative Symlinks wie
-    // `../../var/db/repos/gentoo/profiles/...` enthalten `..`-Segmente).
     let norm_abs =
         mod_02_profile::normalize_join(std::path::Path::new("/"), &abs.display().to_string());
     let norm_base = mod_02_profile::normalize_join(
@@ -111,16 +119,16 @@ pub(super) fn resolve_make_profile_from(
             return Some(s);
         }
     }
-    // Fallback: letzter Pfadanteil als Hinweis (kein gueltiges Profil).
     None
 }
 
-/// Welt lesen (fehlende Datei ist ein Fehler mit Hinweis, T09).
+/// Welt lesen (fehlende Datei ist ein Fehler mit Hinweis).
 pub fn load_world(args: &CommonArgs) -> anyhow::Result<Vec<String>> {
-    mod_02_profile::read_world(&args.world).with_context(|| {
+    let world_path = args.eff_world();
+    mod_02_profile::read_world(&world_path).with_context(|| {
         format!(
             "world-Datei nicht gefunden unter {} — bitte mit --world <PFAD> angeben",
-            args.world.display()
+            world_path.display()
         )
     })
 }
@@ -146,7 +154,7 @@ impl LoadedContext {
 pub fn load_context(args: &CommonArgs) -> anyhow::Result<LoadedContext> {
     let profile = load_profile(args)?;
     let world = load_world(args)?;
-    let index = RepoIndex::load(&args.repo, args.binhost.as_deref(), &profile)
+    let index = RepoIndex::load(&args.eff_repo(), args.binhost.as_deref(), &profile)
         .with_context(|| "Repo-Index laden")?;
     Ok(LoadedContext {
         index,

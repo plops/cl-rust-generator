@@ -80,6 +80,7 @@ pub fn resolve_with_options(
                 binpkg: pkg.binhost_size.unwrap_or(0),
                 download,
                 use_flags: active.clone(),
+                has_binpkg: pkg.binhost_size.is_some(),
             },
         );
 

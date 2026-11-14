@@ -309,3 +309,42 @@ fn package_use_dir_reads_all_files() {
     );
     assert_eq!(pu.get("app-misc/jq").unwrap(), &vec!["abbrev".to_string()]);
 }
+
+#[test]
+fn package_unmask_line_negates_mask() {
+    use super::stack::read_atom_lines;
+    let d = tmpdir();
+    std::fs::write(d.path().join("package.mask"), ">=dev-libs/openssl-99\n").unwrap();
+    std::fs::write(d.path().join("package.unmask"), ">=dev-libs/openssl-99\n").unwrap();
+    let mut extra: Vec<String> = read_atom_lines(&d.path().join("package.mask"));
+    for line in read_atom_lines(&d.path().join("package.unmask")) {
+        let atom = line.split_whitespace().next().unwrap_or("").to_string();
+        if atom.starts_with('-') {
+            extra.push(atom);
+        } else {
+            extra.push(format!("-{atom}"));
+        }
+    }
+    assert_eq!(extra.last().unwrap().as_str(), "->=dev-libs/openssl-99");
+    let mut p = Profile::test_default();
+    p.package_mask = extra;
+    p.sync_pattern_caches();
+    let last = p.package_mask_index.last().unwrap();
+    assert!(last.unmask);
+    assert_eq!(last.cpn, "dev-libs/openssl");
+}
+
+#[test]
+fn package_accept_keywords_parsed_with_default_testing() {
+    let mut p = Profile::test_default();
+    p.package_accept_keywords_raw = vec![
+        "dev-libs/openssl ~amd64".to_string(),
+        "app-misc/jq".to_string(),
+    ];
+    p.sync_pattern_caches();
+    let rules = p.package_accept_keywords.get("dev-libs/openssl").unwrap();
+    assert!(rules[0].1.contains("~amd64"));
+    // Ohne Keywords auf der Zeile gilt ~arch.
+    let jq = p.package_accept_keywords.get("app-misc/jq").unwrap();
+    assert!(jq[0].1.contains("~amd64"));
+}

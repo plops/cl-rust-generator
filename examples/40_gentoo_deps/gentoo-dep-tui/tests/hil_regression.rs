@@ -172,7 +172,6 @@ fn hil_deltas_and_levers_sane() {
 
 #[test]
 fn hil_tui_core_actions_on_snapshot() {
-    use gentoo_dep_tui::mod_09_plan_toml::Plan;
     use gentoo_dep_tui::mod_12_tui_state::{AppState, LeftEntry, Pane, Tab};
 
     let Some(base) = hil_repo() else {
@@ -183,7 +182,7 @@ fn hil_tui_core_actions_on_snapshot() {
         eprintln!("SKIP: Snapshot unvollstaendig");
         return;
     };
-    let mut state = AppState::new(&index, &profile, world, Plan::default(), None).unwrap();
+    let mut state = AppState::new(&index, &profile, world).unwrap();
     assert!(!state.left.is_empty(), "linke Liste leer");
     eprintln!(
         "HIL tui: {} Knoten, {} Eintraege links, {} Konflikte",
@@ -236,20 +235,10 @@ fn hil_tui_core_actions_on_snapshot() {
         "keine Toggle-Aktion moeglich"
     );
 
-    // Speichern + Exportieren (Portage-Syntax lesbar).
+    // package.use-Export (Portage-Syntax lesbar).
     let dir = tempfile::tempdir().unwrap();
-    state.plan_path = Some(dir.path().join("plan.toml"));
-    let saved = state.save().unwrap();
-    let back = Plan::load(&saved).unwrap();
-    assert!(!back.package.is_empty() || state.modal.is_some());
-    let out = dir.path().join("export");
-    let exported = gentoo_dep_tui::mod_11_cli::export_plan(&back, &out).unwrap();
-    assert!(!exported.world.is_empty());
-    assert!(out.join("world").is_file());
-    assert!(out.join("package.use").is_file());
-    eprintln!(
-        "HIL tui: plan + export ok ({} world, {} package.use)",
-        exported.world.len(),
-        exported.package_use.len()
-    );
+    let use_path = dir.path().join("package.use");
+    state.export_package_use(&use_path).unwrap();
+    assert!(use_path.is_file());
+    eprintln!("HIL tui: package.use ok: {}", state.status);
 }

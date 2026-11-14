@@ -4,7 +4,9 @@ Du änderst ein USE-Flag (z. B. `svt-av1` bei `ffmpeg`) und willst **vorher**
 wissen: Wie viele Pakete kommen dazu, welche genau, wie groß wird es — und
 löst das Flag einen `REQUIRED_USE`-Konflikt aus? Genau das beantwortet
 `gentoo-dep-tui` offline anhand der Gentoo-Metadaten (`md5-cache`), ohne dass
-du `emerge` laufen lassen musst.
+du `emerge` laufen lassen musst. Und wenn du fragst „Wie werfe ich
+`x11-libs/gtk+` ganz raus, und was spare ich dadurch?“ — dafür gibt es die
+Cut-Analyse.
 
 ## Wo sucht das Programm seine Dateien?
 
@@ -12,18 +14,18 @@ du `emerge` laufen lassen musst.
 | :--- | :--- | :--- |
 | `world`-Datei | `/var/lib/portage/world` | `--world <PFAD>` |
 | Gentoo-Repo | `/var/db/repos/gentoo` | `--repo <PFAD>` |
-| Profil | `default/linux/amd64/23.0` (relativ zu `<repo>/profiles`; ohne `--profile` wird `/etc/portage/make.profile` aufgelöst) | `--profile <NAME>` |
-| `make.conf` | `/etc/portage/make.conf` | `--make-conf <PFAD>` |
-| `package.use` | `/etc/portage/package.use` | `--package-use <PFAD>` |
+| Profil | `default/linux/amd64/23.0` (relativ zu `<repo>/profiles`; ohne `--profile` wird `<portage-dir>/make.profile` aufgelöst) | `--profile <NAME>` |
+| Portage-Verzeichnis | `/etc/portage` (liefert `make.conf`, `package.use`, `package.mask`, `package.unmask`, `package.accept_keywords`, `make.profile`) | `--portage-dir <PFAD>` |
+| `make.conf` | aus `--portage-dir` | `--make-conf <PFAD>` (gewinnt) |
+| `package.use` | aus `--portage-dir` | `--package-use <PFAD>` (gewinnt) |
+| Snapshot-Root | *(keiner)* | `--snapshot <PFAD>` (setzt `<PFAD>/repo`, `<PFAD>/world`, `<PFAD>/etc/portage` bzw. `make.conf`/`package.use`) |
 | Binhost-Index | *(keiner — optional!)* | `--binhost <PFAD/zur/Packages>` |
 
-**Ohne `--binhost`** zeigt das Programm bei `bin` überall `n/a
-(ohne --binhost)` — achte dann auf die `dl`-Werte (Quell-Downloads aus den
-`Manifest`-Dateien). Die Binpkg-Größe ist der bessere Maßstab für die echte
-Laufzeitgröße; `dl` zählt nur herunterzuladende Quell-Tarballs.
-`BDEPEND`-Pakete (nur zur Bauzeit nötig, z. B. `dev-lang/go` bei `caddy`)
-werden getrennt als `BDEPEND-extra` gezählt und verfälschen die
-Runtime-Größe nicht.
+**Ohne `--binhost`** steht bei `bin` überall `n/a (ohne --binhost)` bzw. in
+der TUI `kein Binpkg (Source-Build)` — achte dann auf die `dl`-Werte
+(Quell-Downloads aus den `Manifest`-Dateien) und auf die Paket-Deltas.
+`BDEPEND`-Pakete (nur zur Bauzeit nötig) werden getrennt als `Build-Only`
+gezählt und verfälschen die Runtime-Größe nicht.
 
 ### Empfohlener Default-Binhost
 
@@ -37,22 +39,15 @@ wget -O /tmp/Packages \
 gentoo-dep-tui tui --repo ... --world ... --binhost /tmp/Packages
 ```
 
-Hinweise: Der Pfad muss zum Profil passen (`23.0/x86-64` für Standard-amd64;
-für `hardened`, `musl`, `no-multilib` o. Ä. gibt es eigene Unterverzeichnisse
-bzw. keinen exakt passenden Binhost — die `SIZE`-Werte bleiben dann ein
-Näherungs-Proxy). Ob der Index zu deinem Repo-Stand passt, zeigt
-`index-check` als `Binhost-Treffer`-Quote; unter ~80 % lohnt ein frischer
-Download. Die `USE`-Flags der Binpkgs müssen nicht deinen entsprechen —
-für reine Größen-Deltas ist das egal.
+Ob der Index zu deinem Repo-Stand passt, zeigt `index-check` als
+`Binhost-Treffer`-Quote; unter ~80 % lohnt ein frischer Download.
 
 **Im Docker-Container** (kein `/var/db/repos/gentoo`, keine `world`) musst du
 die Pfade per Flag übergeben, z. B. auf einen Snapshot unter `/tmp/gentoo-hil`.
 Prüfe zuerst mit `index-check`, ob alle Pfade stimmen:
 
 ```bash
-cargo run --release -- index-check --repo /tmp/gentoo-hil/repo \
-  --world /tmp/gentoo-hil/world --make-conf /tmp/gentoo-hil/make.conf \
-  --package-use /tmp/gentoo-hil/package.use \
+cargo run --release -- index-check --snapshot /tmp/gentoo-hil \
   --profile default/linux/amd64/23.0/no-multilib
 ```
 
@@ -63,52 +58,57 @@ gentoo-dep-tui tui --repo ... --world ... [weitere Flags wie oben]
 # Ohne Subcommand startet automatisch die TUI.
 ```
 
-Aufbau: **links** deine `world`-Pakete, dahinter `choice:`-Gruppen aus
-`plan.toml`, `||`-Alternativen und transitive Abhängigkeiten. **Mitte**: alle
-USE-Flags des gewählten Pakets mit Marginal-Delta (`bin`/`dl`,
-`(+N/-M Pakete)` bei Paket-Differenz) oder `||`-Kandidaten bzw.
-Choice-Optionen. **Rechts**: Blame-Kette („Wer zieht das rein?"), `Pros`/`Cons`
-der Choice und die Paket-Differenz des selektierten Flags.
+Aufbau: **links** deine `world`-Pakete, dahinter `||`-Alternativen und
+transitive Abhängigkeiten. **Mitte**: alle USE-Flags des gewählten Pakets mit
+Marginal-Delta (`bin`/`dl`, `(+N/-M Pakete)` bei Paket-Differenz) oder
+`||`-Kandidaten. **Rechts**: Blame-Kette („Wer zieht das rein?"),
+Konflikte, Paket-Differenz des selektierten Flags, Flag-Doku und die
+Voll-Ersparnis-Analyse.
 
 | Taste | Wirkung |
 | :--- | :--- |
 | `1` / `2` | Tab Pakete / Big Levers (Tab 2 berechnet lazy beim ersten Besuch) |
 | `Tab` | Pane wechseln (links ↔ Mitte ↔ rechts) |
-| `↑`/`↓`, `j`/`k` | Bewegen (rechts scrollt den Blame-Text; alle Listen folgen der Selektion) |
+| `↑`/`↓`, `j`/`k` | Bewegen (rechts scrollt den Text; alle Listen folgen der Selektion) |
 | `/` | Filtern (nur Liste, kein Re-Resolve — sofort; `Esc` löscht zuerst den Filter) |
-| `?` / `F1` | Hilfe-Overlay (Metriken, Navigation, Ablauf; `Esc`/`?`/`q` schliesst) |
-| `Space` | Flag toggeln (Mitte) · Big Lever global toggeln (Tab 2) · Choice-Option wechseln |
-| `Enter` | `\|\|`-Alternative durchschalten · Choice-Option wechseln · Konflikt öffnen |
-| `S` / `E` | In `plan.toml` speichern / als Portage-Dateien exportieren (`E` synct vorher) |
-| `V` | Export synchron halten (bei Bedarf auto-`Export`) und gegen `emerge --pretend` verifizieren |
+| `o` | Sortierung links wechseln: Standard → Exkl. Pakete → Exkl. Größe (kein Re-Resolve; zeigt `(N pkg, X)` je Paket) |
+| `?` / `F1` | Hilfe-Overlay (`Esc`/`?`/`q` schliesst) |
+| `Space` | Flag toggeln (Mitte) · Big Lever global toggeln (Tab 2) |
+| `Enter` | `||`-Alternative durchschalten · Konflikt öffnen |
+| `x` | Cut-Analyse fürs selektierte Paket (rechte Pane) |
+| `a` | Alle Flag-Blocker des Cut-Plans auf einmal anwenden |
+| `u` | Letzte Änderung zurückrollen (Undo, bis 32 Schritte) |
+| `S` | Geänderte Flags als `/etc/portage/package.use`-Syntax schreiben (Default `/tmp/gentoo-dep-tui.package.use`, per `--out-use` wählbar) |
 | `Esc` | Filter löschen → Pane links → beenden |
 | `q` | Beenden |
 
 ## Zahlen & Metriken richtig lesen
 
 Fußzeile: `Binpkg <X> (<hits>/<total> Hits)` summiert komprimierte
-Binhost-`SIZE`-Werte über alle Runtime-Pakete — Pakete **ohne** Treffer im
-Binhost-Index zählen mit `0 B` (die echte Größe wird dann unterschätzt;
-Trefferquote beachten, ohne `--binhost` steht `n/a`). `Quell-DL` enthält
-ausschließlich Quell-Tarballs (`Manifest`-`DIST`-Summen), **keine**
-Binärpakete. `Build-Only` fasst Buildzeit-Pakete
-(`DEPEND`/`BDEPEND`/`IDEPEND`) als `bin`/`src` zusammen.
+Binhost-`SIZE`-Werte über alle Runtime-Pakete — Pakete **ohne** Treffer
+zählen mit `0 B` (Trefferquote beachten; ohne `--binhost` steht `n/a`).
+`Quell-DL` enthält ausschließlich Quell-Tarballs (`Manifest`-`DIST`-Summen).
+`Build-Only` fasst Buildzeit-Pakete (`DEPEND`/`BDEPEND`/`IDEPEND`) zusammen.
 
 Mitte: `Pkg-Quell-DL` ist der Quell-Tarball des Pakets **selbst** — nicht der
 ganze Subgraph. `0 B`-Deltas sind normal bei geteilten Abhängigkeiten
-(z. B. bleibt `gtk+` über `firefox-bin` im Graphen, Refcount ≥ 2) oder bei
-reinen Compile-Features ohne neue Pakete/Distfiles.
+(z. B. bleibt `gtk+` über `firefox-bin` im Graphen) oder bei reinen
+Compile-Features ohne neue Pakete/Distfiles. `CONFLICT` markiert Flags, deren
+Toggle einen Widerspruch auslösen würde — `Space` öffnet dann einen
+Quick-Switch statt still zu scheitern.
 
-Rechte Pane: `Flag <x> zieht:` listet hinzukommende/entfallende Pakete. Wird
-eine gezogene Abhängigkeit von anderen gehalten, zeigt **Voll-Ersparnis**,
-was das Abschalten *überall* (`Flag aus bei: …`) bzw. zusätzlich mit
-Entfernen von Welt-Paketen (`world entfernen: …`) sparen würde —
-`deltas <pkg> --deep` gibt denselben Bericht auf der Konsole.
+Rechte Pane: Bei geteilten Abhängigkeiten zeigt **Voll-Ersparnis**, was das
+Abschalten *überall* (`Flag aus bei: …`) bzw. zusätzlich mit Entfernen von
+Welt-Paketen (`world entfernen: …`) sparen würde. Steht beim selektierten
+Flag ein `Toggle-Konflikt`, siehst du Grund und Verursacher sofort — nicht
+erst im Modal.
 
-Tab 2 (`Big Levers`): globales Abschalten je Flag, sortiert nach Ersparnis;
-die Detailbox unten nennt Beschreibung, betroffene Pakete und
-hinzu/entfernte Pakete. Hinweis: `dl` kann beim Abschalten *steigen*
-(`!flag?`-Bedingungen ziehen dann Fallback-Quellen) — korrekt, kein Bug.
+Tab 2 (`Big Levers`): standardmäßig nur **Abschalten** (`[AUS]`), sortiert
+nach Paket-Ersparnis (`Pkg-Delta`), danach Download — ohne `--binhost`
+stehen die größten Paket-Einsparungen oben statt lauter `0 B`-Zeilen. Die
+Detailbox unten nennt Beschreibung, betroffene Pakete und hinzu/entfernte
+Pakete. Hinweis: `dl` kann beim Abschalten *steigen* (`!flag?`-Bedingungen
+ziehen dann Fallback-Quellen) — korrekt, kein Bug.
 
 USE-Flag-Bedeutungen stehen offline in der TUI (rechte Pane): lokale
 Beschreibung aus `<repo>/profiles/use.local.desc` vor globaler aus
@@ -116,11 +116,11 @@ Beschreibung aus `<repo>/profiles/use.local.desc` vor globaler aus
 
 ## Drei Anwendungsfälle Schritt für Schritt
 
-### 1. `ffmpeg`: Was kostet JPEG→AV1?
+### 1. `ffmpeg`: Was kostet AV1?
 
 ```bash
-gentoo-dep-tui deltas media-video/ffmpeg --repo ... --world ... [...]
-# [ ] svt-av1  (n/a (ohne --binhost) / 8000 B dl (+1/-0 Pakete: media-libs/svt-av1))
+gentoo-dep-tui deltas media-video/ffmpeg --repo ... --world ...
+# [ ] svt-av1  (n/a (ohne --binhost) / +8000 B dl (+1/-0 Pakete: media-libs/svt-av1))
 ```
 
 `(+1/-0 Pakete: …)` nennt die exakte Paket-Differenz. In der TUI: `/ffmpeg`
@@ -128,61 +128,59 @@ gentoo-dep-tui deltas media-video/ffmpeg --repo ... --world ... [...]
 neue Paket. Hinweis: Die REQUIRED_USE-Kaskade `svt-av1? ( aom )` schaltet
 `aom` ggf. mit ein — das Delta enthält dann beide Pakete.
 
-### 2. `openssh`-Alternativen vergleichen (`[[choice]]`)
+### 2. `gtk+` rauswerfen: Was spart das wirklich?
 
-`plan.toml` anlegen (`init --world … --plan plan.toml`), Baseline-Welt ohne
-Choice-Atome halten und Alternativen eintragen:
-
-```toml
-[[choice]]
-id = "ssh-server"
-selected = 0
-[[choice.option]]
-atom = "net-misc/openssh"
-pros = "volles OpenSSH, SFTP"
-cons = "zieht OpenSSL/zlib, groesser"
-[[choice.option]]
-atom = "net-misc/dropbear"
-pros = "sehr klein, ideal fuer Container"
-cons = "kein volles OpenSSH-Featureset"
+```bash
+gentoo-dep-tui cut x11-libs/gtk+ --repo ... --world ...
+# Cut-Analyse fuer x11-libs/gtk+:
+#   keine Flag-Blocker
+#   Harte world-Blocker: www-client/firefox-bin, ...
+#   Ohne alle Blocker: ... (-7/+0 pkg)
 ```
 
-In der TUI erscheint `choice: ssh-server` links; `Enter`/`Space` schaltet die
-Option um und aktualisiert Welt, Graph und Deltas live. `baseline.world` wird
-dabei nie mit Choice-Atomen vermischt (`S`/`E` bleiben sauber).
+Niemand hält `gtk+` über ein schaltbares Flag (alle Kanten unbedingt) — also
+gibt es keine Flag-Blocker, nur harte Welt-Blocker. In der TUI: Paket
+selektieren, `x` zeigt den Plan rechts; `a` wendet alle Flag-Blocker an
+(hier: nichts zu tun), `u` rollt zurück. Echte Messung auf einem
+Desktop-System: nur echte Halter (`firefox-bin`, `signal-desktop-bin`,
+`google-chrome`), **keine** unbeteiligten Basispakete — und −585 MB Download
+bei 7 entfernten Paketen.
 
-### 3. `nginx`-Alternativen vermessen
+### 3. Schnittstelle für AI-Agenten: `simulate` und `batch`
 
-`gentoo-dep-tui` hat keine eingebaute „Was ersetzt was"-Datenbank (außer
-`||`-Gruppen und `[[choice]]`, die **du** pflegst). Trage Kandidaten
-(`www-servers/nginx`, `caddy`, `lighttpd`) als `[[choice]]` ein und vergleiche:
-Achte auf `BDEPEND-extra` vs. Runtime — `caddy` braucht `dev-lang/go` nur zur
-Bauzeit (fällt im Multi-Stage-Build weg), `nginx` behält seine C-Bibliotheken
-in der Runtime.
+Statt den Index pro Frage neu zu laden (`~650 ms` bei ~14.000 Paketen),
+lädst du ihn einmal und stellst viele Fragen:
+
+```bash
+# Einzelne Was-wäre-wenn-Frage als JSON:
+gentoo-dep-tui simulate --set app-editors/emacs=gui,Xaw3d,-gtk --json
+
+# Dutzende Fragen in Sekundenbruchteilen (eine Zeile = eine Antwort):
+printf '%s\n' \
+  '{"op":"deltas","package":"media-video/ffmpeg"}' \
+  '{"op":"cut","package":"x11-libs/gtk+"}' \
+  '{"op":"simulate","set":{"app-editors/emacs":["-gtk"]}}' \
+  | gentoo-dep-tui batch
+```
+
+Alle Lese-Subcommands (`index-check`, `graph`, `blame`, `deltas`, `cut`,
+`big-levers`, `simulate`) kennen `--json` (maschinenlesbar; `--perf-report`
+geht dann nach `stderr`, damit `stdout` reines JSON bleibt). `graph --json`
+liefert Totals (inkl. `build_extra`, Trefferquote) plus je Knoten CPV, Slot,
+`has_binpkg`, USE-Flags und exklusive Kosten.
 
 ## CLI-Überblick
 
 `index-check` (Repo-Statistik) · `graph` (Gesamtgrößen + Paketliste) ·
-`blame <pkg>` (Abhängigkeitsketten) · `deltas <pkg>` (Flag-Deltas mit
-Paket-Diff; `--deep` zusätzlich mit Shared-Blocker-Bericht) ·
-`big-levers` (systemweite Hebel, multi-core) · `init`
-(`world` → `plan.toml`) · `export` · `verify` · `tui` (Default).
+`blame <pkg>` (Abhängigkeitsketten, Welt-Pakete zeigen sauber „kein Pfad") ·
+`deltas <pkg>` (Flag-Deltas mit Paket-Diff; `--deep` zusätzlich mit
+Shared-Blocker-Bericht) · `cut <pkg>` (Paket-Eliminierungs-Analyse) ·
+`big-levers` (systemweite Hebel, multi-core; `--include-enable` zeigt auch
+Einschalt-Hebel) · `simulate` (`--set cat/pkg=flag1,-flag2`, `--drop
+cat/pkg`) · `batch` (JSON-Zeilen von `stdin`) · `tui` (Default).
 
-Alle Lese-Subcommands (`index-check`, `graph`, `deltas`, `big-levers`)
-kennen `--perf-report` (Phasen-Report; misst nur mit
+Alle Lese-Subcommands kennen `--perf-report` (Phasen-Report; misst nur mit
 `--features perf-metrics`, sonst Hinweis).
-
-### Verify-Reihenfolge: `[S]`/`[E]` → `[V]`
-
-`verify` braucht einen Export als Configroot. Fehlt das Verzeichnis, gibt es
-eine klare Meldung statt `ENOENT` (zuerst `[E]` bzw. `gentoo-dep-tui
-export`). Beim Export ergänzt das Tool `make.profile`, `make.conf` und
-`repos.conf` aus dem laufenden `/etc/portage` (nur falls dort vorhanden und
-im Export fehlend), sodass `emerge --root <out> --config-root <out> @world`
-auf einem Gentoo-Host direkt gegen die laufenden Paketdefinitionen läuft.
-Außerhalb von Gentoo ist das ein No-Op. In der TUI hält `[V]` den Export
-selbst synchron (bei `dirty` oder fehlendem Export erst Export, dann
-Verify).
 
 ## Performance (gemessen, `tests/perf_system.rs`)
 
@@ -195,13 +193,13 @@ Synthetisches Repo: 125 Pakete, `ffmpeg`-Simulator mit 60 Flags. Release-Build:
 | `big-levers` | 6 ms, 62 Hebel, **1 Thread ≡ Pool** (exakt identisch) |
 | TUI-Workflow (10× Cursor, 5× Filter, 3× Toggle, Tab-Wechsel) | alles 0 ms, Budgets (<1 s) mit Reserve eingehalten |
 
-Verfahren: Baseline einmalig (`flag_delta_with_base`), Simulationen parallel
-(`rayon`), `Manifest` einmal je Paketverzeichnis, Filter/Cursor ohne Resolve
-(Cache + Idle-Recompute), Big Levers lazy. Vorher/Nachher-Vergleich und
-Latenz-Budgets stehen als Tests in `tests/perf_system.rs`
+Verfahren: Profil-Baseline je Paket einmalig gecacht (`OnceLock`),
+Baseline einmalig pro Refresh (`node_costs` <1 ms bei ~600 Knoten),
+Simulationen parallel (`rayon`), `Manifest` einmal je Paketverzeichnis,
+Filter/Cursor/Sortierung ohne Resolve (Cache + 80-ms-Idle-Recompute), Big
+Levers lazy. Vorher/Nachher-Vergleich und Latenz-Budgets stehen als Tests in
+`tests/perf_system.rs`
 (`cargo test --release --test perf_system -- --nocapture`).
-HIL-Abgleich auf echtem Snapshot: `GENTOO_HIL_REPO=/tmp/gentoo-hil cargo test
---release` (hier nicht verfügbar, Test skippt sauber).
 
 Detaillierte Phasen-Zeiten und Counter gibt es mit
 `cargo test --release --features perf-metrics --test perf_system --
@@ -209,21 +207,20 @@ Detaillierte Phasen-Zeiten und Counter gibt es mit
 `--perf-report` an den Lese-Subcommands druckt denselben Report).
 
 Skriptbare TUI-Tests mit Text-Screenshots: `cargo test --test tui_screencaps`
-fährt das Review-Szenario (Suche, Shared-Blocker, Big Levers, Hilfe,
-Konflikt) gegen `ratatui::TestBackend` und sichert alle Frames nach
+fährt das Review-Szenario (Suche, Shared-Blocker, Big Levers, Cut, Sort,
+Hilfe, Konflikt) gegen `ratatui::TestBackend` und sichert alle Frames nach
 `target/screencaps/review_screencaps.md` (Ablage via
 `GENTOO_SCREENCAP_OUT=<pfad>` wählbar); gegen echten Snapshot optional mit
 `GENTOO_HIL_REPO=…` (`hil_screencaps.md`).
 
-**Echte Messung auf dem Gentoo-Host** (32 Kerne, 13.700 Pakete im Index,
-156 `world`-Einträge → 570 Knoten im Graphen; Stand 2026-11-13):
+**Echte Messung auf einem Gentoo-System** (32 Kerne, ~13.700 Pakete im
+Index, 651 Knoten im Graphen):
 
-| Befehl | Wandzeit | CPU-Zeit | Befund |
-| :--- | :--- | :--- | :--- |
-| `graph` | 0,4 s | 1,0 s | Basisauflösung unkritisch |
-| `deltas media-video/ffmpeg` (~100 Flags) | 1,2 s | 24,5 s (~20× parallel) | pro Toggle spürbar, aber ok |
-| `big-levers` | **83 s → 7,7 s** | 167 s → 218 s (~28×) | sequentielle Off-Flag-Schleife war der Engpass (Fix: alles parallel) |
-
-Lehre: Die synthetischen 0–6 ms sagten nichts über den Ernstfall. Der
-HIL-Lauf fand den echten Engpass (nicht-parallelisierte zweite Schleife),
-den die Unit-Tests nicht sehen konnten.
+| Befehl | Befund |
+| :--- | :--- |
+| `index-check` | 645 ms Ladezeit (33.945 Cache-Dateien) |
+| `graph --json` | 651 Pakete, 9847 MB Quell-DL; mit Binhost 1032 MB Binpkg (561/651 Treffer) |
+| `cut x11-libs/gtk+ --json` | nur echte Halter, −585 MB DL / −7 Pakete |
+| `deltas media-video/ffmpeg --json` | 101 Flags, 63 mit Wirkung, exakte Konfliktgründe |
+| `big-levers --json` | 391 Hebel, alle `[AUS]`, Top `rdw` −13 Pakete |
+| `batch` (6 Ops, 1 Index-Load) | ~0,6 s Wandzeit |

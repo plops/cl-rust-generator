@@ -1,21 +1,14 @@
 //! 12_tui_state/actions — AppState-Mutationen und Selektion.
-//!
-//! Genau eine Zustaendigkeit: Navigation, Toggle-/Quick-Switch-Aktionen,
-//! Choice-Entscheidungen, Speichern (alles was `engine.overrides` aendert).
-
-use std::path::PathBuf;
 
 use crate::mod_01_types::{EngineResult, QuickSwitch};
 
-use super::{
-    AppState, LeftEntry, Modal, Pane, Tab, current_set, overrides_fingerprint, sync_plan_from_state,
-};
+use super::{AppState, LeftEntry, Modal, Pane, Tab, current_set, overrides_fingerprint};
 
 impl<'a> AppState<'a> {
     pub fn selected_package(&self) -> Option<String> {
         match self.left.get(self.left_selected)? {
             LeftEntry::WorldPkg(cpn) | LeftEntry::Transitive(cpn) => Some(cpn.clone()),
-            LeftEntry::OrDecision(_) | LeftEntry::PlanChoice(_) => None,
+            LeftEntry::OrDecision(_) => None,
         }
     }
 
@@ -27,15 +20,7 @@ impl<'a> AppState<'a> {
         }
     }
 
-    /// Selektierte `[[choice]]`-ID (`None` bei Paket-/`||`-Eintrag, T07).
-    pub fn selected_choice(&self) -> Option<String> {
-        match self.left.get(self.left_selected)? {
-            LeftEntry::PlanChoice(id) => Some(id.clone()),
-            _ => None,
-        }
-    }
-
-    /// Tab wechseln (Big Levers werden lazy nachgeladen, T05).
+    /// Tab wechseln (Big Levers werden lazy nachgeladen).
     pub fn set_tab(&mut self, tab: Tab) -> EngineResult<()> {
         self.tab = tab;
         if tab == Tab::BigLevers {
@@ -63,10 +48,6 @@ impl<'a> AppState<'a> {
     }
 
     /// Selektion bewegen (Listen-Laenge beachten, Wrap-around).
-    ///
-    /// Links wird die gecachte Variante genutzt (T05): Cache-Hit ist sofort
-    /// da, Cache-Miss setzt `deltas_loading` und wird per `ensure_deltas`
-    /// (Idle im Event-Loop) nachgeladen. Rechts scrollt `right_scroll` (T06).
     pub fn move_selection(&mut self, delta: i32) {
         if self.tab == Tab::BigLevers {
             if self.levers.is_empty() {
@@ -96,7 +77,6 @@ impl<'a> AppState<'a> {
                     (self.middle_selected as i32 + delta).rem_euclid(len as i32) as usize;
             }
             Pane::Right => {
-                // Blame-/Pros-Cons-Text scrollen (T06).
                 if delta < 0 {
                     self.right_scroll = self.right_scroll.saturating_sub((-delta) as u16);
                 } else {
@@ -106,15 +86,12 @@ impl<'a> AppState<'a> {
         }
     }
 
-    /// Schnellauswahl links (T05): Selektion + Cache-Hit sofort, Miss → `deltas_loading`.
+    /// Schnellauswahl links: Selektion + Cache-Hit sofort, Miss → `deltas_loading`.
     pub fn select_left_fast(&mut self, idx: usize) {
         if self.left.is_empty() {
-            // Nichts selektierbar (z. B. Filter ohne Treffer): keine stale
-            // Mitte/rechts zeigen (review3 Task 1.2).
             self.flag_deltas.clear();
             self.deltas_loading = false;
             self.middle_selected = 0;
-            self.middle_scroll = 0;
             self.right_scroll = 0;
             return;
         }
@@ -128,7 +105,6 @@ impl<'a> AppState<'a> {
                     self.deltas_loading = false;
                     crate::mod_00_perf::perf_count_cache_hit();
                 } else {
-                    // Miss: alte Flags nicht weiter anzeigen (Idle-Recompute folgt).
                     self.flag_deltas.clear();
                     self.deltas_loading = true;
                     crate::mod_00_perf::perf_count_cache_miss();
@@ -139,13 +115,11 @@ impl<'a> AppState<'a> {
                 self.deltas_loading = false;
             }
         }
-        // Paketwechsel: Mitte und rechts von vorn (review3 Task 1.2).
         self.middle_selected = 0;
-        self.middle_scroll = 0;
         self.right_scroll = 0;
     }
 
-    /// Laenge der mittleren Liste (Flags, Kandidaten oder Choice-Optionen).
+    /// Laenge der mittleren Liste (Flags oder `||`-Kandidaten).
     pub fn middle_len(&self) -> usize {
         match self.left.get(self.left_selected) {
             Some(LeftEntry::OrDecision(group)) => self
@@ -156,22 +130,11 @@ impl<'a> AppState<'a> {
                 .map(|a| a.candidates.len())
                 .unwrap_or(0),
             Some(LeftEntry::WorldPkg(_)) | Some(LeftEntry::Transitive(_)) => self.flag_deltas.len(),
-            Some(LeftEntry::PlanChoice(id)) => self
-                .plan
-                .choice
-                .iter()
-                .find(|c| &c.id == id)
-                .map(|c| c.option.len())
-                .unwrap_or(0),
             None => 0,
         }
     }
 
     /// `Space`: USE-Flag toggeln (nur bei Paket + Flag-Selektion).
-    ///
-    /// Der Toggle misst gegen den Post-Kaskaden-Stand aus dem Graphen.
-    /// Traegt die Simulation einen Konflikt, oeffnet `Space` stattdessen ein
-    /// Modal (echter Konflikt bevorzugt, sonst simulierter, Task 4.1).
     pub fn toggle_selected_flag(&mut self) -> EngineResult<bool> {
         let package = match self.selected_package() {
             Some(p) => p,
@@ -181,7 +144,6 @@ impl<'a> AppState<'a> {
             Some(d) => d.flag.clone(),
             None => return Ok(false),
         };
-        // Conflict-Flags sind nicht direkt schaltbar → Modal anbieten.
         if let Some(sim_conflict) = self.flag_deltas[self.middle_selected].conflict.clone() {
             if let Some(idx) = self
                 .conflicts
@@ -200,13 +162,12 @@ impl<'a> AppState<'a> {
             }
             return Ok(false);
         }
-        // Nur der Toggle ist expliziter Intent (keine Defaults kopieren).
-        // Post-Kaskaden-Stand aus dem Graphen, Fallback auf Defaults.
         let current_on = match self.graph.nodes.get(&package) {
             Some(n) => n.use_flags.contains(&flag),
             None => current_set(&self.engine, &package).contains(&flag),
         };
         let toggled_on = !current_on;
+        self.push_undo();
         self.engine
             .overrides
             .entry(package)
@@ -243,12 +204,7 @@ impl<'a> AppState<'a> {
         Ok(true)
     }
 
-    /// `Space` auf Tab 2 (T07): selektiertes Big-Lever-Flag global umschalten.
-    ///
-    /// Ist das Flag irgendwo an, wird es ueberall ausgeschaltet; ist es
-    /// ueberall aus, wird es fuer alle Pakete eingeschaltet, die es kennen.
-    /// Plattform-Fakten sowie profil-maskierte/-erzwungene Flags sind keine
-    /// Hebel und werden abgewiesen (Task 4.1).
+    /// `Space` auf Tab 2: selektiertes Big-Lever-Flag global umschalten.
     pub fn toggle_big_lever(&mut self) -> EngineResult<bool> {
         let lever = match self.levers.get(self.lever_selected) {
             Some(l) => l.clone(),
@@ -262,18 +218,11 @@ impl<'a> AppState<'a> {
             self.status = format!("{flag} ist kein schaltbarer Hebel");
             return Ok(false);
         }
-        let holders: Vec<String> = self
-            .graph
-            .nodes
-            .iter()
-            .filter(|(_, n)| n.use_flags.contains(&flag))
-            .map(|(cpn, _)| cpn.clone())
-            .collect();
-        if holders.is_empty() {
-            // Ueberall aus → fuer alle Pakete mit diesem IUSE-Flag einschalten
-            // (maskierte ausgenommen — dort waere AN wirkungslos).
-            let mut any = false;
+        self.push_undo();
+        if lever.turn_on {
+            // Enable-Hebel: fuer alle Pakete mit diesem IUSE-Flag einschalten.
             let cpns: Vec<String> = self.graph.nodes.keys().cloned().collect();
+            let mut any = false;
             for cpn in cpns {
                 let knows = self
                     .engine
@@ -290,9 +239,21 @@ impl<'a> AppState<'a> {
                 }
             }
             if !any {
+                self.undo_stack.pop();
                 return Ok(false);
             }
         } else {
+            let holders: Vec<String> = self
+                .graph
+                .nodes
+                .iter()
+                .filter(|(_, n)| n.use_flags.contains(&flag))
+                .map(|(cpn, _)| cpn.clone())
+                .collect();
+            if holders.is_empty() {
+                self.undo_stack.pop();
+                return Ok(false);
+            }
             for cpn in holders {
                 self.engine
                     .overrides
@@ -304,73 +265,6 @@ impl<'a> AppState<'a> {
         self.dirty = true;
         self.refresh()?;
         Ok(true)
-    }
-
-    /// `Enter`/`Space` auf `[[choice]]` (T07): naechste Option waehlen.
-    pub fn cycle_choice_option(&mut self) -> EngineResult<bool> {
-        let id = match self.selected_choice() {
-            Some(id) => id,
-            None => return Ok(false),
-        };
-        let next = match self.plan.choice.iter().find(|c| c.id == id) {
-            Some(c) if !c.option.is_empty() => (c.selected + 1) % c.option.len(),
-            _ => return Ok(false),
-        };
-        if let Some(choice) = self.plan.choice.iter_mut().find(|c| c.id == id) {
-            choice.selected = next;
-        }
-        self.sync_world_from_plan();
-        // `suggested_use` der neu gewaehlten Option einmischen (manuelle
-        // Toggles bleiben erhalten — kein Voll-Reset der Overrides!).
-        if let Some(choice) = self.plan.choice.iter().find(|c| c.id == id)
-            && let Some(opt) = choice.option.get(choice.selected)
-        {
-            for token in &opt.suggested_use {
-                if let Some(flag) = token.strip_prefix('-') {
-                    self.engine
-                        .overrides
-                        .entry(opt.atom.clone())
-                        .or_default()
-                        .insert(flag.to_string(), false);
-                } else {
-                    self.engine
-                        .overrides
-                        .entry(opt.atom.clone())
-                        .or_default()
-                        .insert(token.clone(), true);
-                }
-            }
-        }
-        self.dirty = true;
-        self.refresh()?;
-        Ok(true)
-    }
-
-    /// Welt aus `plan.baseline.world` + gewaehlten Choice-Optionen ableiten.
-    fn sync_world_from_plan(&mut self) {
-        use std::collections::HashSet;
-        let mut choice_atoms: HashSet<&String> = HashSet::new();
-        for choice in &self.plan.choice {
-            for opt in &choice.option {
-                choice_atoms.insert(&opt.atom);
-            }
-        }
-        let mut world = self.plan.baseline.world.clone();
-        if world.is_empty() {
-            // Ohne Baseline: bisherige Welt ohne alte Choice-Atome behalten.
-            world = self
-                .world
-                .iter()
-                .filter(|w| !choice_atoms.contains(w))
-                .cloned()
-                .collect();
-        }
-        for atom in self.plan.effective_world() {
-            if !world.contains(&atom) {
-                world.push(atom);
-            }
-        }
-        self.world = world;
     }
 
     /// Konflikt-Modal fuer Paket oeffnen (erster passender Konflikt).
@@ -403,15 +297,13 @@ impl<'a> AppState<'a> {
     }
 
     /// Quick-Switch-Option anwenden (Modal schliessen, neu aufloesen).
-    ///
-    /// Leere `changes` sind keine Aktion: Status-Hinweis statt Dirty-Flag
-    /// und ohne Re-Resolve (Task 4.1).
     pub fn apply_quick_switch(&mut self, option: &QuickSwitch) -> EngineResult<()> {
         if option.changes.is_empty() {
             self.status = "Keine automatische Aenderung verfuegbar".into();
             self.modal = None;
             return Ok(());
         }
+        self.push_undo();
         for (package, flag, want_on) in &option.changes {
             self.engine
                 .overrides
@@ -441,20 +333,6 @@ impl<'a> AppState<'a> {
             Some(Modal::Help) | None => return,
         };
         *selected = (*selected as i32 + delta).rem_euclid(len as i32) as usize;
-    }
-
-    /// In `plan.toml` speichern (Dirty-Flag zuruecksetzen).
-    pub fn save(&mut self) -> EngineResult<PathBuf> {
-        let path = self
-            .plan_path
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("plan.toml"));
-        sync_plan_from_state(&mut self.plan, &self.engine, &self.world);
-        self.plan.save(&path)?;
-        self.plan_path = Some(path.clone());
-        self.dirty = false;
-        self.status = format!("Gespeichert: {}", path.display());
-        Ok(path)
     }
 
     /// Blame-Ketten des selektierten Pakets.

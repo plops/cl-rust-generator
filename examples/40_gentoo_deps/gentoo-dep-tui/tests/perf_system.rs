@@ -25,7 +25,6 @@ use gentoo_dep_tui::mod_05_repo_index::RepoIndex;
 use gentoo_dep_tui::mod_06_graph::Engine;
 use gentoo_dep_tui::mod_07_cascade::resolve_with_cascade;
 use gentoo_dep_tui::mod_08_delta::{big_levers, package_deltas};
-use gentoo_dep_tui::mod_09_plan_toml::Plan;
 use gentoo_dep_tui::mod_12_tui_state::{AppState, Tab};
 
 /// Perf-Zaehler sind prozessglobal → counter-sensitive Tests serialisieren.
@@ -247,7 +246,7 @@ fn sys_perf_tui_workflow() {
     let index: &'static RepoIndex = Box::leak(Box::new(index));
     let profile: &'static Profile = Box::leak(Box::new(profile));
     let t0 = Instant::now();
-    let mut state = AppState::new(index, profile, world, Plan::default(), None).unwrap();
+    let mut state = AppState::new(index, profile, world).unwrap();
     let init_ms = t0.elapsed().as_millis();
     // 10x Cursor: reine Selektion (kein Resolve).
     let t1 = Instant::now();

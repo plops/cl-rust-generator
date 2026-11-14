@@ -215,6 +215,37 @@ pub fn apply_flag_list(target: &mut HashSet<String>, path: &Path) -> EngineResul
     Ok(())
 }
 
+/// Liest reine Atom-Zeilen (Datei oder Verzeichnis, `#`-Kommentare raus).
+pub fn read_atom_lines(path: &Path) -> Vec<String> {
+    let mut files = Vec::new();
+    if path.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(path) {
+            let mut sorted: Vec<PathBuf> = entries
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.is_file())
+                .collect();
+            sorted.sort();
+            files = sorted;
+        }
+    } else if path.is_file() {
+        files.push(path.to_path_buf());
+    } else {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for file in files {
+        if let Ok(text) = std::fs::read_to_string(&file) {
+            for line in text.lines() {
+                let line = strip_comment(line).trim();
+                if !line.is_empty() {
+                    out.push(line.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Liest `package.use` (Datei oder Verzeichnis): `atom flag1 -flag2`.
 pub fn read_package_use(path: &Path) -> EngineResult<HashMap<String, Vec<String>>> {
     let mut out: HashMap<String, Vec<String>> = HashMap::new();

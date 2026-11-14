@@ -1,4 +1,4 @@
-//! 13_tui_view/right — rechte Pane: Blame, Konflikte, Pros/Cons.
+//! 13_tui_view/right — rechte Pane: Blame, Konflikte, Deltas, Cut.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -10,7 +10,7 @@ use crate::mod_01_types::ConflictInfo;
 use crate::mod_08_delta::SharedRemovalImpact;
 use crate::mod_12_tui_state::{AppState, Pane};
 
-use super::bottom::{border_style, fmt_bytes};
+use super::bottom::{border_style, fmt_bytes, fmt_delta};
 
 pub(super) fn render_right(frame: &mut Frame, state: &AppState, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
@@ -18,8 +18,6 @@ pub(super) fn render_right(frame: &mut Frame, state: &AppState, area: Rect) {
         "Warum ist das hier?",
         Style::default().add_modifier(Modifier::BOLD),
     ));
-    // Konflikte des selektierten Pakets direkt in der rechten Pane
-    // (Task 4.2) — sonst faellt ein rotes Flag im Blame nicht auf.
     if let Some(pkg) = state.selected_package() {
         let pkg_conflicts: Vec<&ConflictInfo> = state
             .conflicts
@@ -59,27 +57,17 @@ pub(super) fn render_right(frame: &mut Frame, state: &AppState, area: Rect) {
             }
         }
     }
-    // Pros/Cons: Choice suchen, deren gewaehlte Option das Paket ist.
     if let Some(pkg) = state.selected_package() {
-        for choice in &state.plan.choice {
-            if let Some(opt) = choice.option.get(choice.selected)
-                && opt.atom == pkg
-            {
-                lines.push(Line::from(""));
-                lines.push(Line::styled(
-                    format!("Choice: {}", choice.id),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ));
-                lines.push(Line::from(format!("Pros: {}", opt.pros)));
-                lines.push(Line::from(format!("Cons: {}", opt.cons)));
-            }
-        }
-        // Paket-Diff des selektierten Flags (T08).
         if let Some(delta) = state.flag_deltas.get(state.middle_selected) {
+            let action = if delta.current {
+                "Ausschalten von"
+            } else {
+                "Einschalten von"
+            };
             if !delta.added_packages.is_empty() || !delta.removed_packages.is_empty() {
                 lines.push(Line::from(""));
                 lines.push(Line::styled(
-                    format!("Flag {} zieht:", delta.flag),
+                    format!("{action} {} bewirkt:", delta.flag),
                     Style::default().add_modifier(Modifier::BOLD),
                 ));
                 for p in delta.added_packages.iter().take(8) {
@@ -98,11 +86,24 @@ pub(super) fn render_right(frame: &mut Frame, state: &AppState, area: Rect) {
                     lines.push(Line::from("  (...)"));
                 }
             }
+            if let Some(c) = &delta.conflict {
+                lines.push(Line::from(""));
+                lines.push(Line::styled(
+                    format!("Toggle-Konflikt ({}):", delta.flag),
+                    Style::default().add_modifier(Modifier::BOLD).fg(Color::Red),
+                ));
+                lines.push(Line::styled(
+                    format!("! {}", c.message),
+                    Style::default().fg(Color::Red),
+                ));
+                for opt in c.options.iter().take(3) {
+                    lines.push(Line::from(format!("  Loesung: {}", opt.label)));
+                }
+            }
             if !delta.has_binhost_data {
                 lines.push(Line::from("bin: n/a (ohne --binhost)"));
             }
         }
-        // Offline-USE-Flag-Doku (`use.desc`/`use.local.desc`, lokal zuerst).
         if let (Some(pkg), Some(delta)) = (
             state.selected_package(),
             state.flag_deltas.get(state.middle_selected),
@@ -111,13 +112,13 @@ pub(super) fn render_right(frame: &mut Frame, state: &AppState, area: Rect) {
             lines.push(Line::from(""));
             lines.push(Line::from(format!("{}: {text}", delta.flag)));
         }
-        // Shared-Blocker-/Voll-Ersparnis-Analyse (nur passend zur Selektion).
         if let Some(impact) = &state.shared_impact
             && state.selected_package().as_deref() == Some(impact.package.as_str())
             && state.selected_flag().as_deref() == Some(impact.flag.as_str())
         {
             render_shared_impact(&mut lines, impact);
         }
+        render_cut_plan(&mut lines, state, &pkg);
     }
     let para = Paragraph::new(Text::from(lines))
         .block(
@@ -131,8 +132,7 @@ pub(super) fn render_right(frame: &mut Frame, state: &AppState, area: Rect) {
     frame.render_widget(para, area);
 }
 
-/// Voll-Ersparnis-Abschnitt: was spart das Flag, wenn Mit-Blocker
-/// ebenfalls abgeschaltet bzw. Welt-Pakete entfernt werden.
+/// Voll-Ersparnis-Abschnitt.
 fn render_shared_impact(lines: &mut Vec<Line>, impact: &SharedRemovalImpact) {
     lines.push(Line::from(""));
     lines.push(Line::styled(
@@ -141,15 +141,23 @@ fn render_shared_impact(lines: &mut Vec<Line>, impact: &SharedRemovalImpact) {
     ));
     let wfb = &impact.without_flag_blockers;
     lines.push(Line::from(format!(
-        "ohne Flag-Blocker: {} bin / {} dl (-{} pkg)",
-        fmt_bytes(wfb.metrics.binpkg_bytes),
-        fmt_bytes(wfb.metrics.download_bytes),
+        "ohne Flag-Blocker: {} / {} (-{} pkg)",
+        fmt_delta(wfb.metrics.binpkg_bytes, "bin"),
+        fmt_delta(wfb.metrics.download_bytes, "dl"),
         wfb.removed_packages.len()
     )));
     if !impact.flag_blockers.is_empty() {
         lines.push(Line::from("Flag aus bei:"));
-        for (cpn, flag) in impact.flag_blockers.iter().take(8) {
-            lines.push(Line::from(format!("  {cpn} [{flag}]")));
+        for b in impact.flag_blockers.iter().take(8) {
+            lines.push(Line::from(format!(
+                "  {} [{}]",
+                b.package,
+                if b.want_on {
+                    format!("+{}", b.flag)
+                } else {
+                    format!("-{}", b.flag)
+                }
+            )));
         }
         if impact.flag_blockers.len() > 8 {
             lines.push(Line::from("  (...)"));
@@ -157,8 +165,8 @@ fn render_shared_impact(lines: &mut Vec<Line>, impact: &SharedRemovalImpact) {
     }
     let wab = &impact.without_all_blockers;
     lines.push(Line::from(format!(
-        "inkl. world-Entfernung: {} bin (-{} pkg)",
-        fmt_bytes(wab.metrics.binpkg_bytes),
+        "inkl. world-Entfernung: {} (-{} pkg)",
+        fmt_delta(wab.metrics.binpkg_bytes, "bin"),
         wab.removed_packages.len()
     )));
     if !impact.world_blockers.is_empty() {
@@ -170,4 +178,63 @@ fn render_shared_impact(lines: &mut Vec<Line>, impact: &SharedRemovalImpact) {
             lines.push(Line::from("  (...)"));
         }
     }
+}
+
+/// Cut-Analyse (`x`) zum selektierten Paket.
+fn render_cut_plan(lines: &mut Vec<Line>, state: &AppState, pkg: &str) {
+    let Some(plan) = &state.cut_plan else {
+        return;
+    };
+    if plan.target != pkg {
+        return;
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::styled(
+        format!("Cut-Analyse fuer {}:", plan.target),
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
+    if plan.flag_blockers.is_empty() {
+        lines.push(Line::from("keine Flag-Blocker"));
+    } else {
+        lines.push(Line::from("Flag-Blocker (Taste [a] wendet alle an):"));
+        for b in plan.flag_blockers.iter().take(10) {
+            lines.push(Line::from(format!(
+                "  {} [{}]",
+                b.package,
+                if b.want_on {
+                    format!("+{}", b.flag)
+                } else {
+                    format!("-{}", b.flag)
+                }
+            )));
+        }
+    }
+    if plan.world_blockers.is_empty() {
+        lines.push(Line::from("keine harten world-Blocker"));
+    } else {
+        lines.push(Line::styled(
+            "Harte world-Blocker:",
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+        for w in plan.world_blockers.iter().take(10) {
+            lines.push(Line::from(format!("  {w}")));
+        }
+    }
+    let wfb = &plan.without_flag_blockers;
+    lines.push(Line::from(format!(
+        "Ohne Flag-Blocker: {} / {} (-{}/+{} pkg)",
+        fmt_delta(wfb.metrics.binpkg_bytes, "bin"),
+        fmt_delta(wfb.metrics.download_bytes, "dl"),
+        wfb.removed_packages.len(),
+        wfb.added_packages.len(),
+    )));
+    let wab = &plan.without_all_blockers;
+    lines.push(Line::from(format!(
+        "Ohne alle Blocker: {} / {} (-{}/+{} pkg)",
+        fmt_delta(wab.metrics.binpkg_bytes, "bin"),
+        fmt_delta(wab.metrics.download_bytes, "dl"),
+        wab.removed_packages.len(),
+        wab.added_packages.len(),
+    )));
+    let _ = fmt_bytes(0);
 }

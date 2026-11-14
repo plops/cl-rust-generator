@@ -1,19 +1,13 @@
 //! Host-Integrationstests auf synthetischen `tempfile`-Repos.
-//!
-//! Deckt T04/T07/T10/T13 ab: Index-Filter, Graph/Blame, Deltas/Kaskaden,
-//! plan.toml-Roundtrip und Export/Verify-Mocks.
 
-use std::collections::HashMap;
 use std::io::Write;
 
 use gentoo_dep_tui::mod_02_profile::{self, Profile};
 use gentoo_dep_tui::mod_03_manifest::parse_manifest;
 use gentoo_dep_tui::mod_05_repo_index::RepoIndex;
 use gentoo_dep_tui::mod_06_graph::{Engine, resolve};
-use gentoo_dep_tui::mod_08_delta::{big_levers, flag_delta};
-use gentoo_dep_tui::mod_09_plan_toml::Plan;
-use gentoo_dep_tui::mod_10_export_verify::{export_portage, parse_emerge_pretend};
-use gentoo_dep_tui::mod_11_cli::export_plan;
+use gentoo_dep_tui::mod_07_cascade::resolve_with_cascade_opts;
+use gentoo_dep_tui::mod_08_delta::{big_levers, cut_package, flag_delta};
 
 /// Mini-Repo bauen: md5-cache + Manifest + profiles + world.
 struct Fixture {
@@ -30,7 +24,6 @@ fn entry(keywords: &str, iuse: &str, rdepend: &str, required_use: &str, src_uri:
 }
 
 fn write_pkg(repo: &std::path::Path, cpn: &str, version: &str, body: &str) {
-    // Echtes md5-cache-Layout: `<kat>/<paket-version>` (zweistufig).
     let (cat, pkg) = cpn.split_once('/').unwrap();
     let dir = repo.join("metadata/md5-cache").join(cat);
     std::fs::create_dir_all(&dir).unwrap();
@@ -41,7 +34,6 @@ fn write_pkg(repo: &std::path::Path, cpn: &str, version: &str, body: &str) {
 fn fixture() -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("repo");
-    // Diamond + SSL-Flag + 9999-Live + maskierte Version.
     write_pkg(
         &repo,
         "app-misc/app",
@@ -104,10 +96,8 @@ fn fixture() -> Fixture {
 fn index_skips_live_and_masked() {
     let fx = fixture();
     let idx = RepoIndex::load(&fx.repo, None, &fx.profile).unwrap();
-    // 9999 ignoriert → hoechste stabile Version gewinnt.
     let sel = idx.select("app-misc/app").unwrap();
     assert_eq!(sel.version_str, "1.0");
-    // Manifest-Summe exakt.
     assert_eq!(
         idx.select("dev-libs/openssl")
             .unwrap()
@@ -123,18 +113,25 @@ fn diamond_graph_counts_shared_once_with_blame() {
     let idx = RepoIndex::load(&fx.repo, None, &fx.profile).unwrap();
     let engine = Engine::new(&idx, &fx.profile);
     let graph = resolve(&engine, &["app-misc/app".into()]).unwrap();
-    // app, b, c, shared + openssl (IUSE `+ssl` ist per Default an).
     assert_eq!(graph.nodes.len(), 5);
     assert_eq!(graph.refcounts.get("dev-libs/shared"), Some(&2));
     assert_eq!(graph.refcounts.get("dev-libs/openssl"), Some(&1));
     let chains = graph.blame("dev-libs/shared");
     assert!(!chains.is_empty());
-    // Pfad endet in der Welt.
     assert!(
         chains
             .iter()
             .any(|c| c.iter().any(|l| l.required_by == "app-misc/app"))
     );
+}
+
+#[test]
+fn world_package_blame_is_clean() {
+    let fx = fixture();
+    let idx = RepoIndex::load(&fx.repo, None, &fx.profile).unwrap();
+    let engine = Engine::new(&idx, &fx.profile);
+    let graph = resolve(&engine, &["app-misc/app".into()]).unwrap();
+    assert!(graph.blame("app-misc/app").is_empty());
 }
 
 #[test]
@@ -146,7 +143,6 @@ fn bdepend_does_not_inflate_runtime() {
         "1.0",
         &entry("amd64", "", "dev-libs/shared", "", "http://x/b.tar.gz"),
     );
-    // BDEPEND separat propagieren: eigener Eintrag mit BDEPEND auf Tool.
     let bdep = "EAPI=8\nDESCRIPTION=t\nSLOT=0\nKEYWORDS=amd64\nIUSE=\nRDEPEND=dev-libs/shared\nBDEPEND=dev-build/tool\nSRC_URI=http://x/b.tar.gz\n";
     write_pkg(&fx.repo, "dev-libs/b", "1.0", bdep);
     write_pkg(
@@ -177,8 +173,6 @@ fn shared_ssl_delta_zero_until_last_user() {
         e
     };
     let d = flag_delta(&with_ssl, &world, "app-misc/app", "ssl").unwrap();
-    // Nur in der Welt, kein Binhost: Binpkg-Delta 0, Download-Delta negativ
-    // (Manifest `o.tar.gz` mit 8000 B faellt weg).
     assert_eq!(d.delta.binpkg_bytes, 0);
     assert!(d.delta.download_bytes < 0);
     let levers = big_levers(&engine, &world).unwrap();
@@ -186,31 +180,56 @@ fn shared_ssl_delta_zero_until_last_user() {
 }
 
 #[test]
-fn plan_roundtrip_and_export_syntax() {
+fn cut_plan_finds_real_holders() {
     let fx = fixture();
-    let world_file = fx._dir.path().join("world");
-    std::fs::write(&world_file, "app-misc/app\n").unwrap();
-    let mut plan = Plan::init_from_world(&world_file, "test").unwrap();
-    plan.package
-        .push(gentoo_dep_tui::mod_09_plan_toml::PlanPackage {
-            atom: "app-misc/app".into(),
-            use_flags: vec!["ssl".into(), "-doc".into()],
-        });
-    let path = fx._dir.path().join("plan.toml");
-    plan.save(&path).unwrap();
-    let back = Plan::load(&path).unwrap();
-    assert_eq!(back.package[0].use_flags, vec!["ssl", "-doc"]);
-    let out = fx._dir.path().join("export");
-    let exported = export_plan(&back, &out).unwrap();
-    assert_eq!(exported.package_use, vec!["app-misc/app ssl -doc"]);
-    // Portage-Syntax: world + package.use Dateien.
-    let world_text = std::fs::read_to_string(out.join("world")).unwrap();
-    assert!(world_text.contains("app-misc/app"));
+    let idx = RepoIndex::load(&fx.repo, None, &fx.profile).unwrap();
+    let engine = Engine::new(&idx, &fx.profile);
+    let world = vec!["app-misc/app".to_string()];
+    let base = resolve_with_cascade_opts(&mut engine.fork(), &world, false, true).unwrap();
+    let plan = cut_package(&engine, &world, &base, "dev-libs/openssl")
+        .unwrap()
+        .expect("Cut-Plan erwartet");
+    assert!(plan.flag_blockers.iter().any(|b| b.package == "app-misc/app"));
+    assert!(plan.world_blockers.is_empty());
+    assert!(!plan.without_flag_blockers.removed_packages.is_empty());
 }
 
 #[test]
-fn verify_parser_handles_profiles_and_manifest_behaviour() {
-    // Profil-Vererbung (parent) wendet use.mask/use.force an.
+fn big_levers_sorted_by_pkg_delta_without_binhost() {
+    let fx = fixture();
+    let idx = RepoIndex::load(&fx.repo, None, &fx.profile).unwrap();
+    let engine = Engine::new(&idx, &fx.profile);
+    let world = vec!["app-misc/app".to_string()];
+    let levers = big_levers(&engine, &world).unwrap();
+    assert!(!levers.is_empty());
+    assert!(levers.iter().all(|l| !l.turn_on));
+    let mut sorted = levers.clone();
+    sorted.sort_by(|a, b| {
+        a.net_pkg_delta
+            .cmp(&b.net_pkg_delta)
+            .then_with(|| a.total.download_bytes.cmp(&b.total.download_bytes))
+            .then_with(|| a.flag.cmp(&b.flag))
+    });
+    let flags: Vec<&str> = levers.iter().map(|l| l.flag.as_str()).collect();
+    let expected: Vec<&str> = sorted.iter().map(|l| l.flag.as_str()).collect();
+    assert_eq!(flags, expected);
+}
+
+#[test]
+fn node_costs_diamond() {
+    let fx = fixture();
+    let idx = RepoIndex::load(&fx.repo, None, &fx.profile).unwrap();
+    let engine = Engine::new(&idx, &fx.profile);
+    let graph = resolve(&engine, &["app-misc/app".into()]).unwrap();
+    let costs = graph.node_costs();
+    let app = costs.get("app-misc/app").unwrap();
+    assert_eq!(app.exclusive_packages, graph.nodes.len());
+    let shared = costs.get("dev-libs/shared").unwrap();
+    assert!(shared.exclusive_packages < app.exclusive_packages);
+}
+
+#[test]
+fn verify_parser_profiles_and_manifest_behaviour() {
     let d = tempfile::tempdir().unwrap();
     let profiles = d.path().join("profiles");
     let base = profiles.join("base");
@@ -224,26 +243,9 @@ fn verify_parser_handles_profiles_and_manifest_behaviour() {
     assert_eq!(prof.arch, "amd64");
     let mask = mod_02_profile::read_flag_list(&base.join("use.mask")).unwrap();
     assert!(mask.contains("wayland"));
-    // Verify-Parser: sauber vs. REQUIRED_USE-Fehler.
-    let ok = parse_emerge_pretend("[ebuild   R   ] dev-libs/openssl-3.3.2\n");
-    assert!(ok.success);
-    let bad = parse_emerge_pretend("!!! REQUIRED_USE unsatisfied: wayland? ( egl )\n");
-    assert!(!bad.success);
-    // Manifest-Edge-Cases (leere Felder).
     let m = parse_manifest("DIST \nDIST a.tar.gz notanumber\nDIST b.tar.gz 42\n");
     assert_eq!(m.size_of("b.tar.gz"), Some(42));
     assert_eq!(m.size_of("a.tar.gz"), None);
-    // Export gegen Baseline-Differenz.
-    let mut cur = HashMap::new();
-    cur.insert("a/b".to_string(), ["x".into()].into_iter().collect());
-    let exp = export_portage(
-        &["a/b".into()],
-        &cur,
-        &HashMap::new(),
-        &d.path().join("exp"),
-    )
-    .unwrap();
-    assert_eq!(exp.package_use, vec!["a/b x"]);
 }
 
 #[test]
@@ -255,8 +257,11 @@ fn missing_world_is_an_error_with_hint() {
         profile: None,
         world: std::path::PathBuf::from("/nonexistent-world-12345"),
         binhost: None,
-        make_conf: std::path::PathBuf::from("/nonexistent-make.conf"),
-        package_use: std::path::PathBuf::from("/nonexistent-package.use"),
+        make_conf: None,
+        package_use: None,
+        portage_dir: std::path::PathBuf::from("/nonexistent-portage"),
+        snapshot: None,
+        json: false,
         perf_report: false,
     };
     let err = load_world(&args).unwrap_err();
@@ -268,7 +273,6 @@ fn missing_world_is_an_error_with_hint() {
 fn ffmpeg_svt_av1_delta_lists_package() {
     use gentoo_dep_tui::mod_06_graph::Engine;
     use gentoo_dep_tui::mod_08_delta::package_deltas;
-    // ffmpeg-Simulator: svt-av1 zieht media-libs/svt-av1.
     let text_ffmpeg = entry(
         "amd64",
         "svt-av1",

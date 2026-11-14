@@ -12,29 +12,101 @@ pub struct CommonArgs {
     /// Profil-Verzeichnis (Default: aus `--repo/profiles` + `make.profile`).
     #[arg(long)]
     pub profile_dir: Option<PathBuf>,
-    /// Aktives Profil (relativ zu profiles, Default: `default/linux/amd64/23.0`).
+    /// Aktives Profil (relativ zu profiles).
     #[arg(long)]
     pub profile: Option<String>,
     /// Welt-Datei.
     #[arg(long, default_value = "/var/lib/portage/world")]
     pub world: PathBuf,
     /// Binhost-`Packages`-Datei (optional, sonst keine Binpkg-Groessen).
-    ///
-    /// Empfohlener Default (offizieller Gentoo-Binhost, amd64/23.0):
-    /// `https://distfiles.gentoo.org/releases/amd64/binpackages/23.0/x86-64/Packages`
-    /// als Datei laden, z. B. `wget -O /tmp/Packages <URL>`, und hier per
-    /// `--binhost /tmp/Packages` uebergeben. `index-check` zeigt die Trefferquote.
     #[arg(long, value_name = "PACKAGES-DATEI")]
     pub binhost: Option<PathBuf>,
-    /// `make.conf` (fuer globale USE/ACCEPT_KEYWORDS).
-    #[arg(long, default_value = "/etc/portage/make.conf")]
-    pub make_conf: PathBuf,
-    /// `package.use` (Datei oder Verzeichnis).
-    #[arg(long, default_value = "/etc/portage/package.use")]
-    pub package_use: PathBuf,
+    /// `make.conf` (fuer globale USE/ACCEPT_KEYWORDS). Explizit > Portage-Dir.
+    #[arg(long)]
+    pub make_conf: Option<PathBuf>,
+    /// `package.use` (Datei oder Verzeichnis). Explizit > Portage-Dir.
+    #[arg(long)]
+    pub package_use: Option<PathBuf>,
+    /// Portage-Verzeichnis (Default `/etc/portage`): liefert make.conf,
+    /// package.use/mask/unmask/accept_keywords und make.profile.
+    #[arg(long, default_value = "/etc/portage")]
+    pub portage_dir: PathBuf,
+    /// Snapshot-Root: `<PFAD>/repo`, `<PFAD>/world`, `<PFAD>/etc/portage`.
+    #[arg(long)]
+    pub snapshot: Option<PathBuf>,
+    /// JSON-Ausgabe auf stdout (Perf-Report dann nach stderr).
+    #[arg(long, default_value_t = false)]
+    pub json: bool,
     /// Phasen-Report der Perf-Metriken ausgeben (braucht `--features perf-metrics`).
     #[arg(long, default_value_t = false)]
     pub perf_report: bool,
+}
+
+impl CommonArgs {
+    /// Repo-Pfad unter Beruecksichtigung von `--snapshot`.
+    pub fn eff_repo(&self) -> PathBuf {
+        if let Some(snap) = &self.snapshot
+            && snap.join("repo").is_dir()
+        {
+            return snap.join("repo");
+        }
+        self.repo.clone()
+    }
+
+    /// Welt-Pfad unter Beruecksichtigung von `--snapshot`.
+    pub fn eff_world(&self) -> PathBuf {
+        if let Some(snap) = &self.snapshot {
+            let w = snap.join("world");
+            if w.is_file() {
+                return w;
+            }
+        }
+        self.world.clone()
+    }
+
+    /// Portage-Dir unter Beruecksichtigung von `--snapshot`.
+    pub fn eff_portage_dir(&self) -> PathBuf {
+        if let Some(snap) = &self.snapshot {
+            let p = snap.join("etc/portage");
+            if p.is_dir() {
+                return p;
+            }
+        }
+        self.portage_dir.clone()
+    }
+
+    /// make.conf-Pfad (explizit > snapshot > portage-dir).
+    pub fn eff_make_conf(&self) -> PathBuf {
+        if let Some(p) = &self.make_conf {
+            return p.clone();
+        }
+        if let Some(snap) = &self.snapshot {
+            for cand in [snap.join("make.conf"), snap.join("etc/portage/make.conf")] {
+                if cand.is_file() {
+                    return cand;
+                }
+            }
+        }
+        self.eff_portage_dir().join("make.conf")
+    }
+
+    /// package.use-Pfad (explizit > snapshot > portage-dir).
+    pub fn eff_package_use(&self) -> PathBuf {
+        if let Some(p) = &self.package_use {
+            return p.clone();
+        }
+        if let Some(snap) = &self.snapshot {
+            for cand in [
+                snap.join("package.use"),
+                snap.join("etc/portage/package.use"),
+            ] {
+                if cand.exists() {
+                    return cand;
+                }
+            }
+        }
+        self.eff_portage_dir().join("package.use")
+    }
 }
 
 /// CLI-Wurzel.
@@ -51,21 +123,28 @@ pub enum Commands {
     /// Repo-Index laden und Statistik ausgeben.
     IndexCheck(CommonArgs),
     /// Runtime-Graph aufloesen und Groessen ausgeben.
-    Graph(CommonArgs),
+    Graph(GraphArgs),
     /// Blame-Ketten fuer ein Paket ausgeben.
     Blame(BlameArgs),
     /// USE-Flag-Deltas eines Pakets ausgeben.
     Deltas(DeltasArgs),
+    /// Paket-Eliminierungs-Analyse.
+    Cut(CutArgs),
     /// Globale Big Levers ausgeben.
-    BigLevers(CommonArgs),
-    /// `world` → `plan.toml` konvertieren.
-    Init(InitArgs),
-    /// `plan.toml` → Portage-Dateien exportieren.
-    Export(ExportArgs),
-    /// Export gegen `emerge --pretend` verifizieren.
-    Verify(VerifyArgs),
+    BigLevers(BigLeversArgs),
+    /// Einmalige Override-Simulation als JSON.
+    Simulate(SimulateArgs),
+    /// JSON-Anfragen zeilenweise von stdin (Index einmal laden).
+    Batch(CommonArgs),
     /// Interaktive TUI starten.
     Tui(TuiArgs),
+}
+
+/// `graph`-Argumente.
+#[derive(Debug, Clone, Parser)]
+pub struct GraphArgs {
+    #[command(flatten)]
+    pub common: CommonArgs,
 }
 
 /// `blame`-Argumente.
@@ -84,46 +163,41 @@ pub struct DeltasArgs {
     pub common: CommonArgs,
     /// Zielpaket (`cat/pkg`).
     pub package: String,
-    /// Zusaetzlich Shared-Blocker-/Voll-Ersparnis-Analyse je Flag
-    /// (teuer: je Flag bis zu drei Kaskadenlaeufe, review3 Task 4.1).
+    /// Zusaetzlich Shared-Blocker-/Voll-Ersparnis-Analyse je Flag.
     #[arg(long, default_value_t = false)]
     pub deep: bool,
 }
 
-/// `init`-Argumente.
+/// `cut`-Argumente.
 #[derive(Debug, Clone, Parser)]
-pub struct InitArgs {
-    /// Welt-Datei.
-    #[arg(long, default_value = "/var/lib/portage/world")]
-    pub world: PathBuf,
-    /// Ziel-`plan.toml`.
-    #[arg(long, default_value = "plan.toml")]
-    pub plan: PathBuf,
-    /// Profilname (informativ).
-    #[arg(long, default_value = "")]
-    pub profile: String,
+pub struct CutArgs {
+    #[command(flatten)]
+    pub common: CommonArgs,
+    /// Zielpaket (`cat/pkg`).
+    pub package: String,
 }
 
-/// `export`-Argumente.
+/// `big-levers`-Argumente.
 #[derive(Debug, Clone, Parser)]
-pub struct ExportArgs {
-    /// Quell-`plan.toml`.
-    #[arg(long, default_value = "plan.toml")]
-    pub plan: PathBuf,
-    /// Zielverzeichnis (`world`, `package.use`).
-    #[arg(long, default_value = "/tmp/gentoo-export")]
-    pub out: PathBuf,
+pub struct BigLeversArgs {
+    #[command(flatten)]
+    pub common: CommonArgs,
+    /// Auch wieder einschaltbare Flags liefern (sonst nur Abschalten).
+    #[arg(long, default_value_t = false)]
+    pub include_enable: bool,
 }
 
-/// `verify`-Argumente.
+/// `simulate`-Argumente.
 #[derive(Debug, Clone, Parser)]
-pub struct VerifyArgs {
-    /// Configroot (exportierte Portage-Dateien als `/etc/portage`-Ersatz).
-    #[arg(long, default_value = "/tmp/gentoo-export")]
-    pub configroot: PathBuf,
-    /// Befehlstemplate (Default: lokales `emerge -p`; HIL: ssh-Prefix).
+pub struct SimulateArgs {
+    #[command(flatten)]
+    pub common: CommonArgs,
+    /// Override `--set cat/pkg=flag1,-flag2` (mehrfach angebbar).
+    #[arg(long = "set")]
+    pub set: Vec<String>,
+    /// Welt-Paket entfernen `--drop cat/pkg` (mehrfach angebbar).
     #[arg(long)]
-    pub command: Option<String>,
+    pub drop: Vec<String>,
 }
 
 /// `tui`-Argumente.
@@ -131,7 +205,7 @@ pub struct VerifyArgs {
 pub struct TuiArgs {
     #[command(flatten)]
     pub common: CommonArgs,
-    /// Plan-Datei (optional; ohne Plan: direkt aus Welt).
-    #[arg(long)]
-    pub plan: Option<PathBuf>,
+    /// Ziel fuer `[S]` package.use-Export.
+    #[arg(long, default_value = "/tmp/gentoo-dep-tui.package.use")]
+    pub out_use: PathBuf,
 }

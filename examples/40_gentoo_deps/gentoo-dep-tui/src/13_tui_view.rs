@@ -82,14 +82,27 @@ fn render_packages(frame: &mut Frame, state: &AppState, area: Rect) {
     render_right(frame, state, cols[2]);
 }
 
-/// Links: Welt/Choices/`||`/Transitive, Konflikt-Markierung (T06 stateful).
+/// Links: Welt/`||`/Transitive, Konflikt-Markierung, exklusive Kosten.
 fn render_left(frame: &mut Frame, state: &AppState, area: Rect) {
     let items: Vec<ListItem> = state
         .left
         .iter()
         .enumerate()
         .map(|(i, entry)| {
-            let mut spans = vec![Span::raw(left_label(entry))];
+            let mut label = left_label(entry);
+            if state.left_sort != crate::mod_12_tui_state::LeftSort::Default
+                && let LeftEntry::WorldPkg(cpn) | LeftEntry::Transitive(cpn) = entry
+                && let Some(cost) = state.node_costs.get(cpn)
+            {
+                let has_bin = state.engine.index.has_any_binhost();
+                let bytes = if has_bin {
+                    cost.exclusive_metrics.binpkg_bytes
+                } else {
+                    cost.exclusive_metrics.download_bytes
+                };
+                label.push_str(&format!(" ({} pkg, {})", cost.exclusive_packages, fmt_bytes(bytes)));
+            }
+            let mut spans = vec![Span::raw(label)];
             if let LeftEntry::WorldPkg(cpn) | LeftEntry::Transitive(cpn) = entry
                 && state.conflicts.iter().any(|c| &c.package == cpn)
             {
@@ -137,7 +150,8 @@ mod tests;
 
 use bottom::border_style;
 use bottom::{
-    footer_height, render_conflict_modal, render_footer, render_help_modal, render_levers,
+    fmt_bytes, footer_height, render_conflict_modal, render_footer, render_help_modal,
+    render_levers,
 };
 use middle::render_middle;
 use right::render_right;

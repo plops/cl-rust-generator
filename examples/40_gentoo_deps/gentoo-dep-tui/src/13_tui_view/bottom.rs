@@ -89,15 +89,25 @@ fn lever_detail_lines(state: &AppState) -> Vec<Line<'static>> {
 }
 
 fn render_lever_table(frame: &mut Frame, state: &AppState, area: Rect) {
-    let header = Row::new(vec!["Flag", "Pakete", "Bin-Delta", "DL-Delta", "Konflikte"])
-        .style(Style::default().add_modifier(Modifier::BOLD));
+    let header = Row::new(vec![
+        "Flag",
+        "An?",
+        "Pakete",
+        "Pkg-Delta",
+        "Bin-Delta",
+        "DL-Delta",
+        "Konflikte",
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD));
     let rows: Vec<Row> = state
         .levers
         .iter()
         .map(|lever| {
             Row::new(vec![
                 Cell::from(lever.flag.clone()),
+                Cell::from(if lever.turn_on { "[AN]" } else { "[AUS]" }.to_string()),
                 Cell::from(lever.packages.to_string()),
+                Cell::from(format!("{:+}", lever.net_pkg_delta)),
                 Cell::from(fmt_bytes(lever.total.binpkg_bytes)),
                 Cell::from(fmt_bytes(lever.total.download_bytes)),
                 Cell::from(lever.conflicts.to_string()),
@@ -105,8 +115,10 @@ fn render_lever_table(frame: &mut Frame, state: &AppState, area: Rect) {
         })
         .collect();
     let widths = [
-        Constraint::Min(12),
+        Constraint::Min(10),
+        Constraint::Length(6),
         Constraint::Length(8),
+        Constraint::Length(10),
         Constraint::Length(12),
         Constraint::Length(12),
         Constraint::Length(10),
@@ -155,10 +167,10 @@ fn totals_text(state: &AppState) -> String {
     )
 }
 
-/// Tasten-Zeile inkl. Dirty-Markierung und Status (review3 Task 5.1).
+/// Tasten-Zeile inkl. Dirty-Markierung und Status.
 fn keys_text(state: &AppState) -> String {
     let mut s = String::from(
-        "[Space] Toggle  [Tab] Pane  [1/2] View  [/] Suche  [?] Hilfe  [S] Save  [E] Export  [V] Verify  [q] Quit",
+        "[Space] Toggle  [Tab] Pane  [1/2] View  [/] Suche  [o] Sort  [x] Cut  [a] Apply  [u] Undo  [S] package.use  [?] Hilfe  [q] Quit",
     );
     if state.dirty {
         s.push_str("  *ungespeichert*");
@@ -176,7 +188,7 @@ pub(super) fn render_footer(frame: &mut Frame, state: &AppState, area: Rect) {
         Style::default().add_modifier(Modifier::BOLD),
     );
     let mut key_spans = vec![Span::raw(
-        "  [Space] Toggle  [Tab] Pane  [1/2] View  [/] Suche  [?] Hilfe  [S] Save  [E] Export  [V] Verify  [q] Quit",
+        "  [Space] Toggle  [Tab] Pane  [1/2] View  [/] Suche  [o] Sort  [x] Cut  [a] Apply  [u] Undo  [S] package.use  [?] Hilfe  [q] Quit",
     )];
     if state.dirty {
         key_spans.push(Span::styled(
@@ -207,10 +219,10 @@ pub(super) fn render_help_modal(frame: &mut Frame, area: Rect) {
         Line::from(""),
         Line::styled("Navigation:", Style::default().add_modifier(Modifier::BOLD)),
         Line::from("/ Suche (Esc loescht Filter), Tab Pane, Space Toggle"),
-        Line::from("Enter Auswahl, 1/2 Tabs, j/k Scrollen"),
+        Line::from("Enter Auswahl, 1/2 Tabs, j/k Scrollen, o Sort, x Cut, a Apply, u Undo"),
         Line::from(""),
         Line::styled("Ablauf:", Style::default().add_modifier(Modifier::BOLD)),
-        Line::from("[S] Save, [E] Export, dann [V] Verify"),
+        Line::from("[S] package.use schreiben"),
         Line::from(""),
         Line::from("[Esc]/[?]/[q] schliesst Hilfe"),
     ];
@@ -291,7 +303,7 @@ pub fn fmt_bytes(bytes: i64) -> String {
 }
 
 /// Delta mit Vorzeichen (fuer Binaergroessen).
-pub(super) fn fmt_delta(bytes: i64, unit: &str) -> String {
+pub fn fmt_delta(bytes: i64, unit: &str) -> String {
     if bytes > 0 {
         format!("+{} {unit}", fmt_bytes(bytes))
     } else {

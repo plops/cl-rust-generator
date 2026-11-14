@@ -1,7 +1,7 @@
 //! 11_cli — CLI-Einstieg: Argumente → Engine-Verdrahtung → Ausgabe.
 //!
-//! Modi: `index-check`, `graph`, `blame`, `deltas`, `big-levers`, `init`,
-//! `export`, `verify`. (TUI-Start: `tui`, siehe `14_tui_runner`.)
+//! Modi: `index-check`, `graph`, `blame`, `deltas`, `cut`, `big-levers`,
+//! `simulate`, `batch`. (TUI-Start: `tui`, siehe `14_tui_runner`.)
 //! Arg-Structs: `args`; Laden: `context`; Subcommands: `commands`.
 
 use clap::Parser;
@@ -17,20 +17,20 @@ mod context;
 mod tests;
 
 pub use args::{
-    BlameArgs, Cli, Commands, CommonArgs, DeltasArgs, ExportArgs, InitArgs, TuiArgs, VerifyArgs,
+    BigLeversArgs, BlameArgs, Cli, Commands, CommonArgs, CutArgs, DeltasArgs, GraphArgs,
+    SimulateArgs, TuiArgs,
 };
-pub use commands::export_plan;
 pub use context::{LoadedContext, load_context, load_profile, load_world};
 
 use commands::{
-    cmd_big_levers, cmd_blame, cmd_deltas, cmd_export, cmd_graph, cmd_index_check, cmd_init,
-    cmd_verify,
+    cmd_batch, cmd_big_levers, cmd_blame, cmd_cut, cmd_deltas, cmd_graph, cmd_index_check,
+    cmd_simulate,
 };
 
 /// Einstieg (aus `main.rs`): parsen und dispatchen.
 pub fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    // Default-Subcommand: ohne Angabe startet die TUI (T07).
+    // Default-Subcommand: ohne Angabe startet die TUI.
     let command = cli.command.unwrap_or_else(|| {
         Commands::Tui(TuiArgs {
             common: CommonArgs {
@@ -39,11 +39,14 @@ pub fn run() -> anyhow::Result<()> {
                 profile: None,
                 world: std::path::PathBuf::from("/var/lib/portage/world"),
                 binhost: None,
-                make_conf: std::path::PathBuf::from("/etc/portage/make.conf"),
-                package_use: std::path::PathBuf::from("/etc/portage/package.use"),
+                make_conf: None,
+                package_use: None,
+                portage_dir: std::path::PathBuf::from("/etc/portage"),
+                snapshot: None,
+                json: false,
                 perf_report: false,
             },
-            plan: None,
+            out_use: std::path::PathBuf::from("/tmp/gentoo-dep-tui.package.use"),
         })
     });
     match command {
@@ -51,10 +54,10 @@ pub fn run() -> anyhow::Result<()> {
         Commands::Graph(a) => cmd_graph(&a),
         Commands::Blame(a) => cmd_blame(&a),
         Commands::Deltas(a) => cmd_deltas(&a),
+        Commands::Cut(a) => cmd_cut(&a),
         Commands::BigLevers(a) => cmd_big_levers(&a),
-        Commands::Init(a) => cmd_init(&a),
-        Commands::Export(a) => cmd_export(&a),
-        Commands::Verify(a) => cmd_verify(&a),
+        Commands::Simulate(a) => cmd_simulate(&a),
+        Commands::Batch(a) => cmd_batch(&a),
         Commands::Tui(a) => crate::mod_14_tui_runner::run_tui(&a),
     }
 }

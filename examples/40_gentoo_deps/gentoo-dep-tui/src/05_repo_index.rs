@@ -40,6 +40,8 @@ pub struct PkgVersion {
     pub manifest: Manifest,
     /// Binhost-`SIZE` des exakten CPV (`None` = kein Binpkg).
     pub binhost_size: Option<u64>,
+    /// Gecachte Profil-Baseline-USE (ohne Overrides).
+    pub base_use: std::sync::OnceLock<HashSet<String>>,
 }
 
 /// Der Repo-Index: alle Versionen pro `cat/pkg`, sortiert (neueste zuerst).
@@ -300,7 +302,8 @@ fn parse_cache_file(
 
     let live = version_str.starts_with("9999") || entry.metadata.is_live();
     let masked = !live && is_masked(&cpn, &version_str, &entry, profile);
-    let keywords_ok = keywords_accepted(&entry, profile);
+    let slot_probe = full_slot(&entry.metadata.slot);
+    let keywords_ok = keywords_accepted(&entry, profile, &cpn, &version_str, &slot_probe);
     if live || masked || !keywords_ok {
         return Ok(None);
     }
@@ -336,6 +339,7 @@ fn parse_cache_file(
             entry,
             manifest,
             binhost_size,
+            base_use: std::sync::OnceLock::new(),
         },
     )))
 }
@@ -401,9 +405,43 @@ fn mask_dep_matches(dep: &Dep, probe: PkgVersionProbe<'_>) -> bool {
 
 /// KEYWORDS-Filter: stabil immer, Testing nur mit `~arch` in ACCEPT_KEYWORDS.
 ///
-/// Leere `KEYWORDS` (`KEYWORDS=""`) heissen unkeyworded und werden nie
-/// akzeptiert (Portage: nur via explizitem `package.accept_keywords`).
-fn keywords_accepted(entry: &CacheEntry, profile: &Profile) -> bool {
+/// Leere `KEYWORDS` werden nur via explizitem `package.accept_keywords` akzeptiert.
+fn keywords_accepted(
+    entry: &CacheEntry,
+    profile: &Profile,
+    cpn: &str,
+    version_str: &str,
+    slot: &str,
+) -> bool {
+    if let Some(rules) = profile.package_accept_keywords.get(cpn) {
+        let have = portage_atom::Version::parse(version_str).ok();
+        for (dep, kws) in rules {
+            let matches = match (dep, &have) {
+                (Some(dep), Some(have)) => {
+                    crate::mod_02_profile::dep_matches_version_and_slot(
+                        dep,
+                        have,
+                        version_str,
+                        slot,
+                    )
+                }
+                (Some(_), None) => false,
+                (None, _) => true,
+            };
+            if !matches {
+                continue;
+            }
+            if kws.contains("**") || kws.contains("*") {
+                return true;
+            }
+            for kw in &entry.metadata.keywords {
+                let rendered = kw.to_string();
+                if kws.contains(&rendered) {
+                    return true;
+                }
+            }
+        }
+    }
     let keywords = &entry.metadata.keywords;
     if keywords.is_empty() {
         return false;

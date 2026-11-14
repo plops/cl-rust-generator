@@ -19,7 +19,6 @@ use ratatui::backend::TestBackend;
 
 use gentoo_dep_tui::mod_02_profile::Profile;
 use gentoo_dep_tui::mod_05_repo_index::RepoIndex;
-use gentoo_dep_tui::mod_09_plan_toml::{ChoiceOption, Plan, PlanChoice};
 use gentoo_dep_tui::mod_12_tui_state::AppState;
 use gentoo_dep_tui::mod_13_tui_view::render;
 use gentoo_dep_tui::mod_14_tui_runner::{RunnerContext, dispatch_key, step_idle};
@@ -40,7 +39,6 @@ enum Step {
 struct Driver<'x> {
     state: AppState<'x>,
     args: gentoo_dep_tui::mod_11_cli::TuiArgs,
-    export_default: PathBuf,
     width: u16,
     height: u16,
     frames: Vec<(String, String)>,
@@ -51,7 +49,6 @@ impl<'x> Driver<'x> {
         let key = KeyEvent::new(code, KeyModifiers::NONE);
         let mut ctx = RunnerContext {
             args: &self.args,
-            export_default: &self.export_default,
         };
         let _ = dispatch_key(&mut self.state, key, &mut ctx).unwrap();
     }
@@ -272,31 +269,6 @@ fn scenario_world() -> Vec<String> {
     ]
 }
 
-/// Plan mit einer `[[choice]]`-Gruppe (linke Pane enthaelt Choice-Eintrag).
-fn scenario_plan() -> Plan {
-    let mut plan = Plan::default();
-    plan.choice.push(PlanChoice {
-        id: "decoder".to_string(),
-        required: false,
-        description: "Bevorzugter Encoder".to_string(),
-        selected: 0,
-        option: vec![
-            ChoiceOption {
-                atom: "media-libs/svt-av1".to_string(),
-                pros: "schnell".to_string(),
-                cons: "gross".to_string(),
-                suggested_use: vec![],
-            },
-            ChoiceOption {
-                atom: "media-libs/aom".to_string(),
-                pros: "klein".to_string(),
-                cons: "langsam".to_string(),
-                suggested_use: vec![],
-            },
-        ],
-    });
-    plan
-}
 
 /// Frames als lesbares Review-Artefakt sichern (Markdown).
 fn save_screencaps(frames: &[(String, String)], size: &str, out: &Path) {
@@ -328,8 +300,7 @@ fn run_scenario(width: u16, height: u16) -> Vec<(String, String)> {
     profile.sync_pattern_caches();
     let index = RepoIndex::load(&repo, None, &profile).unwrap();
     let world = scenario_world();
-    let plan = scenario_plan();
-    let mut state = AppState::new(&index, &profile, world, plan, None).unwrap();
+    let mut state = AppState::new(&index, &profile, world).unwrap();
     // Offline-Flag-Doku einspeisen (wie `use.local.desc`).
     let desc_dir = repo.join("profiles");
     std::fs::write(
@@ -346,16 +317,18 @@ fn run_scenario(width: u16, height: u16) -> Vec<(String, String)> {
             profile: None,
             world: dir.path().join("world"),
             binhost: None,
-            make_conf: dir.path().join("make.conf"),
-            package_use: dir.path().join("package.use"),
+            make_conf: Some(dir.path().join("make.conf")),
+            package_use: Some(dir.path().join("package.use")),
+            portage_dir: dir.path().join("portage"),
+            snapshot: None,
+            json: false,
             perf_report: false,
         },
-        plan: None,
+        out_use: dir.path().join("package.use"),
     };
     let mut driver = Driver {
         state,
         args,
-        export_default: dir.path().join("export"),
         width,
         height,
         frames: Vec::new(),
@@ -369,6 +342,11 @@ fn run_scenario(width: u16, height: u16) -> Vec<(String, String)> {
         Key(KeyCode::Enter),
         Idle,
         Capture("02_ffmpeg_after_filter"),
+        // Sortierung `o`: exklusive Kosten erscheinen links.
+        Key(KeyCode::Char('o')),
+        Capture("02b_sorted"),
+        Key(KeyCode::Char('o')),
+        Key(KeyCode::Char('o')),
         // Suche `/emacs`, auf gtk navigieren: Shared-Blocker + Doku.
         Key(KeyCode::Char('/')),
         Type("emacs"),
@@ -378,6 +356,15 @@ fn run_scenario(width: u16, height: u16) -> Vec<(String, String)> {
         Key(KeyCode::Down),
         Idle,
         Capture("03_emacs_shared_blocker"),
+        // Cut-Analyse `x`, dann `a` (apply) und `u` (undo).
+        Key(KeyCode::Char('x')),
+        Capture("03b_cut_plan"),
+        Key(KeyCode::Char('a')),
+        Idle,
+        Capture("03c_cut_applied"),
+        Key(KeyCode::Char('u')),
+        Idle,
+        Capture("03d_cut_undone"),
         // Tab 2: keine Phantom-Flags, Detailbox sichtbar.
         Key(KeyCode::Char('2')),
         Idle,
@@ -450,7 +437,7 @@ fn tui_review_scenario_screencaps() {
         );
         assert!(ffmpeg.contains("svt-av1"), "ffmpeg-Flag fehlt ({size})");
 
-        // 03: Shared-Blocker + Flag-Doku, rechte Pane nicht leer.
+        // 03: Toggle-Konflikt direkt in der rechten Pane (beide Breiten).
         let emacs = frames
             .iter()
             .find(|(n, _)| n == "03_emacs_shared_blocker")
@@ -458,31 +445,60 @@ fn tui_review_scenario_screencaps() {
             .1
             .clone();
         assert!(
-            emacs.contains("Voll-Ersparnis"),
-            "Shared-Analyse fehlt ({size}):\n{emacs}"
+            emacs.contains("Toggle-Konflikt"),
+            "Inline-Konflikt fehlt ({size}):\n{emacs}"
         );
-        // gtk+ wird unbedingt von firefox-bin gehalten (World-Blocker).
-        // Schmal: Schwanz unterhalb des Falzes → dort nur Anriss pruefen.
+        // Shared-Analyse: auf breitem Terminal voll sichtbar, schmal nur
+        // angerissen (rechte Pane ist dort 24 Spalten schmal).
         if width >= 100 {
+            assert!(
+                emacs.contains("Voll-Ersparnis"),
+                "Shared-Analyse fehlt ({size}):\n{emacs}"
+            );
             assert!(
                 emacs.contains("world entfernen:"),
                 "World-Blocker fehlen ({size}):\n{emacs}"
             );
             assert!(emacs.contains("firefox-bin"), "Blocker fehlt ({size})");
-        } else {
+        }
+        // 03b: Cut-Analyse `x` (breit: voll sichtbar).
+        let cut = frames
+            .iter()
+            .find(|(n, _)| n == "03b_cut_plan")
+            .unwrap()
+            .1
+            .clone();
+        if width >= 100 {
             assert!(
-                emacs.contains("world-Entfernung"),
-                "Max-Ersparnis fehlt ({size})"
+                cut.contains("Cut-Analyse"),
+                "Cut-Plan fehlt ({size}):\n{cut}"
             );
         }
-        // Doku: vollstaendiger Satz nur auf breitem Terminal unumgebrochen.
+        // 02b: Sortierung `o` zeigt exklusive Kosten.
+        let sorted = frames
+            .iter()
+            .find(|(n, _)| n == "02b_sorted")
+            .unwrap()
+            .1
+            .clone();
+        if width >= 100 {
+            assert!(
+                sorted.contains("pkg,"),
+                "exklusive Kosten fehlen ({size}):\n{sorted}"
+            );
+        } else {
+            // Schmal: Suffix angerissen (`media-video/ffmpeg (`).
+            assert!(
+                sorted.contains("ffmpeg ("),
+                "Sort-Suffix fehlt ({size}):\n{sorted}"
+            );
+        }
+        // Doku: nur auf breitem Terminal oberhalb des Falzes sichtbar.
         if width >= 100 {
             assert!(
                 emacs.contains("gtk: GTK-Toolkit"),
                 "Flag-Doku fehlt ({size}):\n{emacs}"
             );
-        } else {
-            assert!(emacs.contains("GTK-Toolkit"), "Flag-Doku fehlt ({size})");
         }
 
         // 04: Big Levers ohne Phantom-Flags, mit Detailbox.
@@ -577,7 +593,7 @@ fn hil_screencaps_on_snapshot() {
     assert!(!world.is_empty(), "HIL-World leer");
     let profile = Profile::test_default();
     let index = RepoIndex::load(&repo, None, &profile).unwrap();
-    let state = AppState::new(&index, &profile, world, Plan::default(), None).unwrap();
+    let state = AppState::new(&index, &profile, world).unwrap();
     let args = gentoo_dep_tui::mod_11_cli::TuiArgs {
         common: gentoo_dep_tui::mod_11_cli::CommonArgs {
             repo: repo.clone(),
@@ -585,16 +601,18 @@ fn hil_screencaps_on_snapshot() {
             profile: None,
             world: world_file,
             binhost: None,
-            make_conf: base.join("make.conf"),
-            package_use: base.join("package.use"),
+            make_conf: Some(base.join("make.conf")),
+            package_use: Some(base.join("package.use")),
+            portage_dir: base.join("etc/portage"),
+            snapshot: None,
+            json: false,
             perf_report: false,
         },
-        plan: None,
+        out_use: base.join("package.use"),
     };
     let mut driver = Driver {
         state,
         args,
-        export_default: base.join("export-probe"),
         width: 140,
         height: 36,
         frames: Vec::new(),
@@ -627,3 +645,4 @@ fn hil_screencaps_on_snapshot() {
         .unwrap_or_else(|_| PathBuf::from("target/screencaps/hil_screencaps.md"));
     save_screencaps(&driver.frames, "140x36", &out);
 }
+

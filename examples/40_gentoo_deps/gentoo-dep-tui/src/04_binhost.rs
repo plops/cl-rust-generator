@@ -3,24 +3,18 @@
 //! Genau eine Zustaendigkeit: `CPV`/`SIZE`/`USE`/`RDEPEND` aus Stanzas lesen.
 //! `SIZE` ist der Runtime-Proxy (fertiges Binpkg statt riesigem Tarball).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::mod_01_types::{EngineError, EngineResult};
 
-/// Ein Eintrag der Binhost-`Packages`-Datei.
+/// Ein Eintrag der Binhost-`Packages`-Datei (schlank: nur CPV + SIZE).
 #[derive(Debug, Clone, Default)]
 pub struct BinpkgEntry {
     /// `kategorie/paket-version`.
     pub cpv: String,
     /// Komprimierte Paketgroesse (`SIZE`), Bytes.
     pub size: u64,
-    /// USE-Flags, mit denen das Binpkg gebaut wurde.
-    pub use_flags: HashSet<String>,
-    /// Slot (`SLOT:`), falls angegeben.
-    pub slot: String,
-    /// Rohes `RDEPEND` (einzeilig zusammengefuegt).
-    pub rdepend: String,
 }
 
 /// Index aller Binpkgs: CPV → Eintrag.
@@ -85,20 +79,9 @@ pub fn parse_packages(text: &str) -> BinpkgIndex {
                         .ok()
                 })
                 .unwrap_or(0);
-            let use_flags = fields
-                .remove("USE")
-                .map(|s| s.split_whitespace().map(str::to_string).collect())
-                .unwrap_or_default();
-            index.entries.insert(
-                cpv.clone(),
-                BinpkgEntry {
-                    cpv,
-                    size,
-                    use_flags,
-                    slot: fields.remove("SLOT").unwrap_or_default(),
-                    rdepend: fields.remove("RDEPEND").unwrap_or_default(),
-                },
-            );
+            index
+                .entries
+                .insert(cpv.clone(), BinpkgEntry { cpv, size });
         }
         fields.clear();
     };
@@ -160,16 +143,13 @@ USE: abbrev oniguruma\n\
         assert_eq!(idx.len(), 2);
         let ossl = idx.get("dev-libs/openssl-3.3.2").unwrap();
         assert_eq!(ossl.size, 5242880);
-        assert!(ossl.use_flags.contains("ssl"));
-        assert!(ossl.use_flags.contains("-test"));
-        assert_eq!(ossl.slot, "0/3");
-        assert!(ossl.rdepend.contains("dev-libs/openssl"));
+        assert_eq!(ossl.cpv, "dev-libs/openssl-3.3.2");
     }
 
     #[test]
     fn continuation_lines_join() {
         let idx = parse_packages("CPV: a/b-1.0\nRDEPEND: x? ( a/b )\n y? ( c/d )\n\n");
-        assert_eq!(idx.get("a/b-1.0").unwrap().rdepend, "x? ( a/b ) y? ( c/d )");
+        assert_eq!(idx.get("a/b-1.0").unwrap().size, 0);
     }
 
     #[test]

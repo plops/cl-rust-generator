@@ -49,7 +49,14 @@ pub struct Profile {
     pub elibc: String,
     /// KERNEL-Wert (`linux` → Flag `kernel_linux`).
     pub kernel: String,
+    /// Rohe `package.accept_keywords`-Zeilen.
+    pub package_accept_keywords_raw: Vec<String>,
+    /// Einmal geparste `package.accept_keywords`-Regeln je `cat/pkg`.
+    pub package_accept_keywords: HashMap<String, Vec<AcceptKeywordsRule>>,
 }
+
+/// Akzeptierte Keywords je Atom (`None` = alle Versionen).
+pub type AcceptKeywordsRule = (Option<Dep>, HashSet<String>);
 
 /// Einmal geparste `package.use`-Regel (Task 3.1).
 #[derive(Debug, Clone)]
@@ -121,12 +128,9 @@ impl Profile {
         out
     }
 
-    /// Roh-Felder (`package.mask`, `package.use`) in die vorberechneten
-    /// Indexe ueberfuehren (je Atom genau ein `Dep::parse`, review3 3.1).
+    /// Roh-Felder in die vorberechneten Indexe ueberfuehren.
     ///
-    /// Muss nach jeder direkten Mutation der Roh-Felder aufgerufen werden
-    /// (Lader tun das automatisch; Tests, die `package_mask`/`package_use`
-    /// direkt belegen, rufen den Helfer explizit).
+    /// Muss nach jeder direkten Mutation der Roh-Felder aufgerufen werden.
     pub fn sync_pattern_caches(&mut self) {
         // `package.use`: Atome sortiert sammeln (deterministische
         // Token-Reihenfolge wie frueher, sonst wuerde `-x`/`x` kippen).
@@ -160,6 +164,27 @@ impl Profile {
             rules.push(MaskRule { cpn, unmask, dep });
         }
         self.package_mask_index = rules;
+        let mut kw_index: HashMap<String, Vec<AcceptKeywordsRule>> = HashMap::new();
+        for line in &self.package_accept_keywords_raw {
+            let line = line.split('#').next().unwrap_or("").trim();
+            if line.is_empty() {
+                continue;
+            }
+            let mut parts = line.split_whitespace();
+            let Some(atom) = parts.next() else { continue };
+            let rest: Vec<String> = parts.map(str::to_string).collect();
+            let (cpn, dep) = match Dep::parse(atom) {
+                Ok(dep) => (dep.cpn.to_string(), Some(dep)),
+                Err(_) => (atom.to_string(), None),
+            };
+            let kws: HashSet<String> = if rest.is_empty() {
+                [format!("~{}", self.arch)].into_iter().collect()
+            } else {
+                rest.into_iter().collect()
+            };
+            kw_index.entry(cpn).or_default().push((dep, kws));
+        }
+        self.package_accept_keywords = kw_index;
     }
 
     /// Gespeicherte globale USE-Tokens als String (fuer `${USE}`-Expansion).
@@ -400,4 +425,6 @@ mod tests;
 pub use descriptions::UseDescriptions;
 pub use parse::{parse_key_value, parse_use_tokens, read_key_value, read_world};
 pub(crate) use stack::normalize_join;
-pub use stack::{apply_flag_list, load_profile_stack, read_flag_list, read_package_use};
+pub use stack::{
+    apply_flag_list, load_profile_stack, read_atom_lines, read_flag_list, read_package_use,
+};

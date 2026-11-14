@@ -1,18 +1,10 @@
 //! 01_types — Basis-IDs, Groessen, Fehler.
 //!
 //! Genau eine Zustaendigkeit: alle Kerndatentypen der Engine.
-//! Die kompakte Paket-ID (`PkgId`) adressiert Engine-Vektoren ohne
-//! String-Lookups (ungenutzte `FlagId`/`IdTable` bewusst entfernt,
-//! review3 Task 3.3).
 
 use thiserror::Error;
 
-/// Kompakte Paket-ID (Index in Engine-Vektoren).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct PkgId(pub u32);
-
-/// Groessenmetriken eines Pakets bzw. Deltas (Bytes, vorzeichenbehaftet bei Deltas).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub struct SizeMetrics {
     /// Komprimierte Binpkg-Groesse (Binhost-`SIZE`, Runtime-Proxy).
     pub binpkg_bytes: i64,
@@ -36,7 +28,7 @@ impl SizeMetrics {
 }
 
 /// Uebersprungene Abhaengigkeit (Warnung statt Abbruch, z. B. alter Slot-Pin).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SkippedDep {
     /// Das problematische Atom.
     pub atom: String,
@@ -47,7 +39,7 @@ pub struct SkippedDep {
 }
 
 /// Ein Eintrag einer Blame-Kette: wer zieht wen ueber welches Flag rein.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct BlameLink {
     /// Das benoetigte (transitive) Paket.
     pub package: String,
@@ -58,7 +50,7 @@ pub struct BlameLink {
 }
 
 /// Ein erkannter Widerspruch (z. B. `+foo` vs. `-foo`) mit Aufloesungen.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ConflictInfo {
     /// Betroffenes Paket (`kategorie/paket`).
     pub package: String,
@@ -71,7 +63,7 @@ pub struct ConflictInfo {
 }
 
 /// Eine umschaltbare Aufloesung eines Konflikts.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct QuickSwitch {
     /// Anzeigename, z. B. `"libX[+foo] erzwingen"`.
     pub label: String,
@@ -80,7 +72,7 @@ pub struct QuickSwitch {
 }
 
 /// Eine `|| ( a b )`-Entscheidung im Graphen.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AlternativeChoice {
     /// Eindeutige Gruppen-ID (Paket + Zaehler).
     pub group_id: String,
@@ -93,7 +85,7 @@ pub struct AlternativeChoice {
 }
 
 /// Marginal-Delta eines USE-Flag-Toggles.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct FlagDelta {
     /// Paket, zu dem das Flag gehoert.
     pub package: String,
@@ -120,21 +112,25 @@ pub struct FlagDelta {
 // `perf-metrics`); hier bleibt kein unkonditionaler Atomic zurueck.
 
 /// Aggregierter globaler Hebel ueber alle Pakete.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct BigLever {
     /// Flag-Name.
     pub flag: String,
+    /// Ob global ein- (`true`) oder ausgeschaltet (`false`) wurde.
+    pub turn_on: bool,
     /// Anzahl betroffener Pakete.
     pub packages: usize,
-    /// Betroffene Pakete (`cat/pkg`, sortiert, review3 Task 4.3).
+    /// Betroffene Pakete (`cat/pkg`, sortiert).
     pub affected_packages: Vec<String>,
-    /// Gesamt-Delta bei globaler Deaktivierung.
+    /// Gesamt-Delta.
     pub total: SizeMetrics,
+    /// Netto-Paketdelta (`added - removed`).
+    pub net_pkg_delta: i64,
     /// Anzahl dadurch entstehender Konflikte.
     pub conflicts: usize,
-    /// Neu hinzukommende Pakete (`cat/pkg`, sortiert, review3 Task 4.3).
+    /// Neu hinzukommende Pakete (`cat/pkg`, sortiert).
     pub added_packages: Vec<String>,
-    /// Entfallende Pakete (`cat/pkg`, sortiert, review3 Task 4.3).
+    /// Entfallende Pakete (`cat/pkg`, sortiert).
     pub removed_packages: Vec<String>,
 }
 

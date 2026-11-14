@@ -22,7 +22,10 @@ use crate::mod_07_cascade::{CascadeOutcome, resolve_with_cascade_opts};
 
 #[path = "08_delta/shared.rs"]
 mod shared;
-pub use shared::{RemovalSavings, SharedRemovalImpact, shared_removal_impact};
+pub use shared::{
+    CutPlan, FlagBlocker, RemovalSavings, SharedRemovalImpact, cut_package,
+    shared_removal_impact,
+};
 
 /// Marginal-Delta eines einzelnen USE-Flag-Toggles auf einem Paket.
 ///
@@ -271,7 +274,7 @@ fn diff_packages(before: &ResolvedGraph, after: &ResolvedGraph) -> (Vec<String>,
 /// Ob ein Flag per `USE_EXPAND_HIDDEN` versteckt ist (z. B. `abi_x86_64` bei
 /// `USE_EXPAND_HIDDEN="ABI_X86 ..."`) und daher kein schaltbarer Hebel ist
 /// (review3 Task 1.1).
-fn is_hidden_expand_flag(profile: &crate::mod_02_profile::Profile, flag: &str) -> bool {
+pub(crate) fn is_hidden_expand_flag(profile: &crate::mod_02_profile::Profile, flag: &str) -> bool {
     let lower = flag.to_lowercase();
     profile.use_expand_hidden.iter().any(|h| {
         let prefix = h.to_lowercase();
@@ -316,11 +319,10 @@ fn cascade_note(
     }
 }
 
-/// Globale Big Levers: jedes USE-Flag ueber alle aktiven Pakete.
+/// Globale Big Levers: jedes aktive USE-Flag global abschalten.
 ///
-/// Deaktiviert das Flag global (pro Paket einzeln simuliert als ein Lauf:
-/// alle Pakete, die es anhaben, schalten es aus) und aggregiert Gesamt-Delta,
-/// Paketanzahl und Konfliktanzahl. Sortiert nach Binpkg-Ersparnis.
+/// Standard-Fokus ist ein minimales System (`turn_on == false`); mit
+/// `include_enable` werden auch wieder einschaltbare Flags geliefert.
 pub fn big_levers(engine: &Engine<'_>, world: &[String]) -> EngineResult<Vec<BigLever>> {
     let base_outcome = resolve_with_cascade_opts(&mut engine.fork(), world, false, false)?;
     big_levers_with_base(engine, world, &base_outcome)
@@ -333,16 +335,27 @@ pub fn big_levers_with_base(
     world: &[String],
     base: &CascadeOutcome,
 ) -> EngineResult<Vec<BigLever>> {
-    big_levers_impl(engine, world, base, true)
+    big_levers_with_opts(engine, world, base, false)
+}
+
+/// Big Levers mit vorberechneter Baseline und optionalen Enable-Hebeln.
+pub fn big_levers_with_opts(
+    engine: &Engine<'_>,
+    world: &[String],
+    base: &CascadeOutcome,
+    include_enable: bool,
+) -> EngineResult<Vec<BigLever>> {
+    big_levers_impl(engine, world, base, true, include_enable)
 }
 
 /// Big-Levers-Kern mit schaltbarem No-Op-Skip (`allow_skip = false` erzwingt
-/// volle Simulationen — fuer Aequivalenz-Tests, review3 Task 3.4).
+/// volle Simulationen — fuer Aequivalenz-Tests).
 fn big_levers_impl(
     engine: &Engine<'_>,
     world: &[String],
     base: &CascadeOutcome,
     allow_skip: bool,
+    include_enable: bool,
 ) -> EngineResult<Vec<BigLever>> {
     perf_count_big_levers();
     let _timer = ScopeTimer::big_levers();
@@ -391,8 +404,6 @@ fn big_levers_impl(
     flags.sort();
     let mut off_flags: Vec<String> = known_off.keys().cloned().collect();
     off_flags.sort();
-    // Multi-Core: jede Flag-Simulation unabhaengig (T04). `Engine::fork` pro
-    // Flag ist billig (nur zwei HashMaps); Index/Profil sind read-only.
     let levers: EngineResult<Vec<BigLever>> = flags
         .into_par_iter()
         .map(|flag| {
@@ -409,34 +420,37 @@ fn big_levers_impl(
         })
         .collect();
     let mut levers = levers?;
-    // Ausgeschaltete bekannte Flags: Einschalten simulieren (positives Delta).
-    // Ebenfalls parallel (sonst dominiert diese Schleife die Laufzeit, HIL:
-    // hunderte Off-Flags mal je ein voller Kaskadenlauf).
-    let mut off_levers: Vec<BigLever> = off_flags
-        .into_par_iter()
-        .map(|flag| {
-            big_lever_for_flag(
-                engine,
-                world,
-                base_outcome,
-                base_totals,
-                &known_off[&flag],
-                &flag,
-                true,
-                allow_skip,
-            )
-        })
-        .collect::<EngineResult<Vec<BigLever>>>()?;
-    levers.append(&mut off_levers);
-    // Deterministisch: Ersparnis, dann Download, dann Flag-Name (review3 3.4).
+    if include_enable {
+        let mut off_levers: Vec<BigLever> = off_flags
+            .into_par_iter()
+            .map(|flag| {
+                big_lever_for_flag(
+                    engine,
+                    world,
+                    base_outcome,
+                    base_totals,
+                    &known_off[&flag],
+                    &flag,
+                    true,
+                    allow_skip,
+                )
+            })
+            .collect::<EngineResult<Vec<BigLever>>>()?;
+        levers.append(&mut off_levers);
+    }
+    let has_bin = engine.index.has_any_binhost();
     levers.sort_by(|a, b| {
-        a.total
-            .binpkg_bytes
-            .cmp(&b.total.binpkg_bytes)
-            .then_with(|| a.total.download_bytes.cmp(&b.total.download_bytes))
-            .then_with(|| a.flag.cmp(&b.flag))
-            .then_with(|| a.packages.cmp(&b.packages))
-            .then_with(|| a.conflicts.cmp(&b.conflicts))
+        if has_bin {
+            a.total
+                .binpkg_bytes
+                .cmp(&b.total.binpkg_bytes)
+                .then_with(|| a.net_pkg_delta.cmp(&b.net_pkg_delta))
+        } else {
+            a.net_pkg_delta
+                .cmp(&b.net_pkg_delta)
+        }
+        .then_with(|| a.total.download_bytes.cmp(&b.total.download_bytes))
+        .then_with(|| a.flag.cmp(&b.flag))
     });
     Ok(levers)
 }
@@ -468,10 +482,11 @@ fn big_lever_for_flag(
         perf_count_big_levers_noop_skip();
         return Ok(BigLever {
             flag: flag.to_string(),
+            turn_on,
             packages: packages.len(),
             affected_packages,
             total: SizeMetrics::zero(),
-            // Identische Graphen → identische Konfliktlage wie die Baseline.
+            net_pkg_delta: 0,
             conflicts: base.conflicts.len(),
             added_packages: Vec::new(),
             removed_packages: Vec::new(),
@@ -487,14 +502,17 @@ fn big_lever_for_flag(
     let outcome = resolve_with_cascade_opts(&mut sim, world, false, false)?;
     let totals = outcome.graph.totals();
     let (added_packages, removed_packages) = diff_packages(&base.graph, &outcome.graph);
+    let net_pkg_delta = added_packages.len() as i64 - removed_packages.len() as i64;
     Ok(BigLever {
         flag: flag.to_string(),
+        turn_on,
         packages: packages.len(),
         affected_packages,
         total: SizeMetrics {
             binpkg_bytes: totals.binpkg_bytes - base_totals.binpkg_bytes,
             download_bytes: totals.download_bytes - base_totals.download_bytes,
         },
+        net_pkg_delta,
         conflicts: outcome.conflicts.len(),
         added_packages,
         removed_packages,
@@ -728,8 +746,8 @@ mod tests {
             let skipped = flag_delta_impl(&engine, &world, "app/a", flag, &base, true).unwrap();
             assert_eq!(full, skipped, "Flag {flag}");
         }
-        let full_levers = big_levers_impl(&engine, &world, &base, false).unwrap();
-        let skipped_levers = big_levers_impl(&engine, &world, &base, true).unwrap();
+        let full_levers = big_levers_impl(&engine, &world, &base, false, false).unwrap();
+        let skipped_levers = big_levers_impl(&engine, &world, &base, true, false).unwrap();
         assert_eq!(full_levers, skipped_levers);
     }
 
