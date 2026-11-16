@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#0B0E17"/>
+  <rect x="48" y="48" width="416" height="416" rx="84" fill="#131824" stroke="#1E293B" stroke-width="6"/>
+  <!-- Spectrogram / Mode-colored frequency bars -->
+  <rect x="96" y="296" width="44" height="92" rx="10" fill="#46AAFF"/>
+  <rect x="158" y="216" width="44" height="172" rx="10" fill="#46AAFF"/>
+  <rect x="220" y="148" width="44" height="240" rx="10" fill="#B978FF"/>
+  <rect x="282" y="116" width="44" height="272" rx="10" fill="#06B6D4"/>
+  <rect x="344" y="180" width="44" height="208" rx="10" fill="#FFB246"/>
+  <!-- Playhead sweep line -->
+  <rect x="298" y="88" width="12" height="336" rx="6" fill="#F8FAFC" opacity="0.92"/>
+  <circle cx="304" cy="96" r="14" fill="#06B6D4"/>
+</svg>

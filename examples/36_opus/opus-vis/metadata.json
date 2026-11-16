@@ -1,0 +1,8 @@
+{
+  "name": "Opus-Vis",
+  "description": "Installierbare Android-PWA für Opus-Bitstrom-Analyse, Spektrogramm-Wasserfall, SILK/CELT-Inspektion und synchronisierte Audio-Wiedergabe.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
