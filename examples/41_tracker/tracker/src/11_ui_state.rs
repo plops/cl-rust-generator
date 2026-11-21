@@ -205,7 +205,7 @@ impl App {
                 }
             }
             KeyCode::Char('?') => {
-                self.message = "z..m/q..p notes · 1 note-off · 0-9a-f hex · fx: C D G R K T · \
+                self.message = "z..m/q..p notes · 1 note-off · 0-9a-f hex · fx: C D G R K T O · \
                                 F1/2 oct F3/4 ins F5/6 pat F7/8 bpm F9/10 step F12 mute · \
                                 =/- order · Ctrl+←/→ order pos · Ctrl+S save"
                     .into()

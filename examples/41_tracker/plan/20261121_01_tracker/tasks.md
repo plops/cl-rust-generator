@@ -57,3 +57,16 @@ Jede Aufgabe endet mit: `cargo fmt && cargo clippy --all-targets -- -D warnings 
 - [x] `tests/render_demos.rs`, `tests/real_samples.rs` (skip ohne Daten)
 - [x] `cargo upgrade`, Gates grün
 - [x] `walkthrough.md`, `plan_effort.md`, Commits laut `plan.md`
+
+## T10 Klang (nach Hör-Feedback „8-bit, kein Bass, blechern“)
+- [x] Spike `spikes/spectrum.py` (Bänder, Schwerpunkt, Crest), `examples/stems.rs` (Kanäle solo)
+- [x] Tone-Tiefpass nach Sättigung, sanftere Sättigung, cleaner Reese-Sub, 808-Hats, Cowbell-Tiefpass
+- [x] `04_master_fx.rs`: Freeverb-Send + Limiter; Module ab 04 umnummeriert
+- [x] Tests: Reverb-Ausklang, Limiter, Reese-Sub-Anteil, Hat-Luftanteil
+
+## T11 Samples und Mixed-Demos
+- [x] Amen-WAVs nach `samples/amen`, Phonk-Toolkit nach `samples/phonk_src/repo` (git-ignoriert)
+- [x] `Patch.root` (Grundton, gemessen mit `spikes/pitch.py`), `Oxx` Slice-Offset, `Rxx` ohne Note rollt Slice
+- [x] `Song.title` + berechnetes Badge `Song::sources()` (synth / samples / synth+samples) in TUI und CLI
+- [x] Demos `synth-dnb`, `synth-phonk`; `songs/mixed_amen_jungle.txt`, `songs/mixed_drift_phonk.txt` via `examples/write_songs.rs`
+- [x] Echtdaten-Tests rekursiv, Mixed-Songs müssen alle Samples finden
