@@ -1,0 +1,12 @@
+[package]
+name = "dnb-tracker"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+cpal = "0.18"
+crossterm = "0.29"
+hound = "3.5"
+ratatui = "0.30"
+rtrb = "0.4"
