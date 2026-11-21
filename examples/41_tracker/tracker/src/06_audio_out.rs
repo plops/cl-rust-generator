@@ -6,11 +6,19 @@ use crate::types::Song;
 use anyhow::{Context, Result, anyhow};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample, Stream, StreamConfig};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Frames rendered per inner chunk (stack buffer, no allocation in the callback).
 const CHUNK: usize = 256;
 /// Requested device buffer (frames).
 const LATENCY_FRAMES: u32 = 512;
+
+/// Stream errors (mostly xruns); counted instead of printed so the TUI stays intact.
+static ERRORS: AtomicU32 = AtomicU32::new(0);
+
+pub fn error_count() -> u32 {
+    ERRORS.load(Ordering::Relaxed)
+}
 
 pub fn device_label(d: &cpal::Device) -> String {
     let id = d.id().map(|i| i.to_string()).unwrap_or_default();
@@ -121,7 +129,9 @@ where
                 }
             }
         },
-        |err| eprintln!("audio: {err}"),
+        |_err| {
+            ERRORS.fetch_add(1, Ordering::Relaxed);
+        },
         None,
     )?;
     Ok(stream)

@@ -1,14 +1,22 @@
-//! CLI-Verdrahtung: Argumente lesen, Song laden, Audio starten, UI oder Render.
+//! CLI-Verdrahtung: Argumente lesen, Song laden, Audio starten, dann TUI,
+//! Headless-Wiedergabe oder Offline-Render.
 
 use anyhow::{Context, Result, bail};
-use dnb_tracker::{audio_out, demo_songs, protocol, types::Song, wav};
+use dnb_tracker::{audio_out, demo_songs, protocol, song_io, ui_runner, ui_state::App, wav};
 use std::path::PathBuf;
 
-const USAGE: &str = "usage: dnb-tracker [--demo dnb|phonk|empty] [--device NAME]
-                   [--list-devices] [--play] [--render OUT.wav] [--seconds N]";
+const USAGE: &str = "usage: dnb-tracker [SONG.txt] [--demo dnb|phonk|empty] [--device NAME]
+                   [--list-devices] [--play] [--render OUT.wav] [--seconds N]
+
+  SONG.txt        load (if it exists) and save target for Ctrl+S (default song.txt)
+  --demo NAME     start from a built-in song instead of a file (default dnb)
+  --device NAME   substring of an output device from --list-devices
+  --play          play without TUI (for --seconds, default forever)
+  --render FILE   write a 48 kHz WAV of --seconds (default 30) and exit";
 
 #[derive(Default)]
 struct Args {
+    song: Option<PathBuf>,
     demo: Option<String>,
     device: Option<String>,
     list: bool,
@@ -33,6 +41,7 @@ fn parse_args() -> Result<Args> {
                 println!("{USAGE}");
                 std::process::exit(0);
             }
+            s if !s.starts_with('-') && a.song.is_none() => a.song = Some(s.into()),
             _ => bail!("unknown argument {arg}\n{USAGE}"),
         }
     }
@@ -47,8 +56,18 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
-    let demo = args.demo.as_deref().unwrap_or("dnb");
-    let song: Song = demo_songs::by_name(demo).with_context(|| format!("unknown demo {demo}"))?;
+    let path = args.song.clone().unwrap_or_else(|| "song.txt".into());
+    let song = match (&args.demo, args.song.as_ref().filter(|p| p.exists())) {
+        (None, Some(p)) => {
+            let (song, warnings) = song_io::load(p)?;
+            warnings.iter().for_each(|w| eprintln!("warning: {w}"));
+            song
+        }
+        (demo, _) => {
+            let name = demo.as_deref().unwrap_or("dnb");
+            demo_songs::by_name(name).with_context(|| format!("unknown demo {name}"))?
+        }
+    };
     if let Some(out) = &args.render {
         let sr = 48000;
         let data = wav::render(song, args.seconds.unwrap_or(30.0), sr);
@@ -57,8 +76,11 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let (mut ui, audio) = protocol::link();
-    let out = audio_out::start(song, audio, args.device.as_deref())?;
-    eprintln!("playing on {} @ {} Hz", out.device, out.sample_rate);
+    let out = audio_out::start(song.clone(), audio, args.device.as_deref())?;
+    eprintln!("audio: {} @ {} Hz", out.device, out.sample_rate);
+    if !args.play {
+        return ui_runner::run(App::new(song, path), ui);
+    }
     ui.send(protocol::Command::Play {
         order_pos: 0,
         loop_pattern: None,
@@ -69,5 +91,6 @@ fn main() -> Result<()> {
         std::thread::sleep(std::time::Duration::from_millis(50));
         ui.poll();
     }
+    eprintln!("audio errors/xruns: {}", audio_out::error_count());
     Ok(())
 }
