@@ -90,7 +90,7 @@ pub fn to_text(song: &Song) -> String {
         let _ = write!(
             s,
             "instr {i:02X} kind={} attack={} decay={} sustain={} release={} cutoff={} reso={} \
-             drive={} pitch_env={} pitch_decay={} detune={} volume={}",
+             drive={} pitch_env={} pitch_decay={} detune={} volume={} reverb={}",
             p.kind.name(),
             p.attack,
             p.decay,
@@ -102,7 +102,8 @@ pub fn to_text(song: &Song) -> String {
             p.pitch_env,
             p.pitch_decay,
             p.detune,
-            p.volume
+            p.volume,
+            p.reverb
         );
         if !p.sample_path.is_empty() {
             let _ = write!(s, " sample={}", p.sample_path);
@@ -144,6 +145,7 @@ fn apply_param(p: &mut Patch, key: &str, val: &str) -> Result<()> {
         "pitch_decay" => p.pitch_decay = num()?,
         "detune" => p.detune = num()?,
         "volume" => p.volume = num()?,
+        "reverb" => p.reverb = num()?,
         _ => bail!("unknown instrument key {key}"),
     }
     Ok(())

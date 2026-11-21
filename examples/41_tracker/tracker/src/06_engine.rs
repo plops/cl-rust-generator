@@ -4,6 +4,7 @@
 //! Real-time rules: no allocation, no locks, no frees inside [`Engine::process`].
 
 use crate::dsp::pan_gains;
+use crate::master_fx::{Limiter, Reverb};
 use crate::protocol::{AudioLink, Command, Status};
 use crate::types::{CHANNELS, Cell, LPB, Note, ROWS, Song};
 use crate::voice::Voice;
@@ -24,7 +25,9 @@ pub fn cutoff_hz(arg: u8) -> f32 {
     40.0 * (18000.0f32 / 40.0).powf(arg as f32 / 255.0)
 }
 
-const MASTER: f32 = 0.7;
+const MASTER: f32 = 0.8;
+/// Level of the reverb return.
+const WET: f32 = 1.0;
 /// Frames between two status messages (~10 ms at 48 kHz).
 const STATUS_EVERY: u32 = 512;
 
@@ -57,6 +60,8 @@ pub struct Engine {
     peak: (f32, f32),
     levels: [f32; CHANNELS],
     since_status: u32,
+    reverb: Reverb,
+    limiter: Limiter,
 }
 
 impl Engine {
@@ -80,6 +85,8 @@ impl Engine {
             peak: (0.0, 0.0),
             levels: [0.0; CHANNELS],
             since_status: 0,
+            reverb: Reverb::new(sample_rate),
+            limiter: Limiter::new(sample_rate),
         };
         e.update_gains();
         e
@@ -263,18 +270,24 @@ impl Engine {
                 }
                 self.tick_wait -= 1.0;
             }
-            let (mut l, mut r) = (0.0, 0.0);
+            let (mut l, mut r, mut send) = (0.0, 0.0, 0.0);
             for ch in 0..CHANNELS {
-                let s = self.voices[ch].next(&self.song.instruments, sr);
+                let v = &mut self.voices[ch];
+                let s = v.next(&self.song.instruments, sr);
                 self.levels[ch] = self.levels[ch].max(s.abs());
                 if !self.mute[ch] {
                     l += s * self.gains[ch].0;
                     r += s * self.gains[ch].1;
+                    send += s * v.send();
                 }
             }
-            let p = self.preview.next(&self.song.instruments, sr) * std::f32::consts::FRAC_1_SQRT_2;
-            l = ((l + p) * MASTER).tanh();
-            r = ((r + p) * MASTER).tanh();
+            let p = self.preview.next(&self.song.instruments, sr);
+            send += p * self.preview.send();
+            let p = p * std::f32::consts::FRAC_1_SQRT_2;
+            let (wl, wr) = self.reverb.process(send);
+            (l, r) = self
+                .limiter
+                .process((l + p + wl * WET) * MASTER, (r + p + wr * WET) * MASTER);
             self.peak = (self.peak.0.max(l.abs()), self.peak.1.max(r.abs()));
             frame[0] = l;
             frame[1] = r;

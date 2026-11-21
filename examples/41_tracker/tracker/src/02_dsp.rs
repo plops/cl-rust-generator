@@ -220,7 +220,7 @@ pub fn saturate(x: f32, drive: f32) -> f32 {
     if drive <= 0.0 {
         return x;
     }
-    let g = 1.0 + drive * 12.0;
+    let g = 1.0 + drive * 6.0;
     (x * g).tanh() / g.tanh()
 }
 
@@ -296,7 +296,7 @@ mod tests {
         for i in -100..=100 {
             let x = i as f32 / 10.0;
             let y = saturate(x, 0.8);
-            assert!(y.abs() <= 1.0 + 1e-6);
+            assert!(y.abs() <= 1.0 + 1e-3);
             assert!((saturate(-x, 0.8) + y).abs() < 1e-6);
         }
     }

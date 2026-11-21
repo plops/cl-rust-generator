@@ -174,6 +174,8 @@ pub struct Patch {
     /// Detune of the second oscillator in cents.
     pub detune: f32,
     pub volume: f32,
+    /// Reverb send 0..1.
+    pub reverb: f32,
     /// Path of the WAV file for [`Kind::Sample`] (kept for saving).
     pub sample_path: String,
     /// Mono sample data; shared so cloning a song stays cheap.
@@ -197,6 +199,7 @@ impl Patch {
             pitch_decay: 0.05,
             detune: 0.0,
             volume: 0.8,
+            reverb: 0.0,
             sample_path: String::new(),
             sample: Arc::from(Vec::new()),
             sample_rate: 48000.0,
@@ -210,13 +213,16 @@ impl Patch {
             }
             Kind::Snare => {
                 p.decay = 0.18;
-                p.cutoff = 3000.0;
-                p.reso = 0.9;
+                p.cutoff = 1800.0;
+                p.pitch_env = 5.0;
+                p.pitch_decay = 0.03;
+                p.reverb = 0.25;
             }
             Kind::Hat => {
                 p.decay = 0.045;
                 p.cutoff = 8000.0;
                 p.volume = 0.45;
+                p.reverb = 0.12;
             }
             Kind::Reese => {
                 p.attack = 0.005;
@@ -239,7 +245,8 @@ impl Patch {
             Kind::Bell => {
                 p.decay = 0.35;
                 p.cutoff = 2500.0;
-                p.reso = 2.0;
+                p.reso = 1.0;
+                p.reverb = 0.3;
                 p.volume = 0.5;
             }
             Kind::Lead => {
@@ -250,6 +257,7 @@ impl Patch {
                 p.cutoff = 2500.0;
                 p.detune = 7.0;
                 p.volume = 0.4;
+                p.reverb = 0.35;
             }
             Kind::Sample => {
                 p.decay = 0.0;
