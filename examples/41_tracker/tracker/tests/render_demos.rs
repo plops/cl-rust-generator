@@ -12,7 +12,7 @@ fn stats(x: &[f32]) -> (f32, f32) {
 
 #[test]
 fn demos_render_with_sane_levels() {
-    for name in ["dnb", "phonk"] {
+    for name in ["synth-dnb", "synth-phonk"] {
         let song = demo_songs::by_name(name).unwrap();
         let out = wav::render(song, 12.0, SR);
         assert_eq!(out.len(), 12 * SR as usize * 2);

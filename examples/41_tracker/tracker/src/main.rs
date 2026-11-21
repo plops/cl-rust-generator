@@ -5,11 +5,13 @@ use anyhow::{Context, Result, bail};
 use dnb_tracker::{audio_out, demo_songs, protocol, song_io, ui_runner, ui_state::App, wav};
 use std::path::PathBuf;
 
-const USAGE: &str = "usage: dnb-tracker [SONG.txt] [--demo dnb|phonk|empty] [--device NAME]
+const USAGE: &str =
+    "usage: dnb-tracker [SONG.txt] [--demo synth-dnb|synth-phonk|empty] [--device NAME]
                    [--list-devices] [--play] [--render OUT.wav] [--seconds N]
 
   SONG.txt        load (if it exists) and save target for Ctrl+S (default song.txt)
-  --demo NAME     start from a built-in song instead of a file (default dnb)
+  --demo NAME     start from a built-in, fully synthesized song (default synth-dnb)
+                  sample-based songs are files: songs/mixed_*.txt
   --device NAME   substring of an output device from --list-devices
   --play          play without TUI (for --seconds, default forever)
   --render FILE   write a 48 kHz WAV of --seconds (default 30) and exit";
@@ -64,10 +66,13 @@ fn main() -> Result<()> {
             song
         }
         (demo, _) => {
-            let name = demo.as_deref().unwrap_or("dnb");
-            demo_songs::by_name(name).with_context(|| format!("unknown demo {name}"))?
+            let name = demo.as_deref().unwrap_or("synth-dnb");
+            demo_songs::by_name(name).with_context(|| {
+                format!("unknown demo {name} (one of {:?})", demo_songs::SYNTH_DEMOS)
+            })?
         }
     };
+    eprintln!("song: {} [{}]", song.title, song.sources().label());
     if let Some(out) = &args.render {
         let sr = 48000;
         let data = wav::render(song, args.seconds.unwrap_or(30.0), sr);

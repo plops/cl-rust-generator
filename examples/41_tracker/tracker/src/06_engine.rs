@@ -17,7 +17,10 @@ pub mod fx {
     pub const RETRIG: u8 = b'R';
     pub const CUT: u8 = b'K';
     pub const TEMPO: u8 = b'T';
-    pub const ALL: [u8; 6] = [CUTOFF, DRIVE, GLIDE, RETRIG, CUT, TEMPO];
+    /// Sample offset: start at slice xx of 32 (chop breakbeats into 16ths).
+    pub const OFFSET: u8 = b'O';
+    pub const SLICES: u8 = 32;
+    pub const ALL: [u8; 7] = [CUTOFF, DRIVE, GLIDE, RETRIG, CUT, TEMPO, OFFSET];
 }
 
 /// `Cxx` argument → cutoff in Hz (exponential 40 Hz .. 18 kHz).
@@ -38,6 +41,8 @@ struct ChanState {
     vel: f32,
     retrig: u8,
     cut: u8,
+    /// Sample start as fraction of its length (`Oxx`), 0 = beginning.
+    offset: f32,
 }
 
 pub struct Engine {
@@ -178,7 +183,11 @@ impl Engine {
     fn trigger(&mut self, ch: usize) {
         let st = self.chan[ch];
         if let Some(p) = self.song.instruments.get(st.instr as usize) {
-            self.voices[ch].trigger(st.instr as usize, p, st.note, st.vel, self.sr);
+            let v = &mut self.voices[ch];
+            v.trigger(st.instr as usize, p, st.note, st.vel, self.sr);
+            if st.offset > 0.0 {
+                v.set_sample_offset(&self.song.instruments, st.offset);
+            }
         }
     }
 
@@ -195,6 +204,15 @@ impl Engine {
             let st = &mut self.chan[ch];
             st.retrig = 0;
             st.cut = 0;
+            // The offset belongs to the note: kept for `Rxx` rolls on following rows
+            // without a note, reset by the next note.
+            if c.note.is_note() {
+                st.offset = if c.fx == fx::OFFSET {
+                    (c.arg % fx::SLICES) as f32 / fx::SLICES as f32
+                } else {
+                    0.0
+                };
+            }
             if c.fx == fx::TEMPO && c.arg >= 30 {
                 self.song.bpm = c.arg as u16;
             }
@@ -419,6 +437,48 @@ mod tests {
         render(&mut e, 6000 + 2000);
         let tail = render(&mut e, 600);
         assert!(tail.iter().all(|x| x.abs() < 1e-3), "cut after 1 tick");
+    }
+
+    #[test]
+    fn sample_offset_starts_at_slice() {
+        // Sample = ramp 0..1 so the first output value reveals the start position.
+        let mut s = song_with(Kind::Sample);
+        let ramp: Vec<f32> = (0..32_000).map(|i| i as f32 / 32_000.0).collect();
+        s.instruments[0].sample = std::sync::Arc::from(ramp);
+        s.instruments[0].sample_rate = SR;
+        s.instruments[0].attack = 0.0;
+        s.instruments[0].volume = 1.0;
+        s.set_cell(0, 0, 0, Cell::note(c4(), 0).fx(fx::OFFSET, 16));
+        let mut e = Engine::new(s, SR);
+        e.play(0, Some(0));
+        let out = render(&mut e, 400);
+        // Undo pan (centre, −3 dB) and master gain; the limiter stays idle below 0.9.
+        let first = out[2 * 300] / (std::f32::consts::FRAC_1_SQRT_2 * MASTER);
+        assert!(
+            (first - 0.5).abs() < 0.03,
+            "offset 16/32 → ~0.5, got {first}"
+        );
+    }
+
+    #[test]
+    fn roll_without_note_keeps_slice_offset() {
+        let mut s = song_with(Kind::Sample);
+        let ramp: Vec<f32> = (0..96_000).map(|i| i as f32 / 96_000.0).collect();
+        s.instruments[0].sample = std::sync::Arc::from(ramp);
+        s.instruments[0].sample_rate = SR;
+        s.instruments[0].attack = 0.0;
+        s.instruments[0].volume = 1.0;
+        s.set_cell(0, 0, 0, Cell::note(c4(), 0).fx(fx::OFFSET, 16));
+        s.set_cell(0, 1, 0, Cell::EMPTY.fx(fx::RETRIG, 2));
+        let mut e = Engine::new(s, SR);
+        e.play(0, Some(0));
+        // 6000 samples/row, 1000/tick: the roll fires at row 1, tick 2 = sample 8000.
+        let out = render(&mut e, 8300);
+        let v = out[2 * 8200] / (std::f32::consts::FRAC_1_SQRT_2 * MASTER);
+        assert!(
+            (v - 0.5).abs() < 0.03,
+            "roll restarts at slice 16/32, got {v}"
+        );
     }
 
     #[test]

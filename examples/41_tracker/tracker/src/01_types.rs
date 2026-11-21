@@ -181,6 +181,8 @@ pub struct Patch {
     /// Mono sample data; shared so cloning a song stays cheap.
     pub sample: Arc<[f32]>,
     pub sample_rate: f32,
+    /// Note at which a sample plays at its original speed.
+    pub root: Note,
 }
 
 impl Patch {
@@ -203,6 +205,7 @@ impl Patch {
             sample_path: String::new(),
             sample: Arc::from(Vec::new()),
             sample_rate: 48000.0,
+            root: Note(49),
         };
         match kind {
             Kind::Kick => {
@@ -271,6 +274,8 @@ impl Patch {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Song {
+    /// Shown in the UI; by convention `[synth] …` or `[samples] …`.
+    pub title: String,
     pub bpm: u16,
     /// Ticks per row (effects like retrigger work in ticks).
     pub speed: u8,
@@ -285,6 +290,7 @@ pub struct Song {
 impl Song {
     pub fn new() -> Song {
         Song {
+            title: "untitled".into(),
             bpm: 174,
             speed: 6,
             order: [0; MAX_ORDER],
@@ -304,6 +310,53 @@ impl Song {
     }
     pub fn set_cell(&mut self, pat: usize, row: usize, ch: usize, c: Cell) {
         self.patterns[pat][row][ch] = c;
+    }
+
+    /// What the song's sound is made of, derived from the instruments that the
+    /// patterns in the order list actually play (not from names or conventions).
+    pub fn sources(&self) -> Sources {
+        let (mut synth, mut sample) = (false, false);
+        let mut seen = [false; MAX_PATTERNS];
+        for &p in &self.order[..self.order_len] {
+            let p = p as usize;
+            if std::mem::replace(&mut seen[p], true) {
+                continue;
+            }
+            for c in self.patterns[p].iter().flatten() {
+                if c.note.is_note()
+                    && let Some(i) = self.instruments.get(c.instr as usize)
+                {
+                    if i.kind == Kind::Sample {
+                        sample = true;
+                    } else {
+                        synth = true;
+                    }
+                }
+            }
+        }
+        match (synth, sample) {
+            (_, false) => Sources::Synth,
+            (false, true) => Sources::Samples,
+            (true, true) => Sources::Mixed,
+        }
+    }
+}
+
+/// Badge for the UI: is the music fully computed, or does it play recorded audio?
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sources {
+    Synth,
+    Samples,
+    Mixed,
+}
+
+impl Sources {
+    pub fn label(self) -> &'static str {
+        match self {
+            Sources::Synth => "synth",
+            Sources::Samples => "samples",
+            Sources::Mixed => "synth+samples",
+        }
     }
 }
 
@@ -333,6 +386,21 @@ mod tests {
         let a4 = parse_note("A-4").unwrap();
         assert!((a4.freq() - 440.0).abs() < 1e-3);
         assert!((parse_note("A-5").unwrap().freq() - 880.0).abs() < 1e-2);
+    }
+
+    #[test]
+    fn sources_follow_the_instruments_played() {
+        let mut s = Song::new();
+        assert_eq!(s.sources(), Sources::Synth, "silence counts as synth");
+        s.instruments[1] = Patch::new("amen", Kind::Sample);
+        assert_eq!(s.sources(), Sources::Synth, "loaded but unused sample");
+        s.set_cell(0, 3, 0, Cell::note(Note(49), 1));
+        assert_eq!(s.sources(), Sources::Samples);
+        s.set_cell(0, 4, 1, Cell::note(Note(49), 0));
+        assert_eq!(s.sources(), Sources::Mixed);
+        s.set_cell(5, 0, 0, Cell::note(Note(49), 1));
+        s.set_cell(0, 3, 0, Cell::EMPTY);
+        assert_eq!(s.sources(), Sources::Synth, "pattern 5 is not in the order");
     }
 
     #[test]

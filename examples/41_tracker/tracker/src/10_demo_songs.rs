@@ -1,6 +1,11 @@
 //! Built-in demo songs, generated from compact rhythm/melody tables.
 //!
-//! Channel layout of both demos:
+//! Two families, told apart by [`Song::sources`]:
+//! * `synth_*`: fully computed, built into the binary.
+//! * `mixed_*`: play recorded WAVs (Amen break, phonk kit) next to synth parts.
+//!   Their sample paths are relative to `songs/` (see `examples/write_songs.rs`).
+//!
+//! Channel layout of the synth demos:
 //! 0 kick · 1 snare · 2 hat · 3 reese · 4 sub/808 · 5 bell · 6 lead · 7 open hat
 
 use crate::engine::fx;
@@ -55,6 +60,7 @@ fn hats(song: &mut Song, pat: usize, ch: usize, ins: u8, every: usize) {
 /// Drum and Bass at 174 BPM: two-step beat, detuned reese bass with filter sweeps.
 pub fn demo_dnb() -> Song {
     let mut s = Song::new();
+    s.title = "Two-Step Reese".into();
     s.bpm = 174;
     kit(&mut s);
     s.instruments[6].cutoff = 3200.0;
@@ -117,6 +123,7 @@ pub fn demo_dnb() -> Song {
 /// Phonk at 140 BPM: cowbell riff, distorted 808 with slides, rolling hats.
 pub fn demo_phonk() -> Song {
     let mut s = Song::new();
+    s.title = "Cowbell Drift".into();
     s.bpm = 140;
     kit(&mut s);
     let ins = &mut s.instruments;
@@ -199,13 +206,240 @@ pub fn demo_phonk() -> Song {
 
 pub fn by_name(name: &str) -> Option<Song> {
     match name {
-        "dnb" => Some(demo_dnb()),
-        "phonk" => Some(demo_phonk()),
+        "synth-dnb" => Some(demo_dnb()),
+        "synth-phonk" => Some(demo_phonk()),
         "empty" => {
             let mut s = Song::new();
             kit(&mut s);
             Some(s)
         }
         _ => None,
+    }
+}
+
+/// Names accepted by `--demo` (all fully synthesized, so they need no files).
+pub const SYNTH_DEMOS: [&str; 3] = ["synth-dnb", "synth-phonk", "empty"];
+
+/// Sample folder as seen from the `songs/` directory.
+const SAMPLES: &str = "../samples";
+const PHONK: &str = "phonk_src/repo";
+
+fn sample(name: &str, path: &str, root: &str) -> Patch {
+    let mut p = Patch::new(name, Kind::Sample);
+    p.sample_path = format!("{SAMPLES}/{path}");
+    p.root = n(root);
+    p
+}
+
+/// Jungle at 175 BPM: the Amen break (rhythm-lab.com, `cw_amen01_175.wav`, exactly
+/// two bars) chopped with `Oxx` into 32 slices = 16ths, plus synth reese and lead.
+pub fn mixed_amen_jungle() -> Song {
+    let mut s = Song::new();
+    s.title = "Amen Jungle".into();
+    s.bpm = 175;
+    kit(&mut s);
+    s.instruments[8] = sample("Amen", "amen/cw_amen01_175.wav", C4);
+    s.instruments[8].volume = 0.9;
+    s.instruments[3].cutoff = 700.0;
+    s.instruments[3].volume = 0.38;
+    s.instruments[6].attack = 0.3;
+    s.instruments[6].release = 0.8;
+    s.instruments[6].cutoff = 1800.0;
+    s.instruments[6].reverb = 0.6;
+    // One effect column per cell: a roll is `Rxx` on the row *after* the slice
+    // (no note there, so the engine retriggers the slice including its offset).
+    let amen = |s: &mut Song, pat: usize, row: usize, slice: u8, roll: u8| {
+        s.set_cell(pat, row, 0, Cell::note(n(C4), 8).fx(fx::OFFSET, slice));
+        if roll > 0 {
+            s.set_cell(pat, row + 1, 0, Cell::EMPTY.fx(fx::RETRIG, roll));
+        }
+    };
+    // Pattern 0: the loop as recorded (one trigger per two bars).
+    amen(&mut s, 0, 0, 0, 0);
+    amen(&mut s, 0, 32, 0, 0);
+    // Pattern 1: retriggered every 8th; the second half re-orders slices and rolls.
+    let straight: Vec<u8> = (0..32).step_by(2).collect();
+    let chopped = [0, 2, 4, 4, 8, 10, 12, 12, 16, 18, 4, 22, 24, 12, 28, 30];
+    for (i, (&a, &b)) in straight.iter().zip(&chopped).enumerate() {
+        amen(&mut s, 1, i * 2, a, 0);
+        let roll = match i {
+            14 => 3,
+            15 => 2,
+            _ => 0,
+        };
+        amen(&mut s, 1, 32 + i * 2, b, roll);
+    }
+    for pat in 0..2 {
+        // Synth kick under the break for weight on small speakers.
+        hits(&mut s, pat, 1, 0, &[0, 10], 0x28);
+        let roots = ["A-1", "A-1", "F-1", "G-1"];
+        for (bar, root) in roots.iter().enumerate() {
+            let r = bar * 16;
+            line(&mut s, pat, 3, 3, &[(r, root, fx::CUTOFF, 0x58)]);
+            s.set_cell(pat, r + 8, 3, Cell::EMPTY.fx(fx::CUTOFF, 0x80));
+            s.set_cell(pat, r + 14, 3, Cell::EMPTY.fx(fx::CUTOFF, 0x48));
+        }
+    }
+    line(
+        &mut s,
+        1,
+        6,
+        6,
+        &[
+            (0, "E-4", 0, 0),
+            (16, "C-4", 0, 0),
+            (32, "E-4", 0, 0),
+            (48, "D-4", 0, 0),
+        ],
+    );
+    s.order[..4].copy_from_slice(&[0, 1, 0, 1]);
+    s.order_len = 4;
+    s
+}
+
+/// Drift phonk at 125 BPM from the free Phonk Producer Toolkit (GareBear99):
+/// sampled kick/clap/hat, 808 (root F-1) and cowbell (root F-4); riffs follow the
+/// toolkit's `melodies.json`/`grooves.json`. Vinyl texture, riser and a synth pad.
+pub fn mixed_drift_phonk() -> Song {
+    let mut s = Song::new();
+    s.title = "Drift Phonk Kit".into();
+    s.bpm = 125;
+    kit(&mut s);
+    let ins = &mut s.instruments;
+    ins[8] = sample(
+        "Kick",
+        &format!("{PHONK}/Free_Phonk_Producer_Toolkit/Drums/Kicks/Kick_1.wav"),
+        C4,
+    );
+    ins[9] = sample(
+        "Clap",
+        &format!("{PHONK}/Drift_Phonk_Pack_V3/Drums/Claps/Clap_1.wav"),
+        C4,
+    );
+    ins[9].reverb = 0.2;
+    ins[10] = sample(
+        "Hat",
+        &format!("{PHONK}/Free_Phonk_Producer_Toolkit/Drums/Hats/Hat_1.wav"),
+        C4,
+    );
+    ins[10].volume = 0.5;
+    ins[11] = sample(
+        "808 F",
+        &format!("{PHONK}/Drift_Phonk_Pack_V3/808s/Drift808_F.wav"),
+        "F-1",
+    );
+    ins[11].volume = 0.5;
+    ins[12] = sample(
+        "Cowbell F",
+        &format!("{PHONK}/Free_Phonk_Producer_Toolkit/Cowbells/Cowbell_F.wav"),
+        "F-4",
+    );
+    ins[12].volume = 0.6;
+    ins[12].reverb = 0.25;
+    ins[13] = sample(
+        "Vinyl",
+        &format!("{PHONK}/Free_Phonk_Producer_Toolkit/Textures/VinylNoise.wav"),
+        C4,
+    );
+    ins[13].volume = 0.35;
+    ins[14] = sample(
+        "Riser",
+        &format!("{PHONK}/Free_Phonk_Producer_Toolkit/FX/PhonkRiser.wav"),
+        C4,
+    );
+    ins[14].volume = 0.5;
+    ins[6].attack = 0.4;
+    ins[6].release = 1.0;
+    ins[6].cutoff = 1200.0;
+    ins[6].volume = 0.3;
+    ins[6].reverb = 0.6;
+    // Cowbell phrases from melodies.json (F minor), 3-3-2 rhythm + echo of the turn.
+    let melodies = [
+        ["F-4", "F-4", "G-4", "G#4"],
+        ["F-4", "G-4", "G#4", "C-5"],
+        ["F-4", "G#4", "G-4", "F-4"],
+        ["F-4", "F-4", "G-4", "G#4"],
+    ];
+    // 808 grooves from grooves.json, one octave down (root F-1).
+    let grooves = [["F-1", "F-1", "F-1", "C-2"], ["F-1", "G-1", "G#1", "F-1"]];
+    for pat in 0..3 {
+        for (bar, m) in melodies.iter().enumerate() {
+            let r = bar * 16;
+            let notes = [m[0], m[1], m[2], m[3], m[2], m[1]];
+            for (k, row) in [0, 3, 6, 8, 10, 12].into_iter().enumerate() {
+                s.set_cell(pat, r + row, 5, Cell::note(n(notes[k]), 12));
+            }
+        }
+    }
+    s.set_cell(0, 0, 7, Cell::note(n(C4), 13));
+    s.set_cell(0, 48, 6, Cell::note(n(C4), 14));
+    for pat in 1..3 {
+        hits(&mut s, pat, 0, 8, &[0, 10], 0x40);
+        hits(&mut s, pat, 1, 9, &[4, 12], 0x38);
+        hats(&mut s, pat, 2, 10, 2);
+        for bar in 0..4 {
+            let g = grooves[bar % 2];
+            let r = bar * 16;
+            line(
+                &mut s,
+                pat,
+                4,
+                11,
+                &[
+                    (r, g[0], 0, 0),
+                    (r + 6, g[1], 0, 0),
+                    (r + 10, g[2], 0, 0),
+                    (r + 14, g[3], fx::GLIDE, 0x0C),
+                ],
+            );
+        }
+        line(
+            &mut s,
+            pat,
+            6,
+            6,
+            &[(0, "F-3", 0, 0), (32, "C#3", 0, 0), (48, "D#3", 0, 0)],
+        );
+    }
+    for bar in (0..ROWS).step_by(16) {
+        s.set_cell(
+            2,
+            bar + 7,
+            2,
+            Cell::note(n(C4), 10).vol(0x28).fx(fx::RETRIG, 2),
+        );
+        s.set_cell(
+            2,
+            bar + 15,
+            2,
+            Cell::note(n(C4), 10).vol(0x30).fx(fx::RETRIG, 1),
+        );
+    }
+    s.order[..4].copy_from_slice(&[0, 1, 2, 1]);
+    s.order_len = 4;
+    s
+}
+
+/// Song files written by `examples/write_songs.rs` into `songs/`.
+pub fn mixed_songs() -> [(&'static str, Song); 2] {
+    [
+        ("mixed_amen_jungle.txt", mixed_amen_jungle()),
+        ("mixed_drift_phonk.txt", mixed_drift_phonk()),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::Sources;
+
+    #[test]
+    fn badges_tell_synth_from_sampled_demos() {
+        for name in ["synth-dnb", "synth-phonk"] {
+            assert_eq!(by_name(name).unwrap().sources(), Sources::Synth, "{name}");
+        }
+        for (file, song) in mixed_songs() {
+            assert_eq!(song.sources(), Sources::Mixed, "{file}");
+        }
     }
 }

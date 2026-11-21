@@ -1,7 +1,7 @@
 //! Drawing with ratatui. Pure function of [`App`] → frame.
 
 use crate::song_io::cell_text;
-use crate::types::{CHANNELS, Cell, ROWS};
+use crate::types::{CHANNELS, Cell, ROWS, Sources};
 use crate::ui_state::App;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -85,10 +85,21 @@ fn header(app: &App) -> Line<'static> {
         Span::raw(" jam ")
     };
     let ins = &app.song.instruments[app.instr as usize];
+    let src = app.song.sources();
+    let badge_bg = match src {
+        Sources::Synth => Color::Cyan,
+        Sources::Samples => Color::Magenta,
+        Sources::Mixed => Color::LightMagenta,
+    };
     Line::from(vec![
         Span::styled(" dnb-tracker ", Style::new().add_modifier(Modifier::BOLD)),
         play,
         edit,
+        Span::styled(
+            format!(" {} ", src.label()),
+            Style::new().fg(Color::Black).bg(badge_bg),
+        ),
+        Span::raw(format!(" {} │", app.song.title)),
         Span::raw(format!(
             " BPM {} │ Pat {:02X} │ Oct {} │ Ins {:02X} {} │ Step {}",
             app.song.bpm, app.pattern, app.octave, app.instr, ins.name, app.step
@@ -258,8 +269,9 @@ mod tests {
     fn renders_small_terminal() {
         let mut app = App::new(demo_dnb(), PathBuf::from("x"));
         app.pattern = 1;
-        let s = screen(80, 24, &app);
+        let s = screen(100, 24, &app);
         assert!(s.contains("BPM 174"), "{s}");
+        assert!(s.contains(" synth  Two-Step Reese"), "badge + title:\n{s}");
         assert!(s.contains("Pattern 01"));
         assert!(s.contains("C-4 00 40"), "kick on row 0:\n{s}");
         assert!(s.contains("Order 00 01 01 02"));

@@ -153,6 +153,14 @@ impl Voice {
         self.cutoff = hz;
         self.update_filter(sr);
     }
+    /// Start sample playback at `frac` (0..1) of the sample length (`Oxx` effect).
+    pub fn set_sample_offset(&mut self, patches: &[Patch], frac: f32) {
+        if self.kind == Kind::Sample
+            && let Some(p) = patches.get(self.instr)
+        {
+            self.pos = (p.sample.len() as f64 * frac as f64).floor();
+        }
+    }
     pub fn set_drive(&mut self, d: f32) {
         self.drive = d;
     }
@@ -237,7 +245,8 @@ impl Voice {
         }
         let frac = (self.pos - i as f64) as f32;
         let v = data[i] + (data[i + 1] - data[i]) * frac;
-        let rate = midi_freq(semi) / midi_freq(C4) * p.sample_rate / sr;
+        let root = p.root.0 as f32 - 1.0;
+        let rate = midi_freq(semi) / midi_freq(root) * p.sample_rate / sr;
         self.pos += rate as f64;
         self.filt.process(v)
     }

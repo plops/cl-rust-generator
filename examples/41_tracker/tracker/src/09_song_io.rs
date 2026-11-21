@@ -78,6 +78,7 @@ fn pattern_used(song: &Song, p: usize) -> bool {
 
 pub fn to_text(song: &Song) -> String {
     let mut s = String::from("# dnb-tracker song v1\n");
+    let _ = writeln!(s, "title {}", song.title);
     let _ = writeln!(s, "bpm {}\nspeed {}", song.bpm, song.speed);
     let order: Vec<String> = song.order[..song.order_len]
         .iter()
@@ -106,7 +107,7 @@ pub fn to_text(song: &Song) -> String {
             p.reverb
         );
         if !p.sample_path.is_empty() {
-            let _ = write!(s, " sample={}", p.sample_path);
+            let _ = write!(s, " sample={} root={}", p.sample_path, note_name(p.root));
         }
         let _ = writeln!(s, " name={}", p.name.replace(' ', "_"));
     }
@@ -134,6 +135,7 @@ fn apply_param(p: &mut Patch, key: &str, val: &str) -> Result<()> {
         "kind" => p.kind = Kind::parse(val).ok_or_else(|| anyhow!("unknown kind {val}"))?,
         "name" => p.name = val.to_string(),
         "sample" => p.sample_path = val.to_string(),
+        "root" => p.root = parse_note(val).ok_or_else(|| anyhow!("bad root {val}"))?,
         "attack" => p.attack = num()?,
         "decay" => p.decay = num()?,
         "sustain" => p.sustain = num()?,
@@ -162,6 +164,7 @@ pub fn from_text(text: &str) -> Result<Song> {
         let ctx = || format!("line {}: {line}", ln + 1);
         let (head, rest) = line.split_once(' ').unwrap_or((line, ""));
         match head {
+            "title" => song.title = rest.trim().to_string(),
             "bpm" => song.bpm = rest.trim().parse().with_context(ctx)?,
             "speed" => song.speed = rest.trim().parse().with_context(ctx)?,
             "order" => {
